@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 import winreg
 import webbrowser
@@ -333,7 +334,9 @@ class DesktopLauncher:
 
         def fetch():
             try:
-                with urllib.request.urlopen(url, timeout=120) as resp, open(target, "wb") as f:
+                # 中文文件名需 percent-encode，否则 urllib 直接打开会报 ascii 编码错误
+                safe_url = urllib.parse.quote(url, safe=":/?&=%.@#")
+                with urllib.request.urlopen(safe_url, timeout=120) as resp, open(target, "wb") as f:
                     total = int(resp.headers.get("Content-Length") or 0)
                     done = 0
                     while True:
