@@ -50,3 +50,22 @@ jobs:
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
           python publish_update.py
+
+  # 授权中心自动部署：仅当 server/** 代码变更时触发
+  deploy-auth:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 10
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(join(github.event.commits.*.modified, ','), 'server/') }}
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 部署授权中心到阿里云
+        shell: powershell
+        run: |
+          python deploy_auth.py
