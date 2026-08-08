@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """服务器配置：全部支持环境变量覆盖，便于生产部署。
-（自动部署验证标记）"""
+（自动部署验证标记 2）"""
 
 import os
 from pathlib import Path
