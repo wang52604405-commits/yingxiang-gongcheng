@@ -154,7 +154,8 @@ def main() -> int:
     print(f"[信息] 服务器当前版本: {old_remote or '（无）'}")
     print(f"[信息] 本机构建版本: {_local_version()}")
 
-    # 1-4 步构建。SKIP_BUILD=1 时跳过 PyInstaller（GitHub Actions 里 deploy_prod.ps1 已构建 dist）
+    # 1-4 步构建。SKIP_BUILD=1 时跳过 PyInstaller+签名（deploy_prod.ps1 已构建 dist），
+    # 但 Inno 仍要跑——把 dist 打成安装程序，产物在当前目录（可能是 checkout 的 _work）
     steps = [
         ("PyInstaller", build_all.step1_pyinstaller),
         ("防篡改签名", build_all.step2_manifest),
@@ -162,7 +163,7 @@ def main() -> int:
         ("验无私钥", build_all.step4_verify_no_key),
     ]
     if os.environ.get("SKIP_BUILD"):
-        steps = steps[2:]  # 跳过 PyInstaller + 签名，直接用现成 dist 打安装包
+        steps = steps[2:]  # 跳过 PyInstaller + 签名，保留 Inno 打安装包
     for name, fn in steps:
         print(f"\n[{name}] ...")
         if not fn():
