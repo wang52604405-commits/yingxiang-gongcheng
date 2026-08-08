@@ -148,7 +148,7 @@
             <thead>
               <tr>
                 <th>账号</th><th>状态</th><th>授权</th><th>到期时间</th>
-                <th>机器</th><th>操作</th>
+                <th>邀请</th><th>机器</th><th>操作</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -231,7 +231,7 @@
     }
 
     function renderAccounts(accounts) {
-      $("#rows").innerHTML = accounts.map(({ account, license }) => {
+      $("#rows").innerHTML = accounts.map(({ account, license, invite_code, invitees, invited_by, invite_count }) => {
         const lic = license || {};
         const typeText = lic.has_license
           ? (lic.license_type === "lifetime" ? "终身" : "限期")
@@ -243,11 +243,18 @@
         const machineButtons = (lic.machines || []).map(m =>
           `<button class="btn sm" data-action="unbind" data-account="${account.id}" data-machine="${escapeAttr(m.machine_id)}">解绑 ${escapeHtml(m.machine_id.slice(-6))}</button>`
         ).join(" ");
+        // 邀请信息
+        const inviteList = (invitees || []).length
+          ? (invitees || []).map(u => `<span class="machine-chip" style="background:rgba(210,153,34,.12);color:var(--gold)">${escapeHtml(u)}</span>`).join("")
+          : '<span class="muted">-</span>';
+        const invText = `邀请码：<span class="mono">${escapeHtml(invite_code || "-")}</span><br>` +
+          `<span class="muted">${invite_count || 0} 人通过它注册</span>${invited_by ? `<br><span class="muted">由 ${escapeHtml(invited_by)} 邀请</span>` : ""}`;
         return `<tr>
           <td><strong>${escapeHtml(account.username)}</strong><br><span class="muted">${escapeHtml(account.display_name || "")}</span></td>
           <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : "停用"}</span></td>
           <td><span class="badge ${typeCls}">${typeText}</span></td>
           <td class="mono">${escapeHtml(expText)}</td>
+          <td>${invText}<br>${inviteList}</td>
           <td><span class="muted">${machineText}</span><br>${machines || '<span class="muted">-</span>'}</td>
           <td>
             <button class="btn sm" data-action="license" data-account="${account.id}" data-user="${escapeAttr(account.username)}">开通/续期</button>

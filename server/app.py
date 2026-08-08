@@ -670,10 +670,29 @@ def create_app():
             result = []
             for row in rows:
                 account = dict(row)
+                # 邀请关系：谁通过该账号邀请码注册的（被邀请人列表）
+                invitees = conn.execute(
+                    "SELECT a.username FROM invites i JOIN accounts a ON a.id = i.invitee_account_id "
+                    "WHERE i.inviter_id = ? ORDER BY i.created_at",
+                    (account["id"],),
+                ).fetchall()
+                invitee_names = [r["username"] for r in invitees]
+                # 该账号是被谁邀请的
+                inviter_name = ""
+                if account.get("inviter_id"):
+                    inv_row = conn.execute(
+                        "SELECT username FROM accounts WHERE id = ?", (account["inviter_id"],)
+                    ).fetchone()
+                    if inv_row:
+                        inviter_name = inv_row["username"]
                 result.append(
                     {
                         "account": account,
                         "license": _license_status_for(account),
+                        "invite_code": account.get("invite_code", ""),
+                        "invitees": invitee_names,
+                        "invited_by": inviter_name,
+                        "invite_count": len(invitee_names),
                     }
                 )
             return jsonify({"ok": True, "accounts": result})

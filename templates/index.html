@@ -6620,7 +6620,7 @@
             <div class="support-settings-form">
               <nav class="support-settings-tabs" aria-label="免费使用分类">
                 <button class="active" type="button" data-support-tab="status">1. 使用状态</button>
-                <button type="button" data-support-tab="share">2. 分享记录</button>
+                <button type="button" data-support-tab="share">2. 邀请进度</button>
                 <button type="button" data-support-tab="poster">3. 宣传海报</button>
                 <button type="button" data-support-tab="donation">4. 捐赠通道</button>
                 <button type="button" data-support-tab="friend">5. 加好友</button>
@@ -6661,22 +6661,23 @@
                 </section>
                 <section class="support-panel-section" data-support-panel="share">
                   <div class="share-points-box">
-                    <div>
-                      <strong>分享积分记录</strong>
-                      <p class="support-note">填写分享对象后点击“记录分享”。对象可写微信群名、好友昵称或手机号后四位，便于截图核验。</p>
-                      <div class="share-points-form">
-                        <label>分享对象<input id="shareTargetInput" type="text" placeholder="例如：项目部群 / 张工 / 1388"></label>
-                        <label>备注<input id="shareNoteInput" type="text" placeholder="可选：分享时间、说明"></label>
-                        <button type="button" id="addSharePointBtn">记录分享</button>
+                    <div style="width:100%;">
+                      <strong>邀请进度</strong>
+                      <p class="support-note">把下方邀请码发给好友注册，每邀请 10 人免费使用 1 个月，可循环累积。</p>
+                      <div style="margin:10px 0;padding:12px;background:#eef6f0;border-radius:8px;text-align:center;">
+                        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">我的邀请码</div>
+                        <div id="inviteCodeDisplay" style="font-size:24px;font-weight:800;color:var(--primary);letter-spacing:3px;font-family:Consolas,monospace;">— — — —</div>
+                        <button type="button" id="copyInviteCodeBtn" style="margin-top:8px;">复制邀请码</button>
                       </div>
+                      <div style="margin:12px 0;padding:12px;background:#f4f8fb;border-radius:8px;text-align:center;">
+                        <div id="inviteProgressText" style="font-size:16px;font-weight:700;color:#12344d;">已邀请 0 人</div>
+                        <div id="inviteProgressRemain" style="font-size:13px;color:var(--muted);margin-top:4px;">还差 10 人即可免费使用 1 个月</div>
+                        <div style="height:8px;border-radius:999px;background:#dce6ee;margin-top:10px;overflow:hidden;">
+                          <div id="inviteProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#116fa6);border-radius:999px;transition:width .4s;"></div>
+                        </div>
+                      </div>
+                      <div id="inviteRewardInfo" style="font-size:12px;color:var(--muted);text-align:center;">已通过邀请免费获得 0 个月使用</div>
                     </div>
-                    <div class="share-points-summary">
-                      <span>当前积分</span>
-                      <strong id="sharePointsTotal">0</strong>
-                      <span id="sharePointsRedeem">满 30 积分可兑换 3 个月</span>
-                      <span id="sharePointsMachine">机器ID：-</span>
-                    </div>
-                    <div id="sharePointsLog" class="share-points-log">暂无分享记录。</div>
                   </div>
                 </section>
                 <section class="support-panel-section" data-support-panel="poster">
@@ -10223,17 +10224,28 @@
       }
     });
 
-    function renderSharePoints(share) {
-      if (!share) return;
-      $("#sharePointsTotal").textContent = share.total_points || 0;
-      $("#sharePointsRedeem").textContent = `满 ${share.redeem_threshold || 30} 积分可兑换 3 个月；已可兑换 ${share.redeemable_count || 0} 次`;
-      $("#sharePointsMachine").textContent = `机器ID：${share.machine_id || "-"}`;
-      const events = share.events || [];
-      $("#sharePointsLog").innerHTML = events.length
-        ? events.slice().reverse().map((event) => `
-          <div>${escapeHtml(event.created_at || "")} · +${Number(event.points || 0)} 分 · ${escapeHtml(event.target_hint || "分享对象")}${event.note ? ` · ${escapeHtml(event.note)}` : ""}</div>
-        `).join("")
-        : "暂无分享记录。";
+    function renderInviteProgress(inv) {
+      if (!inv) return;
+      // 未登录时不显示邀请进度
+      if (!inv.logged_in) {
+        const codeEl = $("#inviteCodeDisplay");
+        if (codeEl) codeEl.textContent = "登录后查看";
+        const remainEl = $("#inviteProgressRemain");
+        if (remainEl) remainEl.textContent = "请先登录云账号，再查看邀请进度";
+        return;
+      }
+      const code = inv.invite_code || "—";
+      const registered = Number(inv.registered_count || 0);
+      const milestone = Number(inv.milestone || 10);
+      const remain = Math.max(0, milestone - (registered % milestone));
+      const reward = Number(inv.reward_months || 0);
+      const inMilestone = registered % milestone;
+      const pct = Math.min(100, (inMilestone / milestone) * 100);
+      if ($("#inviteCodeDisplay")) $("#inviteCodeDisplay").textContent = code;
+      if ($("#inviteProgressText")) $("#inviteProgressText").textContent = `已邀请 ${registered} 人`;
+      if ($("#inviteProgressRemain")) $("#inviteProgressRemain").textContent = `还差 ${remain} 人即可免费使用 1 个月`;
+      if ($("#inviteProgressBar")) $("#inviteProgressBar").style.width = pct + "%";
+      if ($("#inviteRewardInfo")) $("#inviteRewardInfo").textContent = `已通过邀请免费获得 ${reward} 个月使用`;
     }
 
     function formatDateText(value) {
@@ -10264,14 +10276,17 @@
     }
 
     async function loadSharePoints() {
-      const [shareData, licenseData, cloudData] = await Promise.all([
-        apiJson("/api/share-points"),
+      const [licenseData, cloudData] = await Promise.all([
         apiJson("/api/license/status"),
         apiJson("/api/cloud/status").catch(() => ({ ok: false }))
       ]);
-      renderSharePoints(shareData.share || {});
       renderSupportLicense(licenseData.license || {});
       renderCloudAccount(cloudData || {});
+      // 邀请进度
+      try {
+        const inv = await apiJson("/api/cloud/invite-status").catch(() => ({}));
+        renderInviteProgress(Object.assign({ logged_in: !!(cloudData && cloudData.logged_in) }, inv));
+      } catch (e) { /* 忽略 */ }
     }
 
     function renderCloudAccount(data) {
@@ -10310,22 +10325,14 @@
       });
     });
 
-    $("#addSharePointBtn").addEventListener("click", async () => {
-      const target = $("#shareTargetInput").value.trim();
-      const note = $("#shareNoteInput").value.trim();
-      if (!target) {
-        showNotice("请输入分享对象，避免重复积分。", true);
+    $("#copyInviteCodeBtn").addEventListener("click", async () => {
+      const code = $("#inviteCodeDisplay") ? $("#inviteCodeDisplay").textContent : "";
+      if (!code || code.includes("—") || code.includes("登录")) {
+        showNotice("请先登录云账号，再复制邀请码。", true);
         return;
       }
-      const data = await apiJson("/api/share-points", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target, note })
-      });
-      $("#shareTargetInput").value = "";
-      $("#shareNoteInput").value = "";
-      renderSharePoints(data.share || {});
-      showNotice("分享积分已记录。累计满 30 分后截图发给作者兑换。");
+      await copyText(code);
+      showNotice("邀请码已复制，发给好友注册即可累积邀请人数。");
     });
     $("#engineeringProjectSelect").addEventListener("change", (event) => {
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
