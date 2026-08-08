@@ -3,9 +3,9 @@
 ## 本地开发
 
 ```bash
-cd E:\use
+cd 工程影像
 pip install -r server\requirements.txt
-copy keys\private_key.pem server\private_key.pem
+set ALBUM_SERVER_PRIVATE_KEY=你的服务器授权私钥路径
 
 # 创建管理员（或用环境变量 ALBUM_ADMIN_USER / ALBUM_ADMIN_PASS 自动创建）
 python -m server.app create-admin --username admin --password 你的强密码
@@ -22,6 +22,9 @@ python -m server.app
 | POST | /api/login | 登录，返回 Bearer 令牌 |
 | GET | /api/me | 当前账号与授权状态 |
 | POST | /api/activate | 客户端绑定本机并获取授权码 {machine_id} |
+| GET | /api/product-config | 免费版、价格、邀请和云预览统一配置 |
+| POST | /api/client-errors | 客户端脱敏错误上报 |
+| GET | /api/check-update | 查询最新版本、下载地址、大小和 SHA-256 |
 | GET | /api/admin/accounts | 管理后台列表（管理员） |
 | POST | /api/admin/license | 开通/续期 {account_id, license_type, valid_days, machine_limit} |
 | POST | /api/admin/revoke | 吊销 {account_id} |
@@ -36,6 +39,8 @@ sudo bash deploy/deploy.sh
 ```
 
 部署内容：安装依赖、gunicorn systemd 服务、nginx 反代、HTTPS 证书、每日数据库备份。
+
+`main` 分支推送后，自托管 GitHub Actions 会先运行测试与发布契约检查，再把服务端上传到独立灰度目录。部署脚本在替换线上代码前创建备份，重启后以 `/api/me = 401` 作为健康检查；失败时自动恢复上一版代码。
 
 ## 安全要点
 

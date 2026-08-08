@@ -3,6 +3,8 @@ name: 自动部署 5088 + 发布客户更新
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
   workflow_dispatch:
 
 concurrency:
@@ -21,20 +23,21 @@ jobs:
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
+      ALBUM_SIGN_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\release_guard_private_key.pem
+      ALBUM_SSH_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\server_key
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 递增版本号
+      - name: 验证测试、版本与发布密钥
         shell: powershell
         run: |
-          python bump_version.py
+          python -m unittest discover -s tests -v
+          python verify_release.py
 
       - name: 构建并部署 5088
         shell: powershell
         env:
-          # 私钥留在本机（E:\use\keys），只以环境变量注入，绝不上传到仓库或 Secrets
-          ALBUM_SIGN_KEY: E:\use\keys\private_key.pem
           ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
           ALBUM_DATA_DIR: D:\工程影像资料
           ALBUM_PORT: "5088"
@@ -63,6 +66,7 @@ jobs:
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
+      ALBUM_SSH_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\server_key
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
