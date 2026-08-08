@@ -116,7 +116,8 @@ def login(username: str, password: str):
             "error": activated.get("error", "本机激活失败，请联系管理员"),
         }
     code = activated.get("license_code", "")
-    licensing.write_installed_license(code)  # 本地验签并写入 license.dat
+    if code:
+        licensing.write_installed_license(code)  # 会员才有授权码，本地验签并写入 license.dat
     # is_member：账号有有效授权即会员（无限使用、无水印）；否则免费版（300张+水印）
     is_member = bool(activated.get("is_member")) or bool((activated.get("license") or {}).get("has_license"))
     account = {
@@ -264,3 +265,51 @@ def check_update(current: str = ""):
     base = server_url()
     cur = current or APP_VERSION
     return _get_json(f"{base}/api/check-update?current={urllib.parse.quote(cur)}")
+
+
+# 云预览同步：单次最多同步的照片数/缩略图大小限制
+CLOUD_SYNC_MAX_PROJECTS = 200
+CLOUD_SYNC_MAX_THUMBS_PER_PROJECT = 500
+CLOUD_THUMB_MAX_B64 = 200_000  # 服务器端同样限制
+
+
+def sync_projects(projects: list) -> dict:
+    """把本机项目缩略图+编号同步到服务器云预览（按登录账号隔离）。
+
+    projects: [{project_code, project_name, unit_name, part_name,
+                thumbs: [{photo_name, thumb_b64}]}]
+    未登录云账号时静默跳过（返回 ok=False, logged_in=False）。
+    """
+    account = _read_json(cloud_account_path()) or {}
+    if not account:
+        return {"ok": False, "logged_in": False, "error": "未登录云账号"}
+    base = str(account.get("server") or server_url()).rstrip("/")
+    token = str(account.get("token") or "")
+    payload = {"projects": projects[:CLOUD_SYNC_MAX_PROJECTS]}
+    return _post_json(f"{base}/api/cloud/sync", payload, token)
+
+
+def fetch_preview_projects() -> dict:
+    """拉取当前账号的云预览项目列表（公网登录后查看用）。"""
+    account = _read_json(cloud_account_path()) or {}
+    if not account:
+        return {"ok": False, "logged_in": False, "error": "未登录云账号"}
+    base = str(account.get("server") or server_url()).rstrip("/")
+    token = str(account.get("token") or "")
+    return _get_json_auth(f"{base}/api/cloud/projects", token)
+
+
+def _get_json_auth(url: str, token: str = ""):
+    req = urllib.request.Request(url, method="GET")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            return {"ok": False, "error": f"服务器错误（{exc.code}）"}
+    except Exception as exc:
+        return {"ok": False, "error": f"无法连接授权服务器：{exc}"}

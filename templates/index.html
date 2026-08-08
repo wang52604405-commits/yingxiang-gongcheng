@@ -6632,10 +6632,31 @@
                       正在读取软件到期时间...
                       <small>打开本面板后自动刷新授权和试用状态。</small>
                     </div>
-                    <div><strong>终身授权码：129 元。</strong> 授权绑定本机机器 ID，适合长期项目部使用。</div>
-                    <div><strong>积分兑换：</strong> 分享给 1 个微信群或 1 位好友记 5 积分，累计 30 积分可兑换 3 个月。</div>
-                    <div><strong>兑换方式：</strong> 积分累计完成后，截图本页面和分享记录发给作者人工核验。</div>
-                    <div><strong>防作弊：</strong> 同一分享对象只记录一次；每日最多记录 6 次；系统保存本机机器 ID、时间和对象摘要，重复点击不加分。</div>
+                    <div style="margin-top:10px;padding:10px;background:#f4f8fb;border-radius:8px;">
+                      <strong>会员收费标准：</strong><br>
+                      ・ 月度会员 <strong>15 元</strong>：无限上传、打印/导出无水印<br>
+                      ・ 终身会员 <strong>169 元</strong>：一次买断，永久使用<br>
+                      ・ 免费版：300 张照片上限，打印/导出带水印<br>
+                      <span style="color:#d29922">联系管理员/作者开通会员。</span>
+                    </div>
+                    <div style="margin-top:8px;padding:10px;background:#eef6f0;border-radius:8px;">
+                      <strong>邀请免费：</strong> 邀请 <strong>10 人</strong>安装注册（用你的邀请码），
+                      免费使用 <strong>1 个月</strong>；每再邀请 10 人再送 1 个月，<strong>可循环</strong>。
+                    </div>
+                    <div style="margin-top:8px;padding:10px;background:#f4f8fb;border-radius:8px;" id="cloudAccountBox">
+                      <strong>云账号：</strong><span id="cloudAccountStatus">未登录</span>
+                      <div id="cloudLoginForm" style="margin-top:8px;">
+                        <label style="display:block;margin-bottom:4px;">账号<input id="cloudUser" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="手机号 / QQ / 邮箱"></label>
+                        <label style="display:block;margin-bottom:4px;">密码<input id="cloudPass" type="password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="密码"></label>
+                        <div style="display:flex;gap:8px;margin-top:8px;">
+                          <button type="button" id="cloudLoginBtn" style="flex:1">登录</button>
+                          <button type="button" id="cloudRegBtn" class="secondary" style="flex:1">注册</button>
+                        </div>
+                        <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
+                        <button type="button" id="cloudLogoutBtn" style="margin-top:8px;display:none;background:#bd2a20">退出登录</button>
+                      </div>
+                    </div>
+                    <div style="margin-top:8px;"><strong>积分兑换（补充）：</strong> 分享给 1 个微信群或 1 位好友记 5 积分，累计 30 积分可兑换 3 个月，截图发作者人工核验。</div>
                   </div>
                 </section>
                 <section class="support-panel-section" data-support-panel="share">
@@ -10183,12 +10204,31 @@
     }
 
     async function loadSharePoints() {
-      const [shareData, licenseData] = await Promise.all([
+      const [shareData, licenseData, cloudData] = await Promise.all([
         apiJson("/api/share-points"),
-        apiJson("/api/license/status")
+        apiJson("/api/license/status"),
+        apiJson("/api/cloud/status").catch(() => ({ ok: false }))
       ]);
       renderSharePoints(shareData.share || {});
       renderSupportLicense(licenseData.license || {});
+      renderCloudAccount(cloudData || {});
+    }
+
+    function renderCloudAccount(data) {
+      const box = $("#cloudAccountStatus");
+      const form = $("#cloudLoginForm");
+      const logoutBtn = $("#cloudLogoutBtn");
+      if (!box) return;
+      if (data && data.logged_in && data.account) {
+        const tier = data.is_member ? (data.license && data.license.is_lifetime ? "终身会员" : "会员") : "免费版";
+        box.innerHTML = `<strong style="color:#1a7a3a">${escapeHtml(data.account)}</strong>（${tier}）`;
+        form.style.display = "none";
+        logoutBtn.style.display = "block";
+      } else {
+        box.textContent = "未登录";
+        form.style.display = "block";
+        logoutBtn.style.display = "none";
+      }
     }
 
     const SOFTWARE_SHARE_URL = "https://wwbro.lanzouu.com/b00l2vsyqj";
@@ -10299,6 +10339,41 @@
       if (event.target.id === "otherImageModal") closeOtherImageModal();
     });
     $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/auth/login", "gate").catch((error) => showNotice(error.message, true)));
+    $("#cloudLoginBtn").addEventListener("click", async () => {
+      const user = $("#cloudUser").value.trim();
+      const pass = $("#cloudPass").value;
+      if (!user || !pass) { showNotice("请输入账号和密码", true); return; }
+      try {
+        const data = await apiJson("/api/cloud/login", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+        if (!data.ok) { showNotice(data.error || "登录失败", true); return; }
+        $("#cloudUser").value = ""; $("#cloudPass").value = "";
+        showNotice("云账号登录成功");
+        loadSharePoints();
+      } catch (e) { showNotice(e.message || "登录失败", true); }
+    });
+    $("#cloudRegBtn").addEventListener("click", async () => {
+      const user = $("#cloudUser").value.trim();
+      const pass = $("#cloudPass").value;
+      const invite = $("#cloudInvite").value.trim();
+      if (!user || !pass) { showNotice("请输入账号和密码", true); return; }
+      try {
+        const data = await apiJson("/api/cloud/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user, password: pass, invite_code: invite })
+        });
+        if (!data.ok) { showNotice(data.error || "注册失败", true); return; }
+        showNotice("注册成功，请登录");
+        $("#cloudInvite").value = "";
+      } catch (e) { showNotice(e.message || "注册失败", true); }
+    });
+    $("#cloudLogoutBtn").addEventListener("click", async () => {
+      try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (e) {}
+      showNotice("已退出云账号");
+      loadSharePoints();
+    });
     ["gateUsername"].forEach((id) => {
       $(`#${id}`).addEventListener("keydown", (event) => {
         if (event.key === "Enter") {

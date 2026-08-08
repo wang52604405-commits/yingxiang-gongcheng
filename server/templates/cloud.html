@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工程影像云预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: #0f1720; color: #e8f0f7;
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .topbar {
+      display: flex; align-items: center; gap: 12px; padding: 14px 22px;
+      background: #151f2b; border-bottom: 1px solid #22303f;
+    }
+    .brand { font-size: 18px; font-weight: 700; color: #fff; }
+    .brand small { color: #7d93a8; font-weight: 400; margin-left: 8px; }
+    .spacer { flex: 1; }
+    .btn {
+      padding: 8px 16px; border: 0; border-radius: 6px; cursor: pointer;
+      background: #1f8bd6; color: #fff; font: inherit; font-weight: 700;
+    }
+    .btn.ghost { background: #243340; color: #dce7f0; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
+    .card {
+      background: #172230; border: 1px solid #22303f; border-radius: 10px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    input {
+      padding: 9px 12px; border: 1px solid #2c3c4d; border-radius: 6px;
+      background: #101a26; color: #e8f0f7; font: inherit; width: 100%; margin-bottom: 10px;
+    }
+    .notice { padding: 10px 12px; border-radius: 6px; margin: 10px 0; display: none; }
+    .notice.show { display: block; }
+    .notice.err { background: #3a1a18; color: #ffb4ad; border: 1px solid #5c2a26; }
+    .notice.ok { background: #123a2a; color: #a5f0c9; border: 1px solid #1f5c44; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .tile {
+      background: #172230; border: 1px solid #22303f; border-radius: 8px;
+      padding: 10px; cursor: pointer; transition: border-color .15s;
+    }
+    .tile:hover { border-color: #2f8fdb; }
+    .tile img { width: 100%; height: 150px; object-fit: cover; border-radius: 5px; background: #101a26; filter: blur(3px); }
+    .tile .name { margin-top: 8px; font-size: 12px; color: #aabccd; line-height: 1.4; word-break: break-all; }
+    .tile .code { font-size: 11px; color: #6f8599; font-family: Consolas, monospace; }
+    .tile .count { font-size: 11px; color: #7d93a8; margin-top: 2px; }
+    .back { display: inline-block; color: #7fc3ef; cursor: pointer; margin-bottom: 12px; }
+    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+    .thumb-grid img { width: 100%; height: 100px; object-fit: cover; border-radius: 4px; filter: blur(3px); background: #101a26; }
+    .muted { color: #7d93a8; font-size: 13px; }
+    #loginBox { max-width: 380px; margin: 70px auto; }
+    .link { color: #7fc3ef; cursor: pointer; font-size: 13px; }
+    .price-line { color: #ffd479; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">工程影像云预览<small>缩略图 + 编号（仅远程查看）</small></div>
+    <div class="spacer"></div>
+    <button class="btn ghost" id="logoutBtn" style="display:none">退出登录</button>
+  </div>
+
+  <!-- 登录 / 注册 -->
+  <div id="loginBox" class="card">
+    <h2 style="margin-top:0">云预览登录</h2>
+    <p class="muted">在外面（公网）登录后可查看自己项目的模糊缩略图和编号。<br>完整功能请回到局域网内使用。</p>
+    <input id="user" placeholder="账号（手机号 / QQ / 邮箱）" autocomplete="username">
+    <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
+    <button class="btn" id="loginBtn" style="width:100%">登录</button>
+    <div class="notice" id="loginNotice"></div>
+    <p class="muted" style="margin-top:14px">没有账号？<span class="link" id="showReg">注册一个</span></p>
+
+    <div id="regBox" style="display:none; margin-top:8px">
+      <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
+      <input id="regUser" placeholder="账号（手机号 / QQ / 邮箱）">
+      <input id="regPass" type="password" placeholder="密码（至少 6 位）">
+      <input id="regInvite" placeholder="邀请码（选填，填了双方有奖励）">
+      <button class="btn" id="regBtn" style="width:100%">注册</button>
+      <p class="muted" style="font-size:12px">邀请 10 人注册，即可免费使用 1 个月，可循环。</p>
+    </div>
+  </div>
+
+  <!-- 项目列表 -->
+  <div id="projectsBox" class="wrap" style="display:none">
+    <div class="card">
+      <div id="whoami" class="muted"></div>
+      <div class="price-line">月度会员 15 元 / 终身会员 169 元；邀请 10 人注册免费 1 个月。联系管理员开通会员后可查看清晰原图。</div>
+    </div>
+    <div class="grid" id="projectGrid"></div>
+  </div>
+
+  <!-- 项目缩略图详情 -->
+  <div id="detailBox" class="wrap" style="display:none">
+    <span class="back" id="backBtn">← 返回项目列表</span>
+    <div class="card">
+      <div id="detailTitle" style="font-weight:700;margin-bottom:4px"></div>
+      <div class="muted" id="detailMeta"></div>
+      <p class="muted" style="margin-bottom:0">以下为模糊缩略图预览（非原图）。查看清晰原图请在局域网内使用完整版。</p>
+    </div>
+    <div class="thumb-grid" id="thumbGrid"></div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let token = localStorage.getItem("album_cloud_token") || "";
+    let username = localStorage.getItem("album_cloud_user") || "";
+
+    function notice(el, msg, ok) {
+      el.textContent = msg;
+      el.className = "notice show " + (ok ? "ok" : "err");
+    }
+
+    async function api(url, opts = {}) {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const resp = await fetch(url, { ...opts, headers });
+      let data;
+      try { data = await resp.json(); } catch (e) { data = { ok: false, error: "服务器响应异常" }; }
+      return data;
+    }
+
+    async function checkAuth() {
+      if (!token) return false;
+      const data = await api("/api/me");
+      if (data.ok) { showProjects(); return true; }
+      return false;
+    }
+
+    $("#loginBtn").addEventListener("click", async () => {
+      const data = await api("/api/login", {
+        method: "POST",
+        body: JSON.stringify({ username: $("#user").value.trim(), password: $("#pass").value }),
+      });
+      if (!data.ok) { notice($("#loginNotice"), data.error || "登录失败", false); return; }
+      token = data.token; username = (data.account && data.account.username) || $("#user").value.trim();
+      localStorage.setItem("album_cloud_token", token);
+      localStorage.setItem("album_cloud_user", username);
+      $("#user").value = ""; $("#pass").value = "";
+      showProjects();
+    });
+
+    $("#showReg").addEventListener("click", () => {
+      $("#regBox").style.display = $("#regBox").style.display === "none" ? "block" : "none";
+    });
+
+    $("#regBtn").addEventListener("click", async () => {
+      const payload = {
+        username: $("#regUser").value.trim(),
+        password: $("#regPass").value,
+      };
+      const invite = $("#regInvite").value.trim();
+      if (invite) payload.invite_code = invite;
+      const data = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
+      notice($("#loginNotice"), data.ok ? "注册成功，请登录" : (data.error || "注册失败"), !!data.ok);
+      if (data.ok) { $("#regBox").style.display = "none"; $("#user").value = payload.username; }
+    });
+
+    $("#logoutBtn").addEventListener("click", () => {
+      token = ""; localStorage.removeItem("album_cloud_token"); localStorage.removeItem("album_cloud_user");
+      location.reload();
+    });
+
+    async function showProjects() {
+      $("#loginBox").style.display = "none";
+      $("#projectsBox").style.display = "block";
+      $("#logoutBtn").style.display = "inline-block";
+      $("#whoami").textContent = "当前账号：" + username;
+      const data = await api("/api/cloud/projects");
+      const grid = $("#projectGrid");
+      grid.innerHTML = "";
+      if (!data.ok) { notice(grid, data.error || "加载失败", false); return; }
+      const list = data.projects || [];
+      if (!list.length) {
+        grid.innerHTML = '<div class="card muted">暂无项目数据。请在局域网内的软件上打开一次，自动同步后这里就能看到。</div>';
+        return;
+      }
+      list.forEach((p) => {
+        const tile = document.createElement("div");
+        tile.className = "tile";
+        const count = p.thumb_count ? p.thumb_count + " 张" : "暂无";
+        tile.innerHTML =
+          '<div class="code">' + esc(p.project_code) + '</div>' +
+          '<div class="name">' + esc(p.project_name || "") + '</div>' +
+          '<div class="count">' + count + '</div>';
+        tile.addEventListener("click", () => openDetail(p));
+        grid.appendChild(tile);
+      });
+    }
+
+    async function openDetail(proj) {
+      $("#projectsBox").style.display = "none";
+      $("#detailBox").style.display = "block";
+      $("#detailTitle").textContent = (proj.project_name || "") + "  " + (proj.project_code || "");
+      $("#detailMeta").textContent = "编号：" + (proj.project_code || "");
+      const data = await api("/api/cloud/thumbs?project_id=" + proj.id);
+      const grid = $("#thumbGrid");
+      grid.innerHTML = "";
+      if (!data.ok) { grid.innerHTML = '<div class="card muted">加载失败</div>'; return; }
+      const thumbs = data.thumbs || [];
+      if (!thumbs.length) { grid.innerHTML = '<div class="card muted">暂无缩略图</div>'; return; }
+      thumbs.forEach((t) => {
+        const div = document.createElement("div");
+        div.innerHTML = '<img src="data:image/webp;base64,' + t.thumb_b64 + '" alt="' + esc(t.photo_name) + '">' +
+          '<div class="muted" style="font-size:11px;word-break:break-all">' + esc(t.photo_name) + '</div>';
+        grid.appendChild(div);
+      });
+    }
+
+    $("#backBtn").addEventListener("click", () => {
+      $("#detailBox").style.display = "none";
+      $("#projectsBox").style.display = "block";
+    });
+
+    function esc(s) {
+      return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    checkAuth();
+  </script>
+</body>
+</html>

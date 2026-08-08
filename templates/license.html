@@ -171,15 +171,17 @@
     <hr style="border:none;border-top:1px solid var(--line);margin:22px 0 0;">
     <h2 style="font-size:16px;margin:18px 0 4px;">注册账号</h2>
     <p>用手机号 / QQ / 邮箱注册即得免费版（300张照片，打印/导出带水印）。可填写好友邀请码。</p>
+    <div style="margin:10px 0;padding:10px;background:#f4f8fb;border-radius:8px;">
+      <strong>会员收费标准：</strong><br>
+      ・ 月度会员 <strong>15 元</strong>：无限上传、打印/导出无水印<br>
+      ・ 终身会员 <strong>169 元</strong>：一次买断，永久使用<br>
+      ・ 邀请 <strong>10 人</strong>注册，免费使用 <strong>1 个月</strong>（可循环）<br>
+      <span style="color:#d29922">联系管理员/作者开通会员。</span>
+    </div>
     <label for="regUser">账号</label>
     <input id="regUser" placeholder="手机号 / QQ / 邮箱">
     <label for="regPass">密码</label>
     <input id="regPass" type="password" placeholder="至少 6 位">
-    <label for="regCode">验证码</label>
-    <div class="actions" style="gap:8px;align-items:center;">
-      <input id="regCode" placeholder="6 位验证码" style="flex:1;">
-      <button type="button" id="sendCodeBtn">发送验证码</button>
-    </div>
     <label for="regInvite">邀请码（选填）</label>
     <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
     <div class="actions">
@@ -279,48 +281,23 @@
       return data;
     }
 
-    // 发送验证码
-    $("#sendCodeBtn").addEventListener("click", async () => {
-      const account = $("#regUser").value.trim();
-      if (!account) {
-        showNotice("请先输入账号（手机号 / QQ / 邮箱）。", true);
-        return;
-      }
-      try {
-        const data = await apiJson("/api/cloud/send-code", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account })
-        });
-        if (data.ok && data.code) {
-          showNotice(`验证码已生成：${data.code}（服务器基础版，10分钟内有效）`);
-        } else {
-          showNotice(data.error || "验证码发送失败", true);
-        }
-      } catch (error) {
-        showNotice(error.message, true);
-      }
-    });
-
-    // 注册
+    // 注册（免验证码，邀请码选填）
     $("#regBtn").addEventListener("click", async () => {
       const username = $("#regUser").value.trim();
       const password = $("#regPass").value;
-      const code = $("#regCode").value.trim();
       const inviteCode = $("#regInvite").value.trim();
-      if (!username || !password || !code) {
-        showNotice("请填写账号、密码和验证码。", true);
+      if (!username || !password) {
+        showNotice("请填写账号和密码。", true);
         return;
       }
       try {
         const data = await apiJson("/api/cloud/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, code, invite_code: inviteCode })
+          body: JSON.stringify({ username, password, invite_code: inviteCode })
         });
         $("#regUser").value = "";
         $("#regPass").value = "";
-        $("#regCode").value = "";
         $("#regInvite").value = "";
         showNotice(`注册成功！你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
       } catch (error) {

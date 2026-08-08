@@ -277,6 +277,10 @@ def create_app():
 
     @app.get("/")
     def index():
+        return render_template("cloud.html")
+
+    @app.get("/admin")
+    def admin_index():
         return render_template("admin.html")
 
     @app.post("/api/send-code")
@@ -304,17 +308,13 @@ def create_app():
         data = request.get_json(silent=True) or {}
         username = str(data.get("username") or "").strip()
         password = str(data.get("password") or "")
-        code = str(data.get("code") or "").strip()
         invite_code = str(data.get("invite_code") or "").strip().upper()
         display_name = str(data.get("display_name") or "").strip()
         if not (3 <= len(username) <= 64):
             return _error("账号长度需在 3~64 个字符之间（可用手机号/QQ/邮箱）")
         if len(password) < 6:
             return _error("密码至少 6 位")
-        # 校验验证码（一次性消费）
-        saved = _codes.pop(username, None)
-        if not saved or saved["code"] != code or _time.time() > saved["exp"]:
-            return _error("验证码错误或已过期，请重新获取", 400)
+        # 免验证码注册（用户名+密码直接注册）
 
         conn = db.connect()
         try:
@@ -660,6 +660,148 @@ def create_app():
                 "UPDATE machines SET active = 0 "
                 "WHERE account_id = ? AND machine_id = ?",
                 (account_id, machine_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------ 云预览（公网查看）
+
+    @app.post("/api/cloud/sync")
+    def cloud_sync():
+        """客户端推送缩略图+编号（登录后按账号隔离存储）。"""
+        user = _require_user()
+        if not user:
+            return _error("未登录或登录已过期", 401)
+        data = request.get_json(silent=True) or {}
+        projects = data.get("projects") if isinstance(data.get("projects"), list) else []
+        if len(projects) > 200:
+            return _error("单次同步项目数超限")
+        conn = db.connect()
+        try:
+            for proj in projects:
+                code = str(proj.get("project_code") or "").strip()
+                if not code:
+                    continue
+                # upsert 项目
+                exists = conn.execute(
+                    "SELECT id FROM cloud_projects WHERE account_id = ? AND project_code = ?",
+                    (user["id"], code),
+                ).fetchone()
+                if exists:
+                    proj_id = exists["id"]
+                    conn.execute(
+                        "UPDATE cloud_projects SET project_name = ?, unit_name = ?, "
+                        "part_name = ?, thumb_count = ?, synced_at = ? WHERE id = ?",
+                        (str(proj.get("project_name") or "")[:200],
+                         str(proj.get("unit_name") or "")[:200],
+                         str(proj.get("part_name") or "")[:200],
+                         int(proj.get("thumb_count") or 0), _now(), proj_id),
+                    )
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO cloud_projects (account_id, project_code, project_name, "
+                        "unit_name, part_name, thumb_count, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (user["id"], code, str(proj.get("project_name") or "")[:200],
+                         str(proj.get("unit_name") or "")[:200],
+                         str(proj.get("part_name") or "")[:200],
+                         int(proj.get("thumb_count") or 0), _now()),
+                    )
+                    proj_id = cur.lastrowid
+                # 缩略图增量同步（photo_name + 模糊缩略图 base64）
+                thumbs = proj.get("thumbs")
+                if isinstance(thumbs, list):
+                    for idx, thumb in enumerate(thumbs[:500]):
+                        name = str(thumb.get("photo_name") or "").strip()
+                        b64 = str(thumb.get("thumb_b64") or "").strip()
+                        if not name or not b64 or len(b64) > 200_000:
+                            continue
+                        texists = conn.execute(
+                            "SELECT id FROM cloud_thumbs WHERE project_id = ? AND photo_name = ?",
+                            (proj_id, name),
+                        ).fetchone()
+                        if texists:
+                            conn.execute(
+                                "UPDATE cloud_thumbs SET thumb_b64 = ?, order_index = ?, synced_at = ? WHERE id = ?",
+                                (b64, idx, _now(), texists["id"]),
+                            )
+                        else:
+                            conn.execute(
+                                "INSERT INTO cloud_thumbs (project_id, photo_name, thumb_b64, order_index, synced_at) "
+                                "VALUES (?, ?, ?, ?, ?)",
+                                (proj_id, name, b64, idx, _now()),
+                            )
+            conn.commit()
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.get("/api/cloud/projects")
+    def cloud_projects():
+        """当前账号的项目列表（编号+名称+缩略图数）。"""
+        user = _require_user()
+        if not user:
+            return _error("未登录或登录已过期", 401)
+        conn = db.connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, project_code, project_name, unit_name, part_name, thumb_count, synced_at "
+                "FROM cloud_projects WHERE account_id = ? ORDER BY project_code",
+                (user["id"],),
+            ).fetchall()
+            return jsonify({
+                "ok": True,
+                "projects": [dict(r) for r in rows],
+            })
+        finally:
+            conn.close()
+
+    @app.get("/api/cloud/thumbs")
+    def cloud_thumbs():
+        """当前账号某项目的缩略图列表（模糊图 base64 + 照片名）。"""
+        user = _require_user()
+        if not user:
+            return _error("未登录或登录已过期", 401)
+        project_id = int(request.args.get("project_id") or 0)
+        conn = db.connect()
+        try:
+            owns = conn.execute(
+                "SELECT id FROM cloud_projects WHERE id = ? AND account_id = ?",
+                (project_id, user["id"]),
+            ).fetchone()
+            if not owns:
+                return _error("项目不存在", 404)
+            thumbs = conn.execute(
+                "SELECT photo_name, thumb_b64, order_index FROM cloud_thumbs "
+                "WHERE project_id = ? ORDER BY order_index, id",
+                (project_id,),
+            ).fetchall()
+            return jsonify({
+                "ok": True,
+                "thumbs": [dict(t) for t in thumbs],
+            })
+        finally:
+            conn.close()
+
+    @app.post("/api/cloud/clear")
+    def cloud_clear():
+        """客户端可选：清除某个项目的云预览（保留编号，清缩略图）。"""
+        user = _require_user()
+        if not user:
+            return _error("未登录或登录已过期", 401)
+        data = request.get_json(silent=True) or {}
+        project_id = int(data.get("project_id") or 0)
+        conn = db.connect()
+        try:
+            conn.execute(
+                "DELETE FROM cloud_thumbs WHERE project_id = ? AND project_id IN "
+                "(SELECT id FROM cloud_projects WHERE id = ? AND account_id = ?)",
+                (project_id, project_id, user["id"]),
+            )
+            conn.execute(
+                "UPDATE cloud_projects SET thumb_count = 0 WHERE id = ? AND account_id = ?",
+                (project_id, user["id"]),
             )
             conn.commit()
             return jsonify({"ok": True})

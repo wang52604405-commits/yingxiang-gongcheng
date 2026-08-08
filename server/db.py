@@ -50,6 +50,30 @@ CREATE TABLE IF NOT EXISTS invites (
     FOREIGN KEY (inviter_id) REFERENCES accounts(id),
     FOREIGN KEY (invitee_account_id) REFERENCES accounts(id)
 );
+
+CREATE TABLE IF NOT EXISTS cloud_projects (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    project_code  TEXT NOT NULL,
+    project_name  TEXT DEFAULT '',
+    unit_name     TEXT DEFAULT '',
+    part_name     TEXT DEFAULT '',
+    thumb_count   INTEGER DEFAULT 0,
+    synced_at     TEXT DEFAULT (datetime('now', 'localtime')),
+    UNIQUE (account_id, project_code),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_thumbs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id    INTEGER NOT NULL,
+    photo_name    TEXT NOT NULL,
+    thumb_b64     TEXT NOT NULL,          -- 模糊缩略图 base64（小尺寸，限长）
+    order_index   INTEGER DEFAULT 0,
+    synced_at     TEXT DEFAULT (datetime('now', 'localtime')),
+    UNIQUE (project_id, photo_name),
+    FOREIGN KEY (project_id) REFERENCES cloud_projects(id)
+);
 """
 
 # 老库升级：accounts 表缺少的新列，启动时补上

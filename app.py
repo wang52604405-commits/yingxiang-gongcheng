@@ -275,6 +275,23 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 ALBUMS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+@app.before_request
+def _public_gate():
+    """公网访问限制：非局域网 IP 只能走云预览受限通道，其余功能完全限制。"""
+    if is_lan_request():
+        return None
+    path = request.path
+    # 静态资源与云预览相关放行
+    if path.startswith("/assets/") or path.startswith("/api/cloud/"):
+        return None
+    if path in {"/", "/license"}:
+        return render_template("restricted.html"), 403
+    # 其余一律受限
+    if path.startswith("/api/"):
+        return jsonify({"ok": False, "error": "公网访问受限：请在局域网内使用完整功能，或使用云预览查看"}), 403
+    return render_template("restricted.html"), 403
+
+
 def migrate_legacy_storage():
     if LEGACY_ALBUMS_DIR.exists() and not any(ALBUMS_DIR.iterdir()):
         shutil.copytree(LEGACY_ALBUMS_DIR, ALBUMS_DIR, dirs_exist_ok=True)
@@ -311,6 +328,52 @@ def runtime_port():
 def is_local_setup_request():
     remote = (request.remote_addr or "").strip().lower()
     return remote in {"127.0.0.1", "::1", "localhost"} or remote.startswith("127.")
+
+
+def is_lan_request():
+    """是否局域网请求。公网（非局域网 IP）返回 False，用于公网访问受限。"""
+    remote = (request.remote_addr or "").strip().lower()
+    if remote in {"127.0.0.1", "::1", "localhost"} or remote.startswith("127."):
+        return True
+    # 常见私网段
+    if remote.startswith("10.") or remote.startswith("192.168."):
+        return True
+    if remote.startswith("172."):
+        try:
+            second = int(remote.split(".")[1])
+            if 16 <= second <= 31:
+                return True
+        except (ValueError, IndexError):
+            pass
+    return False
+
+
+# 公网请求允许访问的路径（云预览受限入口）；其余功能完全限制
+PUBLIC_ALLOWED_PREFIXES = (
+    "/api/cloud/preview",
+    "/api/cloud/preview-login",
+    "/api/cloud/login",
+    "/api/cloud/register",
+    "/api/cloud/logout",
+    "/api/cloud/status",
+)
+
+
+def public_restricted():
+    """公网请求：非局域网 IP 访问完整功能时，强制走云预览受限通道。
+
+    返回 True 表示已拦截（渲染受限提示），False 表示放行。
+    """
+    if is_lan_request():
+        return False
+    path = request.path
+    # 静态资源、云预览相关放行
+    if path.startswith("/assets/") or path.startswith("/api/cloud/"):
+        return False
+    if path in {"/", "/license"} or path.startswith("/api/cloud"):
+        return False
+    # 其余 API 与页面：公网一律受限
+    return True
 
 
 def write_text_file(path: Path, content: str):
@@ -468,6 +531,8 @@ def run_lan_server():
     print(f"Local: http://127.0.0.1:{port}")
     print(f"LAN:   http://{lan_ip}:{port}")
     print("Keep this window open while other computers use the system.")
+    # 启动后稍候同步一次云预览（缩略图+编号），不阻塞主服务
+    threading.Timer(3.0, sync_cloud_preview_async).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
@@ -2659,6 +2724,72 @@ def is_member_user():
     return bool(app_license_status().get("ok"))
 
 
+# 云预览自动同步：每项目最多同步的缩略图数（控制服务器负载）
+CLOUD_SYNC_THUMB_CAP = 60
+
+
+def _build_cloud_sync_payload(max_thumbs=CLOUD_SYNC_THUMB_CAP):
+    """枚举本机工程项目 + 缩略图，构造云预览同步 payload。"""
+    import base64 as _b64
+
+    projects_payload = []
+    try:
+        items = manager.list_projects(include_other=True)
+    except Exception:
+        return []
+    for item in items:
+        code = str(item.get("project_code") or "")
+        if not code:
+            continue
+        source = item.get("source_fields") or {}
+        unit_name = str(source.get("单位工程名称") or source.get("单位名称") or "")
+        part_name = str(source.get("分部工程名称") or source.get("分部名称") or "")
+        thumbs = []
+        try:
+            photos = manager.get_photos(code)
+            for photo in photos[:max_thumbs]:
+                fname = str(photo.get("filename") or "")
+                if not fname:
+                    continue
+                thumb_rel = manager._thumb_filename(fname)
+                thumb_path = manager._photos_dir(code) / thumb_rel
+                if thumb_path.exists():
+                    try:
+                        b64 = _b64.b64encode(thumb_path.read_bytes()).decode("ascii")
+                        if len(b64) > cloud_client.CLOUD_THUMB_MAX_B64:
+                            continue
+                        thumbs.append({"photo_name": fname, "thumb_b64": b64})
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        # 只同步有照片的项目（空项目不同步，避免无用数据）
+        if not thumbs:
+            continue
+        projects_payload.append({
+            "project_code": code,
+            "project_name": str(item.get("project_name") or ""),
+            "unit_name": unit_name,
+            "part_name": part_name,
+            "thumb_count": len(thumbs),
+            "thumbs": thumbs,
+        })
+    return projects_payload
+
+
+def sync_cloud_preview_async():
+    """后台线程：把本机项目缩略图+编号同步到服务器云预览（账号隔离）。"""
+    def worker():
+        try:
+            payload = _build_cloud_sync_payload()
+            if not payload:
+                return
+            cloud_client.sync_projects(payload)
+        except Exception:
+            pass
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def free_photo_over_limit(incoming_count):
     """免费版：全部照片合计 >= FREE_PHOTO_LIMIT 时拦截上传。返回剩余额度或 None。"""
     photo_count = app_license_status().get("photo_count", 0)
@@ -3790,6 +3921,7 @@ def api_upload(project_code):
             process_code=request.form.get("process_code", ""),
             per_file_meta=per_file_meta or None,
         )
+        sync_cloud_preview_async()  # 上传后自动同步缩略图到云预览
         return jsonify({"ok": True, "added": added, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc))
