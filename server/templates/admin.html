@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>授权中心管理后台</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px;
+      background: #f2f5f8; color: #162131;
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    .card {
+      background: #fff; border: 1px solid #dce6ee; border-radius: 10px;
+      padding: 20px; margin-bottom: 18px; box-shadow: 0 8px 24px rgba(20,43,66,.06);
+    }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .muted { color: #627487; font-size: 13px; }
+    input, select {
+      padding: 8px 10px; border: 1px solid #c7d6e2; border-radius: 6px;
+      font: inherit; margin: 4px 6px 4px 0;
+    }
+    button {
+      padding: 8px 14px; border: 0; border-radius: 6px; cursor: pointer;
+      background: #116fa6; color: #fff; font: inherit; font-weight: 700;
+    }
+    button.ghost { background: #eef3f7; color: #12344d; border: 1px solid #c7d6e2; }
+    button.danger { background: #bd2a20; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e6edf3; vertical-align: top; }
+    th { color: #526a7e; background: #f8fafc; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; }
+    .badge.ok { background: #e3f5e9; color: #1a7a3a; }
+    .badge.off { background: #fdeceb; color: #bd2a20; }
+    .notice { padding: 10px 12px; border-radius: 6px; margin: 10px 0; display: none; }
+    .notice.show { display: block; }
+    .notice.err { background: #fff3f2; color: #bd2a20; border: 1px solid #f0b8b2; }
+    .notice.ok { background: #eafaf0; color: #1a7a3a; border: 1px solid #bfe8cf; }
+    #loginBox { max-width: 380px; margin: 80px auto; }
+    #loginBox input { width: 100%; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="loginBox" class="card">
+      <h1>授权中心管理后台</h1>
+      <p class="muted">仅管理员可登录</p>
+      <input id="loginUser" placeholder="管理员账号">
+      <input id="loginPass" type="password" placeholder="密码">
+      <button id="loginBtn" style="width:100%">登录</button>
+      <div id="loginNotice" class="notice"></div>
+    </div>
+
+    <div id="mainBox" style="display:none">
+      <div class="card">
+        <h1>客户与授权管理</h1>
+        <p class="muted" id="whoami"></p>
+        <button id="refreshBtn">刷新列表</button>
+        <button class="ghost" id="logoutBtn">退出登录</button>
+        <div id="notice" class="notice"></div>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>账号</th><th>状态</th><th>授权</th><th>到期时间</th>
+              <th>机器</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let token = localStorage.getItem("album_admin_token") || "";
+
+    function notice(el, msg, isErr) {
+      el.textContent = msg;
+      el.className = `notice show ${isErr ? "err" : "ok"}`;
+    }
+
+    async function api(url, options = {}) {
+      const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const resp = await fetch(url, Object.assign({}, options, { headers }));
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || `请求失败(${resp.status})`);
+      return data;
+    }
+
+    $("#loginBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ username: $("#loginUser").value.trim(), password: $("#loginPass").value })
+        });
+        if (data.account.role !== "admin") throw new Error("该账号不是管理员");
+        token = data.token;
+        localStorage.setItem("album_admin_token", token);
+        enterAdmin(data.account);
+      } catch (e) {
+        notice($("#loginNotice"), e.message, true);
+      }
+    });
+
+    function enterAdmin(account) {
+      $("#loginBox").style.display = "none";
+      $("#mainBox").style.display = "block";
+      $("#whoami").textContent = `当前管理员：${account.display_name || account.username}`;
+      loadAccounts();
+    }
+
+    async function loadAccounts() {
+      try {
+        const data = await api("/api/admin/accounts");
+        renderAccounts(data.accounts);
+      } catch (e) {
+        notice($("#notice"), e.message, true);
+        if (/登录|权限/.test(e.message)) {
+          token = "";
+          localStorage.removeItem("album_admin_token");
+          $("#mainBox").style.display = "none";
+          $("#loginBox").style.display = "block";
+        }
+      }
+    }
+
+    function renderAccounts(accounts) {
+      $("#rows").innerHTML = accounts.map(({ account, license }) => {
+        const lic = license || {};
+        const typeText = lic.has_license
+          ? (lic.license_type === "lifetime" ? "终身" : "限期")
+          : "未开通";
+        const expText = lic.license_type === "lifetime" ? "终身" : (lic.expires_at || "-");
+        const machineText = `${lic.machine_count || 0}/${lic.machine_limit || 3} 台`;
+        const machines = (lic.machines || []).map(m => escapeHtml(m.machine_id)).join("<br>");
+        const machineButtons = (lic.machines || []).map(m =>
+          `<button class="ghost" data-action="unbind" data-account="${account.id}" data-machine="${escapeAttr(m.machine_id)}">解绑 ${escapeHtml(m.machine_id.slice(-6))}</button>`
+        ).join(" ");
+        return `<tr>
+          <td><strong>${escapeHtml(account.username)}</strong><br>
+              <span class="muted">${escapeHtml(account.display_name || "")}</span></td>
+          <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : "停用"}</span></td>
+          <td><span class="badge ${lic.has_license ? "ok" : "off"}">${typeText}</span></td>
+          <td>${escapeHtml(expText)}</td>
+          <td>${machineText}<br><span class="muted">${machines || "-"}</span></td>
+          <td>
+            <button data-action="license" data-account="${account.id}" data-user="${escapeAttr(account.username)}">开通/续期</button>
+            <button class="danger" data-action="revoke" data-account="${account.id}">吊销</button>
+            ${machineButtons}
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    function issueLicense(accountId, username) {
+      const type = prompt(`为 ${username} 开通授权\n输入授权类型（term=限期, lifetime=终身）：`, "term");
+      if (!type || (type !== "term" && type !== "lifetime")) return;
+      let days = 90;
+      let limit = 3;
+      if (type === "term") {
+        days = parseInt(prompt("授权天数：", "90"), 10) || 90;
+      }
+      limit = parseInt(prompt("可绑定电脑数（默认 3）：", "3"), 10) || 3;
+      api("/api/admin/license", {
+        method: "POST",
+        body: JSON.stringify({ account_id: accountId, license_type: type, valid_days: days, machine_limit: limit })
+      }).then(() => { notice($("#notice"), "授权已开通/更新"); loadAccounts(); })
+        .catch(e => notice($("#notice"), e.message, true));
+    }
+
+    function revoke(accountId) {
+      if (!confirm("吊销后该账号所有机器立即失效，确定？")) return;
+      api("/api/admin/revoke", { method: "POST", body: JSON.stringify({ account_id: accountId }) })
+        .then(() => { notice($("#notice"), "已吊销"); loadAccounts(); })
+        .catch(e => notice($("#notice"), e.message, true));
+    }
+
+    function unbind(accountId, machineId) {
+      if (!confirm(`解绑机器 ${machineId}？`)) return;
+      api("/api/admin/unbind", { method: "POST", body: JSON.stringify({ account_id: accountId, machine_id: machineId }) })
+        .then(() => { notice($("#notice"), "已解绑"); loadAccounts(); })
+        .catch(e => notice($("#notice"), e.message, true));
+    }
+
+    $("#refreshBtn").addEventListener("click", loadAccounts);
+    $("#logoutBtn").addEventListener("click", () => {
+      token = "";
+      localStorage.removeItem("album_admin_token");
+      $("#mainBox").style.display = "none";
+      $("#loginBox").style.display = "block";
+    });
+    // 事件委托：替代原先内联 onclick，避免 machine_id/用户名 注入 JS 字符串
+    $("#rows").addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
+      const accountId = btn.getAttribute("data-account");
+      const username = btn.getAttribute("data-user") || "";
+      const machineId = btn.getAttribute("data-machine") || "";
+      if (action === "license") issueLicense(Number(accountId), username);
+      else if (action === "revoke") revoke(Number(accountId));
+      else if (action === "unbind") unbind(Number(accountId), machineId);
+    });
+
+    function escapeHtml(v) {
+      return String(v == null ? "" : v).replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+    function escapeAttr(v) { return escapeHtml(v).replace(/"/g, "&quot;"); }
+
+    (async () => {
+      if (!token) return;
+      try {
+        const data = await api("/api/me");
+        if (data.account.role === "admin") enterAdmin(data.account);
+        else { token = ""; localStorage.removeItem("album_admin_token"); }
+      } catch (e) { token = ""; localStorage.removeItem("album_admin_token"); }
+    })();
+  </script>
+</body>
+</html>

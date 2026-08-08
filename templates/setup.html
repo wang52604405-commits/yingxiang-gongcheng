@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>局域网部署向导 - 工程影像管理平台</title>
+  <style>
+    :root {
+      --bg: #eef3f7;
+      --panel: #ffffff;
+      --line: #d5e1eb;
+      --text: #162131;
+      --muted: #627487;
+      --primary: #116fa6;
+      --primary-dark: #0e5a88;
+      --ok: #23866f;
+      --warn: #b37618;
+      --danger: #bd2a20;
+      --soft: #f6f9fc;
+      --shadow: 0 14px 34px rgba(20, 43, 66, .10);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: linear-gradient(180deg, #eaf2f7 0, #f7fafc 280px, var(--bg) 100%);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input { font: inherit; }
+    button, .link-button {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: 1px solid rgba(17, 111, 166, .22);
+      border-radius: 8px;
+      color: #fff;
+      background: linear-gradient(180deg, #1d83bd 0%, var(--primary) 100%);
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button:hover, .link-button:hover { background: linear-gradient(180deg, #1779b4 0%, var(--primary-dark) 100%); }
+    button.secondary, .link-button.secondary {
+      color: #12344d;
+      background: #fff;
+      border-color: #c4d3df;
+    }
+    button.secondary:hover, .link-button.secondary:hover {
+      color: #0d5481;
+      background: #f4f9fd;
+    }
+    button:disabled { opacity: .58; cursor: not-allowed; }
+
+    .topbar {
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 22px;
+      color: #fff;
+      background: linear-gradient(90deg, #183a55 0%, #146995 58%, #7b5b1b 100%);
+      box-shadow: 0 10px 28px rgba(14, 49, 77, .18);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .14);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22);
+      font-weight: 800;
+    }
+    .brand h1 { margin: 0; font-size: 19px; line-height: 1.2; white-space: nowrap; }
+    .topbar a { color: #fff; }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 18px auto 32px;
+      display: grid;
+      gap: 14px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .hero-main, .url-card, .panel, .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .94);
+      box-shadow: var(--shadow);
+    }
+    .hero-main {
+      padding: 20px;
+      display: grid;
+      align-content: space-between;
+      gap: 20px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 1px solid #b7d5e9;
+      border-radius: 999px;
+      color: #155b84;
+      background: #eaf6fd;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    h2, h3, p { margin: 0; }
+    .hero h2 {
+      margin-top: 10px;
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .hero p {
+      margin-top: 9px;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+    .url-card {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+      align-content: center;
+      background: linear-gradient(180deg, #ffffff 0%, #edf8f8 100%);
+      border-left: 4px solid #178a94;
+    }
+    .url-card .label { color: #53697e; font-size: 13px; font-weight: 700; }
+    .url {
+      padding: 12px;
+      border: 1px solid #b9d9e8;
+      border-radius: 8px;
+      background: #fff;
+      color: #084c76;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 20px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .url-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .step {
+      padding: 14px;
+      display: grid;
+      gap: 9px;
+      align-content: start;
+      cursor: pointer;
+      transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease, background .18s ease;
+    }
+    .step:hover {
+      border-color: #9fc9e8;
+      background: #f7fbfe;
+      box-shadow: 0 16px 34px rgba(17, 111, 166, .12);
+      transform: translateY(-1px);
+    }
+    .step:focus-visible {
+      outline: 3px solid rgba(17, 111, 166, .18);
+      outline-offset: 2px;
+    }
+    .step-num {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--primary);
+      font-weight: 800;
+    }
+    .step h3, .panel h3 { font-size: 16px; }
+    .step p, .panel p, .hint { color: var(--muted); line-height: 1.6; font-size: 13px; }
+    .step-action {
+      width: fit-content;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border: 1px solid #b7d5e9;
+      border-radius: 999px;
+      color: #155b84;
+      background: #eaf6fd;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .panel { overflow: hidden; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 44px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff 0%, #f5f9fc 100%);
+    }
+    .panel-body { padding: 14px; display: grid; gap: 12px; }
+    .kv {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid #e3ebf2;
+    }
+    .kv:last-child { border-bottom: 0; }
+    .kv span:first-child { color: #63788b; font-weight: 700; font-size: 13px; }
+    .value {
+      min-width: 0;
+      color: #17283a;
+      overflow-wrap: anywhere;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 13px;
+    }
+    .mini {
+      min-height: 30px;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .status {
+      min-height: 40px;
+      display: none;
+      align-items: center;
+      padding: 9px 12px;
+      border: 1px solid #b9d7ed;
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      background: #eef7ff;
+      color: #0f4f7a;
+      line-height: 1.5;
+    }
+    .status.error {
+      border-color: #f0b8b2;
+      border-left-color: var(--danger);
+      background: #fff5f4;
+      color: var(--danger);
+    }
+    .tips {
+      display: grid;
+      gap: 9px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .tips li {
+      padding: 10px;
+      border: 1px solid #d9e5ef;
+      border-radius: 8px;
+      background: var(--soft);
+      color: #334b60;
+      line-height: 1.55;
+    }
+    .command {
+      padding: 10px;
+      border: 1px dashed #b9cde0;
+      border-radius: 8px;
+      background: #fbfdff;
+      color: #28445d;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 900px) {
+      .hero, .grid, .steps { grid-template-columns: 1fr; }
+      .topbar { align-items: flex-start; flex-direction: column; padding: 12px; }
+      .brand h1 { white-space: normal; }
+      .kv { grid-template-columns: 1fr; }
+      .url-actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">影</div>
+      <h1>工程影像管理平台</h1>
+    </div>
+    <a href="/" class="link-button secondary">返回登录页</a>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-main">
+        <div>
+          <span class="eyebrow" id="readyBadge">正在检测</span>
+          <h2>局域网部署向导</h2>
+          <p>在服务器电脑上完成一次配置，把显示的登录网址发给同一局域网内的电脑即可使用。软件运行期间，请保持这台电脑开机并连接网络。</p>
+        </div>
+        <div class="hero-actions">
+          <button type="button" id="autoConfigBtn">一键自动配置</button>
+          <button class="secondary" type="button" id="refreshBtn">重新检测</button>
+          <a id="openAppBtn" class="link-button secondary" href="/">打开登录页</a>
+        </div>
+        <div id="notice" class="status"></div>
+      </div>
+
+      <aside class="url-card">
+        <div>
+          <div class="label">配置完成后的登录网址</div>
+          <div id="lanUrl" class="url">检测中...</div>
+        </div>
+        <div class="url-actions">
+          <button type="button" data-copy="lanUrl">复制登录网址</button>
+          <button class="secondary" type="button" data-copy="setupUrl">复制配置页</button>
+        </div>
+        <p class="hint">把登录网址发给同一个 Wi-Fi 或同一交换机下的电脑，浏览器打开即可。</p>
+      </aside>
+    </section>
+
+    <section class="steps">
+      <article class="step" role="button" tabindex="0" data-step-action="refresh">
+        <div class="step-num">1</div>
+        <h3>自动检测本机网络</h3>
+        <p>页面会读取当前端口、本机局域网 IP、数据目录和启动脚本路径，确认服务是否绑定到局域网。</p>
+        <span class="step-action">点击重新检测</span>
+      </article>
+      <article class="step" role="button" tabindex="0" data-step-action="auto-config">
+        <div class="step-num">2</div>
+        <h3>一键生成便携配置</h3>
+        <p>点击后会创建本地 data 数据目录，并生成可转发的 start_album.bat 和 autostart_album.ps1。</p>
+        <span class="step-action">点击自动配置</span>
+      </article>
+      <article class="step" role="button" tabindex="0" data-step-action="copy-url">
+        <div class="step-num">3</div>
+        <h3>发送网址给其他电脑</h3>
+        <p>配置完成后复制登录网址。第一次使用可注册账号；其他电脑不能访问时按右侧防火墙提示处理。</p>
+        <span class="step-action">点击复制网址</span>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="panel-head">
+          <h3>当前配置</h3>
+          <span class="hint" id="configuredAt">未配置</span>
+        </div>
+        <div class="panel-body" id="configRows"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h3>局域网提示</h3>
+        </div>
+        <div class="panel-body">
+          <ul class="tips">
+            <li>其他电脑必须和服务器电脑在同一个局域网内，例如同一个路由器、同一个 Wi-Fi 或同一交换机。</li>
+            <li>服务器电脑运行窗口不能关闭。关闭窗口后，其他电脑的登录网址会失效。</li>
+            <li>如果其他电脑打不开登录网址，通常是 Windows 防火墙拦截了端口。</li>
+          </ul>
+          <div>
+            <p class="hint">管理员命令提示符中可执行：</p>
+            <div id="firewallCommand" class="command">检测中...</div>
+          </div>
+          <button class="secondary" type="button" data-copy="firewallCommand">复制防火墙命令</button>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    let currentSetup = null;
+
+    async function apiJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "请求失败");
+      return data;
+    }
+
+    function showNotice(message, isError = false) {
+      const box = $("#notice");
+      box.textContent = message;
+      box.className = `status${isError ? " error" : ""}`;
+      box.style.display = "flex";
+    }
+
+    function row(label, value, copyId) {
+      const button = copyId ? `<button class="secondary mini" type="button" data-copy="${copyId}">复制</button>` : "";
+      const idAttr = copyId ? ` id="${copyId}"` : "";
+      return `
+        <div class="kv">
+          <span>${label}</span>
+          <strong class="value"${idAttr}>${value || "-"}</strong>
+          ${button}
+        </div>
+      `;
+    }
+
+    function render(setup) {
+      currentSetup = setup;
+      $("#readyBadge").textContent = setup.is_lan_bound ? "局域网已启用" : "仅本机可用";
+      $("#readyBadge").style.borderColor = setup.is_lan_bound ? "#a8d7c8" : "#e6c98d";
+      $("#readyBadge").style.color = setup.is_lan_bound ? "#176b58" : "#81560f";
+      $("#readyBadge").style.background = setup.is_lan_bound ? "#e9f7f2" : "#fff6df";
+      $("#lanUrl").textContent = setup.lan_url;
+      $("#openAppBtn").href = setup.local_url;
+      $("#firewallCommand").textContent = setup.firewall_command;
+      $("#configuredAt").textContent = setup.configured_at ? `已配置：${setup.configured_at}` : "未配置";
+      $("#autoConfigBtn").disabled = !setup.can_auto_config;
+      $("#autoConfigBtn").textContent = setup.can_auto_config ? "一键自动配置" : "请在服务器本机配置";
+
+      $("#configRows").innerHTML = [
+        row("本机配置页", setup.setup_url, "setupUrlLocal"),
+        row("局域网登录页", setup.lan_url, "lanUrlValue"),
+        row("局域网配置页", setup.lan_setup_url, "setupUrl"),
+        row("本机 IP", setup.lan_ip),
+        row("服务端口", setup.port),
+        row("运行目录", setup.app_dir, "appDir"),
+        row("当前数据目录", setup.data_dir, "dataDir"),
+        row("便携数据目录", setup.portable_data_dir, "portableDataDir"),
+        row("启动脚本", setup.start_script, "startScript")
+      ].join("");
+    }
+
+    async function refreshStatus() {
+      const data = await apiJson("/api/setup/status");
+      render(data.setup);
+    }
+
+    async function autoConfig() {
+      $("#autoConfigBtn").disabled = true;
+      try {
+        const data = await apiJson("/api/setup/auto-config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        render(data.setup);
+        showNotice(data.message || "配置完成");
+      } catch (error) {
+        showNotice(error.message, true);
+      } finally {
+        if (currentSetup?.can_auto_config) $("#autoConfigBtn").disabled = false;
+      }
+    }
+
+    async function copyTextFrom(id) {
+      const node = $(`#${id}`);
+      const text = node?.textContent?.trim() || "";
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      showNotice("已复制：" + text);
+    }
+
+    function runStepAction(action) {
+      if (action === "refresh") {
+        refreshStatus()
+          .then(() => showNotice("检测完成，已刷新当前配置。"))
+          .catch((error) => showNotice(error.message, true));
+        return;
+      }
+      if (action === "auto-config") {
+        autoConfig();
+        return;
+      }
+      if (action === "copy-url") {
+        copyTextFrom("lanUrl").catch((error) => showNotice(error.message, true));
+      }
+    }
+
+    document.addEventListener("click", (event) => {
+      const copyButton = event.target.closest("[data-copy]");
+      if (copyButton) copyTextFrom(copyButton.dataset.copy).catch((error) => showNotice(error.message, true));
+      const step = event.target.closest("[data-step-action]");
+      if (step) runStepAction(step.dataset.stepAction);
+    });
+    document.querySelectorAll("[data-step-action]").forEach((step) => {
+      step.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          runStepAction(step.dataset.stepAction);
+        }
+      });
+    });
+    $("#refreshBtn").addEventListener("click", () => refreshStatus().catch((error) => showNotice(error.message, true)));
+    $("#autoConfigBtn").addEventListener("click", () => autoConfig());
+
+    refreshStatus().catch((error) => showNotice(error.message, true));
+  </script>
+</body>
+</html>

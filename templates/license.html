@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>软件授权 - 工程影像管理平台</title>
+  <style>
+    :root {
+      --bg: #eef3f7;
+      --panel: #ffffff;
+      --line: #d5e1eb;
+      --text: #162131;
+      --muted: #627487;
+      --primary: #116fa6;
+      --danger: #bd2a20;
+      --shadow: 0 18px 42px rgba(20, 43, 66, .14);
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--text);
+      background: linear-gradient(180deg, #eaf2f7 0, #f7fafc 280px, var(--bg) 100%);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .card {
+      width: min(100%, 560px);
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: var(--shadow);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--primary);
+      font-weight: 800;
+    }
+    h1 { margin: 0; font-size: 22px; }
+    p { margin: 8px 0 0; color: var(--muted); line-height: 1.65; }
+    label { display: grid; gap: 7px; margin-top: 16px; color: #526a7e; font-size: 13px; font-weight: 700; }
+    input, textarea {
+      width: 100%;
+      min-height: 40px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font: inherit;
+      outline: none;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+    }
+    input:focus, textarea:focus {
+      border-color: #78b8df;
+      box-shadow: 0 0 0 3px rgba(17, 111, 166, .12);
+    }
+    .machine {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px dashed #b9cde0;
+      border-radius: 8px;
+      background: #fbfdff;
+      color: #084c76;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 18px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    button {
+      min-height: 40px;
+      padding: 9px 14px;
+      border: 1px solid rgba(17, 111, 166, .22);
+      border-radius: 8px;
+      color: #fff;
+      background: var(--primary);
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    button.secondary { color: #12344d; background: #fff; border-color: #c4d3df; }
+    .notice {
+      display: none;
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid #b9d7ed;
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      color: #0f4f7a;
+      background: #eef7ff;
+      line-height: 1.5;
+    }
+    .notice.error {
+      border-color: #f0b8b2;
+      border-left-color: var(--danger);
+      color: var(--danger);
+      background: #fff5f4;
+    }
+    .status {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .terms {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid #f0d6a5;
+      border-radius: 8px;
+      color: #8a4b12;
+      background: #fff9ec;
+      font-size: 12px;
+      line-height: 1.65;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <div class="brand-mark">影</div>
+      <div>
+        <h1>试用与授权</h1>
+        <p>软件默认提供一个月试用期。需要长期使用时，把本机机器 ID 复制到在线授权中心获取授权码。</p>
+      </div>
+    </div>
+
+    <label>本机机器 ID</label>
+    <div id="machineId" class="machine">{{ license_status.machine_id }}</div>
+
+    <div class="actions">
+      <button class="secondary" type="button" id="copyMachineBtn">复制机器 ID</button>
+      <a id="onlinePortalBtn" class="link-button secondary" href="https://album-auth-portal.vercel.app" target="_blank" style="display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:8px 14px;border:1px solid rgba(17,111,166,.22);border-radius:8px;color:#12344d;background:#fff;border-color:#c4d3df;font-weight:700;text-decoration:none;font:inherit;">🌐 在线获取授权</a>
+      <button class="secondary" type="button" id="refreshBtn">刷新状态</button>
+    </div>
+
+    <label for="licenseCodeInput">授权码</label>
+    <textarea id="licenseCodeInput" placeholder="把管理员发来的授权码粘贴到这里"></textarea>
+    <div class="actions">
+      <button type="button" id="activateBtn">激活授权</button>
+    </div>
+    <div id="notice" class="notice"></div>
+    <div id="status" class="status">{{ license_status.message }}{% if license_status.trial_active %} / 试用剩余：{{ license_status.trial_remaining }} 天{% endif %}</div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:22px 0 0;">
+    <h2 style="font-size:16px;margin:18px 0 4px;">账号登录激活（推荐）</h2>
+    <p>登录授权账号后自动绑定本机，无需手动粘贴授权码。</p>
+    <div id="cloudStatus" class="status"></div>
+    <div id="inviteStatus" class="status" style="margin-top:6px;"></div>
+    <label for="cloudUser">账号</label>
+    <input id="cloudUser" placeholder="手机号 / QQ / 邮箱">
+    <label for="cloudPass">密码</label>
+    <input id="cloudPass" type="password" placeholder="密码">
+    <div class="actions">
+      <button type="button" id="cloudLoginBtn">登录并激活本机</button>
+      <button class="secondary" type="button" id="cloudLogoutBtn">退出登录</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--line);margin:22px 0 0;">
+    <h2 style="font-size:16px;margin:18px 0 4px;">注册账号</h2>
+    <p>用手机号 / QQ / 邮箱注册即得免费版（300张照片，打印/导出带水印）。可填写好友邀请码。</p>
+    <label for="regUser">账号</label>
+    <input id="regUser" placeholder="手机号 / QQ / 邮箱">
+    <label for="regPass">密码</label>
+    <input id="regPass" type="password" placeholder="至少 6 位">
+    <label for="regCode">验证码</label>
+    <div class="actions" style="gap:8px;align-items:center;">
+      <input id="regCode" placeholder="6 位验证码" style="flex:1;">
+      <button type="button" id="sendCodeBtn">发送验证码</button>
+    </div>
+    <label for="regInvite">邀请码（选填）</label>
+    <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
+    <div class="actions">
+      <button type="button" id="regBtn">注册</button>
+    </div>
+
+    <div class="terms">使用声明：本软件仅限项目部内部试用和授权使用。禁止复制传播、反编译、破解限制或二次销售。</div>
+  </main>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+
+    async function apiJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || "请求失败");
+      return data;
+    }
+
+    function showNotice(message, isError = false) {
+      const box = $("#notice");
+      box.textContent = message;
+      box.className = `notice${isError ? " error" : ""}`;
+      box.style.display = "block";
+    }
+
+    function renderStatus(status) {
+      $("#machineId").textContent = status.machine_id || "";
+      const trialText = status.trial_active
+        ? ` / 试用剩余：${status.trial_remaining || 0} 天`
+        : "";
+      $("#status").textContent = `${status.message || ""}${trialText}`;
+    }
+
+    async function refreshStatus() {
+      const data = await apiJson("/api/license/status");
+      renderStatus(data.license);
+      return data.license;
+    }
+
+    $("#copyMachineBtn").addEventListener("click", async () => {
+      await navigator.clipboard.writeText($("#machineId").textContent.trim());
+      showNotice("机器 ID 已复制。");
+    });
+
+    $("#refreshBtn").addEventListener("click", () => {
+      refreshStatus().then(() => showNotice("状态已刷新。")).catch((error) => showNotice(error.message, true));
+    });
+
+    $("#activateBtn").addEventListener("click", async () => {
+      const licenseCode = $("#licenseCodeInput").value.trim();
+      if (!licenseCode) {
+        showNotice("请先粘贴授权码。", true);
+        return;
+      }
+      try {
+        const data = await apiJson("/api/license/activate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ license_code: licenseCode })
+        });
+        $("#licenseCodeInput").value = "";
+        renderStatus(data.license);
+        showNotice("授权已激活，可以继续使用。");
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+
+    function renderCloud(data) {
+      const el = $("#cloudStatus");
+      if (data.logged_in) {
+        const tier = data.is_member ? "会员版（无限使用，无水印）" : "免费版（300张照片，打印/导出带水印）";
+        el.textContent = `已登录：${data.account}（服务器：${data.server}）｜${tier}`;
+        $("#cloudUser").value = "";
+        $("#cloudPass").value = "";
+      } else {
+        el.textContent = "未登录（当前为免费版：300张照片，打印/导出带水印）";
+      }
+      // 已登录时展示邀请码和邀请激励
+      const inviteEl = $("#inviteStatus");
+      if (data.logged_in) {
+        apiJson("/api/cloud/invite-status").then((inv) => {
+          if (inv.ok) {
+            const remain = inv.milestone - (inv.registered_count % inv.milestone);
+            inviteEl.textContent = `我的邀请码：${inv.invite_code}｜已邀请 ${inv.registered_count} 人｜已获 ${inv.reward_months} 个月｜再邀 ${remain} 人续 1 个月`;
+          }
+        }).catch(() => {});
+      } else {
+        inviteEl.textContent = "";
+      }
+    }
+
+    async function refreshCloud() {
+      const data = await apiJson("/api/cloud/status");
+      renderCloud(data);
+      return data;
+    }
+
+    // 发送验证码
+    $("#sendCodeBtn").addEventListener("click", async () => {
+      const account = $("#regUser").value.trim();
+      if (!account) {
+        showNotice("请先输入账号（手机号 / QQ / 邮箱）。", true);
+        return;
+      }
+      try {
+        const data = await apiJson("/api/cloud/send-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account })
+        });
+        if (data.ok && data.code) {
+          showNotice(`验证码已生成：${data.code}（服务器基础版，10分钟内有效）`);
+        } else {
+          showNotice(data.error || "验证码发送失败", true);
+        }
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+
+    // 注册
+    $("#regBtn").addEventListener("click", async () => {
+      const username = $("#regUser").value.trim();
+      const password = $("#regPass").value;
+      const code = $("#regCode").value.trim();
+      const inviteCode = $("#regInvite").value.trim();
+      if (!username || !password || !code) {
+        showNotice("请填写账号、密码和验证码。", true);
+        return;
+      }
+      try {
+        const data = await apiJson("/api/cloud/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, code, invite_code: inviteCode })
+        });
+        $("#regUser").value = "";
+        $("#regPass").value = "";
+        $("#regCode").value = "";
+        $("#regInvite").value = "";
+        showNotice(`注册成功！你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+
+    $("#cloudLoginBtn").addEventListener("click", async () => {
+      const username = $("#cloudUser").value.trim();
+      const password = $("#cloudPass").value;
+      if (!username || !password) {
+        showNotice("请输入账号和密码。", true);
+        return;
+      }
+      try {
+        await apiJson("/api/cloud/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const status = await refreshCloud();
+        renderStatus(status.license);
+        showNotice("登录成功，本机已激活。");
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+
+    $("#cloudLogoutBtn").addEventListener("click", async () => {
+      try {
+        await apiJson("/api/cloud/logout", { method: "POST" });
+        renderCloud({ logged_in: false });
+        refreshStatus().then(() => showNotice("已退出登录。")).catch(() => {});
+      } catch (error) {
+        showNotice(error.message, true);
+      }
+    });
+
+    refreshCloud().catch(() => {});
+
+  </script>
+</body>
+</html>

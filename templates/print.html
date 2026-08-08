@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+{% set code = project.project_code or project.code %}
+{% set name = project.project_name or project.name %}
+{% set label = category_label or "影像资料" %}
+{% set layout = print_layout or request.args.get("layout", "landscape") %}
+{% set layout = "portrait" if layout == "portrait" else "landscape" %}
+{% set page_size = print_page_size or request.args.get("page_size", 2) %}
+{% set page_size = page_size|int %}
+{% if page_size not in [1, 2, 4] %}{% set page_size = 2 %}{% endif %}
+{% if page_size == 4 %}{% set layout = "landscape" %}{% endif %}
+{% set print_settings = print_settings or {} %}
+{% set caption_font_size = [print_settings.get("print_caption_font_size", 7.2) or 7.2, 7.5]|min %}
+{% set has_project_groups = project_groups is defined and project_groups is not none %}
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A4打印 - {{ label }} - {{ code }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Microsoft YaHei", Arial, sans-serif; color: #111827; background: #dfe4ec; }
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 18px;
+      background: #fff;
+      border-bottom: 1px solid #cfd7e6;
+    }
+    .toolbar strong { overflow-wrap: anywhere; }
+    .toolbar-actions { display: flex; align-items: center; gap: 8px; }
+    .print-tip {
+      color: #b45309;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    select {
+      height: 36px;
+      min-width: 112px;
+      border: 1px solid #cfd7e6;
+      border-radius: 8px;
+      background: #f8fbff;
+      padding: 0 10px;
+      font: inherit;
+    }
+    button { border: 0; border-radius: 7px; padding: 9px 14px; background: #1f6feb; color: #fff; cursor: pointer; }
+    .page {
+      margin: 12px auto;
+      padding: 0;
+      background: #fff;
+      page-break-after: always;
+      overflow: hidden;
+      position: relative;
+    }
+    .page:last-of-type { page-break-after: auto; break-after: auto; }
+    body.landscape .page { width: {% if page_size == 4 %}285mm{% else %}257mm{% endif %}; height: {% if page_size == 4 %}198mm{% else %}170mm{% endif %}; }
+    body.portrait .page { width: 170mm; height: 252mm; }
+    {% if page_size == 4 %}
+    body.landscape .page .title { height: 6mm; margin-bottom: 1mm; }
+    {% endif %}
+    .title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      height: 8mm;
+      margin-bottom: 1.5mm;
+      border-bottom: 1px solid #111827;
+      padding-bottom: 1mm;
+      overflow: hidden;
+    }
+    h1 { margin: 0; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .meta { font-size: 12px; color: #374151; white-space: nowrap; }
+    .layout-fixed {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+    body.landscape .layout-fixed { height: {% if page_size == 4 %}190.5mm{% else %}159.5mm{% endif %}; }
+    body.portrait .layout-fixed { height: 242mm; }
+    .photo-item {
+      position: absolute;
+      background: #fff;
+    }
+    .photo-frame {
+      position: relative;
+      width: 100%;
+      border: 1px solid #9ca3af;
+      overflow: hidden;
+    }
+    /* 免费版照片水印：半透明斜向铺满 */
+    .photo-frame .watermark {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .photo-frame .watermark span {
+      font-size: 26pt;
+      font-weight: 700;
+      color: rgba(255, 0, 0, 0.22);
+      transform: rotate(-30deg);
+      white-space: nowrap;
+      letter-spacing: 4px;
+    }
+    .photo-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .photo-frame img.pr-90,
+    .photo-frame img.pr-270 {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 70.08%;   /* 89/127：旋转后正好铺满 5 寸横版 */
+      height: 142.7%;  /* 127/89 */
+      object-fit: cover;
+      transform: translate(-50%, -50%) rotate(90deg);
+    }
+    .photo-frame img.pr-270 { transform: translate(-50%, -50%) rotate(270deg); }
+    .photo-frame img.pr-180 { transform: rotate(180deg); }
+    .photo-caption {
+      padding: 0.4mm 1mm 0.6mm;
+      background: #fff;
+      color: #111827;
+      font-size: {{ caption_font_size }}px;
+      line-height: 1.1;
+      overflow: hidden;
+      border-left: 1px solid #9ca3af;
+      border-right: 1px solid #9ca3af;
+      border-bottom: 1px solid #9ca3af;
+    }
+    .photo-caption .row {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+      overflow: hidden;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .empty { width: 210mm; margin: 12px auto; padding: 24mm; background: #fff; color: #6b7280; text-align: center; }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .page {
+        margin: 0;
+        padding: 0;
+        width: 100% !important;
+        box-shadow: none;
+        page-break-after: always;
+        break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .empty { width: auto; margin: 0; }
+      @page { size: A4 {{ layout }}; margin: {% if page_size == 4 %}6mm{% else %}25mm 20mm 15mm 20mm{% endif %}; }
+    }
+  </style>
+</head>
+<body class="{{ layout }}">
+  <div class="toolbar">
+    {% if has_project_groups %}
+    <strong>{{ label }}：共 {{ project_groups|length }} 个单元</strong>
+    {% else %}
+    <strong>{{ label }}：{{ code }} - {{ name }}</strong>
+    {% endif %}
+    <div class="toolbar-actions">
+      <span class="print-tip">打印预览里请取消“页眉和页脚”，缩放选“默认/100%”。照片按 5 寸铺满，说明文字在照片底部。</span>
+      <label>打印版式
+        <select id="printLayoutSelect">
+          <option value="landscape" {% if layout == "landscape" %}selected{% endif %}>横版</option>
+          <option value="portrait" {% if layout == "portrait" %}selected{% endif %}>竖版</option>
+        </select>
+      </label>
+      <label>每页张数
+        <select id="printPageSizeSelect">
+          <option value="2" {% if page_size == 2 %}selected{% endif %}>2 张（标准边距）</option>
+          <option value="4" {% if page_size == 4 %}selected{% endif %}>4 张（最小边距）</option>
+        </select>
+      </label>
+      <button onclick="window.print()">打印</button>
+    </div>
+  </div>
+
+  {% if has_project_groups %}
+    {% for group in project_groups %}
+      {% set g_pages = group.pages or [] %}
+      {% if g_pages %}
+        {% for page in g_pages %}
+        <section class="page">
+          <div class="title">
+            <h1>{{ group.project_name or group.name or "" }}</h1>
+            <div class="meta">第 {{ loop.index }} 页 / 共 {{ g_pages|length }} 页</div>
+          </div>
+          <div class="layout-fixed">
+            {% for item in page %}
+            <div class="photo-item" style="left: {{ item._left }}mm; top: {{ item._top }}mm; width: {{ item._w }}mm; height: {{ item._block_h }}mm;">
+              <div class="photo-frame" style="height: {{ item._h }}mm;">
+                <img class="pr-{{ item._rotate or 0 }}" src="{{ item.url }}" alt="">
+                {% if watermark_text %}<div class="watermark"><span>{{ watermark_text }}</span></div>{% endif %}
+              </div>
+              {% if item.detail_rows %}
+              <div class="photo-caption">
+                {% if page_size == 4 %}
+                <div class="row">{% for row in item.detail_rows %}{% if not loop.first %}｜{% endif %}{{ row.label }}：{{ row.value }}{% endfor %}</div>
+                {% else %}
+                {% for row in item.detail_rows %}
+                <div class="row"><b>{{ row.label }}：</b><span>{{ row.value }}</span></div>
+                {% endfor %}
+                {% endif %}
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      {% else %}
+        <div class="empty">{{ label }}暂无照片。</div>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <div class="empty">{{ label }}暂无照片。</div>
+  {% endif %}
+
+  <script>
+    const select = document.getElementById("printLayoutSelect");
+    select.addEventListener("change", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("layout", select.value);
+      window.location.href = url.toString();
+    });
+    const pageSizeSelect = document.getElementById("printPageSizeSelect");
+    pageSizeSelect.addEventListener("change", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("page_size", pageSizeSelect.value);
+      window.location.href = url.toString();
+    });
+    document.title = "";
+    window.addEventListener("load", () => setTimeout(() => window.print(), 500));
+  </script>
+</body>
+</html>

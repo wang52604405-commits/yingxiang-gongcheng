@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工程影像管理平台 - 海报分享</title>
+  <style>
+    :root {
+      --ink: #092337;
+      --muted: #4f6578;
+      --line: #d7e5ef;
+      --blue: #0d6dab;
+      --blue-dark: #124f76;
+      --teal: #11978f;
+      --green: #16805c;
+      --red: #c9342d;
+      --paper: #f5f9fc;
+      --card: #ffffff;
+      --gold: #9a6a16;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      color: var(--ink);
+      background: #dfeaf2;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    .page {
+      width: min(100%, 1080px);
+      min-height: 100vh;
+      margin: 0 auto;
+      background:
+        linear-gradient(180deg, rgba(18, 79, 118, .92), rgba(16, 100, 132, .78) 34%, rgba(245, 249, 252, 0) 34%),
+        var(--paper);
+      box-shadow: 0 24px 70px rgba(20, 40, 60, .22);
+      overflow: hidden;
+    }
+
+    .poster {
+      display: grid;
+      gap: 22px;
+      padding: 34px 42px 38px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      color: #fff;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 8px;
+      background: rgba(255,255,255,.14);
+      font-weight: 800;
+      font-size: 21px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,.32);
+      border-radius: 999px;
+      color: #fff;
+      background: rgba(255,255,255,.12);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+      gap: 28px;
+      align-items: center;
+      color: #fff;
+      padding: 20px 0 0;
+    }
+    .eyebrow {
+      margin: 0 0 12px;
+      color: #d7f4ff;
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .hero h2 {
+      margin: 0;
+      font-size: 50px;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+    .hero h2 strong { color: #fff2b8; }
+    .lead {
+      margin: 18px 0 0;
+      color: #e7f5fb;
+      font-size: 20px;
+      line-height: 1.65;
+    }
+    .proof {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .proof span {
+      min-height: 68px;
+      padding: 10px;
+      border: 1px solid rgba(255,255,255,.23);
+      border-radius: 8px;
+      background: rgba(255,255,255,.12);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .proof b {
+      display: block;
+      color: #fff;
+      font-size: 22px;
+      line-height: 1.1;
+    }
+
+    .screen-stack {
+      position: relative;
+      min-height: 390px;
+    }
+    .screen {
+      position: absolute;
+      overflow: hidden;
+      border: 8px solid #fff;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 22px 48px rgba(10, 35, 55, .28);
+    }
+    .screen img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top left;
+    }
+    .screen.main {
+      inset: 0 0 auto 24px;
+      width: 88%;
+      height: 285px;
+    }
+    .screen.sub {
+      right: 18px;
+      bottom: 0;
+      width: 58%;
+      height: 185px;
+      border-width: 7px;
+    }
+    .screen.print {
+      left: 0;
+      bottom: 18px;
+      width: 43%;
+      height: 165px;
+      border-width: 7px;
+    }
+
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 14px 34px rgba(20, 40, 60, .08);
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 20px 0;
+    }
+    .section-head h3 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+    .section-head span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .benefits {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding: 18px 20px 20px;
+    }
+    .benefit {
+      min-height: 150px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fcff;
+    }
+    .benefit:nth-child(2) { background: #f2fbfa; }
+    .benefit:nth-child(3) { background: #fff9ed; }
+    .benefit:nth-child(4) { background: #fff7f6; }
+    .icon {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--blue);
+      font-weight: 800;
+    }
+    .benefit:nth-child(2) .icon { background: var(--teal); }
+    .benefit:nth-child(3) .icon { background: var(--gold); }
+    .benefit:nth-child(4) .icon { background: var(--red); }
+    .benefit h4 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+    .benefit p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 18px;
+      align-items: stretch;
+      padding: 20px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .step {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .step b {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--blue-dark);
+      font-size: 15px;
+    }
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .qr {
+      display: grid;
+      place-items: center;
+      padding: 14px;
+      border: 2px dashed #9bc4df;
+      border-radius: 12px;
+      background: #f7fbfe;
+      text-align: center;
+    }
+    .qr-box {
+      width: 142px;
+      height: 142px;
+      display: grid;
+      place-items: center;
+      border: 1px solid #bfd7e8;
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, rgba(13,109,171,.12) 1px, transparent 1px),
+        linear-gradient(rgba(13,109,171,.12) 1px, transparent 1px),
+        #fff;
+      background-size: 14px 14px;
+      color: var(--blue-dark);
+      font-weight: 800;
+    }
+    .qr p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .bottom {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 18px 20px;
+      color: #fff;
+      border-radius: 14px;
+      background: linear-gradient(90deg, #123c59, #0d6dab 62%, #16805c);
+      box-shadow: 0 16px 34px rgba(18, 79, 118, .18);
+    }
+    .bottom strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 22px;
+    }
+    .bottom span {
+      color: #dff4ff;
+      font-size: 15px;
+    }
+    .cta {
+      min-width: 180px;
+      padding: 13px 18px;
+      border-radius: 999px;
+      color: #12344b;
+      background: #fff;
+      text-align: center;
+      font-weight: 800;
+    }
+
+    @media (max-width: 900px) {
+      .poster { padding: 22px 16px 26px; }
+      .topbar,
+      .hero,
+      .workflow,
+      .bottom {
+        grid-template-columns: 1fr;
+      }
+      .topbar { align-items: flex-start; }
+      .hero h2 { font-size: 38px; }
+      .screen-stack { min-height: 310px; }
+      .benefits,
+      .steps {
+        grid-template-columns: 1fr 1fr;
+      }
+      .qr { min-height: 220px; }
+    }
+
+    @media (max-width: 560px) {
+      .hero h2 { font-size: 32px; }
+      .lead { font-size: 17px; }
+      .proof,
+      .benefits,
+      .steps {
+        grid-template-columns: 1fr;
+      }
+      .screen.main { left: 0; width: 100%; height: 210px; }
+      .screen.sub { width: 65%; height: 150px; }
+      .screen.print { width: 52%; height: 130px; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { width: 100%; min-height: 100vh; box-shadow: none; }
+      .poster { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <article class="poster">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">影</div>
+          <h1>工程影像管理平台</h1>
+        </div>
+        <span class="tag">项目部影像归档 · 局域网私有部署</span>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">面向施工、监理、资料归档的影像管理工具</p>
+          <h2>项目照片<br><strong>一览无余</strong></h2>
+          <p class="lead">施工影像和监理影像分开收集，按项目划分自动归档，让每个单元照片不再遗漏，让竣工验收更轻松。</p>
+          <div class="proof">
+            <span><b>分级清楚</b>合同 / 单位 / 分部 / 单元逐级查看</span>
+            <span><b>编号统一</b>上传后按单元自动生成影像编号</span>
+            <span><b>成果可交</b>支持打印、导出、打包归档</span>
+          </div>
+        </div>
+        <div class="screen-stack" aria-label="软件界面截图">
+          <div class="screen main"><img src="/assets/poster-overview.png" alt="工程影像总览界面"></div>
+          <div class="screen print"><img src="/assets/poster-print.png" alt="影像打印预览"></div>
+          <div class="screen sub"><img src="/assets/poster-unit.png" alt="单元影像上传界面"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h3>把工程照片从“散、乱、漏”变成可验收资料</h3>
+          <span>适合项目部、施工单位、监理单位、资料员日常使用</span>
+        </div>
+        <div class="benefits">
+          <div class="benefit">
+            <span class="icon">览</span>
+            <h4>项目照片一览无余</h4>
+            <p>从总览页直接看每个单位、分部、单元照片数量，哪里缺照片一眼看出来。</p>
+          </div>
+          <div class="benefit">
+            <span class="icon">分</span>
+            <h4>监理施工分开收集</h4>
+            <p>施工单元影像和监理单元影像独立管理，打印和归档不混在一起。</p>
+          </div>
+          <div class="benefit">
+            <span class="icon">补</span>
+            <h4>单元照片不再遗漏</h4>
+            <p>按项目划分建立目录，缺失单元、照片数量、最近上传状态都能快速定位。</p>
+          </div>
+          <div class="benefit">
+            <span class="icon">验</span>
+            <h4>竣工验收更轻松</h4>
+            <p>一键打印、CSV/JSON/ZIP 导出，减少后期翻群聊、找照片、改编号的时间。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section workflow">
+        <div>
+          <div class="section-head" style="padding:0 0 16px;">
+            <h3>四步完成影像归档</h3>
+            <span>把日常拍照直接沉淀成可交付资料</span>
+          </div>
+          <div class="steps">
+            <div class="step"><b>1. 导入项目划分</b><span>Excel 项目划分一键导入，自动生成工程结构。</span></div>
+            <div class="step"><b>2. 选择单元上传</b><span>按单元工程上传照片，施工、监理各走各的目录。</span></div>
+            <div class="step"><b>3. 自动编号整理</b><span>照片按单元编号排列，删除后可重排，减少手工改名。</span></div>
+            <div class="step"><b>4. 打印导出归档</b><span>形成影像页、元数据和压缩包，交资料更省心。</span></div>
+          </div>
+        </div>
+        <aside class="qr">
+          <div class="qr-box">二维码位置</div>
+          <p>扫码查看演示 / 联系部署<br>可替换为微信、公众号或演示地址</p>
+        </aside>
+      </section>
+
+      <footer class="bottom">
+        <div>
+          <strong>工程影像管理平台</strong>
+          <span>让项目影像从上传、整理、打印到验收归档形成闭环。</span>
+        </div>
+        <div class="cta">扫码了解方案</div>
+      </footer>
+    </article>
+  </main>
+</body>
+</html>

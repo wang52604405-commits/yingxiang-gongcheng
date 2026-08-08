@@ -1,0 +1,48 @@
+# 密钥与授权（绝不能提交）
+private_key.pem
+public_key.der
+*.pem
+*.der
+*.key
+*.lic
+license.dat
+license.dat.*
+_license.dat-*
+keys/
+trial.json
+
+# 日志
+*.log
+
+# 构建产物与安装包（大文件）
+build/
+dist/
+installer_payload/
+客户可发送安装包-Win10/
+部署准备/
+*.zip
+*.rar
+*.7z
+*.exe
+
+# 数据与备份（大文件）
+models/
+mem0_store/
+_data_backups/
+_原图备份/
+data/
+tmp/
+项目聊天记忆-工程影像管理平台/
+项目聊天记忆-*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 工具与 IDE 状态
+.claude/
+.reasonix/
+.vscode/
+.idea/
