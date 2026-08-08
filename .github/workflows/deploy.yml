@@ -23,11 +23,27 @@ jobs:
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
-      ALBUM_SIGN_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\release_guard_private_key.pem
-      ALBUM_SSH_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\server_key
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 准备临时发布凭据
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布密钥 Secrets" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
+          $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
 
       - name: 验证测试、版本与发布密钥
         shell: powershell
@@ -57,6 +73,14 @@ jobs:
           Set-ExecutionPolicy -Scope Process Bypass -Force
           python publish_update.py
 
+      - name: 清理临时发布凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
+          }
+
   # 授权中心自动部署：仅当 server/** 代码变更时触发
   deploy-auth:
     runs-on: [self-hosted, windows, x64]
@@ -66,12 +90,25 @@ jobs:
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
-      ALBUM_SSH_KEY: D:\Desktop\工程影像\服务器访问-工程影像管理平台\server_key
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: 准备临时服务器凭据
+        shell: powershell
+        env:
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SSH_KEY_B64) { throw "缺少服务器密钥 Secret" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
 
       - name: 判断是否改动 server/
         id: check
@@ -91,3 +128,11 @@ jobs:
         shell: powershell
         run: |
           python deploy_auth.py
+
+      - name: 清理临时服务器凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
+          }
