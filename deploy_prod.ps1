@@ -69,17 +69,30 @@ Write-Host "[4/7] 完整性校验"
 & $pythonPath "tamper_guard.py" verify "$distDir"
 if ($LASTEXITCODE -ne 0) { throw "[4/7] 校验失败（退出码 $LASTEXITCODE）" }
 
-# ---------- 5. 停 5088 ----------
+# ---------- 5. 停 5088 + 桌面启动器（占用 DLL 的全部进程） ----------
 Write-Host ""
-Write-Host "[5/7] 停止 $port"
+Write-Host "[5/7] 停止 $port 与桌面启动器"
+# 停所有 album_server.exe / 工程影像管理平台.exe 进程（不只看监听端口，
+# 桌面启动器也会占用 _internal 的 DLL，不停会导致替换失败）
+$procs = @(Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -in @("album_server.exe", "工程影像管理平台.exe") })
+foreach ($proc in $procs) {
+    Write-Host "    停止 PID $($proc.ProcessId) $($proc.Name)"
+    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+}
+# 额外兜底：停监听端口的进程（防止进程名不同但占用端口）
 $conn = Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($conn) {
-    Write-Host "    停止 PID $($conn.OwningProcess)"
-    Stop-Process -Id $conn.OwningProcess -Force
-    Start-Sleep -Seconds 2
-} else {
-    Write-Host "    $port 未在运行"
+    Write-Host "    停止监听 PID $($conn.OwningProcess)"
+    Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
 }
+# 等待进程退出并释放 DLL 句柄（最多 30 秒）
+for ($i = 0; $i -lt 30; $i++) {
+    $alive = Get-Process album_server, "工程影像管理平台" -ErrorAction SilentlyContinue
+    if (-not $alive) { break }
+    Start-Sleep -Seconds 1
+}
+Start-Sleep -Seconds 1
 
 # ---------- 6. 备份旧版（首次安装时旧文件不存在则跳过） ----------
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -95,8 +108,17 @@ if (Test-Path (Join-Path $installDir "_internal")) {
 
 # ---------- 7. 替换 + 重启 + 健康检查 ----------
 Write-Host "[7/7] 替换并重启"
-if (Test-Path (Join-Path $installDir "_internal")) {
-    Remove-Item (Join-Path $installDir "_internal") -Recurse -Force
+# 删除 _internal（含 DLL 占用重试，最多 30 秒）
+for ($i = 0; $i -lt 30; $i++) {
+    try {
+        if (Test-Path (Join-Path $installDir "_internal")) {
+            Remove-Item (Join-Path $installDir "_internal") -Recurse -Force -ErrorAction Stop
+        }
+        break
+    } catch {
+        if ($i -ge 29) { throw "无法删除 _internal（文件被占用）: $_" }
+        Start-Sleep -Seconds 1
+    }
 }
 Copy-Item (Join-Path $distDir "_internal")          (Join-Path $installDir "_internal")          -Recurse
 Copy-Item (Join-Path $distDir "album_server.exe")   (Join-Path $installDir "album_server.exe")   -Force
@@ -122,8 +144,17 @@ if ($created.ReturnValue -ne 0) {
     throw "[7/7] WMI 启动失败（返回值 $($created.ReturnValue)）"
 }
 
-Start-Sleep -Seconds 8
-$resp = Invoke-WebRequest "http://127.0.0.1:$port/api/projects" -UseBasicParsing -TimeoutSec 20
-if ($resp.StatusCode -ne 200) { throw "[7/7] 健康检查失败：HTTP $($resp.StatusCode)" }
+# OCR 等大模块首次加载较慢（可能 20 秒+），轮询等待健康（最多 60 秒）
+$healthy = $false
+for ($i = 0; $i -lt 60; $i++) {
+    try {
+        $resp = Invoke-WebRequest "http://127.0.0.1:$port/api/projects" -UseBasicParsing -TimeoutSec 5
+        if ($resp.StatusCode -eq 200) { $healthy = $true; break }
+    } catch {
+        # 服务未就绪，继续等
+    }
+    Start-Sleep -Seconds 1
+}
+if (-not $healthy) { throw "[7/7] 健康检查失败：60 秒内未就绪" }
 Write-Host ""
 Write-Host "[OK] 部署完成，$port 健康检查通过"
