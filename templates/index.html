@@ -6633,37 +6633,44 @@
                       <small>打开本面板后自动刷新授权和试用状态。</small>
                     </div>
                     <div style="margin-top:10px;padding:10px;background:#f4f8fb;border-radius:8px;">
-                      <strong>会员收费标准（限时优惠）：</strong><br>
-                      ・ 月度会员 <strong>15 元</strong>/月（原价 <s>45 元</s>）：无限上传、打印/导出无水印<br>
-                      ・ 终身会员 <strong>169 元</strong>（原价 <s>499 元</s>）：一次买断，永久使用<br>
-                      ・ 免费版：300 张照片上限，打印/导出带水印<br>
-                      <span style="color:#d29922">限时优惠，联系管理员/作者开通会员。</span>
+                      <strong id="pricingLabel">会员收费标准（内测会员价）：</strong><br>
+                      ・ 月度会员 <strong><span id="monthlyPriceText">15</span> 元</strong>/月：无限上传、打印/导出无水印<br>
+                      ・ 终身会员 <strong><span id="lifetimePriceText">169</span> 元</strong>：一次买断，永久使用<br>
+                      ・ 免费版：永久免费 <span id="freePhotoLimitText">300</span> 张照片，打印/导出带水印<br>
+                      <span style="color:#9a6700">当前价格仅用于小范围内测，正式定价以后续公告为准。</span>
                     </div>
                     <div style="margin-top:8px;padding:10px;background:#eef6f0;border-radius:8px;">
-                      <strong>邀请免费：</strong> 邀请 <strong>10 人</strong>安装注册（用你的邀请码），
-                      免费使用 <strong>1 个月</strong>；每再邀请 10 人再送 1 个月，<strong>可循环</strong>。
+                      <strong>邀请奖励：</strong> 每 <strong><span id="inviteMilestoneText">10</span> 个有效邀请</strong>奖励
+                      <strong><span id="inviteRewardDaysText">30</span> 天</strong>会员；好友须注册并首次登录软件，同一设备重复注册不计入。
                     </div>
                     <div style="margin-top:8px;padding:10px;background:#f4f8fb;border-radius:8px;" id="cloudAccountBox">
                       <strong>云账号：</strong><span id="cloudAccountStatus">未登录</span>
                       <div id="cloudLoginForm" style="margin-top:8px;">
-                        <label style="display:block;margin-bottom:4px;">账号<input id="cloudUser" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="手机号 / QQ / 邮箱"></label>
-                        <label style="display:block;margin-bottom:4px;">密码<input id="cloudPass" type="password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="密码"></label>
+                        <label style="display:block;margin-bottom:4px;">账号<input id="cloudUser" autocomplete="username" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="手机号 / QQ / 邮箱"></label>
+                        <label style="display:block;margin-bottom:4px;">登录密码<input id="cloudPass" type="password" autocomplete="current-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="注册时至少 8 位，包含字母和数字"></label>
                         <div style="display:flex;gap:8px;margin-top:8px;">
                           <button type="button" id="cloudLoginBtn" style="flex:1">登录</button>
                           <button type="button" id="cloudRegBtn" class="secondary" style="flex:1">注册</button>
                         </div>
-                        <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
+                        <div id="cloudRegisterFields" style="margin-top:10px;padding:10px;background:#fff8e6;border:1px solid #ead8a1;border-radius:8px;">
+                          <strong style="display:block;color:#7a5510;margin-bottom:6px;">仅注册时填写</strong>
+                          <label style="display:block;margin-top:6px;">找回邮箱（建议填写）<input id="cloudEmail" type="email" autocomplete="email" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="用于找回登录密码"></label>
+                          <label style="display:block;margin-top:6px;">工程删除密码<input id="cloudDeletePass" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="6~32 位，请勿使用 114405"></label>
+                          <label style="display:block;margin-top:6px;">确认工程删除密码<input id="cloudDeletePassConfirm" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="再次输入删除密码"></label>
+                          <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
+                          <small style="display:block;margin-top:7px;color:#765b22;line-height:1.5;">登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。</small>
+                        </div>
                         <button type="button" id="cloudLogoutBtn" style="margin-top:8px;display:none;background:#bd2a20">退出登录</button>
                       </div>
                     </div>
-                    <div style="margin-top:8px;"><strong>积分兑换（补充）：</strong> 分享给 1 个微信群或 1 位好友记 5 积分，累计 30 积分可兑换 3 个月，截图发作者人工核验。</div>
+                    <div style="margin-top:8px;"><strong>内测说明：</strong> 邀请奖励只按后台记录的有效邀请自动计算，不再采用截图积分，避免漏记和重复核销。</div>
                   </div>
                 </section>
                 <section class="support-panel-section" data-support-panel="share">
                   <div class="share-points-box">
                     <div style="width:100%;">
                       <strong>邀请进度</strong>
-                      <p class="support-note">把下方邀请码发给好友注册，每邀请 10 人免费使用 1 个月，可循环累积。</p>
+                      <p class="support-note">把邀请码发给好友；好友完成注册并首次登录软件后才记为有效邀请，同一设备重复注册不计入。</p>
                       <div style="margin:10px 0;padding:12px;background:#eef6f0;border-radius:8px;text-align:center;">
                         <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">我的邀请码</div>
                         <div id="inviteCodeDisplay" style="font-size:24px;font-weight:800;color:var(--primary);letter-spacing:3px;font-family:Consolas,monospace;">— — — —</div>
@@ -6673,7 +6680,7 @@
                         <div id="inviteProgressText" style="font-size:16px;font-weight:700;color:#12344d;">已邀请 0 人</div>
                         <div id="inviteProgressRemain" style="font-size:13px;color:var(--muted);margin-top:4px;">还差 10 人即可免费使用 1 个月</div>
                         <div style="height:8px;border-radius:999px;background:#dce6ee;margin-top:10px;overflow:hidden;">
-                          <div id="inviteProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#116fa6);border-radius:999px;transition:width .4s;"></div>
+                          <div id="inviteProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#116fa6);border-radius:999px;transition:width 200ms cubic-bezier(.23,1,.32,1);"></div>
                         </div>
                       </div>
                       <div id="inviteRewardInfo" style="font-size:12px;color:var(--muted);text-align:center;">已通过邀请免费获得 0 个月使用</div>
@@ -6698,9 +6705,9 @@
                     <img src="/assets/donation_qr.jpg" alt="微信收款二维码">
                     <div style="margin:10px 0;padding:10px;background:#f4f8fb;border-radius:8px;text-align:left;">
                       <strong>收费标准：</strong><br>
-                      ・ 月度会员 <strong>15 元</strong>/月（原价 45 元）<br>
-                      ・ 终身会员 <strong>169 元</strong>（原价 499 元）<br>
-                      <span style="color:#d29922">限时优惠</span>
+                      ・ 月度会员 <strong><span id="monthlyPricePaymentText">15</span> 元</strong>/月<br>
+                      ・ 终身会员 <strong><span id="lifetimePricePaymentText">169</span> 元</strong><br>
+                      <span style="color:#9a6700">内测会员价</span>
                     </div>
                     <span><strong>开通步骤：</strong><br>1. 微信扫码付款对应金额（备注写账号）<br>2. 加微信好友（下方二维码）发送：付款截图 + 账号 + 机器ID<br>3. 管理员确认后开通会员，立即生效</span>
                   </div>
@@ -7072,7 +7079,8 @@
               <label>监理单位<input id="projectInfoSupervisorInput" type="text" placeholder="可选"></label>
               <label>工程地点<input id="projectInfoLocationInput" type="text" placeholder="可选"></label>
               <label>开工日期<input id="projectInfoStartDateInput" type="date"></label>
-              <label>删除密码<input id="projectInfoDeletePasswordInput" type="password" placeholder="用于删除本工程数据"></label>
+              <label>工程删除密码<input id="projectInfoDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="新工程必填；编辑时留空表示不修改"></label>
+              <p class="import-hint wide">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
             </div>
           </section>
@@ -8020,8 +8028,48 @@
       box.style.display = "flex";
     }
 
+    function reportClientError(message, context = {}, stack = "", severity = "error") {
+      const payload = {
+        source: "desktop_browser",
+        message: String(message || "浏览器错误").slice(0, 2000),
+        stack: String(stack || "").slice(0, 12000),
+        severity,
+        page: location.pathname,
+        context
+      };
+      fetch("/api/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true
+      }).catch(() => {});
+    }
+
+    window.addEventListener("error", (event) => {
+      reportClientError(event.message, {
+        filename: String(event.filename || "").split(/[\\/]/).pop(),
+        line: event.lineno,
+        column: event.colno
+      }, event.error?.stack || "", "error");
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      reportClientError(reason?.message || String(reason || "未处理的异步错误"), {
+        kind: "unhandledrejection"
+      }, reason?.stack || "", "error");
+    });
+
     async function apiJson(url, options) {
-      const response = await fetch(url, options);
+      let response;
+      try {
+        response = await fetch(url, options);
+      } catch (error) {
+        if (url !== "/api/client-error") {
+          reportClientError(error.message || "网络请求失败", { url, method: options?.method || "GET" }, error.stack || "", "warning");
+        }
+        throw error;
+      }
       const text = await response.text();
       let data = {};
       try {
@@ -8031,6 +8079,13 @@
       }
       if (!response.ok || data.ok === false) {
         const detail = data.error || data.message || text.trim();
+        if (url !== "/api/client-error") {
+          reportClientError(detail || `HTTP ${response.status}`, {
+            url,
+            method: options?.method || "GET",
+            status: response.status
+          }, "", response.status >= 500 ? "error" : "warning");
+        }
         throw new Error(detail || `请求失败（HTTP ${response.status}）`);
       }
       return data;
@@ -8193,7 +8248,12 @@
       $("#projectInfoSupervisorInput").value = projectInfoValue("supervisor");
       $("#projectInfoLocationInput").value = projectInfoValue("location");
       $("#projectInfoStartDateInput").value = projectInfoValue("start_date");
-      $("#projectInfoDeletePasswordInput").value = projectInfoValue("delete_password") || "";
+      const deletePasswordInput = $("#projectInfoDeletePasswordInput");
+      deletePasswordInput.value = "";
+      deletePasswordInput.required = !Boolean(state.projectInfo?.delete_password_set);
+      deletePasswordInput.placeholder = state.projectInfo?.delete_password_set
+        ? "已设置；留空表示不修改"
+        : "尚未设置，保存工程前必须填写";
       $("#projectInfoDescriptionInput").value = projectInfoValue("description");
       $("#settingsNumberingModeInput").value = settings.numbering_mode || "custom";
       $("#settingsUnitOrderDigitsInput").value = settings.unit_order_digits || 3;
@@ -10207,7 +10267,8 @@
       $("#supportPanel").classList.toggle("open");
       $("#supportPanel").setAttribute("aria-hidden", $("#supportPanel").classList.contains("open") ? "false" : "true");
       if ($("#supportPanel").classList.contains("open")) {
-        setSupportTab("poster");
+        setSupportTab("status");
+        loadProductConfig().catch(() => {});
         loadSharePoints().catch((error) => showNotice(error.message, true));
       }
     });
@@ -10236,14 +10297,16 @@
       }
       const code = inv.invite_code || "—";
       const registered = Number(inv.registered_count || 0);
+      const qualified = Number(inv.qualified_count || 0);
+      const pending = Number(inv.pending_count || 0);
       const milestone = Number(inv.milestone || 10);
-      const remain = Math.max(0, milestone - (registered % milestone));
+      const remain = Math.max(0, milestone - (qualified % milestone));
       const reward = Number(inv.reward_months || 0);
-      const inMilestone = registered % milestone;
+      const inMilestone = qualified % milestone;
       const pct = Math.min(100, (inMilestone / milestone) * 100);
       if ($("#inviteCodeDisplay")) $("#inviteCodeDisplay").textContent = code;
-      if ($("#inviteProgressText")) $("#inviteProgressText").textContent = `已邀请 ${registered} 人`;
-      if ($("#inviteProgressRemain")) $("#inviteProgressRemain").textContent = `还差 ${remain} 人即可免费使用 1 个月`;
+      if ($("#inviteProgressText")) $("#inviteProgressText").textContent = `有效邀请 ${qualified} 人（待确认 ${pending} 人）`;
+      if ($("#inviteProgressRemain")) $("#inviteProgressRemain").textContent = `还差 ${remain} 个有效邀请即可获得下一次奖励`;
       if ($("#inviteProgressBar")) $("#inviteProgressBar").style.width = pct + "%";
       if ($("#inviteRewardInfo")) $("#inviteRewardInfo").textContent = `已通过邀请免费获得 ${reward} 个月使用`;
     }
@@ -10265,6 +10328,9 @@
           ? `软件状态：终身授权${license.owner ? `（${license.owner}）` : ""}`
           : `软件授权到期时间：${licenseExpiry || "未设置"}`;
         subText = license.machine_id ? `机器ID：${license.machine_id}` : "授权已生效。";
+      } else if (license.free_forever) {
+        mainText = "免费版：永久免费";
+        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 300} 张，打印和导出带水印。`;
       } else if (license.upload_locked) {
         mainText = "软件试用已到期";
         subText = trialExpiry ? `试用到期时间：${trialExpiry}，请联系管理员继续使用。` : "请联系管理员继续使用。";
@@ -10273,6 +10339,27 @@
         subText = `剩余 ${license.trial_remaining || 0} 天，可通过分享积分兑换使用时长。`;
       }
       box.innerHTML = `${escapeHtml(mainText)}<small>${escapeHtml(subText)}</small>`;
+    }
+
+    async function loadProductConfig() {
+      const data = await apiJson("/api/cloud/product-config");
+      const product = data.product || {};
+      const pricing = product.pricing || {};
+      const free = product.free || {};
+      const invite = product.invite || {};
+      const label = pricing.price_label || "内测会员价";
+      const monthly = Number(pricing.monthly_price || 15);
+      const lifetime = Number(pricing.lifetime_price || 169);
+      const setText = (id, value) => { const node = $(id); if (node) node.textContent = value; };
+      setText("#pricingLabel", `会员收费标准（${label}）：`);
+      setText("#monthlyPriceText", monthly);
+      setText("#monthlyPricePaymentText", monthly);
+      setText("#lifetimePriceText", lifetime);
+      setText("#lifetimePricePaymentText", lifetime);
+      setText("#freePhotoLimitText", Number(free.photo_limit || 300));
+      setText("#inviteMilestoneText", Number(invite.milestone || 10));
+      setText("#inviteRewardDaysText", Number(invite.reward_days || 30));
+      return product;
     }
 
     async function loadSharePoints() {
@@ -10332,7 +10419,7 @@
         return;
       }
       await copyText(code);
-      showNotice("邀请码已复制，发给好友注册即可累积邀请人数。");
+      showNotice("邀请码已复制；好友注册并首次登录软件后会计为有效邀请。");
     });
     $("#engineeringProjectSelect").addEventListener("change", (event) => {
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
@@ -10425,15 +10512,38 @@
       const user = $("#cloudUser").value.trim();
       const pass = $("#cloudPass").value;
       const invite = $("#cloudInvite").value.trim();
-      if (!user || !pass) { showNotice("请输入账号和密码", true); return; }
+      const email = $("#cloudEmail").value.trim();
+      const deletePass = $("#cloudDeletePass").value;
+      const deletePassConfirm = $("#cloudDeletePassConfirm").value;
+      if (!user || !pass) { showNotice("请输入账号和登录密码", true); return; }
+      if (pass.length < 8 || !/[A-Za-z]/.test(pass) || !/\d/.test(pass)) {
+        showNotice("登录密码至少 8 位，并同时包含字母和数字。", true);
+        return;
+      }
+      if (deletePass.length < 6) { showNotice("请设置至少 6 位的工程删除密码。", true); return; }
+      if (deletePass !== deletePassConfirm) { showNotice("两次输入的工程删除密码不一致。", true); return; }
       try {
         const data = await apiJson("/api/cloud/register", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: user, password: pass, invite_code: invite })
+          body: JSON.stringify({
+            username: user,
+            password: pass,
+            email,
+            invite_code: invite,
+            delete_password: deletePass,
+            delete_password_confirm: deletePassConfirm
+          })
         });
         if (!data.ok) { showNotice(data.error || "注册失败", true); return; }
-        showNotice("注册成功，请登录");
+        showNotice("注册成功。工程删除密码已安全保存，请牢记；现在可以登录。 ");
         $("#cloudInvite").value = "";
+        $("#cloudEmail").value = "";
+        $("#cloudDeletePass").value = "";
+        $("#cloudDeletePassConfirm").value = "";
+        const projectData = await apiJson("/api/project-info");
+        state.projectInfo = projectData.project_info || state.projectInfo;
+        state.engineeringProjects = projectData.engineering_projects || state.engineeringProjects;
+        state.activeEngineeringProjectId = projectData.active_engineering_project_id || state.activeEngineeringProjectId;
       } catch (e) { showNotice(e.message || "注册失败", true); }
     });
     $("#cloudLogoutBtn").addEventListener("click", async () => {
@@ -10767,15 +10877,16 @@
 
     setView("overview");
     const startupUnitCode = routeUnitCode();
-    loadAuth().catch((error) => showNotice(error.message, true));
+    loadProductConfig().catch(() => {});
     // 启动后静默检查更新（有新版本才提示）
     setTimeout(() => checkForUpdate(false).catch(() => {}), 3000);
-    if (startupUnitCode) {
-      loadProject(startupUnitCode, "detail").catch((error) => showNotice(error.message, true));
+    loadAuth().then(() => {
+      if (!state.auth.user) return;
+      if (startupUnitCode) {
+        loadProject(startupUnitCode, "detail").catch((error) => showNotice(error.message, true));
+      }
       refreshAll({ skipOtherImages: true }).catch((error) => showNotice(error.message, true));
-    } else {
-      refreshAll({ skipOtherImages: true }).catch((error) => showNotice(error.message, true));
-    }
+    }).catch((error) => showNotice(error.message, true));
   </script>
 </body>
 </html>

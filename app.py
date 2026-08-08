@@ -15,6 +15,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, send_from_directory, session
 from werkzeug.exceptions import HTTPException
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 import licensing
@@ -41,16 +42,17 @@ ENGINEERING_PROJECTS_PATH = DATA_DIR / "engineering_projects.json"
 SHARE_POINTS_PATH = DATA_DIR / "share_points.json"
 NUMBERING_RULES_PATH = DATA_DIR / "numbering_rules.json"
 ENGINEERING_SETTINGS_PATH = DATA_DIR / "engineering_settings.json"
+CLOUD_THUMB_CACHE_DIR = DATA_DIR / "cloud_thumbs"
 OTHER_IMAGES_TEMPLATE_DIR = Path(os.environ.get("ALBUM_OTHER_IMAGES_TEMPLATE_DIR", r"E:\龙泉缓洪工程施工照片")).expanduser()
 LEGACY_ALBUMS_DIR = BASE_DIR / "albums"
 LEGACY_USERS_PATH = BASE_DIR / "users.json"
-DELETE_SAFETY_PASSWORD = os.environ.get("ALBUM_DELETE_PASSWORD", "114405")
+LEGACY_DELETE_SAFETY_PASSWORD = "114405"
 DEFAULT_ENGINEERING_PROJECT_ID = "default"
 OTHER_IMAGE_MARKER = "_other_image"
 SHARE_POINTS_PER_PERSON = 5
 SHARE_POINTS_REDEEM_THRESHOLD = 30
 SHARE_POINTS_DAILY_LIMIT = 6
-LIFETIME_LICENSE_PRICE = 129
+LIFETIME_LICENSE_PRICE = 169
 DEFAULT_PROJECT_TABLE = Path("")
 PROJECT_TEMPLATE_XLSX_PATH = BASE_DIR / "assets" / "project_template.xlsx"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -541,6 +543,16 @@ def now_text():
 
 
 def json_error(message, status=400):
+    try:
+        if request.path != "/api/client-error":
+            cloud_client.report_error(
+                "desktop_api",
+                message,
+                context={"method": request.method, "path": request.path, "status": status},
+                severity="warning" if int(status) < 500 else "error",
+            )
+    except Exception:
+        pass
     return jsonify({"ok": False, "error": message}), status
 
 
@@ -548,7 +560,18 @@ def json_error(message, status=400):
 def handle_unexpected_error(exc):
     if isinstance(exc, HTTPException):
         return json_error(exc.description or "请求错误", exc.code or 500)
+    stack = traceback.format_exc()
     traceback.print_exc()
+    try:
+        cloud_client.report_error(
+            "desktop_unhandled",
+            exc,
+            context={"method": request.method, "path": request.path, "status": 500},
+            severity="critical",
+            stack=stack,
+        )
+    except Exception:
+        pass
     # 不把内部异常消息/堆栈路径返回给客户端，避免信息泄露
     return json_error("服务器内部错误，请稍后重试。详情已记录到日志。", 500)
 
@@ -2127,14 +2150,19 @@ manager = AlbumManager(ALBUMS_DIR)
 def app_license_status():
     status = licensing.license_status()
     photo_count = manager.dashboard(include_other=True).get("photo_count", 0)
-    trial_active = not status.get("ok")
+    free_cfg = cloud_client.product_config().get("free", {})
+    trial_active = False
     trial_period_active = bool(status.get("trial_period_active"))
+    upload_expiry_enabled = bool(free_cfg.get("upload_expiry_enabled", False))
     status.update({
         "trial_limit": status.get("trial_valid_days", 30),
         "photo_count": photo_count,
         "trial_active": trial_active,
         "trial_remaining": None if status.get("ok") else max(0, int(status.get("trial_days_remaining") or 0)),
-        "upload_locked": (not status.get("ok")) and not trial_period_active,
+        "upload_locked": upload_expiry_enabled and (not status.get("ok")) and not trial_period_active,
+        "plan": "member" if status.get("ok") else "free",
+        "free_forever": not upload_expiry_enabled,
+        "free_photo_limit": int(free_cfg.get("photo_limit") or 300),
     })
     return status
 
@@ -2541,7 +2569,7 @@ def export_photo_statistics_xlsx(codes=""):
 def expired_license_response(action):
     status = app_license_status()
     if status.get("upload_locked"):
-        return f"一个月试用期已到期，无法{action}，请联系管理员继续使用。", 403
+        return f"当前免费策略已暂停{action}，请联系管理员。", 403
     return None
 
 
@@ -2666,13 +2694,15 @@ def match_project_by_filename(filename):
     return best if best_score else None
 
 
-FREE_PHOTO_LIMIT = 300  # 免费版全部照片合计上限
+FREE_PHOTO_LIMIT = 300  # 离线兜底；在线值由服务器产品配置下发
 WATERMARK_TEXT = "乐嵘聚合"  # 免费版打印/导出水印文字
 
 
 def watermark_text_for_user():
     """免费版返回水印文字，会员返回空（无水印）。"""
-    return "" if is_member_user() else WATERMARK_TEXT
+    free_cfg = cloud_client.product_config().get("free", {})
+    enabled = bool(free_cfg.get("watermark_enabled", True))
+    return "" if is_member_user() or not enabled else WATERMARK_TEXT
 
 
 def add_watermark_to_image(file_path, text=WATERMARK_TEXT):
@@ -2724,14 +2754,59 @@ def is_member_user():
     return bool(app_license_status().get("ok"))
 
 
-# 云预览自动同步：每项目最多同步的缩略图数（控制服务器负载）
-CLOUD_SYNC_THUMB_CAP = 60
+# 云预览自动同步：离线兜底值；在线由服务器产品配置动态下发。
+CLOUD_SYNC_THUMB_CAP = 240
 
 
-def _build_cloud_sync_payload(max_thumbs=CLOUD_SYNC_THUMB_CAP):
+def _cloud_thumbnail_bytes(project_code, filename, limits):
+    """生成可辨认的云预览图并按原图时间戳缓存，不上传原图。"""
+    original = manager._photos_dir(project_code) / Path(str(filename)).name
+    if not original.exists():
+        return b""
+    side = max(320, int(limits.get("thumb_max_side") or 720))
+    quality = max(40, min(92, int(limits.get("thumb_quality") or 76)))
+    try:
+        stat = original.stat()
+        cache_key = hashlib.sha256(
+            f"{original.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{side}|{quality}".encode("utf-8")
+        ).hexdigest()[:24]
+        cache_dir = CLOUD_THUMB_CACHE_DIR / manager._safe_code(project_code)
+        cache_path = cache_dir / f"{cache_key}.webp"
+        if cache_path.exists():
+            return cache_path.read_bytes()
+        from PIL import Image, ImageOps
+        with Image.open(original) as img:
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((side, side), Image.LANCZOS)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            memory = io.BytesIO()
+            img.save(memory, "WEBP", quality=quality, method=4)
+            raw = memory.getvalue()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(raw)
+        return raw
+    except Exception as exc:
+        cloud_client.report_error(
+            "cloud_thumbnail",
+            exc,
+            context={"project_code": project_code, "filename": Path(str(filename)).name},
+            severity="warning",
+            stack=traceback.format_exc(),
+        )
+        return b""
+
+
+def _build_cloud_sync_payload(max_thumbs=None):
     """枚举本机工程项目 + 缩略图，构造云预览同步 payload。"""
     import base64 as _b64
 
+    limits = cloud_client.cloud_preview_limits()
+    max_thumbs = min(
+        int(max_thumbs or limits.get("max_thumbs_per_project") or CLOUD_SYNC_THUMB_CAP),
+        int(limits.get("max_thumbs_per_project") or CLOUD_SYNC_THUMB_CAP),
+    )
+    max_b64 = int(limits.get("max_thumb_b64") or cloud_client.CLOUD_THUMB_MAX_B64)
     projects_payload = []
     try:
         items = manager.list_projects(include_other=True)
@@ -2751,21 +2826,22 @@ def _build_cloud_sync_payload(max_thumbs=CLOUD_SYNC_THUMB_CAP):
                 fname = str(photo.get("filename") or "")
                 if not fname:
                     continue
-                thumb_rel = manager._thumb_filename(fname)
-                thumb_path = manager._photos_dir(code) / thumb_rel
-                if thumb_path.exists():
-                    try:
-                        b64 = _b64.b64encode(thumb_path.read_bytes()).decode("ascii")
-                        if len(b64) > cloud_client.CLOUD_THUMB_MAX_B64:
-                            continue
-                        thumbs.append({"photo_name": fname, "thumb_b64": b64})
-                    except Exception:
+                try:
+                    raw = _cloud_thumbnail_bytes(code, fname, limits)
+                    b64 = _b64.b64encode(raw).decode("ascii") if raw else ""
+                    if not b64 or len(b64) > max_b64:
                         continue
-        except Exception:
-            pass
-        # 只同步有照片的项目（空项目不同步，避免无用数据）
-        if not thumbs:
-            continue
+                    thumbs.append({"photo_name": fname, "thumb_b64": b64})
+                except Exception:
+                    continue
+        except Exception as exc:
+            cloud_client.report_error(
+                "cloud_sync",
+                exc,
+                context={"stage": "background_sync"},
+                severity="error",
+                stack=traceback.format_exc(),
+            )
         projects_payload.append({
             "project_code": code,
             "project_name": str(item.get("project_name") or ""),
@@ -2796,16 +2872,30 @@ def sync_cloud_preview_async():
                     cloud_client.login(auto_user, auto_pass)
             # 单项目循环同步，避免大请求被服务器拒绝
             for proj in payload:
-                cloud_client.sync_projects([proj])
-        except Exception:
-            pass
+                result = cloud_client.sync_projects([proj])
+                if not result.get("ok"):
+                    cloud_client.report_error(
+                        "cloud_sync_response",
+                        result.get("error") or "云预览同步失败",
+                        context={"project_code": proj.get("project_code", "")},
+                        severity="warning",
+                    )
+        except Exception as exc:
+            cloud_client.report_error(
+                "cloud_sync",
+                exc,
+                context={"stage": "background_sync"},
+                severity="error",
+                stack=traceback.format_exc(),
+            )
     threading.Thread(target=worker, daemon=True).start()
 
 
 def free_photo_over_limit(incoming_count):
     """免费版：全部照片合计 >= FREE_PHOTO_LIMIT 时拦截上传。返回剩余额度或 None。"""
     photo_count = app_license_status().get("photo_count", 0)
-    remaining = max(0, FREE_PHOTO_LIMIT - photo_count)
+    limit = int(cloud_client.product_config().get("free", {}).get("photo_limit") or FREE_PHOTO_LIMIT)
+    remaining = max(0, limit - photo_count)
     if incoming_count > remaining:
         return remaining
     return None
@@ -2816,17 +2906,18 @@ def trial_upload_limit_response(incoming_count):
     if is_member_user():
         return None
     # 免费版：先查 300 张上限
+    limit = int(cloud_client.product_config().get("free", {}).get("photo_limit") or FREE_PHOTO_LIMIT)
     remaining = free_photo_over_limit(incoming_count)
     if remaining is not None:
         return jsonify({
             "ok": False,
-            "error": f"免费版照片总上限 {FREE_PHOTO_LIMIT} 张，已达上限，无法再上传。升级会员可无限使用。",
+            "error": f"免费版照片总上限 {limit} 张，已达上限，无法再上传。升级会员可无限使用。",
             "license_required": True,
             "photo_limit_reached": True,
-            "free_photo_limit": FREE_PHOTO_LIMIT,
+            "free_photo_limit": limit,
             "remaining": remaining,
         }), 403
-    # 免费版：保留试用期到期逻辑
+    # 免费版默认永久免费；是否启用上传到期锁仅由服务器产品策略控制。
     status = app_license_status()
     if status.get("upload_locked"):
         return jsonify({
@@ -3059,7 +3150,7 @@ def default_engineering_project():
         "location": info.get("location", ""),
         "start_date": info.get("start_date", ""),
         "description": info.get("description", ""),
-        "delete_password": DELETE_SAFETY_PASSWORD,
+        "delete_password_hash": "",
         "created_at": "",
         "updated_at": "",
     }
@@ -3074,19 +3165,26 @@ def read_engineering_projects():
     except (OSError, json.JSONDecodeError):
         return {"active_id": default_project["id"], "projects": [default_project]}
     projects = []
+    migrated = False
     seen = set()
     for item in data.get("projects", []) if isinstance(data, dict) else []:
         if not isinstance(item, dict):
             continue
         project = dict(default_project)
         project.update({key: str(item.get(key) or "").strip() for key in project.keys()})
+        stored_hash = str(item.get("delete_password_hash") or "").strip()
+        legacy_password = str(item.get("delete_password") or "").strip()
+        if not stored_hash and legacy_password and legacy_password != LEGACY_DELETE_SAFETY_PASSWORD:
+            stored_hash = generate_password_hash(legacy_password)
+            migrated = True
+        if legacy_password:
+            migrated = True
+        project["delete_password_hash"] = stored_hash
         project["id"] = safe_engineering_project_id(item.get("id") or item.get("project_code") or item.get("project_name"))
         if not project["id"] or project["id"] in seen:
             continue
         if not project.get("project_name"):
             project["project_name"] = project["id"]
-        if not project.get("delete_password"):
-            project["delete_password"] = DELETE_SAFETY_PASSWORD
         seen.add(project["id"])
         projects.append(project)
     if not projects:
@@ -3094,10 +3192,21 @@ def read_engineering_projects():
     active_id = safe_engineering_project_id(data.get("active_id") if isinstance(data, dict) else "")
     if active_id not in {item["id"] for item in projects}:
         active_id = projects[0]["id"]
-    return {"active_id": active_id, "projects": projects}
+    normalized = {"active_id": active_id, "projects": projects}
+    if migrated:
+        try:
+            ENGINEERING_PROJECTS_PATH.write_text(
+                json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+    return normalized
 
 
 def write_engineering_projects(data):
+    for project in data.get("projects", []) if isinstance(data, dict) else []:
+        if isinstance(project, dict):
+            project.pop("delete_password", None)
     ENGINEERING_PROJECTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     ENGINEERING_PROJECTS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     active_project = current_engineering_project(data)
@@ -3127,9 +3236,20 @@ def project_matches_engineering(data, project_id=None):
 
 
 def ensure_engineering_delete_password(value):
-    expected = str(current_engineering_project().get("delete_password") or DELETE_SAFETY_PASSWORD)
-    if str(value or "") != expected:
+    expected_hash = str(current_engineering_project().get("delete_password_hash") or "")
+    if not expected_hash:
+        raise ValueError("当前工程尚未设置删除密码，请先在工程设置中设置")
+    if not check_password_hash(expected_hash, str(value or "")):
         raise ValueError("当前工程删除密码错误")
+
+
+def validate_engineering_delete_password(value):
+    password = str(value or "").strip()
+    if len(password) < 6 or len(password) > 32:
+        raise ValueError("工程删除密码需为 6~32 位")
+    if password == LEGACY_DELETE_SAFETY_PASSWORD or len(set(password)) < 3:
+        raise ValueError("工程删除密码过于简单，请换一个不易猜到的密码")
+    return password
 
 
 def default_project_info():
@@ -3297,6 +3417,11 @@ def index():
     return render_template("index.html", default_project_table=str(DEFAULT_PROJECT_TABLE))
 
 
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
+
+
 @app.route("/poster")
 def poster_page():
     return render_template("poster.html")
@@ -3328,6 +3453,31 @@ def api_cloud_status():
     return jsonify(cloud_client.status())
 
 
+@app.route("/api/cloud/product-config")
+def api_cloud_product_config():
+    return jsonify({"ok": True, "product": cloud_client.product_config()})
+
+
+@app.route("/api/client-error", methods=["POST"])
+def api_client_error():
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message") or "浏览器发生未知错误")
+    cloud_client.report_error(
+        str(payload.get("source") or "desktop_browser"),
+        message,
+        context={
+            "page": str(payload.get("page") or request.path)[:300],
+            "line": payload.get("line"),
+            "column": payload.get("column"),
+            "user_agent": request.headers.get("User-Agent", "")[:300],
+            "extra": payload.get("context") if isinstance(payload.get("context"), dict) else {},
+        },
+        severity=str(payload.get("severity") or "error"),
+        stack=str(payload.get("stack") or ""),
+    )
+    return jsonify({"ok": True, "message": "错误已反馈到后台"})
+
+
 @app.route("/api/cloud/login", methods=["POST"])
 def api_cloud_login():
     payload = request.get_json(silent=True) or {}
@@ -3352,6 +3502,12 @@ def api_cloud_send_code():
 @app.route("/api/cloud/register", methods=["POST"])
 def api_cloud_register():
     payload = request.get_json(silent=True) or {}
+    try:
+        delete_password = validate_engineering_delete_password(payload.get("delete_password"))
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+    if delete_password != str(payload.get("delete_password_confirm") or ""):
+        return json_error("两次输入的工程删除密码不一致", 400)
     result = cloud_client.register(
         str(payload.get("username") or "").strip(),
         str(payload.get("password") or ""),
@@ -3361,6 +3517,12 @@ def api_cloud_register():
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "注册失败")}), 400
+    data = read_engineering_projects()
+    active = current_engineering_project(data)
+    active["delete_password_hash"] = generate_password_hash(delete_password)
+    active.pop("delete_password", None)
+    write_engineering_projects(data)
+    result["delete_password_notice"] = "工程删除密码已设置，请妥善保存；平台不会显示或找回明文。"
     return jsonify(result)
 
 
@@ -3388,6 +3550,8 @@ def api_cloud_reset_password():
 
 @app.route("/api/cloud/invite-status")
 def api_cloud_invite_status():
+    if not cloud_client.membership_status().get("logged_in"):
+        return jsonify({"ok": True, "logged_in": False, "registered_count": 0, "qualified_count": 0, "pending_count": 0})
     return jsonify(cloud_client.invite_status())
 
 
@@ -3511,6 +3675,8 @@ def _public_project(project):
         return project
     out = dict(project)
     out.pop("delete_password", None)
+    password_hash = out.pop("delete_password_hash", "")
+    out["delete_password_set"] = bool(password_hash)
     return out
 
 
@@ -3535,11 +3701,19 @@ def api_save_project_info():
         data = read_engineering_projects()
         project_id = safe_engineering_project_id(payload.get("id") or payload.get("project_code") or payload.get("project_name"))
         now = now_text()
-        existing_pwd = next(
-            (item.get("delete_password") for item in data.get("projects", []) if item.get("id") == project_id),
+        existing_project = next(
+            (item for item in data.get("projects", []) if item.get("id") == project_id),
             None,
         )
+        existing_hash = str((existing_project or {}).get("delete_password_hash") or "")
         new_pwd = str(payload.get("delete_password") or "").strip()
+        if not existing_hash and not new_pwd:
+            return json_error("当前工程尚未设置删除密码，请先设置独立的工程删除密码", 400)
+        if new_pwd:
+            new_pwd = validate_engineering_delete_password(new_pwd)
+            password_hash = generate_password_hash(new_pwd)
+        else:
+            password_hash = existing_hash
         project = {
             "id": project_id,
             "project_name": str(payload.get("project_name") or project_id).strip(),
@@ -3550,7 +3724,7 @@ def api_save_project_info():
             "location": str(payload.get("location") or "").strip(),
             "start_date": str(payload.get("start_date") or "").strip(),
             "description": str(payload.get("description") or "").strip(),
-            "delete_password": new_pwd or existing_pwd or DELETE_SAFETY_PASSWORD,
+            "delete_password_hash": password_hash,
             "created_at": now,
             "updated_at": now,
         }
@@ -3589,8 +3763,8 @@ def api_set_active_engineering_project():
     write_engineering_projects(data)
     return jsonify({
         "ok": True,
-        "project_info": current_engineering_project(data),
-        "engineering_projects": data.get("projects", []),
+        "project_info": _public_project(current_engineering_project(data)),
+        "engineering_projects": [_public_project(p) for p in data.get("projects", [])],
         "active_engineering_project_id": data.get("active_id"),
     })
 
@@ -3606,7 +3780,10 @@ def api_delete_engineering_project(project_id):
     target = next((item for item in data.get("projects", []) if item.get("id") == target_id), None)
     if not target:
         return json_error("工程项目不存在", 404)
-    if str(payload.get("delete_password", "")) != str(target.get("delete_password") or DELETE_SAFETY_PASSWORD):
+    target_hash = str(target.get("delete_password_hash") or "")
+    if not target_hash:
+        return json_error("当前工程尚未设置删除密码，请先编辑工程并设置", 403)
+    if not check_password_hash(target_hash, str(payload.get("delete_password", ""))):
         return json_error("当前工程删除密码错误", 403)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = ALBUMS_DIR / f"_deleted_engineering_project_{target_id}_{stamp}"
@@ -3633,8 +3810,8 @@ def api_delete_engineering_project(project_id):
         "ok": True,
         "deleted": moved,
         "backup": str(backup_dir) if moved else "",
-        "project_info": current_engineering_project(data),
-        "engineering_projects": data.get("projects", []),
+        "project_info": _public_project(current_engineering_project(data)),
+        "engineering_projects": [_public_project(p) for p in data.get("projects", [])],
         "active_engineering_project_id": data.get("active_id"),
     })
 

@@ -18,14 +18,16 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
-SSH_KEY = Path.home() / ".ssh" / "id_ed25519_album"
-SERVER_HOST = "root@47.95.221.66"
-REMOTE_SERVER_DIR = "/opt/album-auth/server"
-REMOTE_TEMPLATES = f"{REMOTE_SERVER_DIR}/templates"
-
 REPO = Path(__file__).resolve().parent
+SSH_KEY = Path(os.environ.get(
+    "ALBUM_SSH_KEY",
+    REPO / "服务器访问-工程影像管理平台" / "server_key",
+))
+SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
+REMOTE_SERVER_DIR = "/opt/album-auth/server"
 
 # 要上传的代码文件（不含私钥/敏感文件）
 CODE_FILES = ["app.py", "config.py", "db.py", "mailer.py", "requirements.txt", "__init__.py", "README.md"]
@@ -54,36 +56,42 @@ def main() -> int:
     if not SSH_KEY.exists():
         print(f"[ERR] 缺 SSH 私钥: {SSH_KEY}")
         return 1
-    print("[1/4] 上传代码文件")
+    stamp = ssh("date +%Y%m%d-%H%M%S").stdout.strip()
+    release_root = f"/opt/album-auth/releases/deploy-{stamp}"
+    stage_server = f"{release_root}/server"
+    stage_templates = f"{stage_server}/templates"
+    backup = f"/opt/album-auth/backups/deploy-{stamp}"
+
+    print("[1/5] 先备份线上代码并创建灰度目录")
+    ssh(f"mkdir -p {stage_templates} {backup}/server")
+    ssh(f"cp -a {REMOTE_SERVER_DIR}/. {backup}/server/")
+
+    print("[2/5] 上传代码到灰度目录")
     for fname in CODE_FILES:
         src = REPO / "server" / fname
         if src.exists():
             run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{REMOTE_SERVER_DIR}/"])
+                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{stage_server}/"])
             print(f"  + {fname}")
 
-    print("[2/4] 上传模板")
+    print("[3/5] 上传模板并执行灰度静态检查")
     for fname in TEMPLATE_FILES:
         src = REPO / "server" / "templates" / fname
         if src.exists():
             run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{REMOTE_TEMPLATES}/"])
+                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{stage_templates}/"])
             print(f"  + templates/{fname}")
+    ssh(f"cd {release_root} && /opt/album-auth/venv/bin/python -m py_compile server/app.py server/config.py server/db.py server/mailer.py")
 
-    print("[3/4] 备份 + 重启 + 健康检查")
-    stamp = ssh("date +%Y%m%d-%H%M%S").stdout.strip()
-    backup = f"/opt/album-auth/backup-{stamp}"
-    ssh(f"mkdir -p {backup}")
-    ssh(f"cp {REMOTE_SERVER_DIR}/app.py {REMOTE_SERVER_DIR}/db.py {REMOTE_SERVER_DIR}/config.py "
-        f"{REMOTE_SERVER_DIR}/mailer.py {backup}/ 2>/dev/null; true")
-    ssh(f"cp -r {REMOTE_SERVER_DIR}/templates {backup}/templates 2>/dev/null; true")
-    ssh("systemctl restart album-auth && sleep 3")
+    print("[4/5] 替换代码、重启并健康检查")
+    ssh(f"cp -a {stage_server}/. {REMOTE_SERVER_DIR}/ && systemctl restart album-auth && sleep 3")
     health = ssh("curl -s -o /dev/null -w %{http_code} http://127.0.0.1:8000/api/me",
                  check=False).stdout.strip()
     if health != "401":
-        raise SystemExit(f"健康检查失败：HTTP {health}（应为 401）")
+        ssh(f"cp -a {backup}/server/. {REMOTE_SERVER_DIR}/ && systemctl restart album-auth", check=False)
+        raise SystemExit(f"健康检查失败：HTTP {health}，已自动回滚线上代码")
     print(f"  部署成功：backup={backup} health=401")
-    print("[4/4] 授权中心部署完成")
+    print("[5/5] 授权中心部署完成")
     return 0
 
 

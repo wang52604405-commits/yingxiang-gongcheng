@@ -8,33 +8,38 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import shutil
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-USE = Path(r"E:\use")
+USE = Path(__file__).resolve().parent
 DEST_ROOT = USE / "客户可发送安装包-Win10"
 STAGING = Path(tempfile.mkdtemp(prefix="album_delivery_"))
 INSTALLER = DEST_ROOT / "发给客户" / "安装程序.exe"
 SERVER = USE / "server"
 SIGNING_DIR = USE / "dist" / "工程影像管理平台"
 
-# 纯净包内容：来自现有已解压的交付包目录（不含私钥、不含授权工具）
+# 纯净包内容：若存在历史交付包目录则复用；新环境可从零生成。
 BASE = USE / "工程影像管理平台-正式版交付包"
 
 
 def main() -> int:
-    if not BASE.exists():
-        print(f"[ERR] 缺交付包基础目录: {BASE}")
-        return 1
     if not INSTALLER.exists():
         print(f"[ERR] 缺安装程序: {INSTALLER}")
         return 1
 
-    # 1. 复制基础目录到临时 staging
-    shutil.copytree(BASE, STAGING, dirs_exist_ok=True)
+    # 1. 复制历史基础目录；首次构建时创建标准目录骨架。
+    if BASE.exists():
+        shutil.copytree(BASE, STAGING, dirs_exist_ok=True)
+    for rel in (
+        "1-安装包-发给客户",
+        "2-代码签名/待签名-安装包内程序",
+        "3-服务器部署/server/templates",
+    ):
+        (STAGING / rel).mkdir(parents=True, exist_ok=True)
 
     # 2. 更新安装程序
     target_installer = STAGING / "1-安装包-发给客户" / "安装程序.exe"
@@ -48,12 +53,22 @@ def main() -> int:
             if dst.parent.exists():
                 shutil.copy2(src, dst)
 
-    # 4. 同步修复过的服务器代码
-    for rel in ("app.py", "config.py", "db.py"):
-        shutil.copy2(SERVER / rel, STAGING / "3-服务器部署" / "server" / rel)
-    for rel in ("deploy.sh", "album-auth.service", "backup.sh"):
-        shutil.copy2(SERVER / "deploy" / rel, STAGING / "3-服务器部署" / "server" / "deploy" / rel)
-    shutil.copy2(SERVER / "templates" / "admin.html", STAGING / "3-服务器部署" / "server" / "templates" / "admin.html")
+    # 4. 同步服务器代码，不复制数据库、缓存或任何凭据。
+    server_target = STAGING / "3-服务器部署" / "server"
+    shutil.copytree(
+        SERVER,
+        server_target,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "data", "*.db", "*.pem"),
+    )
+
+    installer_sha256 = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
+    (STAGING / "版本与校验.txt").write_text(
+        "工程影像管理平台交付包\n"
+        f"安装程序 SHA256: {installer_sha256}\n"
+        "说明：安装包、服务器代码和校验值均来自同一次构建。\n",
+        encoding="utf-8",
+    )
 
     # 5. 防私钥：彻底清除任何残留 pem / 授权工具目录
     for item in STAGING.rglob("*.pem"):

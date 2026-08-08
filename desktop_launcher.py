@@ -1,4 +1,5 @@
 import os
+import hashlib
 import json
 import re
 import socket
@@ -20,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260808-2.20"
+APP_VERSION = "A20260809-2.27"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -63,13 +64,19 @@ def _ver_tuple(version):
 
 
 def fetch_remote_version():
-    """获取服务器上的最新版本信息；失败返回 (None, None, '')，不抛异常。"""
+    """获取服务器上的最新版本信息；兼容旧版 url/note 字段。"""
     try:
         with urllib.request.urlopen(UPDATE_URL, timeout=UPDATE_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        return data.get("version"), data.get("url"), data.get("note", "")
+        return (
+            data.get("version"),
+            data.get("download_url") or data.get("url"),
+            data.get("note") or "\n".join(data.get("changelog") or []),
+            str(data.get("sha256") or "").lower(),
+            int(data.get("size") or 0),
+        )
     except Exception:
-        return None, None, ""
+        return None, None, "", "", 0
 
 
 def app_dir():
@@ -322,22 +329,22 @@ class DesktopLauncher:
     def check_update_async(self):
         def worker():
             try:
-                remote_ver, url, note = fetch_remote_version()
+                remote_ver, url, note, sha256, size = fetch_remote_version()
                 if remote_ver and _ver_tuple(remote_ver) > _ver_tuple(APP_VERSION):
-                    self.root.after(2000, lambda: self.prompt_update(remote_ver, url, note))
+                    self.root.after(2000, lambda: self.prompt_update(remote_ver, url, note, sha256, size))
             except Exception:
                 pass
         threading.Thread(target=worker, daemon=True).start()
 
-    def prompt_update(self, remote_ver, url, note):
+    def prompt_update(self, remote_ver, url, note, sha256="", size=0):
         if not messagebox.askyesno(
             "发现新版本",
             f"发现新版本：{remote_ver}\n当前版本：{APP_VERSION}\n\n更新说明：{note or '无'}\n\n是否立即下载更新？",
         ):
             return
-        self.download_update(url, remote_ver)
+        self.download_update(url, remote_ver, sha256, size)
 
-    def download_update(self, url, remote_ver):
+    def download_update(self, url, remote_ver, expected_sha256="", expected_size=0):
         target = Path(tempfile.gettempdir()) / f"{APP_TITLE}-更新-{remote_ver}.exe"
         win = tk.Toplevel(self.root)
         win.title("正在更新")
@@ -360,16 +367,26 @@ class DesktopLauncher:
                 with urllib.request.urlopen(safe_url, timeout=120) as resp, open(target, "wb") as f:
                     total = int(resp.headers.get("Content-Length") or 0)
                     done = 0
+                    digest = hashlib.sha256()
                     while True:
                         chunk = resp.read(65536)
                         if not chunk:
                             break
                         f.write(chunk)
+                        digest.update(chunk)
                         done += len(chunk)
                         if total:
                             pct = int(done * 100 / total)
                             win.after(0, lambda p=pct: (prog.configure(value=p), pct_lbl.configure(text=f"{p}%")))
+                if expected_size and done != expected_size:
+                    raise ValueError(f"安装包大小校验失败（应为 {expected_size}，实际 {done}）")
+                if expected_sha256 and digest.hexdigest().lower() != expected_sha256.lower():
+                    raise ValueError("安装包完整性校验失败，请勿运行该文件")
             except Exception as exc:
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 win.after(0, lambda: (win.destroy(), messagebox.showerror("更新失败", f"下载失败：{friendly_error(exc)}")))
                 return
             win.after(0, lambda: (win.destroy(), self.finish_update(target)))

@@ -45,9 +45,10 @@
     .btn {
       padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
       background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
-      font-weight: 700; cursor: pointer; transition: all .15s;
+      font-weight: 700; cursor: pointer; transition: transform 140ms cubic-bezier(.23,1,.32,1), border-color 160ms ease, background-color 160ms ease, color 160ms ease;
     }
-    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn:active { transform: scale(.97); }
+    @media (hover:hover) and (pointer:fine) { .btn:hover { border-color: var(--accent); color: #fff; } }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn.primary:hover { background: #3b8af5; }
     .btn.danger { color: var(--red); }
@@ -108,6 +109,22 @@
       display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 6px;
       background: rgba(47,129,247,.08); color: var(--accent2); font-size: 11px; font-family: Consolas, monospace;
     }
+    .admin-grid { display:grid; grid-template-columns:repeat(4,minmax(140px,1fr)); gap:12px; }
+    .admin-grid label { color:var(--muted); font-size:12px; }
+    .admin-grid input, .admin-grid select { margin:6px 0 0; }
+    .admin-grid .wide { grid-column:1/-1; }
+    .check { display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; }
+    .check input { width:auto; margin:0; }
+    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .toolbar input, .toolbar select { width:auto; min-width:160px; margin:0; }
+    details summary { cursor:pointer; color:var(--accent2); }
+    pre { white-space:pre-wrap; word-break:break-word; max-width:520px; color:var(--muted); font:11px/1.6 Consolas,monospace; }
+    dialog { width:min(520px,calc(100vw - 32px)); color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; }
+    dialog::backdrop { background:rgba(0,0,0,.62); }
+    dialog h2 { margin-top:0; }
+    @media (max-width:800px) { .admin-grid { grid-template-columns:1fr 1fr; } .wrap { padding:14px 10px 40px; } }
+    @media (max-width:520px) { .admin-grid { grid-template-columns:1fr; } .topbar { flex-wrap:wrap; } }
+    @media (prefers-reduced-motion:reduce) { .btn { transition:color 120ms ease, background-color 120ms ease; } .btn:active { transform:none; } }
   </style>
 </head>
 <body>
@@ -155,12 +172,73 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <h2>产品策略 <span class="hint">客户端自动同步，断网使用最近缓存</span></h2>
+        <form id="productForm" class="admin-grid">
+          <label>月度会员价格<input id="cfgMonthly" type="number" min="1" max="9999"></label>
+          <label>终身会员价格<input id="cfgLifetime" type="number" min="1" max="99999"></label>
+          <label>价格标签<input id="cfgPriceLabel" maxlength="40"></label>
+          <label>免费照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>
+          <label>有效邀请门槛<input id="cfgInviteMilestone" type="number" min="1" max="1000"></label>
+          <label>每次奖励天数<input id="cfgInviteDays" type="number" min="0" max="3650"></label>
+          <label>云图最长边(px)<input id="cfgThumbSide" type="number" min="320" max="1600"></label>
+          <label>云图质量(40~92)<input id="cfgThumbQuality" type="number" min="40" max="92"></label>
+          <label>每项目云图上限<input id="cfgThumbCount" type="number" min="1" max="1000"></label>
+          <label class="check"><input id="cfgBetaCloud" type="checkbox">内测期免费账号可用云预览</label>
+          <label class="check"><input id="cfgLogging" type="checkbox">接收客户端错误日志</label>
+          <div class="wide"><button class="btn primary" type="submit">保存并下发策略</button> <span id="configVersion" class="muted"></span></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>客户端错误中心 <span class="hint" id="errorSummary">正在读取</span></h2>
+        <div class="toolbar">
+          <select id="errorStatus"><option value="0">未处理</option><option value="">全部</option><option value="1">已处理</option></select>
+          <input id="errorSearch" placeholder="搜索账号、模块或错误内容">
+          <button id="errorSearchBtn" class="btn" type="button">查询</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>时间</th><th>级别</th><th>来源/账号</th><th>错误</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="errorRows"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
+
+  <dialog id="licenseDialog">
+    <form id="licenseForm" method="dialog">
+      <h2>开通或调整会员</h2>
+      <p class="muted" id="licenseAccountText"></p>
+      <input id="licenseAccountId" type="hidden">
+      <label>授权类型<select id="licenseType" style="width:100%;padding:10px 12px;margin:6px 0 12px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;"><option value="term">限期会员</option><option value="lifetime">终身会员</option></select></label>
+      <label id="licenseDaysLabel">有效天数<input id="licenseDays" type="number" min="1" max="3650" value="30"></label>
+      <label>可绑定电脑数<input id="licenseLimit" type="number" min="1" max="100" value="3"></label>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;"><button id="cancelLicenseBtn" class="btn" type="button">取消</button><button class="btn primary" type="submit">确认开通</button></div>
+    </form>
+  </dialog>
 
   <script>
     const $ = (s) => document.querySelector(s);
     let token = localStorage.getItem("album_admin_token") || "";
+
+    function reportError(message, context = {}, stack = "", severity = "error") {
+      fetch("/api/client-errors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ source: "admin_web", message, context, stack, severity, app_version: "web" }),
+        keepalive: true
+      }).catch(() => {});
+    }
+    window.addEventListener("error", (event) => reportError(event.message, {
+      filename: String(event.filename || "").split(/[\\/]/).pop(), line: event.lineno, column: event.colno
+    }, event.error?.stack || ""));
+    window.addEventListener("unhandledrejection", (event) => reportError(
+      event.reason?.message || String(event.reason || "未处理的异步错误"),
+      { kind: "unhandledrejection" }, event.reason?.stack || ""
+    ));
 
     function notice(el, msg, isErr) {
       el.textContent = msg;
@@ -170,9 +248,18 @@
     async function api(url, options = {}) {
       const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
       if (token) headers.Authorization = `Bearer ${token}`;
-      const resp = await fetch(url, Object.assign({}, options, { headers }));
+      let resp;
+      try {
+        resp = await fetch(url, Object.assign({}, options, { headers }));
+      } catch (error) {
+        reportError(error.message || "网络请求失败", { url, method: options.method || "GET" }, error.stack || "", "warning");
+        throw error;
+      }
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || `请求失败(${resp.status})`);
+      if (!resp.ok || data.ok === false) {
+        reportError(data.error || `请求失败(${resp.status})`, { url, method: options.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
+        throw new Error(data.error || `请求失败(${resp.status})`);
+      }
       return data;
     }
 
@@ -195,7 +282,7 @@
       $("#loginBox").style.display = "none";
       $("#mainBox").style.display = "block";
       $("#whoami").textContent = `当前管理员：${account.display_name || account.username}`;
-      loadAccounts();
+      Promise.all([loadAccounts(), loadProductConfig(), loadErrors()]).catch(() => {});
     }
 
     async function loadAccounts() {
@@ -231,7 +318,7 @@
     }
 
     function renderAccounts(accounts) {
-      $("#rows").innerHTML = accounts.map(({ account, license, invite_code, invitees, invited_by, invite_count }) => {
+      $("#rows").innerHTML = accounts.map(({ account, license, invite_code, invitees, invited_by, invite_count, invite_qualified_count }) => {
         const lic = license || {};
         const typeText = lic.has_license
           ? (lic.license_type === "lifetime" ? "终身" : "限期")
@@ -245,10 +332,10 @@
         ).join(" ");
         // 邀请信息
         const inviteList = (invitees || []).length
-          ? (invitees || []).map(u => `<span class="machine-chip" style="background:rgba(210,153,34,.12);color:var(--gold)">${escapeHtml(u)}</span>`).join("")
+          ? (invitees || []).map(item => `<span class="machine-chip" style="background:${item.status === "qualified" ? "rgba(63,185,80,.12)" : "rgba(210,153,34,.12)"};color:${item.status === "qualified" ? "var(--green)" : "var(--gold)"}">${escapeHtml(item.username)} · ${item.status === "qualified" ? "有效" : item.status === "rejected" ? "拒绝" : "待确认"}</span>`).join("")
           : '<span class="muted">-</span>';
         const invText = `邀请码：<span class="mono">${escapeHtml(invite_code || "-")}</span><br>` +
-          `<span class="muted">${invite_count || 0} 人通过它注册</span>${invited_by ? `<br><span class="muted">由 ${escapeHtml(invited_by)} 邀请</span>` : ""}`;
+          `<span class="muted">注册 ${invite_count || 0} 人 / 有效 ${invite_qualified_count || 0} 人</span>${invited_by ? `<br><span class="muted">由 ${escapeHtml(invited_by)} 邀请</span>` : ""}`;
         return `<tr>
           <td><strong>${escapeHtml(account.username)}</strong><br><span class="muted">${escapeHtml(account.display_name || "")}</span></td>
           <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : "停用"}</span></td>
@@ -266,20 +353,36 @@
     }
 
     function issueLicense(accountId, username) {
-      const type = prompt(`为 ${username} 开通授权\n输入授权类型（term=限期, lifetime=终身）：`, "term");
-      if (!type || (type !== "term" && type !== "lifetime")) return;
-      let days = 90;
-      let limit = 3;
-      if (type === "term") {
-        days = parseInt(prompt("授权天数：", "90"), 10) || 90;
-      }
-      limit = parseInt(prompt("可绑定电脑数（默认 3）：", "3"), 10) || 3;
-      api("/api/admin/license", {
-        method: "POST",
-        body: JSON.stringify({ account_id: accountId, license_type: type, valid_days: days, machine_limit: limit })
-      }).then(() => { notice($("#notice"), "授权已开通/更新"); loadAccounts(); })
-        .catch(e => notice($("#notice"), e.message, true));
+      $("#licenseAccountId").value = accountId;
+      $("#licenseAccountText").textContent = `账号：${username}`;
+      $("#licenseType").value = "term";
+      $("#licenseDays").value = "30";
+      $("#licenseLimit").value = "3";
+      $("#licenseDaysLabel").style.display = "block";
+      $("#licenseDialog").showModal();
     }
+
+    $("#licenseType").addEventListener("change", () => {
+      $("#licenseDaysLabel").style.display = $("#licenseType").value === "term" ? "block" : "none";
+    });
+    $("#cancelLicenseBtn").addEventListener("click", () => $("#licenseDialog").close());
+    $("#licenseForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await api("/api/admin/license", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: Number($("#licenseAccountId").value),
+            license_type: $("#licenseType").value,
+            valid_days: Number($("#licenseDays").value || 30),
+            machine_limit: Number($("#licenseLimit").value || 3)
+          })
+        });
+        $("#licenseDialog").close();
+        notice($("#notice"), "会员已开通或更新");
+        loadAccounts();
+      } catch (error) { notice($("#notice"), error.message, true); }
+    });
 
     function revoke(accountId) {
       if (!confirm("吊销后该账号所有机器立即失效，确定？")) return;
@@ -295,7 +398,72 @@
         .catch(e => notice($("#notice"), e.message, true));
     }
 
-    $("#refreshBtn").addEventListener("click", loadAccounts);
+    async function loadProductConfig() {
+      const data = await api("/api/product-config");
+      const product = data.product || {};
+      const pricing = product.pricing || {}, free = product.free || {}, invite = product.invite || {}, cloud = product.cloud_preview || {}, logging = product.logging || {};
+      $("#cfgMonthly").value = pricing.monthly_price || 15;
+      $("#cfgLifetime").value = pricing.lifetime_price || 169;
+      $("#cfgPriceLabel").value = pricing.price_label || "内测会员价";
+      $("#cfgFreeLimit").value = free.photo_limit || 300;
+      $("#cfgInviteMilestone").value = invite.milestone || 10;
+      $("#cfgInviteDays").value = invite.reward_days || 30;
+      $("#cfgThumbSide").value = cloud.thumb_max_side || 720;
+      $("#cfgThumbQuality").value = cloud.thumb_quality || 76;
+      $("#cfgThumbCount").value = cloud.max_thumbs_per_project || 240;
+      $("#cfgBetaCloud").checked = Boolean(cloud.beta_free_access);
+      $("#cfgLogging").checked = logging.enabled !== false;
+      $("#configVersion").textContent = `配置版本 ${product.config_version || 1}`;
+    }
+
+    $("#productForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await api("/api/admin/product-config", {
+          method: "POST",
+          body: JSON.stringify({ product: {
+            pricing: { monthly_price: Number($("#cfgMonthly").value), lifetime_price: Number($("#cfgLifetime").value), price_label: $("#cfgPriceLabel").value.trim() },
+            free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: true },
+            invite: { milestone: Number($("#cfgInviteMilestone").value), reward_days: Number($("#cfgInviteDays").value), enabled: true },
+            cloud_preview: { thumb_max_side: Number($("#cfgThumbSide").value), thumb_quality: Number($("#cfgThumbQuality").value), max_thumbs_per_project: Number($("#cfgThumbCount").value), beta_free_access: $("#cfgBetaCloud").checked },
+            logging: { enabled: $("#cfgLogging").checked }
+          } })
+        });
+        $("#configVersion").textContent = `配置版本 ${data.product.config_version}`;
+        notice($("#notice"), "产品策略已保存，客户端将在一小时内自动同步");
+      } catch (error) { notice($("#notice"), error.message, true); }
+    });
+
+    async function loadErrors() {
+      const status = $("#errorStatus").value;
+      const q = $("#errorSearch").value.trim();
+      const params = new URLSearchParams({ limit: "100" });
+      if (status !== "") params.set("resolved", status);
+      if (q) params.set("q", q);
+      try {
+        const data = await api(`/api/admin/errors?${params}`);
+        const summary = data.summary || {};
+        $("#errorSummary").textContent = `未处理 ${summary.unresolved || 0} 条，严重 ${summary.critical || 0} 条，共 ${summary.total || 0} 条`;
+        $("#errorRows").innerHTML = (data.errors || []).map((item) => {
+          const detail = [item.stack, JSON.stringify(item.context || {}, null, 2)].filter(Boolean).join("\n");
+          const levelClass = item.severity === "critical" ? "off" : item.severity === "warning" ? "gold" : "blue";
+          return `<tr><td class="mono">${escapeHtml(item.created_at || "-")}</td><td><span class="badge ${levelClass}">${escapeHtml(item.severity)}</span></td><td>${escapeHtml(item.source)}<br><span class="muted">${escapeHtml(item.username || "未登录")}</span></td><td><strong>${escapeHtml(item.error_type || "错误")}</strong><br>${escapeHtml(item.message || "-")}${detail ? `<details><summary>技术详情</summary><pre>${escapeHtml(detail)}</pre></details>` : ""}</td><td>${item.resolved ? '<span class="badge ok">已处理</span>' : '<span class="badge off">待处理</span>'}</td><td>${item.resolved ? "" : `<button class="btn sm" data-resolve-error="${item.id}">标记已处理</button>`}</td></tr>`;
+        }).join("") || '<tr><td colspan="6" class="muted">暂无符合条件的错误记录</td></tr>';
+      } catch (error) { $("#errorSummary").textContent = error.message; }
+    }
+
+    $("#errorSearchBtn").addEventListener("click", loadErrors);
+    $("#errorStatus").addEventListener("change", loadErrors);
+    $("#errorRows").addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-resolve-error]");
+      if (!button) return;
+      try {
+        await api(`/api/admin/errors/${button.dataset.resolveError}/resolve`, { method: "POST", body: JSON.stringify({ resolved: true }) });
+        loadErrors();
+      } catch (error) { notice($("#notice"), error.message, true); }
+    });
+
+    $("#refreshBtn").addEventListener("click", () => Promise.all([loadAccounts(), loadErrors(), loadProductConfig()]));
     $("#logoutBtn").addEventListener("click", () => {
       token = "";
       localStorage.removeItem("album_admin_token");

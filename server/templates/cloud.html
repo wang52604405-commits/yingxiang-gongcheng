@@ -20,7 +20,9 @@
     .btn {
       padding: 8px 16px; border: 0; border-radius: 6px; cursor: pointer;
       background: #1f8bd6; color: #fff; font: inherit; font-weight: 700;
+      transition: transform 140ms cubic-bezier(.23,1,.32,1), background-color 160ms ease;
     }
+    .btn:active { transform: scale(.97); }
     .btn.ghost { background: #243340; color: #dce7f0; }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
     .card {
@@ -40,18 +42,19 @@
       background: #172230; border: 1px solid #22303f; border-radius: 8px;
       padding: 10px; cursor: pointer; transition: border-color .15s;
     }
-    .tile:hover { border-color: #2f8fdb; }
-    .tile img { width: 100%; height: 150px; object-fit: cover; border-radius: 5px; background: #101a26; filter: blur(3px); }
+    @media (hover:hover) and (pointer:fine) { .tile:hover { border-color: #2f8fdb; } }
+    .tile img { width: 100%; height: 150px; object-fit: cover; border-radius: 5px; background: #101a26; }
     .tile .name { margin-top: 8px; font-size: 12px; color: #aabccd; line-height: 1.4; word-break: break-all; }
     .tile .code { font-size: 11px; color: #6f8599; font-family: Consolas, monospace; }
     .tile .count { font-size: 11px; color: #7d93a8; margin-top: 2px; }
     .back { display: inline-block; color: #7fc3ef; cursor: pointer; margin-bottom: 12px; }
-    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-    .thumb-grid img { width: 100%; height: 100px; object-fit: cover; border-radius: 4px; filter: blur(3px); background: #101a26; }
+    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+    .thumb-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: 6px; background: #101a26; }
     .muted { color: #7d93a8; font-size: 13px; }
     #loginBox { max-width: 380px; margin: 70px auto; }
     .link { color: #7fc3ef; cursor: pointer; font-size: 13px; }
     .price-line { color: #ffd479; font-size: 13px; }
+    @media (prefers-reduced-motion:reduce) { .btn { transition:background-color 120ms ease; } .btn:active { transform:none; } }
   </style>
 </head>
 <body>
@@ -64,7 +67,7 @@
   <!-- 登录 / 注册 -->
   <div id="loginBox" class="card">
     <h2 style="margin-top:0">云预览登录</h2>
-    <p class="muted">在外面（公网）登录后可查看自己项目的模糊缩略图和编号。<br>完整功能请回到局域网内使用。</p>
+    <p class="muted">在外面（公网）登录后可查看自己项目的可辨认缩略图和编号。<br>平台只同步缩略图，不上传工程原图；完整编辑请回到局域网内使用。</p>
     <input id="user" placeholder="账号（手机号 / QQ / 邮箱）" autocomplete="username">
     <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
     <button class="btn" id="loginBtn" style="width:100%">登录</button>
@@ -74,11 +77,12 @@
     <div id="regBox" style="display:none; margin-top:8px">
       <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
       <input id="regUser" placeholder="账号（手机号 / QQ / 邮箱）">
-      <input id="regPass" type="password" placeholder="密码（至少 6 位）">
+      <input id="regPass" type="password" placeholder="登录密码（至少 8 位，包含字母和数字）">
       <input id="regEmail" placeholder="邮箱（选填，用于找回密码）">
       <input id="regInvite" placeholder="邀请码（选填，填了双方有奖励）">
+      <label class="muted" style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 12px;line-height:1.5;"><input id="regDeleteAck" type="checkbox" style="width:auto;margin:3px 0 0;">我已了解：登录密码不等于工程删除密码，首次进入桌面软件时需要单独设置并保存工程删除密码。</label>
       <button class="btn" id="regBtn" style="width:100%">注册</button>
-      <p class="muted" style="font-size:12px">邀请 10 人注册，即可免费使用 1 个月，可循环。</p>
+      <p class="muted" style="font-size:12px">好友注册并首次登录软件后才算有效邀请，同一设备重复注册不计入。</p>
     </div>
 
     <div id="forgotBox" style="display:none; margin-top:8px">
@@ -88,7 +92,7 @@
         <input id="forgotCode" placeholder="邮箱验证码" style="flex:1">
         <button class="btn" id="forgotSendBtn" style="flex:0 0 auto">发送验证码</button>
       </div>
-      <input id="forgotPass" type="password" placeholder="新密码（至少 6 位）">
+      <input id="forgotPass" type="password" placeholder="新密码（至少 8 位，包含字母和数字）">
       <button class="btn" id="forgotResetBtn" style="width:100%">重置密码</button>
     </div>
   </div>
@@ -97,7 +101,7 @@
   <div id="projectsBox" class="wrap" style="display:none">
     <div class="card">
       <div id="whoami" class="muted"></div>
-      <div class="price-line">月度会员 15 元 / 终身会员 169 元；邀请 10 人注册免费 1 个月。联系管理员开通会员后可查看清晰原图。</div>
+      <div class="price-line" id="priceLine">月度会员 15 元 / 终身会员 169 元（内测会员价）；云端仅提供可辨认缩略图，不上传原图。</div>
     </div>
     <div class="grid" id="projectGrid"></div>
   </div>
@@ -108,7 +112,7 @@
     <div class="card">
       <div id="detailTitle" style="font-weight:700;margin-bottom:4px"></div>
       <div class="muted" id="detailMeta"></div>
-      <p class="muted" style="margin-bottom:0">以下为模糊缩略图预览（非原图）。查看清晰原图请在局域网内使用完整版。</p>
+      <p class="muted" style="margin-bottom:0">以下为可辨认缩略图预览（非原图）。查看和编辑原图请在局域网内使用桌面版。</p>
     </div>
     <div class="thumb-grid" id="thumbGrid"></div>
   </div>
@@ -118,6 +122,19 @@
     let token = localStorage.getItem("album_cloud_token") || "";
     let username = localStorage.getItem("album_cloud_user") || "";
 
+    function reportError(message, context = {}, stack = "", severity = "error") {
+      fetch("/api/client-errors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "Authorization": "Bearer " + token } : {}) },
+        body: JSON.stringify({ source: "cloud_preview_web", message, context, stack, severity, app_version: "web" }),
+        keepalive: true
+      }).catch(() => {});
+    }
+    window.addEventListener("error", (event) => reportError(event.message, {
+      filename: String(event.filename || "").split(/[\\/]/).pop(), line: event.lineno, column: event.colno
+    }, event.error?.stack || ""));
+    window.addEventListener("unhandledrejection", (event) => reportError(event.reason?.message || String(event.reason || "未处理的异步错误"), { kind: "unhandledrejection" }, event.reason?.stack || ""));
+
     function notice(el, msg, ok) {
       el.textContent = msg;
       el.className = "notice show " + (ok ? "ok" : "err");
@@ -126,10 +143,23 @@
     async function api(url, opts = {}) {
       const headers = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = "Bearer " + token;
-      const resp = await fetch(url, { ...opts, headers });
+      let resp;
+      try { resp = await fetch(url, { ...opts, headers }); }
+      catch (error) {
+        reportError(error.message || "网络请求失败", { url, method: opts.method || "GET" }, error.stack || "", "warning");
+        return { ok: false, error: "网络连接失败，请稍后重试" };
+      }
       let data;
       try { data = await resp.json(); } catch (e) { data = { ok: false, error: "服务器响应异常" }; }
+      if (!resp.ok || data.ok === false) reportError(data.error || `HTTP ${resp.status}`, { url, method: opts.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
       return data;
+    }
+
+    async function loadProduct() {
+      const data = await api("/api/product-config");
+      if (!data.ok) return;
+      const pricing = data.product?.pricing || {};
+      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 15} 元 / 终身会员 ${pricing.lifetime_price || 169} 元（${pricing.price_label || "内测会员价"}）；云端仅提供可辨认缩略图，不上传原图。`;
     }
 
     async function checkAuth() {
@@ -165,8 +195,12 @@
       const invite = $("#regInvite").value.trim();
       if (email) payload.email = email;
       if (invite) payload.invite_code = invite;
+      if (payload.password.length < 8 || !/[A-Za-z]/.test(payload.password) || !/\d/.test(payload.password)) {
+        notice($("#loginNotice"), "登录密码至少 8 位，并同时包含字母和数字", false); return;
+      }
+      if (!$("#regDeleteAck").checked) { notice($("#loginNotice"), "请先确认已了解工程删除密码的用途", false); return; }
       const data = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
-      notice($("#loginNotice"), data.ok ? "注册成功，请登录" : (data.error || "注册失败"), !!data.ok);
+      notice($("#loginNotice"), data.ok ? "注册成功。首次进入桌面软件时请立即设置并保存工程删除密码。" : (data.error || "注册失败"), !!data.ok);
       if (data.ok) { $("#regBox").style.display = "none"; $("#user").value = payload.username; }
     });
 
@@ -254,6 +288,7 @@
       return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    loadProduct();
     checkAuth();
   </script>
 </body>

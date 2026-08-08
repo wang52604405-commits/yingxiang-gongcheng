@@ -82,6 +82,43 @@ CREATE TABLE IF NOT EXISTS mail_codes (
     expires_at INTEGER NOT NULL,
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS product_settings (
+    setting_key TEXT PRIMARY KEY,
+    value_json  TEXT NOT NULL,
+    updated_at  TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_by  INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS client_error_logs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER,
+    fingerprint     TEXT NOT NULL DEFAULT '',
+    source          TEXT NOT NULL DEFAULT 'desktop',
+    severity        TEXT NOT NULL DEFAULT 'error',
+    error_type      TEXT NOT NULL DEFAULT '',
+    message         TEXT NOT NULL DEFAULT '',
+    stack           TEXT NOT NULL DEFAULT '',
+    context_json    TEXT NOT NULL DEFAULT '{}',
+    app_version     TEXT NOT NULL DEFAULT '',
+    machine_id      TEXT NOT NULL DEFAULT '',
+    client_time     TEXT NOT NULL DEFAULT '',
+    request_ip      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now', 'localtime')),
+    resolved        INTEGER DEFAULT 0,
+    resolved_at     TEXT NOT NULL DEFAULT '',
+    resolution_note TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_created
+ON client_error_logs(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_account
+ON client_error_logs(account_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_fingerprint
+ON client_error_logs(fingerprint, created_at DESC);
 """
 
 # 老库升级：accounts 表缺少的新列，启动时补上
@@ -90,6 +127,13 @@ ACCOUNTS_EXTRA_COLUMNS = {
     "inviter_id": "INTEGER DEFAULT 0",
     "invite_reward_months": "INTEGER DEFAULT 0",
     "email": "TEXT DEFAULT ''",
+}
+
+INVITES_EXTRA_COLUMNS = {
+    "status": "TEXT DEFAULT 'pending'",
+    "qualified_at": "TEXT DEFAULT ''",
+    "device_hash": "TEXT DEFAULT ''",
+    "ip_hash": "TEXT DEFAULT ''",
 }
 
 
@@ -106,7 +150,7 @@ CREATE TABLE IF NOT EXISTS invites (
 
 
 def migrate() -> None:
-    """幂等迁移：建 invites 表；检查 accounts 表缺列则 ALTER 补上（老库兜底）。"""
+    """幂等迁移：只补表和列，不重建旧表，不改写现有业务数据。"""
     conn = connect()
     try:
         conn.execute(INVITES_DDL)
@@ -114,6 +158,10 @@ def migrate() -> None:
         for name, decl in ACCOUNTS_EXTRA_COLUMNS.items():
             if name not in cols:
                 conn.execute(f"ALTER TABLE accounts ADD COLUMN {name} {decl}")
+        invite_cols = {row["name"] for row in conn.execute("PRAGMA table_info(invites)")}
+        for name, decl in INVITES_EXTRA_COLUMNS.items():
+            if name not in invite_cols:
+                conn.execute(f"ALTER TABLE invites ADD COLUMN {name} {decl}")
         conn.commit()
     finally:
         conn.close()
@@ -121,9 +169,11 @@ def migrate() -> None:
 
 def connect() -> sqlite3.Connection:
     config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(config.DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 10000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 

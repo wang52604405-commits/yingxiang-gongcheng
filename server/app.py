@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import random
@@ -36,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import config, db
@@ -102,6 +104,95 @@ INVITE_MILESTONE = 10   # 每邀请 10 人，邀请人续期 1 个月
 REWARD_MONTH_DAYS = 30
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = json.loads(json.dumps(base, ensure_ascii=False))
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _normalized_product_config(value=None) -> dict:
+    """合并默认值并把后台可编辑数值限制在安全范围内。"""
+    product = _deep_merge(config.DEFAULT_PRODUCT_CONFIG, value or {})
+    pricing = product["pricing"]
+    pricing["monthly_price"] = max(1, min(9999, int(pricing.get("monthly_price") or 15)))
+    pricing["lifetime_price"] = max(1, min(99999, int(pricing.get("lifetime_price") or 169)))
+    pricing["price_label"] = str(pricing.get("price_label") or "内测会员价")[:40]
+    free = product["free"]
+    free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
+    free["watermark_enabled"] = bool(free.get("watermark_enabled", True))
+    free["upload_expiry_enabled"] = bool(free.get("upload_expiry_enabled", False))
+    invite = product["invite"]
+    invite["enabled"] = bool(invite.get("enabled", True))
+    invite["milestone"] = max(1, min(1000, int(invite.get("milestone") or 10)))
+    invite["reward_days"] = max(0, min(3650, int(invite.get("reward_days") or 30)))
+    invite["qualification"] = "activated_unique_device"
+    cloud = product["cloud_preview"]
+    cloud["enabled"] = bool(cloud.get("enabled", True))
+    cloud["requires_member"] = bool(cloud.get("requires_member", False))
+    cloud["beta_free_access"] = bool(cloud.get("beta_free_access", True))
+    cloud["thumb_max_side"] = max(320, min(1600, int(cloud.get("thumb_max_side") or 720)))
+    cloud["thumb_quality"] = max(40, min(92, int(cloud.get("thumb_quality") or 76)))
+    cloud["max_thumbs_per_project"] = max(1, min(1000, int(cloud.get("max_thumbs_per_project") or 240)))
+    cloud["max_projects_per_sync"] = max(1, min(500, int(cloud.get("max_projects_per_sync") or 200)))
+    cloud["max_thumb_b64"] = max(100000, min(2000000, int(cloud.get("max_thumb_b64") or 600000)))
+    logging_cfg = product["logging"]
+    logging_cfg["enabled"] = bool(logging_cfg.get("enabled", True))
+    logging_cfg["max_message"] = max(200, min(10000, int(logging_cfg.get("max_message") or 2000)))
+    logging_cfg["max_stack"] = max(1000, min(50000, int(logging_cfg.get("max_stack") or 12000)))
+    logging_cfg["max_context"] = max(500, min(20000, int(logging_cfg.get("max_context") or 8000)))
+    logging_cfg["retention_days"] = max(7, min(365, int(logging_cfg.get("retention_days") or 90)))
+    logging_cfg["max_records"] = max(500, min(50000, int(logging_cfg.get("max_records") or 5000)))
+    product["config_version"] = max(1, int(product.get("config_version") or 1))
+    return product
+
+
+def _product_config(conn=None) -> dict:
+    own_conn = conn is None
+    conn = conn or db.connect()
+    try:
+        row = conn.execute(
+            "SELECT value_json FROM product_settings WHERE setting_key = 'public'"
+        ).fetchone()
+        saved = {}
+        if row:
+            try:
+                saved = json.loads(row["value_json"])
+            except (TypeError, ValueError):
+                saved = {}
+        return _normalized_product_config(saved)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+def _save_product_config(value: dict, admin_id: int) -> dict:
+    current = _product_config()
+    merged = _normalized_product_config(_deep_merge(current, value or {}))
+    merged["config_version"] = int(current.get("config_version") or 1) + 1
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO product_settings (setting_key, value_json, updated_at, updated_by) "
+            "VALUES ('public', ?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET "
+            "value_json = excluded.value_json, updated_at = excluded.updated_at, "
+            "updated_by = excluded.updated_by",
+            (json.dumps(merged, ensure_ascii=False), _now(), admin_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return merged
+
+
+def _hash_identifier(value: str) -> str:
+    raw = (str(value or "").strip() + "|" + config.SECRET_KEY).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _generate_invite_code(conn):
     """生成不重复的 8 位邀请码。"""
     for _ in range(50):
@@ -155,6 +246,12 @@ def _parse_utc(value: str):
     """解析带 Z 后缀的 UTC 时间。Python 3.10 的 fromisoformat 不认 Z，
     用 strptime 显式解析并标记为 UTC，避免到期校验被静默跳过。"""
     return datetime.strptime(str(value), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def _version_key(value: str):
+    """按数字段比较 A20260808-2.21，避免仅用不等号把旧版本误判为更新。"""
+    numbers = [int(part) for part in re.findall(r"\d+", str(value or ""))]
+    return tuple(numbers) if numbers else (0,)
 
 
 def _b64u(data: bytes) -> str:
@@ -253,6 +350,82 @@ def _account_license(conn, account_id: int):
     ).fetchone()
 
 
+def _has_active_membership(conn, account_id: int) -> bool:
+    lic = _account_license(conn, account_id)
+    if not lic or not bool(lic["active"]):
+        return False
+    if lic["license_type"] == "lifetime":
+        return True
+    expires_at = str(lic["expires_at"] or "")
+    if not expires_at:
+        return bool(int(lic["valid_days"] or 0) > 0)
+    try:
+        return datetime.now(timezone.utc) <= _parse_utc(expires_at)
+    except ValueError:
+        return False
+
+
+def _cloud_access_allowed(conn, account_id: int) -> bool:
+    cloud = _product_config(conn).get("cloud_preview", {})
+    if not cloud.get("enabled", True):
+        return False
+    if not cloud.get("requires_member", False) or cloud.get("beta_free_access", False):
+        return True
+    return _has_active_membership(conn, account_id)
+
+
+def _qualify_invite(conn, invitee_account_id: int, machine_id: str) -> None:
+    """首次绑定独立设备后确认邀请有效；同一设备不能为多次邀请计奖。"""
+    invite_cfg = _product_config(conn).get("invite", {})
+    if not invite_cfg.get("enabled", True):
+        return
+    relation = conn.execute(
+        "SELECT * FROM invites WHERE invitee_account_id = ?",
+        (invitee_account_id,),
+    ).fetchone()
+    if not relation or str(relation["status"] or "pending") == "qualified":
+        return
+    device_hash = _hash_identifier(machine_id.upper())
+    duplicate = conn.execute(
+        "SELECT 1 FROM invites WHERE inviter_id = ? AND device_hash = ? "
+        "AND status = 'qualified' AND invitee_account_id <> ?",
+        (relation["inviter_id"], device_hash, invitee_account_id),
+    ).fetchone()
+    if duplicate:
+        conn.execute(
+            "UPDATE invites SET status = 'rejected', device_hash = ? "
+            "WHERE invitee_account_id = ?",
+            (device_hash, invitee_account_id),
+        )
+        return
+    conn.execute(
+        "UPDATE invites SET status = 'qualified', qualified_at = ?, device_hash = ? "
+        "WHERE invitee_account_id = ?",
+        (_now(), device_hash, invitee_account_id),
+    )
+    count_row = conn.execute(
+        "SELECT COUNT(*) AS n FROM invites WHERE inviter_id = ? AND status = 'qualified'",
+        (relation["inviter_id"],),
+    ).fetchone()
+    milestone = max(1, int(invite_cfg.get("milestone") or 10))
+    target = int(count_row["n"]) // milestone
+    inviter = conn.execute(
+        "SELECT invite_reward_months FROM accounts WHERE id = ?",
+        (relation["inviter_id"],),
+    ).fetchone()
+    already = int(inviter["invite_reward_months"] or 0) if inviter else 0
+    if target > already:
+        reward_days = max(0, int(invite_cfg.get("reward_days") or 30))
+        if reward_days:
+            _grant_or_extend_license(
+                conn, relation["inviter_id"], (target - already) * reward_days
+            )
+        conn.execute(
+            "UPDATE accounts SET invite_reward_months = ? WHERE id = ?",
+            (target, relation["inviter_id"]),
+        )
+
+
 def _machine_count(conn, account_id: int):
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM machines WHERE account_id = ? AND active = 1",
@@ -300,6 +473,124 @@ def _sign_for(account: dict, machine_id: str, license_row) -> str:
     return signer.sign(payload)
 
 
+_SENSITIVE_KEYS = {
+    "password", "passwd", "pwd", "token", "authorization", "license_code",
+    "secret", "private_key", "thumb_b64", "image", "photo", "content",
+}
+
+
+def _redact_text(value, limit: int) -> str:
+    text = str(value or "")
+    text = re.sub(r"(?i)Bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+    text = re.sub(
+        r"(?i)(password|passwd|pwd|token|secret|license_code)\s*[:=]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
+        text,
+    )
+    text = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "[IMAGE_REMOVED]", text)
+    return text[:limit]
+
+
+def _sanitize_telemetry(value, limit: int, depth: int = 0):
+    if depth > 4:
+        return "[DEPTH_LIMIT]"
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in list(value.items())[:50]:
+            key_text = str(key)[:80]
+            if key_text.lower() in _SENSITIVE_KEYS or any(
+                term in key_text.lower() for term in ("password", "token", "secret", "photo", "image", "b64")
+            ):
+                cleaned[key_text] = "[REDACTED]"
+            else:
+                cleaned[key_text] = _sanitize_telemetry(item, limit, depth + 1)
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_telemetry(item, limit, depth + 1) for item in list(value)[:30]]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _redact_text(value, limit)
+
+
+def _store_client_error(payload: dict, user=None) -> int:
+    product = _product_config()
+    log_cfg = product.get("logging", {})
+    if not log_cfg.get("enabled", True):
+        return 0
+    max_message = int(log_cfg.get("max_message") or 2000)
+    max_stack = int(log_cfg.get("max_stack") or 12000)
+    max_context = int(log_cfg.get("max_context") or 8000)
+    message = _redact_text(payload.get("message"), max_message)
+    stack = _redact_text(payload.get("stack"), max_stack)
+    error_type = _redact_text(payload.get("error_type"), 160)
+    source = _redact_text(payload.get("source") or "desktop", 80)
+    severity = str(payload.get("severity") or "error").lower()
+    if severity not in {"info", "warning", "error", "critical"}:
+        severity = "error"
+    context = _sanitize_telemetry(payload.get("context") or {}, 1200)
+    context_json = json.dumps(context, ensure_ascii=False)[:max_context]
+    fingerprint_seed = "|".join((source, error_type, message[:500], stack.splitlines()[-1] if stack else ""))
+    fingerprint = hashlib.sha256(fingerprint_seed.encode("utf-8", "replace")).hexdigest()[:32]
+    machine_id = _redact_text(payload.get("machine_id"), 160)
+    machine_hash = _hash_identifier(machine_id) if machine_id else ""
+    request_ip_hash = _hash_identifier(request.remote_addr or "")
+    conn = db.connect()
+    try:
+        cur = conn.execute(
+            "INSERT INTO client_error_logs "
+            "(account_id, fingerprint, source, severity, error_type, message, stack, "
+            "context_json, app_version, machine_id, client_time, request_ip) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                user.get("id") if user else None,
+                fingerprint,
+                source,
+                severity,
+                error_type,
+                message,
+                stack,
+                context_json,
+                _redact_text(payload.get("app_version"), 80),
+                machine_hash,
+                _redact_text(payload.get("client_time"), 80),
+                request_ip_hash,
+            ),
+        )
+        log_id = int(cur.lastrowid or 0)
+        if log_id and log_id % 50 == 0:
+            retention_days = max(7, min(int(log_cfg.get("retention_days") or 90), 365))
+            max_records = max(500, min(int(log_cfg.get("max_records") or 5000), 50000))
+            conn.execute(
+                "DELETE FROM client_error_logs WHERE created_at < datetime('now', ?) ",
+                (f"-{retention_days} days",),
+            )
+            conn.execute(
+                "DELETE FROM client_error_logs WHERE id NOT IN "
+                "(SELECT id FROM client_error_logs ORDER BY id DESC LIMIT ?)",
+                (max_records,),
+            )
+        conn.commit()
+        return log_id
+    finally:
+        conn.close()
+
+
+def _valid_thumbnail_b64(value: str, max_length: int) -> bool:
+    if not value or len(value) > max_length:
+        return False
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except Exception:
+        return False
+    if not raw or len(raw) > int(max_length * 0.76):
+        return False
+    return (
+        (raw.startswith(b"RIFF") and raw[8:12] == b"WEBP")
+        or raw.startswith(b"\xff\xd8\xff")
+        or raw.startswith(b"\x89PNG\r\n\x1a\n")
+    )
+
+
 def create_app():
     app = Flask(__name__)
     app.config["SECRET_KEY"] = config.SECRET_KEY
@@ -309,9 +600,37 @@ def create_app():
     if config.ADMIN_USERNAME and config.ADMIN_PASSWORD:
         _ensure_admin(config.ADMIN_USERNAME, config.ADMIN_PASSWORD)
 
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(exc):
+        status = int(exc.code) if isinstance(exc, HTTPException) else 500
+        if isinstance(exc, HTTPException):
+            return _error(exc.description or "请求错误", status)
+        try:
+            auth = request.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            user = _user_from_token(token) if token else None
+            _store_client_error({
+                "source": "server_api",
+                "severity": "critical",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "stack": __import__("traceback").format_exc(),
+                "context": {"method": request.method, "path": request.path, "status": status},
+                "app_version": "server",
+                "client_time": _now(),
+            }, user=user)
+        except Exception:
+            app.logger.exception("记录服务器异常失败")
+        app.logger.exception("未处理的服务器异常")
+        return _error("服务器内部错误，错误编号已反馈到后台", 500)
+
     @app.get("/")
     def index():
         return render_template("member_center.html")
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return "", 204
 
     @app.get("/cloud-preview")
     def cloud_preview_page():
@@ -320,6 +639,25 @@ def create_app():
     @app.get("/admin")
     def admin_index():
         return render_template("admin.html")
+
+    @app.get("/api/product-config")
+    def product_config():
+        """客户端公共产品策略；不包含服务器密钥、支付或管理员配置。"""
+        return jsonify({"ok": True, "product": _product_config(), "server_time": _now()})
+
+    @app.post("/api/client-errors")
+    def client_errors():
+        """接收桌面端和浏览器错误。请求体严限 64KB，敏感字段会再次脱敏。"""
+        if request.content_length and request.content_length > 64 * 1024:
+            return _error("错误日志内容过大", 413)
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _error("错误日志格式不正确")
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        user = _user_from_token(token) if token else None
+        log_id = _store_client_error(data, user=user)
+        return jsonify({"ok": True, "log_id": log_id})
 
     @app.post("/api/send-code")
     def send_code():
@@ -349,10 +687,12 @@ def create_app():
         invite_code = str(data.get("invite_code") or "").strip().upper()
         display_name = str(data.get("display_name") or "").strip()
         email = str(data.get("email") or "").strip()
-        if not (3 <= len(username) <= 64):
+        if not (3 <= len(username) <= 64) or any(ch.isspace() for ch in username):
             return _error("账号长度需在 3~64 个字符之间（可用手机号/QQ/邮箱）")
-        if len(password) < 6:
-            return _error("密码至少 6 位")
+        if len(password) < 8 or not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+            return _error("登录密码至少 8 位，并同时包含字母和数字")
+        if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+            return _error("邮箱格式不正确")
         # 免验证码注册（用户名+密码直接注册）
 
         conn = db.connect()
@@ -365,10 +705,13 @@ def create_app():
 
             # 邀请码（可选）：查邀请人，写入 invites 表，并触发 10 人/月 续期奖励
             inviter = None
-            if invite_code:
+            invite_cfg = _product_config(conn).get("invite", {})
+            if invite_code and invite_cfg.get("enabled", True):
                 inviter = conn.execute(
                     "SELECT * FROM accounts WHERE invite_code = ?", (invite_code,)
                 ).fetchone()
+                if not inviter:
+                    return _error("邀请码无效，请核对后重试")
 
             new_code = _generate_invite_code(conn)
             cur = conn.execute(
@@ -380,31 +723,20 @@ def create_app():
             new_account_id = cur.lastrowid
 
             if inviter:
-                # 记录邀请关系（一人一邀请，UNIQUE 防重）
+                # 先记为待确认；被邀请人首次在软件中绑定独立设备后才计为有效邀请。
                 conn.execute(
-                    "INSERT OR IGNORE INTO invites (inviter_id, invitee_account_id) VALUES (?, ?)",
-                    (inviter["id"], new_account_id),
+                    "INSERT OR IGNORE INTO invites "
+                    "(inviter_id, invitee_account_id, status, ip_hash) VALUES (?, ?, 'pending', ?)",
+                    (inviter["id"], new_account_id, _hash_identifier(request.remote_addr or "")),
                 )
-                # 统计邀请人已注册人数，每满 10 人续期 1 个月（无限累加）
-                row = conn.execute(
-                    "SELECT COUNT(*) AS n FROM invites WHERE inviter_id = ?", (inviter["id"],)
-                ).fetchone()
-                count = int(row["n"])
-                target = count // INVITE_MILESTONE
-                reward = int(inviter["invite_reward_months"] or 0)
-                if target > reward:
-                    delta = target - reward
-                    _grant_or_extend_license(conn, inviter["id"], delta * REWARD_MONTH_DAYS)
-                    conn.execute(
-                        "UPDATE accounts SET invite_reward_months = ? WHERE id = ?",
-                        (target, inviter["id"]),
-                    )
 
             conn.commit()
             return jsonify({
                 "ok": True,
                 "account": {"username": username, "invite_code": new_code},
                 "invited_by": inviter["username"] if inviter else "",
+                "invite_status": "pending" if inviter else "",
+                "delete_password_notice": "登录密码与工程删除密码用途不同，请在软件中单独设置并妥善保存工程删除密码。",
             })
         finally:
             conn.close()
@@ -454,8 +786,8 @@ def create_app():
         account = str(data.get("account") or "").strip()
         code = str(data.get("code") or "").strip()
         new_password = str(data.get("new_password") or "")
-        if len(new_password) < 6:
-            return _error("新密码至少 6 位")
+        if len(new_password) < 8 or not re.search(r"[A-Za-z]", new_password) or not re.search(r"\d", new_password):
+            return _error("新密码至少 8 位，并同时包含字母和数字")
         if not _consume_code(f"reset:{account}", code):
             return _error("验证码错误或已过期，请重新获取", 400)
         conn = db.connect()
@@ -516,19 +848,30 @@ def create_app():
             invite_code = row["invite_code"] if row else ""
             reward_months = int(row["invite_reward_months"] or 0) if row else 0
             count_row = conn.execute(
-                "SELECT COUNT(*) AS n FROM invites WHERE inviter_id = ?", (user["id"],)
+                "SELECT COUNT(*) AS registered_count, "
+                "SUM(CASE WHEN status = 'qualified' THEN 1 ELSE 0 END) AS qualified_count, "
+                "SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count "
+                "FROM invites WHERE inviter_id = ?", (user["id"],)
             ).fetchone()
-            registered_count = int(count_row["n"])
+            registered_count = int(count_row["registered_count"] or 0)
+            qualified_count = int(count_row["qualified_count"] or 0)
+            pending_count = int(count_row["pending_count"] or 0)
+            invite_cfg = _product_config(conn).get("invite", {})
         finally:
             conn.close()
-        next_milestone = INVITE_MILESTONE - (registered_count % INVITE_MILESTONE)
+        milestone = max(1, int(invite_cfg.get("milestone") or 10))
+        next_milestone = milestone - (qualified_count % milestone)
         return jsonify({
             "ok": True,
             "invite_code": invite_code,
             "registered_count": registered_count,
+            "qualified_count": qualified_count,
+            "pending_count": pending_count,
             "reward_months": reward_months,
             "next_milestone": next_milestone,  # 还差几人到下一个里程碑
-            "milestone": INVITE_MILESTONE,
+            "milestone": milestone,
+            "reward_days": int(invite_cfg.get("reward_days") or 30),
+            "qualification": "注册并首次登录软件，且使用未重复的设备",
         })
 
     @app.get("/api/check-update")
@@ -544,13 +887,18 @@ def create_app():
             except Exception:
                 info = {}
         latest = str(info.get("version") or "")
-        has_update = bool(latest and latest != current)
+        has_update = bool(latest and _version_key(latest) > _version_key(current))
+        changelog = info.get("changelog") or []
+        if not changelog and info.get("note"):
+            changelog = [str(info.get("note"))]
         return jsonify({
             "ok": True,
             "latest_version": latest,
-            "changelog": info.get("changelog") or [],
+            "changelog": changelog,
             "fixes": info.get("fixes") or [],
-            "download_url": info.get("download_url") or "",
+            "download_url": info.get("download_url") or info.get("url") or "",
+            "sha256": str(info.get("sha256") or ""),
+            "size": int(info.get("size") or 0),
             "has_update": has_update,
         })
 
@@ -567,6 +915,8 @@ def create_app():
             "changelog": [str(x) for x in (data.get("changelog") or [])],
             "fixes": [str(x) for x in (data.get("fixes") or [])],
             "download_url": str(data.get("download_url") or "").strip(),
+            "sha256": str(data.get("sha256") or "").strip().lower(),
+            "size": max(0, int(data.get("size") or 0)),
         }
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         import json as _json
@@ -611,15 +961,7 @@ def create_app():
         conn = db.connect()
         try:
             lic = _account_license(conn, user["id"])
-            is_member = bool(lic and lic["active"])
-            if lic and lic["active"] and lic["license_type"] == "term" and lic["expires_at"]:
-                try:
-                    exp = _parse_utc(lic["expires_at"])
-                    if datetime.now(timezone.utc) > exp:
-                        # 到期：不再视为会员，但仍允许免费版激活绑定本机
-                        is_member = False
-                except ValueError:
-                    pass
+            is_member = _has_active_membership(conn, user["id"])
 
             # 免费版账号（无授权/到期）也能激活绑定本机，走免费版限制；会员才签发授权码
             machine_limit = int(lic["machine_limit"] or config.DEFAULT_MACHINE_LIMIT) if lic else config.DEFAULT_MACHINE_LIMIT
@@ -645,6 +987,7 @@ def create_app():
                     "VALUES (?, ?, ?, ?)",
                     (user["id"], machine_id, _now(), _now()),
                 )
+            _qualify_invite(conn, user["id"], machine_id)
             conn.commit()
             code = _sign_for(user, machine_id, lic) if is_member else ""
             return jsonify(
@@ -672,11 +1015,11 @@ def create_app():
                 account = dict(row)
                 # 邀请关系：谁通过该账号邀请码注册的（被邀请人列表）
                 invitees = conn.execute(
-                    "SELECT a.username FROM invites i JOIN accounts a ON a.id = i.invitee_account_id "
+                    "SELECT a.username, i.status, i.qualified_at FROM invites i JOIN accounts a ON a.id = i.invitee_account_id "
                     "WHERE i.inviter_id = ? ORDER BY i.created_at",
                     (account["id"],),
                 ).fetchall()
-                invitee_names = [r["username"] for r in invitees]
+                invitee_items = [dict(r) for r in invitees]
                 # 该账号是被谁邀请的
                 inviter_name = ""
                 if account.get("inviter_id"):
@@ -690,12 +1033,94 @@ def create_app():
                         "account": account,
                         "license": _license_status_for(account),
                         "invite_code": account.get("invite_code", ""),
-                        "invitees": invitee_names,
+                        "invitees": invitee_items,
                         "invited_by": inviter_name,
-                        "invite_count": len(invitee_names),
+                        "invite_count": len(invitee_items),
+                        "invite_qualified_count": sum(1 for item in invitee_items if item.get("status") == "qualified"),
                     }
                 )
             return jsonify({"ok": True, "accounts": result})
+        finally:
+            conn.close()
+
+    @app.post("/api/admin/product-config")
+    def admin_product_config():
+        admin = _require_admin()
+        if not admin:
+            return _error("需要管理员权限", 403)
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return _error("配置格式不正确")
+        product = _save_product_config(data.get("product") or data, admin["id"])
+        return jsonify({"ok": True, "product": product})
+
+    @app.get("/api/admin/errors")
+    def admin_errors():
+        if not _require_admin():
+            return _error("需要管理员权限", 403)
+        try:
+            limit = max(1, min(200, int(request.args.get("limit") or 100)))
+        except (TypeError, ValueError):
+            limit = 100
+        resolved = str(request.args.get("resolved") or "").strip()
+        query = str(request.args.get("q") or "").strip()[:100]
+        clauses = []
+        params = []
+        if resolved in {"0", "1"}:
+            clauses.append("e.resolved = ?")
+            params.append(int(resolved))
+        if query:
+            clauses.append("(e.message LIKE ? OR e.error_type LIKE ? OR e.source LIKE ? OR a.username LIKE ?)")
+            like = f"%{query}%"
+            params.extend([like, like, like, like])
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        conn = db.connect()
+        try:
+            rows = conn.execute(
+                "SELECT e.*, COALESCE(a.username, '') AS username FROM client_error_logs e "
+                "LEFT JOIN accounts a ON a.id = e.account_id" + where +
+                " ORDER BY e.id DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+            errors = []
+            for row in rows:
+                item = dict(row)
+                try:
+                    item["context"] = json.loads(item.pop("context_json") or "{}")
+                except (TypeError, ValueError):
+                    item["context"] = {}
+                if item.get("machine_id"):
+                    item["machine_id"] = str(item["machine_id"])[:12]
+                item.pop("request_ip", None)
+                errors.append(item)
+            summary = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN resolved = 0 THEN 1 ELSE 0 END) AS unresolved, "
+                "SUM(CASE WHEN severity = 'critical' AND resolved = 0 THEN 1 ELSE 0 END) AS critical "
+                "FROM client_error_logs"
+            ).fetchone()
+            return jsonify({"ok": True, "errors": errors, "summary": dict(summary)})
+        finally:
+            conn.close()
+
+    @app.post("/api/admin/errors/<int:error_id>/resolve")
+    def admin_resolve_error(error_id):
+        if not _require_admin():
+            return _error("需要管理员权限", 403)
+        data = request.get_json(silent=True) or {}
+        resolved = 1 if data.get("resolved", True) else 0
+        note = _redact_text(data.get("note"), 1000)
+        conn = db.connect()
+        try:
+            cur = conn.execute(
+                "UPDATE client_error_logs SET resolved = ?, resolved_at = ?, resolution_note = ? "
+                "WHERE id = ?",
+                (resolved, _now() if resolved else "", note, error_id),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                return _error("错误记录不存在", 404)
+            return jsonify({"ok": True})
         finally:
             conn.close()
 
@@ -796,10 +1221,16 @@ def create_app():
             return _error("未登录或登录已过期", 401)
         data = request.get_json(silent=True) or {}
         projects = data.get("projects") if isinstance(data.get("projects"), list) else []
-        if len(projects) > 200:
+        cloud_cfg = _product_config().get("cloud_preview", {})
+        max_projects = int(cloud_cfg.get("max_projects_per_sync") or 200)
+        max_thumbs = int(cloud_cfg.get("max_thumbs_per_project") or 240)
+        max_thumb_b64 = int(cloud_cfg.get("max_thumb_b64") or 600000)
+        if len(projects) > max_projects:
             return _error("单次同步项目数超限")
         conn = db.connect()
         try:
+            if not _cloud_access_allowed(conn, user["id"]):
+                return _error("当前账号未开通云预览权益", 403)
             for proj in projects:
                 code = str(proj.get("project_code") or "").strip()
                 if not code:
@@ -832,11 +1263,13 @@ def create_app():
                 # 缩略图增量同步（photo_name + 模糊缩略图 base64）
                 thumbs = proj.get("thumbs")
                 if isinstance(thumbs, list):
-                    for idx, thumb in enumerate(thumbs[:500]):
+                    synced_names = []
+                    for idx, thumb in enumerate(thumbs[:max_thumbs]):
                         name = str(thumb.get("photo_name") or "").strip()
                         b64 = str(thumb.get("thumb_b64") or "").strip()
-                        if not name or not b64 or len(b64) > 200_000:
+                        if not name or len(name) > 260 or not _valid_thumbnail_b64(b64, max_thumb_b64):
                             continue
+                        synced_names.append(name)
                         texists = conn.execute(
                             "SELECT id FROM cloud_thumbs WHERE project_id = ? AND photo_name = ?",
                             (proj_id, name),
@@ -852,8 +1285,27 @@ def create_app():
                                 "VALUES (?, ?, ?, ?, ?)",
                                 (proj_id, name, b64, idx, _now()),
                             )
+                    if synced_names:
+                        placeholders = ",".join("?" for _ in synced_names)
+                        conn.execute(
+                            f"DELETE FROM cloud_thumbs WHERE project_id = ? AND photo_name NOT IN ({placeholders})",
+                            (proj_id, *synced_names),
+                        )
+                    else:
+                        conn.execute("DELETE FROM cloud_thumbs WHERE project_id = ?", (proj_id,))
+                    conn.execute(
+                        "UPDATE cloud_projects SET thumb_count = ? WHERE id = ?",
+                        (len(synced_names), proj_id),
+                    )
             conn.commit()
-            return jsonify({"ok": True})
+            return jsonify({
+                "ok": True,
+                "limits": {
+                    "max_projects": max_projects,
+                    "max_thumbs_per_project": max_thumbs,
+                    "max_thumb_b64": max_thumb_b64,
+                },
+            })
         finally:
             conn.close()
 
@@ -865,6 +1317,8 @@ def create_app():
             return _error("未登录或登录已过期", 401)
         conn = db.connect()
         try:
+            if not _cloud_access_allowed(conn, user["id"]):
+                return _error("当前账号未开通云预览权益", 403)
             rows = conn.execute(
                 "SELECT id, project_code, project_name, unit_name, part_name, thumb_count, synced_at "
                 "FROM cloud_projects WHERE account_id = ? ORDER BY project_code",
@@ -886,6 +1340,8 @@ def create_app():
         project_id = int(request.args.get("project_id") or 0)
         conn = db.connect()
         try:
+            if not _cloud_access_allowed(conn, user["id"]):
+                return _error("当前账号未开通云预览权益", 403)
             owns = conn.execute(
                 "SELECT id FROM cloud_projects WHERE id = ? AND account_id = ?",
                 (project_id, user["id"]),
@@ -914,6 +1370,8 @@ def create_app():
         project_id = int(data.get("project_id") or 0)
         conn = db.connect()
         try:
+            if not _cloud_access_allowed(conn, user["id"]):
+                return _error("当前账号未开通云预览权益", 403)
             conn.execute(
                 "DELETE FROM cloud_thumbs WHERE project_id = ? AND project_id IN "
                 "(SELECT id FROM cloud_projects WHERE id = ? AND account_id = ?)",

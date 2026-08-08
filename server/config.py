@@ -54,6 +54,46 @@ APP_CODE = "HDYX"
 DEFAULT_MACHINE_LIMIT = 3   # 每账号默认可绑定电脑数
 OFFLINE_GRACE_DAYS = 7      # 客户端离线缓冲天数（客户端侧实现）
 
+# 默认产品策略。管理员可在后台修改并写入 product_settings；客户端会缓存，
+# 因此这些值既是首次部署默认值，也是服务器短暂不可达时的安全兜底。
+DEFAULT_PRODUCT_CONFIG = {
+    "config_version": 1,
+    "pricing": {
+        "monthly_price": 15,
+        "lifetime_price": 169,
+        "price_label": "内测会员价",
+    },
+    "free": {
+        "photo_limit": 300,
+        "watermark_enabled": True,
+        "upload_expiry_enabled": False,
+    },
+    "invite": {
+        "enabled": True,
+        "milestone": 10,
+        "reward_days": 30,
+        "qualification": "activated_unique_device",
+    },
+    "cloud_preview": {
+        "enabled": True,
+        "requires_member": False,
+        "beta_free_access": True,
+        "thumb_max_side": 720,
+        "thumb_quality": 76,
+        "max_thumbs_per_project": 240,
+        "max_projects_per_sync": 200,
+        "max_thumb_b64": 600000,
+    },
+    "logging": {
+        "enabled": True,
+        "max_message": 2000,
+        "max_stack": 12000,
+        "max_context": 8000,
+        "retention_days": 90,
+        "max_records": 5000,
+    },
+}
+
 # 首次启动自动创建管理员（生产环境建议用 CLI 创建后清除环境变量）
 ADMIN_USERNAME = os.environ.get("ALBUM_ADMIN_USER", "")
 ADMIN_PASSWORD = os.environ.get("ALBUM_ADMIN_PASS", "")

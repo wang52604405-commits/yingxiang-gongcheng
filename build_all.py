@@ -17,7 +17,12 @@ from pathlib import Path
 
 USE = Path(__file__).resolve().parent
 ISCC = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
-PRIVATE_KEY = USE / "keys" / "private_key.pem"
+PRIVATE_KEY = Path(
+    os.environ.get(
+        "ALBUM_SIGN_KEY",
+        USE / "服务器访问-工程影像管理平台" / "release_guard_private_key.pem",
+    )
+)
 INSTALLER = USE / "客户可发送安装包-Win10" / "发给客户" / "安装程序.exe"
 DIST_DIR = USE / "dist" / "工程影像管理平台"
 

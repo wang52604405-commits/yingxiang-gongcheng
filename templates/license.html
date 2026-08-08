@@ -173,7 +173,7 @@
         <div class="price"><b>0</b><small>元 / 永久</small></div>
         <div class="desc">适合体验与小额使用</div>
         <ul>
-          <li>最多 300 张照片</li>
+          <li>最多 <span id="freeLimitText">300</span> 张照片</li>
           <li>打印 / 导出带水印</li>
           <li>局域网内完整使用</li>
           <li class="no">无限上传</li>
@@ -184,9 +184,9 @@
       </div>
 
       <div class="plan hot">
-        <div class="flag">限时优惠</div>
+        <div class="flag" id="priceFlag">内测会员价</div>
         <div class="pname">月度会员</div>
-        <div class="price"><span class="oldprice">45 元</span><b>15</b><small>元 / 月</small><span class="save">省 66%</span></div>
+        <div class="price"><b id="monthlyPrice">15</b><small>元 / 月</small></div>
         <div class="desc">无限使用，按月付费灵活</div>
         <ul>
           <li>无限上传照片</li>
@@ -200,7 +200,7 @@
 
       <div class="plan">
         <div class="pname">终身会员</div>
-        <div class="price"><span class="oldprice">499 元</span><b>169</b><small>元 / 一次买断</small><span class="save">省 66%</span></div>
+        <div class="price"><b id="lifetimePrice">169</b><small>元 / 一次买断</small></div>
         <div class="desc">一次付费，永久使用</div>
         <ul>
           <li>无限上传照片</li>
@@ -216,7 +216,7 @@
     <!-- 邀请免费 -->
     <div class="card">
       <h2>邀请好友，免费续期</h2>
-      <p class="sub">把你的邀请码发给好友注册，每邀请 10 人免费使用 1 个月，可循环累积。</p>
+      <p class="sub">好友注册并首次登录软件后才算有效邀请；同一设备重复注册不计入奖励。</p>
       <div class="invite-box">
         <code id="inviteCode">— — — — — — — —</code>
         <div class="meta" id="inviteStatus">登录后查看我的邀请码</div>
@@ -252,11 +252,19 @@
         <label for="regUser">注册账号</label>
         <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
         <label for="regPass">密码</label>
-        <input id="regPass" type="password" placeholder="至少 6 位" autocomplete="new-password">
+        <input id="regPass" type="password" placeholder="至少 8 位，同时包含字母和数字" autocomplete="new-password">
         <label for="regEmail">邮箱（选填，用于找回密码）</label>
         <input id="regEmail" type="email" placeholder="you@example.com">
         <label for="regInvite">邀请码（选填）</label>
         <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
+        <div style="padding:12px;margin-top:12px;border-radius:8px;background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.35);">
+          <strong>登录密码不等于工程删除密码</strong>
+          <p class="sub" style="margin:5px 0 10px;">删除密码仅用于删除照片、单元或工程，只保存不可逆摘要，平台无法显示明文。</p>
+          <label for="regDeletePass">工程删除密码</label>
+          <input id="regDeletePass" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="6~32 位，请勿使用 114405">
+          <label for="regDeletePassConfirm">确认工程删除密码</label>
+          <input id="regDeletePassConfirm" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="再次输入删除密码">
+        </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn primary" id="regBtn">注册</button>
           <button class="btn" id="backLoginBtn">返回登录</button>
@@ -272,7 +280,7 @@
           <button class="btn" id="forgotSendBtn">发送验证码</button>
         </div>
         <label for="forgotPass">新密码</label>
-        <input id="forgotPass" type="password" placeholder="至少 6 位">
+        <input id="forgotPass" type="password" placeholder="至少 8 位，同时包含字母和数字">
         <div class="row" style="margin-top:14px;">
           <button class="btn primary" id="forgotResetBtn">重置密码</button>
           <button class="btn" id="backLoginBtn2">返回登录</button>
@@ -300,12 +308,43 @@
 
   <script>
     const $ = (selector) => document.querySelector(selector);
+    let productConfig = {};
+
+    function reportError(message, context = {}, stack = "", severity = "error") {
+      fetch("/api/client-error", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "license_page", message, context, stack, severity, page: location.pathname }),
+        keepalive: true
+      }).catch(() => {});
+    }
+    window.addEventListener("error", (event) => reportError(event.message, {
+      filename: String(event.filename || "").split(/[\\/]/).pop(), line: event.lineno, column: event.colno
+    }, event.error?.stack || ""));
+    window.addEventListener("unhandledrejection", (event) => reportError(event.reason?.message || String(event.reason || "未处理的异步错误"), { kind: "unhandledrejection" }, event.reason?.stack || ""));
 
     async function apiJson(url, options = {}) {
-      const response = await fetch(url, options);
+      let response;
+      try { response = await fetch(url, options); }
+      catch (error) {
+        reportError(error.message || "网络请求失败", { url, method: options.method || "GET" }, error.stack || "", "warning");
+        throw error;
+      }
       const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.ok === false) throw new Error(data.error || "请求失败");
+      if (!response.ok || data.ok === false) {
+        if (url !== "/api/client-error") reportError(data.error || `HTTP ${response.status}`, { url, method: options.method || "GET", status: response.status }, "", response.status >= 500 ? "error" : "warning");
+        throw new Error(data.error || "请求失败");
+      }
       return data;
+    }
+
+    async function loadProduct() {
+      const data = await apiJson("/api/cloud/product-config");
+      productConfig = data.product || {};
+      const pricing = productConfig.pricing || {}, free = productConfig.free || {};
+      $("#monthlyPrice").textContent = pricing.monthly_price || 15;
+      $("#lifetimePrice").textContent = pricing.lifetime_price || 169;
+      $("#freeLimitText").textContent = free.photo_limit || 300;
+      $("#priceFlag").textContent = pricing.price_label || "内测会员价";
     }
 
     function showNotice(message, isError = false) {
@@ -329,9 +368,8 @@
         highlightPlan(1);
       } else {
         $("#statusBadge").className = "badge free";
-        $("#statusBadge").textContent = status.trial_active
-          ? `免费版 · 试用剩余 ${status.trial_remaining || 0} 天`
-          : "免费版 · 试用已到期";
+        $("#statusBadge").textContent = status.free_forever ? "免费版 · 永久" : "免费版";
+        $("#status").textContent = `免费版永久免费，已使用 ${status.photo_count || 0} / ${status.free_photo_limit || 300} 张；打印和导出带水印。`;
         highlightPlan(0);
       }
     }
@@ -352,12 +390,12 @@
     function renderCloud(data) {
       const el = $("#cloudStatus");
       if (data.logged_in) {
-        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用，无水印）" : "免费版（300 张照片，打印/导出带水印）"}`;
+        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用，无水印）" : `免费版（${productConfig.free?.photo_limit || 300} 张照片，打印/导出带水印）`}`;
         $("#accountLoginForm").style.display = "block";
         $("#cloudLogoutBtn").style.display = "inline-block";
         $("#showRegBtn").style.display = "none";
       } else {
-        el.textContent = "未登录（当前为免费版：300 张照片，打印/导出带水印）";
+        el.textContent = `未登录（当前为免费版：${productConfig.free?.photo_limit || 300} 张照片，打印/导出带水印）`;
         $("#accountLoginForm").style.display = "block";
         $("#cloudLogoutBtn").style.display = "none";
         $("#showRegBtn").style.display = "inline-block";
@@ -367,9 +405,11 @@
         apiJson("/api/cloud/invite-status").then((inv) => {
           if (inv.ok) {
             $("#inviteCode").textContent = inv.invite_code || "—";
-            const remain = Math.max(0, inv.milestone - (inv.registered_count % inv.milestone));
-            $("#inviteStatus").textContent = `已邀请 ${inv.registered_count} 人｜已获 ${inv.reward_months} 个月｜再邀 ${remain} 人续 1 个月`;
-            const pct = Math.min(100, (inv.registered_count % inv.milestone) / inv.milestone * 100);
+            const qualified = Number(inv.qualified_count || 0);
+            const pending = Number(inv.pending_count || 0);
+            const remain = Math.max(0, inv.milestone - (qualified % inv.milestone));
+            $("#inviteStatus").textContent = `有效 ${qualified} 人｜待确认 ${pending} 人｜已获 ${inv.reward_months} 个月｜还差 ${remain} 人`;
+            const pct = Math.min(100, (qualified % inv.milestone) / inv.milestone * 100);
             $("#inviteProgress").style.width = pct + "%";
           }
         }).catch(() => {});
@@ -456,15 +496,19 @@
       const password = $("#regPass").value;
       const email = $("#regEmail").value.trim();
       const inviteCode = $("#regInvite").value.trim();
+      const deletePassword = $("#regDeletePass").value;
+      const deletePasswordConfirm = $("#regDeletePassConfirm").value;
       if (!username || !password) { showNotice("请填写账号和密码。", true); return; }
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) { showNotice("登录密码至少 8 位，并同时包含字母和数字。", true); return; }
+      if (deletePassword.length < 6 || deletePassword !== deletePasswordConfirm) { showNotice("请设置工程删除密码，并确保两次输入一致。", true); return; }
       try {
         const data = await apiJson("/api/cloud/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, invite_code: inviteCode, email })
+          body: JSON.stringify({ username, password, invite_code: inviteCode, email, delete_password: deletePassword, delete_password_confirm: deletePasswordConfirm })
         });
         $("#regUser").value = ""; $("#regPass").value = ""; $("#regInvite").value = "";
-        showNotice(`注册成功！你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
+        showNotice(`注册成功，工程删除密码已安全保存，请牢记。你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
       } catch (error) { showNotice(error.message, true); }
     });
 
@@ -510,14 +554,14 @@
 
     // ---- 开通会员按钮（引导联系管理员）----
     $("#monthlyBtn").addEventListener("click", () => {
-      showNotice("请截图本页面（含机器 ID），联系管理员 / 作者开通月度会员（15 元/月）。", false);
+      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通月度会员（${productConfig.pricing?.monthly_price || 15} 元/月，内测会员价）。`, false);
     });
     $("#lifetimeBtn").addEventListener("click", () => {
-      showNotice("请截图本页面（含机器 ID），联系管理员 / 作者开通终身会员（169 元一次买断）。", false);
+      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通终身会员（${productConfig.pricing?.lifetime_price || 169} 元一次买断，内测会员价）。`, false);
     });
     $("#freeCurrentBtn").disabled = true;
 
-    Promise.all([refreshStatus(), refreshCloud()]).catch(() => {});
+    loadProduct().then(() => Promise.all([refreshStatus(), refreshCloud()])).catch(() => {});
   </script>
 </body>
 </html>

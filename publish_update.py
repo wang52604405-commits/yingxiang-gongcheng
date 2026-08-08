@@ -17,6 +17,7 @@ note（客户看到的更新说明）来源：
 from __future__ import annotations
 
 import os
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -25,10 +26,14 @@ from pathlib import Path
 
 import build_all  # 复用 step1-4
 
-SSH_KEY = Path.home() / ".ssh" / "id_ed25519_album"
-SERVER_HOST = "root@47.95.221.66"
+SSH_KEY = Path(os.environ.get(
+    "ALBUM_SSH_KEY",
+    build_all.USE / "服务器访问-工程影像管理平台" / "server_key",
+))
+SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_UPDATES = "/var/www/updates"
 REMOTE_EXE_NAME = "工程影像管理平台-安装程序.exe"
+PUBLIC_UPDATE_BASE = os.environ.get("ALBUM_UPDATE_BASE", "http://47.95.221.66/update").rstrip("/")
 
 INSTALLER = build_all.INSTALLER  # 客户可发送安装包-Win10/发给客户/安装程序.exe
 
@@ -73,9 +78,10 @@ DRY_RUN = os.environ.get("DRY_RUN") == "1"
 
 def upload_installer() -> None:
     """scp 上传本地安装包到服务器（中文文件名）。"""
+    remote_tmp = f"{REMOTE_UPDATES}/.{REMOTE_EXE_NAME}.uploading"
     cmd = ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
            "-i", str(SSH_KEY), str(INSTALLER),
-           f"{SERVER_HOST}:{REMOTE_UPDATES}/{REMOTE_EXE_NAME}"]
+           f"{SERVER_HOST}:{remote_tmp}"]
     print(f"\n[上传] {INSTALLER.name} ({INSTALLER.stat().st_size/1024/1024:.1f} MB)")
     if DRY_RUN:
         print("[DRY_RUN] 跳过上传")
@@ -83,6 +89,12 @@ def upload_installer() -> None:
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if result.returncode != 0:
         raise SystemExit(f"上传失败: {result.stderr}")
+    expected = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
+    remote_hash = ssh_cmd(["sha256sum", remote_tmp]).stdout.split()[0].lower()
+    if remote_hash != expected:
+        ssh_cmd(["rm", "-f", remote_tmp], check=False)
+        raise SystemExit("上传后的安装包 SHA-256 校验失败，已拒绝发布")
+    ssh_cmd(["mv", remote_tmp, f"{REMOTE_UPDATES}/{REMOTE_EXE_NAME}"])
     print(f"[OK] 已上传到 {REMOTE_UPDATES}/{REMOTE_EXE_NAME}")
 
 
@@ -105,8 +117,12 @@ def write_remote_version(new_version: str, note: str) -> None:
     payload = {
         "app": "工程影像管理平台",
         "version": new_version,
-        "url": f"http://47.95.221.66/update/{REMOTE_EXE_NAME}",
+        "url": f"{PUBLIC_UPDATE_BASE}/{REMOTE_EXE_NAME}",
+        "download_url": f"{PUBLIC_UPDATE_BASE}/{REMOTE_EXE_NAME}",
         "note": note,
+        "changelog": [item.strip() for item in note.splitlines() if item.strip()],
+        "sha256": hashlib.sha256(INSTALLER.read_bytes()).hexdigest(),
+        "size": INSTALLER.stat().st_size,
     }
     print(f"[version.json] 将更新为 {new_version}，note: {note!r}")
     if DRY_RUN:
@@ -116,15 +132,18 @@ def write_remote_version(new_version: str, note: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             _json.dump(payload, f, ensure_ascii=False, indent=2)
-        # 备份旧 version.json
+        # 备份旧 version.json，先上传临时文件再原子替换。
         ssh_cmd(["cp", f"{REMOTE_UPDATES}/version.json",
                  f"{REMOTE_UPDATES}/version.json.bak"], check=False)
+        remote_tmp = f"{REMOTE_UPDATES}/.version.json.uploading"
         cmd = ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
                "-i", str(SSH_KEY), tmp,
-               f"{SERVER_HOST}:{REMOTE_UPDATES}/version.json"]
+               f"{SERVER_HOST}:{remote_tmp}"]
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
             raise SystemExit(f"version.json 上传失败: {result.stderr}")
+        ssh_cmd(["mv", remote_tmp, f"{REMOTE_UPDATES}/version.json"])
+        ssh_cmd(["cp", f"{REMOTE_UPDATES}/version.json", "/opt/album-auth/data/version.json"])
     finally:
         os.unlink(tmp)
     print(f"[OK] version.json 已更新 -> {new_version}")
@@ -135,7 +154,7 @@ def verify_remote() -> None:
     import json as _json
     try:
         result = subprocess.run(
-            ["curl", "-s", "-m", "10", "http://47.95.221.66/update/version.json"],
+            ["curl", "-s", "-m", "10", f"{PUBLIC_UPDATE_BASE}/version.json"],
             capture_output=True, text=True, encoding="utf-8")
         data = _json.loads(result.stdout)
         print("\n=== 服务器 version.json 当前内容 ===")

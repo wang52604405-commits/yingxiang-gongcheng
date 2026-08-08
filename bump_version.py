@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import datetime
+import os
 import re
 import sys
 from pathlib import Path
@@ -22,8 +23,11 @@ DESKTOP = USE / "desktop_launcher.py"
 CLOUD = USE / "cloud_client.py"
 ISS = USE / "安装脚本.iss"
 
-SSH_KEY = Path.home() / ".ssh" / "id_ed25519_album"
-SERVER_HOST = "root@47.95.221.66"
+SSH_KEY = Path(os.environ.get(
+    "ALBUM_SSH_KEY",
+    USE / "服务器访问-工程影像管理平台" / "server_key",
+))
+SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_VERSION_JSON = "/var/www/updates/version.json"
 
 VER_RE = re.compile(r"A(\d{8})-(\d+)\.(\d+)")

@@ -11,7 +11,7 @@ Environment="ALBUM_SERVER_PORT=8000"
 Environment="ALBUM_SERVER_DATA=/opt/album-auth/data"
 Environment="ALBUM_SERVER_PRIVATE_KEY=/etc/album-auth/private_key.pem"
 Environment="ALBUM_SERVER_SECRET=请改成强随机字符串"
-ExecStart=/opt/album-auth/venv/bin/gunicorn -w 2 -b 127.0.0.1:8000 "server.app:create_app()"
+ExecStart=/opt/album-auth/venv/bin/gunicorn --no-control-socket -w 2 -b 127.0.0.1:8000 "server.app:create_app()"
 Restart=always
 RestartSec=3
 
