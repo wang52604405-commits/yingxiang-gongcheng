@@ -146,10 +146,6 @@ def verify_remote() -> None:
 
 
 def main() -> int:
-    if not INSTALLER.exists():
-        print(f"[ERR] 缺安装程序: {INSTALLER}")
-        return 1
-
     old_remote = current_remote_version()
     print(f"[信息] 服务器当前版本: {old_remote or '（无）'}")
     print(f"[信息] 本机构建版本: {_local_version()}")
@@ -169,6 +165,11 @@ def main() -> int:
         if not fn():
             print(f"\n[BUILD FAILED] 步骤失败: {name}")
             return 1
+
+    # Inno 生成后再校验安装程序存在
+    if not INSTALLER.exists():
+        print(f"[ERR] 安装程序未生成: {INSTALLER}")
+        return 1
 
     # 上传前备份旧版
     backup = backup_remote_installer()
