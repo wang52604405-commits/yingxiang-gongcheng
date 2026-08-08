@@ -1,4 +1,4 @@
-name: 自动部署到 5088
+name: 自动部署 5088 + 发布客户更新
 
 on:
   push:
@@ -12,14 +12,19 @@ concurrency:
 jobs:
   deploy:
     # 本机自托管 runner（登录时启动的计划任务，以 Administrator 账户运行），
-    # 构建+签名+替换+重启都在本机完成，权限与手动操作一致
+    # 构建+签名+替换+重启+发布安装包都在本机完成，权限与手动操作一致
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 构建并部署
+      - name: 递增版本号
+        shell: powershell
+        run: |
+          python bump_version.py
+
+      - name: 构建并部署 5088
         shell: powershell
         env:
           # 私钥留在本机（E:\use\keys），只以环境变量注入，绝不上传到仓库或 Secrets
@@ -30,3 +35,12 @@ jobs:
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\deploy_prod.ps1
+
+      - name: 发布安装包到更新通道
+        shell: powershell
+        env:
+          # SKIP_BUILD=1：deploy_prod.ps1 已构建 dist 并签名，此处直接打 Inno 安装包
+          SKIP_BUILD: "1"
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          python publish_update.py

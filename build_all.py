@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-USE = Path(r"E:\use")
+USE = Path(__file__).resolve().parent
 ISCC = Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe")
 PRIVATE_KEY = USE / "keys" / "private_key.pem"
 INSTALLER = USE / "客户可发送安装包-Win10" / "发给客户" / "安装程序.exe"

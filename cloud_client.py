@@ -22,7 +22,7 @@ CLOUD_CONFIG_NAME = "cloud_config.json"
 CLOUD_ACCOUNT_NAME = "cloud_account.json"
 DEFAULT_SERVER_URL = "https://api.example.com"  # 部署后改为你的域名
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260807-2.13"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260808-2.14"  # 与桌面启动器版本一致，用于检查更新
 
 
 def _get_json(url):
