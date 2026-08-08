@@ -15,6 +15,12 @@ jobs:
     # 构建+签名+替换+重启+发布安装包都在本机完成，权限与手动操作一致
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
+    env:
+      # 本机走代理才能访问 GitHub（Clash 7897），checkout 也要用代理
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
