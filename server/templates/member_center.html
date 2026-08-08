@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>会员中心 - 工程影像管理平台</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel2: #1c2230;
+      --line: #2d3748;
+      --text: #f0f6fc;
+      --muted: #8b949e;
+      --accent: #2f81f7;
+      --accent2: #58a6ff;
+      --green: #3fb950;
+      --gold: #d29922;
+      --red: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 500px at 50% -100px, rgba(47,129,247,.14), transparent 60%),
+        radial-gradient(900px 400px at 90% 110%, rgba(63,185,80,.08), transparent 60%),
+        var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    .hero { text-align: center; margin-bottom: 26px; }
+    .hero .logo {
+      width: 56px; height: 56px; margin: 0 auto 14px;
+      display: grid; place-items: center; border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), #1158c7);
+      font-size: 26px; font-weight: 800; color: #fff;
+      box-shadow: 0 8px 24px rgba(47,129,247,.35);
+    }
+    .hero h1 { margin: 0; font-size: 24px; }
+    .hero p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+    .btn {
+      padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
+      font-weight: 700; cursor: pointer; transition: all .15s;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: #3b8af5; }
+    .btn.danger { color: var(--red); }
+    .btn.danger:hover { border-color: var(--red); }
+
+    .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .plan {
+      position: relative; display: flex; flex-direction: column;
+      padding: 22px 20px; border: 1px solid var(--line); border-radius: 14px;
+      background: var(--panel); transition: transform .15s, border-color .15s;
+    }
+    .plan:hover { transform: translateY(-3px); border-color: #3d4b61; }
+    .plan.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 12px 32px rgba(47,129,247,.18); }
+    .plan .flag {
+      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+      padding: 3px 12px; border-radius: 999px; font-size: 11px; font-weight: 800;
+      background: var(--accent); color: #fff; white-space: nowrap;
+    }
+    .plan .pname { font-size: 15px; font-weight: 800; }
+    .plan .price { margin: 12px 0 4px; }
+    .plan .price b { font-size: 32px; letter-spacing: -.5px; }
+    .plan .price small { color: var(--muted); font-size: 13px; margin-left: 4px; }
+    .plan .oldprice { display: inline-block; color: var(--muted); font-size: 13px; text-decoration: line-through; margin-right: 6px; }
+    .plan .save { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(210,153,34,.15); color: var(--gold); font-size: 11px; font-weight: 800; margin-left: 6px; }
+    .plan .desc { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+    .plan ul { margin: 0; padding: 0; list-style: none; flex: 1; }
+    .plan li { position: relative; padding: 4px 0 4px 22px; font-size: 13px; color: #c9d1d9; }
+    .plan li::before { content: "✓"; position: absolute; left: 2px; color: var(--green); font-weight: 800; }
+    .plan li.no::before { content: "✕"; color: var(--red); }
+    .plan li.no { color: #6e7681; }
+    .plan .btn { margin-top: 16px; width: 100%; text-align: center; }
+
+    .card {
+      padding: 20px; margin-bottom: 16px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    }
+    .card h2 { margin: 0 0 6px; font-size: 16px; }
+    .card .sub { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+    label { display: block; margin: 12px 0 6px; color: #c9d1d9; font-size: 13px; font-weight: 700; }
+    input {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg); color: var(--text); font: inherit; outline: none;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,129,247,.15); }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+
+    .invite-box { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .invite-box code {
+      padding: 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
+      background: rgba(47,129,247,.08); color: var(--accent2); font-size: 18px;
+      font-weight: 800; letter-spacing: 2px;
+    }
+    .invite-box .meta { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .progress { flex: 1; min-width: 160px; height: 8px; border-radius: 999px; background: #2d3748; overflow: hidden; }
+    .progress i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--green)); }
+
+    .notice { display: none; margin-top: 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+    .notice.show { display: block; }
+    .notice.ok { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+    .notice.err { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+    .section-title { display: flex; align-items: center; gap: 8px; margin: 24px 0 12px; color: #c9d1d9; font-weight: 800; font-size: 14px; }
+    .section-title::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .link { color: var(--accent2); cursor: pointer; font-size: 13px; }
+    .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 22px; background: #151f2b; border-bottom: 1px solid #22303f; }
+    .spacer { flex: 1; }
+    .terms { margin-top: 18px; text-align: center; color: #6e7681; font-size: 12px; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div style="font-weight:800">工程影像管理平台</div>
+    <div class="spacer"></div>
+    <span id="whoami" style="font-size:13px;color:var(--muted)"></span>
+    <button class="btn danger" id="logoutBtn" style="display:none">退出登录</button>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <div class="logo">影</div>
+      <h1>工程影像管理平台 · 会员中心</h1>
+      <p>按需选择会员，解锁无限上传与无水印导出 · 邀请好友注册，还能免费续期</p>
+    </div>
+
+    <!-- 定价卡片 -->
+    <div class="plans">
+      <div class="plan">
+        <div class="pname">免费版</div>
+        <div class="price"><b>0</b><small>元 / 永久</small></div>
+        <div class="desc">适合体验与小额使用</div>
+        <ul>
+          <li>最多 300 张照片</li>
+          <li>打印 / 导出带水印</li>
+          <li>局域网内完整使用</li>
+          <li class="no">无限上传</li>
+          <li class="no">无水印导出</li>
+          <li class="no">远程云预览</li>
+        </ul>
+        <button class="btn" id="freeBtn">联系开通</button>
+      </div>
+
+      <div class="plan hot">
+        <div class="flag">限时优惠</div>
+        <div class="pname">月度会员</div>
+        <div class="price"><span class="oldprice">45 元</span><b>15</b><small>元 / 月</small><span class="save">省 66%</span></div>
+        <div class="desc">无限使用，按月付费灵活</div>
+        <ul>
+          <li>无限上传照片</li>
+          <li>打印 / 导出无水印</li>
+          <li>局域网内完整使用</li>
+          <li>远程云预览</li>
+          <li class="no">永久有效</li>
+        </ul>
+        <button class="btn primary" id="monthlyBtn">开通月度会员</button>
+      </div>
+
+      <div class="plan">
+        <div class="pname">终身会员</div>
+        <div class="price"><span class="oldprice">499 元</span><b>169</b><small>元 / 一次买断</small><span class="save">省 66%</span></div>
+        <div class="desc">一次付费，永久使用</div>
+        <ul>
+          <li>无限上传照片</li>
+          <li>打印 / 导出无水印</li>
+          <li>局域网内完整使用</li>
+          <li>远程云预览</li>
+          <li>永久有效</li>
+        </ul>
+        <button class="btn primary" id="lifetimeBtn">开通终身会员</button>
+      </div>
+    </div>
+
+    <!-- 邀请免费 -->
+    <div class="card">
+      <h2>邀请好友，免费续期</h2>
+      <p class="sub">把你的邀请码发给好友注册，每邀请 10 人免费使用 1 个月，可循环累积。</p>
+      <div class="invite-box">
+        <code id="inviteCode">— — — — — — — —</code>
+        <div class="meta" id="inviteStatus">登录后查看我的邀请码</div>
+        <div class="progress"><i id="inviteProgress" style="width:0%"></i></div>
+      </div>
+    </div>
+
+    <!-- 账号 -->
+    <div class="section-title">账号</div>
+    <div class="card">
+      <div id="accountLoginForm">
+        <div class="grid2">
+          <div>
+            <label for="cloudUser">账号</label>
+            <input id="cloudUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+          </div>
+          <div>
+            <label for="cloudPass">密码</label>
+            <input id="cloudPass" type="password" placeholder="密码" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="cloudLoginBtn">登录</button>
+          <button class="btn" id="showRegBtn">没有账号？去注册</button>
+        </div>
+      </div>
+
+      <div id="accountRegForm" style="display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
+        <label for="regUser">注册账号</label>
+        <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <label for="regPass">密码</label>
+        <input id="regPass" type="password" placeholder="至少 6 位" autocomplete="new-password">
+        <label for="regInvite">邀请码（选填）</label>
+        <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
+        <div class="row">
+          <button class="btn primary" id="regBtn">注册</button>
+          <button class="btn" id="backLoginBtn">返回登录</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 云预览入口 -->
+    <div class="section-title">远程查看</div>
+    <div class="card">
+      <p class="sub">在外面（公网）查看自己项目的缩略图和编号，账号隔离。</p>
+      <button class="btn primary" id="previewBtn">进入云预览查看项目</button>
+    </div>
+
+    <div id="notice" class="notice"></div>
+    <div class="terms">
+      使用声明：本软件仅限项目部内部试用和授权使用。<br>
+      禁止复制传播、反编译、破解限制或二次销售。
+    </div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let token = localStorage.getItem("album_cloud_token") || "";
+    let username = localStorage.getItem("album_cloud_user") || "";
+
+    async function api(url, opts = {}) {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const resp = await fetch(url, { ...opts, headers });
+      let data;
+      try { data = await resp.json(); } catch (e) { data = { ok: false, error: "服务器响应异常" }; }
+      return data;
+    }
+
+    function notice(msg, isErr = false) {
+      const box = $("#notice");
+      box.textContent = msg;
+      box.className = "notice show " + (isErr ? "err" : "ok");
+      box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    async function refreshCloud() {
+      const data = await api("/api/me");
+      if (data.ok) {
+        username = (data.account && data.account.username) || username;
+        localStorage.setItem("album_cloud_token", token);
+        localStorage.setItem("album_cloud_user", username);
+        $("#whoami").textContent = "已登录：" + username;
+        $("#logoutBtn").style.display = "inline-block";
+        $("#accountLoginForm").style.display = "none";
+        loadInvite();
+      } else {
+        $("#whoami").textContent = "";
+        $("#logoutBtn").style.display = "none";
+        $("#accountLoginForm").style.display = "block";
+      }
+    }
+
+    async function loadInvite() {
+      const inv = await api("/api/invite-status");
+      if (inv.ok) {
+        $("#inviteCode").textContent = inv.invite_code || "—";
+        const remain = Math.max(0, inv.milestone - (inv.registered_count % inv.milestone));
+        $("#inviteStatus").textContent = `已邀请 ${inv.registered_count} 人｜已获 ${inv.reward_months} 个月｜再邀 ${remain} 人续 1 个月`;
+        $("#inviteProgress").style.width = Math.min(100, (inv.registered_count % inv.milestone) / inv.milestone * 100) + "%";
+      }
+    }
+
+    $("#cloudLoginBtn").addEventListener("click", async () => {
+      const d = await api("/api/login", { method: "POST", body: JSON.stringify({
+        username: $("#cloudUser").value.trim(), password: $("#cloudPass").value }) });
+      if (!d.ok) { notice(d.error || "登录失败", true); return; }
+      token = d.token; username = d.account.username;
+      localStorage.setItem("album_cloud_token", token);
+      localStorage.setItem("album_cloud_user", username);
+      $("#cloudUser").value = ""; $("#cloudPass").value = "";
+      notice("登录成功");
+      refreshCloud();
+    });
+
+    $("#showRegBtn").addEventListener("click", () => {
+      $("#accountLoginForm").style.display = "none";
+      $("#accountRegForm").style.display = "block";
+    });
+    $("#backLoginBtn").addEventListener("click", () => {
+      $("#accountRegForm").style.display = "none";
+      $("#accountLoginForm").style.display = "block";
+    });
+
+    $("#regBtn").addEventListener("click", async () => {
+      const payload = { username: $("#regUser").value.trim(), password: $("#regPass").value };
+      const inv = $("#regInvite").value.trim();
+      if (inv) payload.invite_code = inv;
+      const d = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
+      notice(d.ok ? "注册成功，请登录" : (d.error || "注册失败"), !d.ok);
+      if (d.ok) {
+        $("#accountRegForm").style.display = "none";
+        $("#accountLoginForm").style.display = "block";
+        $("#cloudUser").value = payload.username;
+      }
+    });
+
+    $("#logoutBtn").addEventListener("click", () => {
+      token = ""; localStorage.removeItem("album_cloud_token"); localStorage.removeItem("album_cloud_user");
+      location.reload();
+    });
+
+    // 开通会员 / 免费：引导联系管理员
+    $("#monthlyBtn").addEventListener("click", () => notice("请联系管理员 / 作者开通月度会员（15 元/月）。请提供账号： " + (username || "未登录")));
+    $("#lifetimeBtn").addEventListener("click", () => notice("请联系管理员 / 作者开通终身会员（169 元一次买断）。请提供账号： " + (username || "未登录")));
+    $("#freeBtn").addEventListener("click", () => notice("免费版无需开通，直接注册使用（300 张照片，打印/导出带水印）。"));
+
+    // 云预览入口
+    $("#previewBtn").addEventListener("click", async () => {
+      if (!token) { notice("请先登录", true); return; }
+      const d = await api("/api/cloud/projects");
+      if (!d.ok) { notice(d.error || "加载失败", true); return; }
+      // 跳转到云预览查看页（带 token）
+      window.location.href = "/cloud-preview?token=" + encodeURIComponent(token);
+    });
+
+    refreshCloud();
+  </script>
+</body>
+</html>

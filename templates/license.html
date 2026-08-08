@@ -3,193 +3,281 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>软件授权 - 工程影像管理平台</title>
+  <title>会员中心 - 工程影像管理平台</title>
   <style>
     :root {
-      --bg: #eef3f7;
-      --panel: #ffffff;
-      --line: #d5e1eb;
-      --text: #162131;
-      --muted: #627487;
-      --primary: #116fa6;
-      --danger: #bd2a20;
-      --shadow: 0 18px 42px rgba(20, 43, 66, .14);
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel2: #1c2230;
+      --line: #2d3748;
+      --text: #f0f6fc;
+      --muted: #8b949e;
+      --accent: #2f81f7;
+      --accent2: #58a6ff;
+      --green: #3fb950;
+      --gold: #d29922;
+      --red: #f85149;
     }
     * { box-sizing: border-box; }
     body {
-      min-height: 100vh;
       margin: 0;
-      display: grid;
-      place-items: center;
-      padding: 24px;
+      min-height: 100vh;
       color: var(--text);
-      background: linear-gradient(180deg, #eaf2f7 0, #f7fafc 280px, var(--bg) 100%);
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background:
+        radial-gradient(1200px 500px at 50% -100px, rgba(47,129,247,.14), transparent 60%),
+        radial-gradient(900px 400px at 90% 110%, rgba(63,185,80,.08), transparent 60%),
+        var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
     }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    /* 顶部 */
+    .hero { text-align: center; margin-bottom: 26px; }
+    .hero .logo {
+      width: 56px; height: 56px; margin: 0 auto 14px;
+      display: grid; place-items: center; border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), #1158c7);
+      font-size: 26px; font-weight: 800; color: #fff;
+      box-shadow: 0 8px 24px rgba(47,129,247,.35);
+    }
+    .hero h1 { margin: 0; font-size: 24px; letter-spacing: .5px; }
+    .hero p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+
+    /* 状态条 */
+    .statusbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+      padding: 14px 18px; margin-bottom: 26px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    }
+    .statusbar .machine {
+      flex: 1; min-width: 200px; font-family: Consolas, monospace; font-size: 13px;
+      color: var(--accent2); word-break: break-all;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    }
+    .badge.free { background: rgba(139,148,158,.15); color: var(--muted); }
+    .badge.member { background: rgba(47,129,247,.15); color: var(--accent2); }
+    .badge.lifetime { background: rgba(210,153,34,.15); color: var(--gold); }
+    .btn {
+      padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
+      font-weight: 700; cursor: pointer; transition: all .15s;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: #3b8af5; }
+    .btn.danger { color: var(--red); }
+    .btn.danger:hover { border-color: var(--red); }
+
+    /* 定价卡片 */
+    .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 26px; }
+    .plan {
+      position: relative; display: flex; flex-direction: column;
+      padding: 22px 20px; border: 1px solid var(--line); border-radius: 14px;
+      background: var(--panel); transition: transform .15s, border-color .15s;
+    }
+    .plan:hover { transform: translateY(-3px); border-color: #3d4b61; }
+    .plan.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 12px 32px rgba(47,129,247,.18); }
+    .plan.current { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+    .plan.current .pname::after { content: "（当前）"; color: var(--green); font-size: 12px; font-weight: 700; margin-left: 6px; }
+    .plan .flag {
+      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+      padding: 3px 12px; border-radius: 999px; font-size: 11px; font-weight: 800;
+      background: var(--accent); color: #fff; white-space: nowrap;
+    }
+    .plan.hot .flag { background: var(--accent); }
+    .plan .pname { font-size: 15px; font-weight: 800; }
+    .plan .price { margin: 12px 0 4px; }
+    .plan .price b { font-size: 32px; letter-spacing: -.5px; }
+    .plan .price small { color: var(--muted); font-size: 13px; margin-left: 4px; }
+    .plan .oldprice { display: inline-block; color: var(--muted); font-size: 13px; text-decoration: line-through; margin-right: 6px; }
+    .plan .save { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(210,153,34,.15); color: var(--gold); font-size: 11px; font-weight: 800; margin-left: 6px; }
+    .plan .desc { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+    .plan ul { margin: 0; padding: 0; list-style: none; flex: 1; }
+    .plan li {
+      position: relative; padding: 4px 0 4px 22px; font-size: 13px; color: #c9d1d9;
+    }
+    .plan li::before {
+      content: "✓"; position: absolute; left: 2px; color: var(--green); font-weight: 800;
+    }
+    .plan li.no::before { content: "✕"; color: var(--red); }
+    .plan li.no { color: #6e7681; }
+    .plan .btn { margin-top: 16px; width: 100%; text-align: center; }
+
+    /* 区块卡片 */
     .card {
-      width: min(100%, 560px);
-      padding: 24px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .96);
-      box-shadow: var(--shadow);
+      padding: 20px; margin-bottom: 16px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
     }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
-    .brand-mark {
-      width: 36px;
-      height: 36px;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      color: #fff;
-      background: var(--primary);
-      font-weight: 800;
-    }
-    h1 { margin: 0; font-size: 22px; }
-    p { margin: 8px 0 0; color: var(--muted); line-height: 1.65; }
-    label { display: grid; gap: 7px; margin-top: 16px; color: #526a7e; font-size: 13px; font-weight: 700; }
+    .card h2 { margin: 0 0 6px; font-size: 16px; }
+    .card .sub { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .row:last-child { margin-bottom: 0; }
+    label { display: block; margin: 12px 0 6px; color: #c9d1d9; font-size: 13px; font-weight: 700; }
     input, textarea {
-      width: 100%;
-      min-height: 40px;
-      padding: 9px 11px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      font: inherit;
-      outline: none;
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--bg); color: var(--text); font: inherit; outline: none;
     }
-    textarea {
-      min-height: 120px;
-      resize: vertical;
-      font-family: Consolas, "SFMono-Regular", monospace;
-      font-size: 12px;
+    input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,129,247,.15); }
+    textarea { min-height: 90px; resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+
+    /* 邀请进度 */
+    .invite-box { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    .invite-box code {
+      padding: 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
+      background: rgba(47,129,247,.08); color: var(--accent2); font-size: 18px;
+      font-weight: 800; letter-spacing: 2px;
     }
-    input:focus, textarea:focus {
-      border-color: #78b8df;
-      box-shadow: 0 0 0 3px rgba(17, 111, 166, .12);
-    }
-    .machine {
-      margin-top: 16px;
-      padding: 12px;
-      border: 1px dashed #b9cde0;
-      border-radius: 8px;
-      background: #fbfdff;
-      color: #084c76;
-      font-family: Consolas, "SFMono-Regular", monospace;
-      font-size: 18px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-    button {
-      min-height: 40px;
-      padding: 9px 14px;
-      border: 1px solid rgba(17, 111, 166, .22);
-      border-radius: 8px;
-      color: #fff;
-      background: var(--primary);
-      font: inherit;
-      font-weight: 800;
-      cursor: pointer;
-    }
-    button.secondary { color: #12344d; background: #fff; border-color: #c4d3df; }
-    .notice {
-      display: none;
-      margin-top: 14px;
-      padding: 10px 12px;
-      border: 1px solid #b9d7ed;
-      border-left: 4px solid var(--primary);
-      border-radius: 8px;
-      color: #0f4f7a;
-      background: #eef7ff;
-      line-height: 1.5;
-    }
-    .notice.error {
-      border-color: #f0b8b2;
-      border-left-color: var(--danger);
-      color: var(--danger);
-      background: #fff5f4;
-    }
-    .status {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
+    .invite-box .meta { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .progress { flex: 1; min-width: 160px; height: 8px; border-radius: 999px; background: #2d3748; overflow: hidden; }
+    .progress i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--green)); }
+
+    .notice { display: none; margin-top: 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+    .notice.show { display: block; }
+    .notice.ok { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+    .notice.err { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
+
     .terms {
-      margin-top: 14px;
-      padding: 10px 12px;
-      border: 1px solid #f0d6a5;
-      border-radius: 8px;
-      color: #8a4b12;
-      background: #fff9ec;
-      font-size: 12px;
-      line-height: 1.65;
+      margin-top: 18px; text-align: center; color: #6e7681; font-size: 12px; line-height: 1.7;
     }
+    .section-title { display: flex; align-items: center; gap: 8px; margin: 24px 0 12px; color: #c9d1d9; font-weight: 800; font-size: 14px; }
+    .section-title::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   </style>
 </head>
 <body>
-  <main class="card">
-    <div class="brand">
-      <div class="brand-mark">影</div>
-      <div>
-        <h1>试用与授权</h1>
-        <p>软件默认提供一个月试用期。需要长期使用时，把本机机器 ID 复制到在线授权中心获取授权码。</p>
+  <div class="wrap">
+
+    <div class="hero">
+      <div class="logo">影</div>
+      <h1>工程影像管理平台 · 会员中心</h1>
+      <p>按需选择会员，解锁无限上传与无水印导出<br>邀请好友注册，还能免费续期</p>
+    </div>
+
+    <!-- 状态条 -->
+    <div class="statusbar">
+      <span class="machine">机器 ID：{{ license_status.machine_id }}</span>
+      <span id="statusBadge" class="badge free">免费版</span>
+      <button class="btn" id="copyMachineBtn">复制机器 ID</button>
+      <button class="btn" id="refreshBtn">刷新</button>
+    </div>
+    <div id="status" class="sub" style="margin:-14px 0 22px;color:var(--muted);font-size:13px;"></div>
+
+    <!-- 定价卡片 -->
+    <div class="plans">
+      <div class="plan">
+        <div class="pname">免费版</div>
+        <div class="price"><b>0</b><small>元 / 永久</small></div>
+        <div class="desc">适合体验与小额使用</div>
+        <ul>
+          <li>最多 300 张照片</li>
+          <li>打印 / 导出带水印</li>
+          <li>局域网内完整使用</li>
+          <li class="no">无限上传</li>
+          <li class="no">无水印导出</li>
+          <li class="no">远程云预览</li>
+        </ul>
+        <button class="btn" id="freeCurrentBtn" disabled>当前版本</button>
+      </div>
+
+      <div class="plan hot">
+        <div class="flag">限时优惠</div>
+        <div class="pname">月度会员</div>
+        <div class="price"><span class="oldprice">45 元</span><b>15</b><small>元 / 月</small><span class="save">省 66%</span></div>
+        <div class="desc">无限使用，按月付费灵活</div>
+        <ul>
+          <li>无限上传照片</li>
+          <li>打印 / 导出无水印</li>
+          <li>局域网内完整使用</li>
+          <li>远程云预览</li>
+          <li class="no">永久有效</li>
+        </ul>
+        <button class="btn primary" id="monthlyBtn">开通月度会员</button>
+      </div>
+
+      <div class="plan">
+        <div class="pname">终身会员</div>
+        <div class="price"><span class="oldprice">499 元</span><b>169</b><small>元 / 一次买断</small><span class="save">省 66%</span></div>
+        <div class="desc">一次付费，永久使用</div>
+        <ul>
+          <li>无限上传照片</li>
+          <li>打印 / 导出无水印</li>
+          <li>局域网内完整使用</li>
+          <li>远程云预览</li>
+          <li>永久有效</li>
+        </ul>
+        <button class="btn primary" id="lifetimeBtn">开通终身会员</button>
       </div>
     </div>
 
-    <label>本机机器 ID</label>
-    <div id="machineId" class="machine">{{ license_status.machine_id }}</div>
-
-    <div class="actions">
-      <button class="secondary" type="button" id="copyMachineBtn">复制机器 ID</button>
-      <a id="onlinePortalBtn" class="link-button secondary" href="https://album-auth-portal.vercel.app" target="_blank" style="display:inline-flex;align-items:center;gap:6px;min-height:38px;padding:8px 14px;border:1px solid rgba(17,111,166,.22);border-radius:8px;color:#12344d;background:#fff;border-color:#c4d3df;font-weight:700;text-decoration:none;font:inherit;">🌐 在线获取授权</a>
-      <button class="secondary" type="button" id="refreshBtn">刷新状态</button>
+    <!-- 邀请免费 -->
+    <div class="card">
+      <h2>邀请好友，免费续期</h2>
+      <p class="sub">把你的邀请码发给好友注册，每邀请 10 人免费使用 1 个月，可循环累积。</p>
+      <div class="invite-box">
+        <code id="inviteCode">— — — — — — — —</code>
+        <div class="meta" id="inviteStatus">登录后查看我的邀请码</div>
+        <div class="progress"><i id="inviteProgress" style="width:0%"></i></div>
+      </div>
     </div>
 
-    <label for="licenseCodeInput">授权码</label>
-    <textarea id="licenseCodeInput" placeholder="把管理员发来的授权码粘贴到这里"></textarea>
-    <div class="actions">
-      <button type="button" id="activateBtn">激活授权</button>
+    <!-- 账号区 -->
+    <div class="section-title">账号</div>
+
+    <div class="card" id="accountCard">
+      <div id="cloudStatus" class="sub" style="margin-bottom:10px;"></div>
+      <div id="accountLoginForm">
+        <div class="grid2">
+          <div>
+            <label for="cloudUser">账号</label>
+            <input id="cloudUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+          </div>
+          <div>
+            <label for="cloudPass">密码</label>
+            <input id="cloudPass" type="password" placeholder="密码" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button class="btn primary" id="cloudLoginBtn">登录</button>
+          <button class="btn" id="showRegBtn">没有账号？去注册</button>
+          <button class="btn danger" id="cloudLogoutBtn" style="display:none;margin-left:auto;">退出登录</button>
+        </div>
+      </div>
+
+      <div id="accountRegForm" style="display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
+        <label for="regUser">注册账号</label>
+        <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <label for="regPass">密码</label>
+        <input id="regPass" type="password" placeholder="至少 6 位" autocomplete="new-password">
+        <label for="regInvite">邀请码（选填）</label>
+        <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
+        <div class="row" style="margin-top:14px;">
+          <button class="btn primary" id="regBtn">注册</button>
+          <button class="btn" id="backLoginBtn">返回登录</button>
+        </div>
+      </div>
     </div>
+
+    <!-- 授权码激活（折叠） -->
+    <div class="section-title">已有授权码</div>
+    <div class="card">
+      <p class="sub">从管理员 / 作者处获得授权码后，粘贴到下方直接激活。</p>
+      <textarea id="licenseCodeInput" placeholder="把管理员发来的授权码粘贴到这里"></textarea>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn primary" id="activateBtn">激活授权</button>
+      </div>
+    </div>
+
     <div id="notice" class="notice"></div>
-    <div id="status" class="status">{{ license_status.message }}{% if license_status.trial_active %} / 试用剩余：{{ license_status.trial_remaining }} 天{% endif %}</div>
 
-    <hr style="border:none;border-top:1px solid var(--line);margin:22px 0 0;">
-    <h2 style="font-size:16px;margin:18px 0 4px;">账号登录激活（推荐）</h2>
-    <p>登录授权账号后自动绑定本机，无需手动粘贴授权码。</p>
-    <div id="cloudStatus" class="status"></div>
-    <div id="inviteStatus" class="status" style="margin-top:6px;"></div>
-    <label for="cloudUser">账号</label>
-    <input id="cloudUser" placeholder="手机号 / QQ / 邮箱">
-    <label for="cloudPass">密码</label>
-    <input id="cloudPass" type="password" placeholder="密码">
-    <div class="actions">
-      <button type="button" id="cloudLoginBtn">登录并激活本机</button>
-      <button class="secondary" type="button" id="cloudLogoutBtn">退出登录</button>
+    <div class="terms">
+      使用声明：本软件仅限项目部内部试用和授权使用。<br>
+      禁止复制传播、反编译、破解限制或二次销售。
     </div>
-
-    <hr style="border:none;border-top:1px solid var(--line);margin:22px 0 0;">
-    <h2 style="font-size:16px;margin:18px 0 4px;">注册账号</h2>
-    <p>用手机号 / QQ / 邮箱注册即得免费版（300张照片，打印/导出带水印）。可填写好友邀请码。</p>
-    <div style="margin:10px 0;padding:10px;background:#f4f8fb;border-radius:8px;">
-      <strong>会员收费标准：</strong><br>
-      ・ 月度会员 <strong>15 元</strong>：无限上传、打印/导出无水印<br>
-      ・ 终身会员 <strong>169 元</strong>：一次买断，永久使用<br>
-      ・ 邀请 <strong>10 人</strong>注册，免费使用 <strong>1 个月</strong>（可循环）<br>
-      <span style="color:#d29922">联系管理员/作者开通会员。</span>
-    </div>
-    <label for="regUser">账号</label>
-    <input id="regUser" placeholder="手机号 / QQ / 邮箱">
-    <label for="regPass">密码</label>
-    <input id="regPass" type="password" placeholder="至少 6 位">
-    <label for="regInvite">邀请码（选填）</label>
-    <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
-    <div class="actions">
-      <button type="button" id="regBtn">注册</button>
-    </div>
-
-    <div class="terms">使用声明：本软件仅限项目部内部试用和授权使用。禁止复制传播、反编译、破解限制或二次销售。</div>
-  </main>
+  </div>
 
   <script>
     const $ = (selector) => document.querySelector(selector);
@@ -204,16 +292,36 @@
     function showNotice(message, isError = false) {
       const box = $("#notice");
       box.textContent = message;
-      box.className = `notice${isError ? " error" : ""}`;
-      box.style.display = "block";
+      box.className = `notice show ${isError ? "err" : "ok"}`;
+      box.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
     function renderStatus(status) {
-      $("#machineId").textContent = status.machine_id || "";
-      const trialText = status.trial_active
-        ? ` / 试用剩余：${status.trial_remaining || 0} 天`
-        : "";
-      $("#status").textContent = `${status.message || ""}${trialText}`;
+      $("#status").textContent = status.message || "";
+      const plans = document.querySelectorAll(".plan");
+      // 高亮当前会员对应卡片
+      if (status.is_lifetime) {
+        $("#statusBadge").className = "badge lifetime";
+        $("#statusBadge").textContent = "终身会员";
+        highlightPlan(2);
+      } else if (status.ok) {
+        $("#statusBadge").className = "badge member";
+        $("#statusBadge").textContent = "会员";
+        highlightPlan(1);
+      } else {
+        $("#statusBadge").className = "badge free";
+        $("#statusBadge").textContent = status.trial_active
+          ? `免费版 · 试用剩余 ${status.trial_remaining || 0} 天`
+          : "免费版 · 试用已到期";
+        highlightPlan(0);
+      }
+    }
+
+    function highlightPlan(index) {
+      const plans = document.querySelectorAll(".plan");
+      plans.forEach((p, i) => {
+        p.classList.toggle("current", i === index);
+      });
     }
 
     async function refreshStatus() {
@@ -222,56 +330,34 @@
       return data.license;
     }
 
-    $("#copyMachineBtn").addEventListener("click", async () => {
-      await navigator.clipboard.writeText($("#machineId").textContent.trim());
-      showNotice("机器 ID 已复制。");
-    });
-
-    $("#refreshBtn").addEventListener("click", () => {
-      refreshStatus().then(() => showNotice("状态已刷新。")).catch((error) => showNotice(error.message, true));
-    });
-
-    $("#activateBtn").addEventListener("click", async () => {
-      const licenseCode = $("#licenseCodeInput").value.trim();
-      if (!licenseCode) {
-        showNotice("请先粘贴授权码。", true);
-        return;
-      }
-      try {
-        const data = await apiJson("/api/license/activate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ license_code: licenseCode })
-        });
-        $("#licenseCodeInput").value = "";
-        renderStatus(data.license);
-        showNotice("授权已激活，可以继续使用。");
-      } catch (error) {
-        showNotice(error.message, true);
-      }
-    });
-
     function renderCloud(data) {
       const el = $("#cloudStatus");
       if (data.logged_in) {
-        const tier = data.is_member ? "会员版（无限使用，无水印）" : "免费版（300张照片，打印/导出带水印）";
-        el.textContent = `已登录：${data.account}（服务器：${data.server}）｜${tier}`;
-        $("#cloudUser").value = "";
-        $("#cloudPass").value = "";
+        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用，无水印）" : "免费版（300 张照片，打印/导出带水印）"}`;
+        $("#accountLoginForm").style.display = "block";
+        $("#cloudLogoutBtn").style.display = "inline-block";
+        $("#showRegBtn").style.display = "none";
       } else {
-        el.textContent = "未登录（当前为免费版：300张照片，打印/导出带水印）";
+        el.textContent = "未登录（当前为免费版：300 张照片，打印/导出带水印）";
+        $("#accountLoginForm").style.display = "block";
+        $("#cloudLogoutBtn").style.display = "none";
+        $("#showRegBtn").style.display = "inline-block";
       }
-      // 已登录时展示邀请码和邀请激励
-      const inviteEl = $("#inviteStatus");
+      // 邀请码
       if (data.logged_in) {
         apiJson("/api/cloud/invite-status").then((inv) => {
           if (inv.ok) {
-            const remain = inv.milestone - (inv.registered_count % inv.milestone);
-            inviteEl.textContent = `我的邀请码：${inv.invite_code}｜已邀请 ${inv.registered_count} 人｜已获 ${inv.reward_months} 个月｜再邀 ${remain} 人续 1 个月`;
+            $("#inviteCode").textContent = inv.invite_code || "—";
+            const remain = Math.max(0, inv.milestone - (inv.registered_count % inv.milestone));
+            $("#inviteStatus").textContent = `已邀请 ${inv.registered_count} 人｜已获 ${inv.reward_months} 个月｜再邀 ${remain} 人续 1 个月`;
+            const pct = Math.min(100, (inv.registered_count % inv.milestone) / inv.milestone * 100);
+            $("#inviteProgress").style.width = pct + "%";
           }
         }).catch(() => {});
       } else {
-        inviteEl.textContent = "";
+        $("#inviteCode").textContent = "— — — — — — — —";
+        $("#inviteStatus").textContent = "登录后查看我的邀请码";
+        $("#inviteProgress").style.width = "0%";
       }
     }
 
@@ -281,63 +367,97 @@
       return data;
     }
 
-    // 注册（免验证码，邀请码选填）
-    $("#regBtn").addEventListener("click", async () => {
-      const username = $("#regUser").value.trim();
-      const password = $("#regPass").value;
-      const inviteCode = $("#regInvite").value.trim();
-      if (!username || !password) {
-        showNotice("请填写账号和密码。", true);
-        return;
-      }
-      try {
-        const data = await apiJson("/api/cloud/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, invite_code: inviteCode })
-        });
-        $("#regUser").value = "";
-        $("#regPass").value = "";
-        $("#regInvite").value = "";
-        showNotice(`注册成功！你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
-      } catch (error) {
-        showNotice(error.message, true);
-      }
+    // ---- 复制机器 ID ----
+    $("#copyMachineBtn").addEventListener("click", async () => {
+      const text = document.querySelector(".statusbar .machine").textContent.replace("机器 ID：", "").trim();
+      await navigator.clipboard.writeText(text);
+      showNotice("机器 ID 已复制。");
     });
 
+    // ---- 刷新 ----
+    $("#refreshBtn").addEventListener("click", () => {
+      Promise.all([refreshStatus(), refreshCloud()])
+        .then(() => showNotice("状态已刷新。"))
+        .catch((error) => showNotice(error.message, true));
+    });
+
+    // ---- 激活授权码 ----
+    $("#activateBtn").addEventListener("click", async () => {
+      const licenseCode = $("#licenseCodeInput").value.trim();
+      if (!licenseCode) { showNotice("请先粘贴授权码。", true); return; }
+      try {
+        const data = await apiJson("/api/license/activate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ license_code: licenseCode })
+        });
+        $("#licenseCodeInput").value = "";
+        renderStatus(data.license);
+        showNotice("授权已激活，可以继续使用。");
+      } catch (error) { showNotice(error.message, true); }
+    });
+
+    // ---- 登录 / 注册切换 ----
+    $("#showRegBtn").addEventListener("click", () => {
+      $("#accountLoginForm").style.display = "none";
+      $("#accountRegForm").style.display = "block";
+    });
+    $("#backLoginBtn").addEventListener("click", () => {
+      $("#accountRegForm").style.display = "none";
+      $("#accountLoginForm").style.display = "block";
+    });
+
+    // ---- 登录 ----
     $("#cloudLoginBtn").addEventListener("click", async () => {
       const username = $("#cloudUser").value.trim();
       const password = $("#cloudPass").value;
-      if (!username || !password) {
-        showNotice("请输入账号和密码。", true);
-        return;
-      }
+      if (!username || !password) { showNotice("请输入账号和密码。", true); return; }
       try {
         await apiJson("/api/cloud/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username, password })
         });
-        const status = await refreshCloud();
-        renderStatus(status.license);
+        const [status, cloud] = await Promise.all([refreshStatus(), refreshCloud()]);
+        renderStatus(status);
         showNotice("登录成功，本机已激活。");
-      } catch (error) {
-        showNotice(error.message, true);
-      }
+      } catch (error) { showNotice(error.message, true); }
     });
 
+    // ---- 退出 ----
     $("#cloudLogoutBtn").addEventListener("click", async () => {
-      try {
-        await apiJson("/api/cloud/logout", { method: "POST" });
-        renderCloud({ logged_in: false });
-        refreshStatus().then(() => showNotice("已退出登录。")).catch(() => {});
-      } catch (error) {
-        showNotice(error.message, true);
-      }
+      try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (e) {}
+      renderCloud({ logged_in: false });
+      refreshStatus().then(() => showNotice("已退出登录。")).catch(() => {});
     });
 
-    refreshCloud().catch(() => {});
+    // ---- 注册 ----
+    $("#regBtn").addEventListener("click", async () => {
+      const username = $("#regUser").value.trim();
+      const password = $("#regPass").value;
+      const inviteCode = $("#regInvite").value.trim();
+      if (!username || !password) { showNotice("请填写账号和密码。", true); return; }
+      try {
+        const data = await apiJson("/api/cloud/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, invite_code: inviteCode })
+        });
+        $("#regUser").value = ""; $("#regPass").value = ""; $("#regInvite").value = "";
+        showNotice(`注册成功！你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
+      } catch (error) { showNotice(error.message, true); }
+    });
 
+    // ---- 开通会员按钮（引导联系管理员）----
+    $("#monthlyBtn").addEventListener("click", () => {
+      showNotice("请截图本页面（含机器 ID），联系管理员 / 作者开通月度会员（15 元/月）。", false);
+    });
+    $("#lifetimeBtn").addEventListener("click", () => {
+      showNotice("请截图本页面（含机器 ID），联系管理员 / 作者开通终身会员（169 元一次买断）。", false);
+    });
+    $("#freeCurrentBtn").disabled = true;
+
+    Promise.all([refreshStatus(), refreshCloud()]).catch(() => {});
   </script>
 </body>
 </html>

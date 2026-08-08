@@ -277,6 +277,10 @@ def create_app():
 
     @app.get("/")
     def index():
+        return render_template("member_center.html")
+
+    @app.get("/cloud-preview")
+    def cloud_preview_page():
         return render_template("cloud.html")
 
     @app.get("/admin")
