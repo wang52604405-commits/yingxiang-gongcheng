@@ -6813,6 +6813,7 @@
               <button class="secondary" type="button" id="printConstructionBtn">施工打印</button>
               <button class="secondary" type="button" id="printSupervisionBtn">监理打印</button>
               <button class="secondary" type="button" id="renumberPhotosBtn">重新编号</button>
+              <button class="secondary" type="button" id="autoSortPilesBtn" style="display:none;">按桩号自动排序</button>
               <button class="secondary" type="button" id="exportUnitStatsBtn">统计表</button>
               <button type="button" id="exportZipBtn">ZIP</button>
               <button class="danger" type="button" id="deleteUnitBtn">删除单元</button>
@@ -9195,6 +9196,7 @@
       $("#unitTitle").textContent = projectName(project);
       $("#unitSub").textContent = projectCode(project);
       renderPhotos();
+      $("#autoSortPilesBtn").style.display = isPileUnitProject() ? "" : "none";
     }
 
     function renderPhotos() {
@@ -9206,12 +9208,14 @@
       host.className = `photo-side photo-sections ${groups.length > 1 ? "is-process-layout" : ""}`;
       host.innerHTML = groups.map((group, groupIndex) => photoCategories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
-        const photos = categoryPhotos(key).filter((photo) => String(photo.process_name || "") === String(group.name || ""));
+        const groupName = String(group.name || "").trim();
+        const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
+        const photos = categoryPhotos(key).filter(processMatches);
         const titlePrefix = group.name ? `${group.code ? group.code + " " : ""}${group.name} · ` : "";
         const sectionKey = photoSectionKey(key, group.name);
         const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
         const constructionPhotos = key === "supervision"
-          ? categoryPhotos("construction").filter((photo) => String(photo.process_name || "") === String(group.name || ""))
+          ? categoryPhotos("construction").filter(processMatches)
           : [];
         const useConstructionBtn = key === "supervision" && !photos.length && constructionPhotos.length
           ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">使用施工照片</button>`
@@ -10018,6 +10022,27 @@
       showNotice("已按当前照片顺序重新编号。");
     }
 
+    function isPileUnitProject() {
+      const p = state.selectedProject || {};
+      return String(p.standard_unit_name || p.project_name || "").includes("灌注桩");
+    }
+
+    async function autoSortPiles() {
+      if (!(await ensureAuthenticated("按桩号自动排序"))) return;
+      if (!window.confirm("将按桩号分组：每根桩的 钻孔、钢筋笼、混凝土 三个工序连体，桩与桩之间按拍摄时间排序，并重新编号。确定继续吗？")) return;
+      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/auto-sort-piles`, { method: "POST" });
+      state.photos = data.photos || [];
+      state.selectedPrintPhotos = {};
+      renderPhotos();
+      const unmatched = data.unmatched || [];
+      if (unmatched.length) {
+        const names = unmatched.slice(0, 5).map((item) => item.title || item.id).join("、");
+        showNotice(`已按桩号+拍摄时间自动排序并重新编号；但有 ${unmatched.length} 张照片题名里没识别到桩号（已排到末尾）：${names}${unmatched.length > 5 ? " 等" : ""}。请检查这些照片的题名。`, true);
+      } else {
+        showNotice("已按桩号+拍摄时间自动排序并重新编号。");
+      }
+    }
+
     async function renumberAllPhotos() {
       if (!(await ensureAuthenticated("整体编号重排"))) return;
       if (!window.confirm("将对当前工程全部单元的照片整体重新编号（施工、监理都按当前顺序重排），确定继续吗？")) return;
@@ -10608,6 +10633,7 @@
     $("#menuPrintConstructionBtn").addEventListener("click", () => openBatchPrint("construction", "print"));
     $("#menuPrintSupervisionBtn").addEventListener("click", () => openBatchPrint("supervision", "print"));
     $("#renumberPhotosBtn").addEventListener("click", () => requireSelected(() => renumberPhotos().catch((error) => showNotice(error.message, true))));
+    $("#autoSortPilesBtn").addEventListener("click", () => requireSelected(() => autoSortPiles().catch((error) => showNotice(error.message, true))));
     $("#renumberAllBtn").addEventListener("click", renumberAllPhotos);
     $("#exportZipBtn").addEventListener("click", exportSelectedZip);
     $("#deleteUnitBtn").addEventListener("click", () => deleteUnit().catch((error) => showNotice(error.message, true)));

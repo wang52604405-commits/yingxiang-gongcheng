@@ -1426,6 +1426,61 @@ class AlbumManager:
             photos[index] = photo
         self._write_metadata(data["project_code"], data)
 
+    def auto_sort_piles(self, project_code):
+        """灌注桩单元：按桩号分组（每根桩三个工序连体），桩之间按拍摄时间排序，并重新编号。
+
+        规则：
+        - 桩号从照片题名/原始文件名解析（如 1#桩、2#、桩3）；
+        - 每根桩内工序固定顺序：钻孔 -> 钢筋笼 -> 混凝土；
+        - 桩与桩之间按该桩最早拍摄日期升序，无日期的桩排最后（按桩号）；
+        - 施工、监理两类照片用同一套规则（监理跟随施工顺序）。
+        """
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            if not is_pile_unit(data):
+                raise ValueError("仅灌注桩类单元支持按桩号自动排序")
+            ordered = []
+            for category in ("construction", "supervision"):
+                photos = [
+                    photo for photo in data.get("photos", [])
+                    if self._normalize_category(photo.get("category")) == category
+                ]
+                if not photos:
+                    continue
+                groups = {}
+                for photo in photos:
+                    pile = photo_pile_number(photo)
+                    groups.setdefault(pile, []).append(photo)
+                dated = []
+                undated = []
+                unknowns = []
+                for pile, group in groups.items():
+                    if pile is None:
+                        # 识别不到桩号的照片固定排最后，保持原相对顺序
+                        unknowns.extend(group)
+                        continue
+                    # 组内按工序固定顺序排：钻孔 -> 钢筋笼 -> 混凝土
+                    group.sort(key=lambda p: pile_process_order(data, p.get("process_name")))
+                    has_date = any(str(p.get("photo_date") or "").strip() for p in group)
+                    (dated if has_date else undated).append((pile, group))
+                dated.sort(key=lambda item: (
+                    min(str(p.get("photo_date") or "").strip()
+                        for p in item[1] if str(p.get("photo_date") or "").strip()),
+                    item[0],
+                ))
+                undated.sort(key=lambda item: item[0])
+                for _, group in dated:
+                    ordered.extend(group)
+                for _, group in undated:
+                    ordered.extend(group)
+                ordered.extend(unknowns)
+            data["photos"] = ordered
+            for category in PHOTO_CATEGORIES:
+                self._renumber_category(project_code, data, category)
+            self._write_metadata(data["project_code"], data)
+            self.invalidate_projects_cache()
+            return data
+
     def classify(self, prompt):
         text = str(prompt or "").strip().lower()
         if not text:
@@ -2118,6 +2173,69 @@ def photo_detail_rows(project, photo):
     return rows
 
 
+def is_pile_unit(data):
+    """判断是否为灌注桩类单元（如 钻孔灌注桩单元工程），用于连体排序。"""
+    text = " ".join([
+        str(data.get("standard_unit_name") or ""),
+        str(data.get("project_name") or ""),
+    ])
+    return "灌注桩" in text
+
+
+def photo_pile_number(photo):
+    """从照片题名/原始文件名解析桩号（1#桩、2#、桩3、4号桩），返回数字或 None。"""
+    candidates = [
+        str(photo.get("title") or "").strip(),
+        str(photo.get("original_name") or "").strip(),
+        Path(str(photo.get("filename") or "")).stem,
+    ]
+    patterns = (
+        re.compile(r"(\d+)\s*[#＃号]\s*桩"),
+        re.compile(r"(\d+)\s*[#＃号]"),
+        re.compile(r"桩\s*(\d+)"),
+    )
+    for text in candidates:
+        if not text:
+            continue
+        for pattern in patterns:
+            m = pattern.search(text)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def pile_process_order(data, process_name):
+    """灌注桩工序排序：钻孔 -> 钢筋笼 -> 混凝土；未知工序排后。"""
+    process_name = str(process_name or "").strip()
+    processes = data.get("processes") or []
+    if isinstance(processes, str):
+        processes = [p.strip() for p in processes.split("、") if p.strip()]
+    try:
+        return processes.index(process_name)
+    except ValueError:
+        pass
+    for keyword, order in (("钻孔", 0), ("钢筋", 1), ("混凝土", 2), ("浇筑", 2)):
+        if keyword in process_name:
+            return order
+    return 10 + len(processes)
+
+
+def pile_photos_key(photos, photo):
+    """连体排序基础键：桩的拍摄日期（取该桩最早日期）-> 桩号。"""
+    pile = photo_pile_number(photo)
+    dates = [
+        str(item.get("photo_date") or "").strip()
+        for item in photos
+        if photo_pile_number(item) == pile and str(item.get("photo_date") or "").strip()
+    ]
+    min_date = min(dates) if dates else ""
+    return (
+        0 if (pile is not None and min_date) else 1,
+        min_date,
+        pile if pile is not None else 10 ** 12,
+    )
+
+
 def enrich_print_photos(project, photos):
     result = []
     processes = project.get("processes") or []
@@ -2127,6 +2245,13 @@ def enrich_print_photos(project, photos):
         item["detail_rows"] = photo_detail_rows(project, item)
         item["_process_order"] = process_order.get(item.get("process_name"), 9999)
         result.append(item)
+    if is_pile_unit(project):
+        # 灌注桩：每根桩三个工序连体，桩之间按拍摄时间排序（监理跟随施工同一规则）
+        return sorted(result, key=lambda p: pile_photos_key(result, p) + (
+            pile_process_order(project, p.get("process_name")),
+            manager._id_number(p.get("id")),
+            str(p.get("upload_time") or ""),
+        ))
     return sorted(result, key=lambda p: (p.get("_process_order", 9999), p.get("process_name", ""), manager._id_number(p.get("id")), p.get("upload_time", "")))
 
 
@@ -2260,11 +2385,20 @@ def export_photo_statistics_xlsx(codes=""):
         display_code = data.get("display_project_code") or source_fields.get("单元工程编码") or code
         unit_name = data.get("project_name") or code
         photos = list(data.get("photos") or [])
-        photos.sort(key=lambda p: (
-            0 if manager._normalize_category(p.get("category")) == "construction" else 1,
-            str(p.get("process_name") or ""),
-            manager._id_number(p.get("id")),
-        ))
+        if is_pile_unit(data):
+            # 灌注桩：每根桩三个工序连体，桩之间按拍摄时间排序
+            photos.sort(key=lambda p: (
+                0 if manager._normalize_category(p.get("category")) == "construction" else 1,
+            ) + pile_photos_key(photos, p) + (
+                pile_process_order(data, p.get("process_name")),
+                manager._id_number(p.get("id")),
+            ))
+        else:
+            photos.sort(key=lambda p: (
+                0 if manager._normalize_category(p.get("category")) == "construction" else 1,
+                str(p.get("process_name") or ""),
+                manager._id_number(p.get("id")),
+            ))
         for index, photo in enumerate(photos, start=1):
             category = manager._normalize_category(photo.get("category"))
             title = str(photo.get("title") or "").strip()
@@ -3834,6 +3968,27 @@ def api_renumber_photos(project_code):
         return jsonify({"ok": True, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc), 404)
+
+
+@app.route("/api/photos/<path:project_code>/auto-sort-piles", methods=["POST"])
+def api_auto_sort_piles(project_code):
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        manager.auto_sort_piles(project_code)
+        photos = manager.get_photos(project_code)
+        unmatched = [
+            {
+                "id": str(p.get("id") or ""),
+                "title": str(p.get("title") or p.get("original_name") or p.get("filename") or ""),
+            }
+            for p in photos
+            if photo_pile_number(p) is None
+        ]
+        return jsonify({"ok": True, "photos": photos, "unmatched": unmatched})
+    except Exception as exc:
+        return json_error(str(exc), 400)
 
 
 @app.route("/api/renumber-all", methods=["POST"])
