@@ -138,7 +138,13 @@ $exePath = Join-Path $installDir "album_server.exe"
 $licPath = Join-Path $installDir "license.dat"
 # 用 WMI 启动：脱离 runner 的 Job Object。若用 Start-Process，job 结束时
 # 5088 会随 runner 进程树被一并杀掉（部署“成功”但服务静默下线）。
-$cmdLine = 'cmd /d /c set ALBUM_HOST=0.0.0.0&& set ALBUM_PORT=' + $port + '&& set ALBUM_DATA_DIR=' + $dataDir + '&& set ALBUM_LICENSE_FILE=' + $licPath + '&& ' + $exePath + ' >> ' + $outLog + ' 2>> ' + $errLog
+# 云预览自动同步账号（由 GitHub Secrets 注入，可能为空；空则不传）
+if ($env:ALBUM_CLOUD_AUTO_USER) {
+    $cloudEnv = '&& set ALBUM_CLOUD_AUTO_USER=' + $env:ALBUM_CLOUD_AUTO_USER + '&& set ALBUM_CLOUD_AUTO_PASS=' + $env:ALBUM_CLOUD_AUTO_PASS
+} else {
+    $cloudEnv = ""
+}
+$cmdLine = 'cmd /d /c set ALBUM_HOST=0.0.0.0&& set ALBUM_PORT=' + $port + '&& set ALBUM_DATA_DIR=' + $dataDir + '&& set ALBUM_LICENSE_FILE=' + $licPath + $cloudEnv + '&& ' + $exePath + ' >> ' + $outLog + ' 2>> ' + $errLog
 $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdLine; CurrentDirectory = $installDir }
 if ($created.ReturnValue -ne 0) {
     throw "[7/7] WMI 启动失败（返回值 $($created.ReturnValue)）"

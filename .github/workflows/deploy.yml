@@ -38,6 +38,9 @@ jobs:
           ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
           ALBUM_DATA_DIR: D:\工程影像资料
           ALBUM_PORT: "5088"
+          # 云预览自动同步账号（存在 GitHub Secrets，不进仓库）
+          ALBUM_CLOUD_AUTO_USER: ${{ secrets.ALBUM_CLOUD_AUTO_USER }}
+          ALBUM_CLOUD_AUTO_PASS: ${{ secrets.ALBUM_CLOUD_AUTO_PASS }}
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\deploy_prod.ps1

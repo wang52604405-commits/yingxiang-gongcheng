@@ -2778,13 +2778,25 @@ def _build_cloud_sync_payload(max_thumbs=CLOUD_SYNC_THUMB_CAP):
 
 
 def sync_cloud_preview_async():
-    """后台线程：把本机项目缩略图+编号同步到服务器云预览（账号隔离）。"""
+    """后台线程：把本机项目缩略图+编号同步到服务器云预览（账号隔离）。
+
+    未登录云账号时，若配置了 ALBUM_CLOUD_AUTO_USER/ALBUM_CLOUD_AUTO_PASS，
+    自动登录后同步（供服务器电脑无人工登录时自动上传云预览）。
+    """
     def worker():
         try:
             payload = _build_cloud_sync_payload()
             if not payload:
                 return
-            cloud_client.sync_projects(payload)
+            # 未登录时尝试用环境变量账号自动登录
+            if not cloud_client.membership_status().get("logged_in"):
+                auto_user = os.environ.get("ALBUM_CLOUD_AUTO_USER", "").strip()
+                auto_pass = os.environ.get("ALBUM_CLOUD_AUTO_PASS", "")
+                if auto_user and auto_pass:
+                    cloud_client.login(auto_user, auto_pass)
+            # 单项目循环同步，避免大请求被服务器拒绝
+            for proj in payload:
+                cloud_client.sync_projects([proj])
         except Exception:
             pass
     threading.Thread(target=worker, daemon=True).start()
