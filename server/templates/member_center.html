@@ -180,6 +180,26 @@
       </div>
     </div>
 
+    <!-- 付款开通 -->
+    <div class="card">
+      <h2>开通会员 · 扫码付款</h2>
+      <p class="sub">微信扫码付款 → 加作者微信发送「付款截图 + 账号 + 机器ID」→ 管理员开通后立即生效。</p>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
+        <img src="/static/donation_qr.jpg" alt="微信收款二维码" style="width:180px;height:auto;border-radius:8px;border:1px solid var(--line);">
+        <div style="flex:1;min-width:220px;">
+          <div style="margin:6px 0;padding:10px;background:rgba(47,129,247,.08);border-radius:8px;">
+            <strong>月度会员 15 元</strong>/月（原价 45 元）<br>
+            <strong>终身会员 169 元</strong>（原价 499 元）<br>
+            <span style="color:var(--gold);font-size:12px">限时优惠</span>
+          </div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.8;">
+            付款备注请写你的账号，方便核对。<br>
+            付款后加作者微信发送截图 + 账号 + 机器ID。
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 邀请免费 -->
     <div class="card">
       <h2>邀请好友，免费续期</h2>
@@ -388,9 +408,9 @@
       location.reload();
     });
 
-    // 开通会员 / 免费：引导联系管理员
-    $("#monthlyBtn").addEventListener("click", () => notice("请联系管理员 / 作者开通月度会员（15 元/月）。请提供账号： " + (username || "未登录")));
-    $("#lifetimeBtn").addEventListener("click", () => notice("请联系管理员 / 作者开通终身会员（169 元一次买断）。请提供账号： " + (username || "未登录")));
+    // 开通会员 / 免费：扫码付款 + 联系作者开通
+    $("#monthlyBtn").addEventListener("click", () => notice("微信扫码付款 15 元（备注账号），然后加作者微信发送：付款截图 + 账号 + 机器ID，确认后开通月度会员。" + (username ? " 当前账号：" + username : "")));
+    $("#lifetimeBtn").addEventListener("click", () => notice("微信扫码付款 169 元（备注账号），然后加作者微信发送：付款截图 + 账号 + 机器ID，确认后开通终身会员。" + (username ? " 当前账号：" + username : "")));
     $("#freeBtn").addEventListener("click", () => notice("免费版无需开通，直接注册使用（300 张照片，打印/导出带水印）。"));
 
     // 云预览入口
