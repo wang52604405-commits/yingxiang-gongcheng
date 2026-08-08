@@ -58,9 +58,43 @@ def _rate_limited():
     return False
 
 
-# 注册验证码：内存存储 {account: {"code": str, "exp": float}}，TTL 600s（基础版，重启失效）
-_codes = {}
+# 验证码 TTL。存储用数据库（gunicorn 多 worker 共享），不用进程内存
 CODE_TTL = 600
+
+
+def _save_code(code_key: str, code: str) -> None:
+    """保存验证码到数据库（多 worker 共享）。"""
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO mail_codes (code_key, code, expires_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(code_key) DO UPDATE SET code = excluded.code, "
+            "expires_at = excluded.expires_at, created_at = datetime('now', 'localtime')",
+            (code_key, code, int(_time.time()) + CODE_TTL),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _consume_code(code_key: str, code: str) -> bool:
+    """校验并一次性消费验证码；正确且未过期返回 True。"""
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT code, expires_at FROM mail_codes WHERE code_key = ?", (code_key,)
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM mail_codes WHERE code_key = ?", (code_key,))
+        conn.commit()
+        if str(row["code"]) != code:
+            return False
+        if int(row["expires_at"]) < int(_time.time()):
+            return False
+        return True
+    finally:
+        conn.close()
 # 邀请码字符集：去易混字符（0/O、1/I/L）
 INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 INVITE_CODE_LEN = 8
@@ -297,7 +331,7 @@ def create_app():
         if not (3 <= len(account) <= 64):
             return _error("账号长度需在 3~64 个字符之间")
         code = str(random.randint(100000, 999999))
-        _codes[account] = {"code": code, "exp": _time.time() + CODE_TTL}
+        _save_code(f"reg:{account}", code)
         return jsonify({
             "ok": True,
             "code": code,
@@ -314,6 +348,7 @@ def create_app():
         password = str(data.get("password") or "")
         invite_code = str(data.get("invite_code") or "").strip().upper()
         display_name = str(data.get("display_name") or "").strip()
+        email = str(data.get("email") or "").strip()
         if not (3 <= len(username) <= 64):
             return _error("账号长度需在 3~64 个字符之间（可用手机号/QQ/邮箱）")
         if len(password) < 6:
@@ -337,10 +372,10 @@ def create_app():
 
             new_code = _generate_invite_code(conn)
             cur = conn.execute(
-                "INSERT INTO accounts (username, password_hash, display_name, role, status, invite_code, inviter_id) "
-                "VALUES (?, ?, ?, 'user', 'active', ?, ?)",
+                "INSERT INTO accounts (username, password_hash, display_name, role, status, invite_code, inviter_id, email) "
+                "VALUES (?, ?, ?, 'user', 'active', ?, ?, ?)",
                 (username, generate_password_hash(password), display_name, new_code,
-                 inviter["id"] if inviter else 0),
+                 inviter["id"] if inviter else 0, email),
             )
             new_account_id = cur.lastrowid
 
@@ -373,6 +408,68 @@ def create_app():
             })
         finally:
             conn.close()
+
+    @app.post("/api/forgot-password")
+    def forgot_password():
+        """找回密码：按账号查绑定邮箱，发验证码到邮箱。"""
+        if _rate_limited():
+            return _error("操作过于频繁，请稍后再试", 429)
+        data = request.get_json(silent=True) or {}
+        account = str(data.get("account") or "").strip()
+        if not (3 <= len(account) <= 64):
+            return _error("请输入正确的账号")
+        conn = db.connect()
+        try:
+            row = conn.execute(
+                "SELECT id, username, email FROM accounts WHERE username = ?", (account,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return _error("账号不存在")
+        email = str(row["email"] or "").strip()
+        if not email:
+            return _error("该账号未绑定邮箱，无法通过邮箱找回。请联系管理员重置密码")
+        code = str(random.randint(100000, 999999))
+        _save_code(f"reset:{account}", code)
+        try:
+            from . import mailer
+            mailer.send_code_email(email, code)
+        except ValueError as exc:
+            return _error(str(exc))
+        except Exception as exc:
+            return _error(f"邮件发送失败：{exc}")
+        return jsonify({
+            "ok": True,
+            "email": email[:3] + "***" + email[email.find("@"):],
+            "expires_in": CODE_TTL,
+        })
+
+    @app.post("/api/reset-password")
+    def reset_password():
+        """用验证码重置密码。"""
+        if _rate_limited():
+            return _error("操作过于频繁，请稍后再试", 429)
+        data = request.get_json(silent=True) or {}
+        account = str(data.get("account") or "").strip()
+        code = str(data.get("code") or "").strip()
+        new_password = str(data.get("new_password") or "")
+        if len(new_password) < 6:
+            return _error("新密码至少 6 位")
+        if not _consume_code(f"reset:{account}", code):
+            return _error("验证码错误或已过期，请重新获取", 400)
+        conn = db.connect()
+        try:
+            cur = conn.execute(
+                "UPDATE accounts SET password_hash = ? WHERE username = ?",
+                (generate_password_hash(new_password), account),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                return _error("账号不存在")
+        finally:
+            conn.close()
+        return jsonify({"ok": True, "message": "密码已重置，请用新密码登录"})
 
     @app.post("/api/login")
     def login():

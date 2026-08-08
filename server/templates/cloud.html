@@ -69,15 +69,27 @@
     <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
     <button class="btn" id="loginBtn" style="width:100%">登录</button>
     <div class="notice" id="loginNotice"></div>
-    <p class="muted" style="margin-top:14px">没有账号？<span class="link" id="showReg">注册一个</span></p>
+    <p class="muted" style="margin-top:14px">没有账号？<span class="link" id="showReg">注册一个</span>　<span class="link" id="showForgot">忘记密码？</span></p>
 
     <div id="regBox" style="display:none; margin-top:8px">
       <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
       <input id="regUser" placeholder="账号（手机号 / QQ / 邮箱）">
       <input id="regPass" type="password" placeholder="密码（至少 6 位）">
+      <input id="regEmail" placeholder="邮箱（选填，用于找回密码）">
       <input id="regInvite" placeholder="邀请码（选填，填了双方有奖励）">
       <button class="btn" id="regBtn" style="width:100%">注册</button>
       <p class="muted" style="font-size:12px">邀请 10 人注册，即可免费使用 1 个月，可循环。</p>
+    </div>
+
+    <div id="forgotBox" style="display:none; margin-top:8px">
+      <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
+      <input id="forgotUser" placeholder="账号">
+      <div style="display:flex;gap:8px">
+        <input id="forgotCode" placeholder="邮箱验证码" style="flex:1">
+        <button class="btn" id="forgotSendBtn" style="flex:0 0 auto">发送验证码</button>
+      </div>
+      <input id="forgotPass" type="password" placeholder="新密码（至少 6 位）">
+      <button class="btn" id="forgotResetBtn" style="width:100%">重置密码</button>
     </div>
   </div>
 
@@ -149,11 +161,37 @@
         username: $("#regUser").value.trim(),
         password: $("#regPass").value,
       };
+      const email = $("#regEmail").value.trim();
       const invite = $("#regInvite").value.trim();
+      if (email) payload.email = email;
       if (invite) payload.invite_code = invite;
       const data = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
       notice($("#loginNotice"), data.ok ? "注册成功，请登录" : (data.error || "注册失败"), !!data.ok);
       if (data.ok) { $("#regBox").style.display = "none"; $("#user").value = payload.username; }
+    });
+
+    // 忘记密码
+    $("#showForgot").addEventListener("click", () => {
+      $("#forgotBox").style.display = $("#forgotBox").style.display === "none" ? "block" : "none";
+    });
+    $("#forgotSendBtn").addEventListener("click", async () => {
+      const account = $("#forgotUser").value.trim();
+      if (!account) { notice($("#loginNotice"), "请输入账号", false); return; }
+      const data = await api("/api/forgot-password", { method: "POST", body: JSON.stringify({ account }) });
+      notice($("#loginNotice"), data.ok ? `验证码已发送到 ${data.email}` : (data.error || "发送失败"), !!data.ok);
+    });
+    $("#forgotResetBtn").addEventListener("click", async () => {
+      const data = await api("/api/reset-password", { method: "POST", body: JSON.stringify({
+        account: $("#forgotUser").value.trim(),
+        code: $("#forgotCode").value.trim(),
+        new_password: $("#forgotPass").value,
+      }) });
+      notice($("#loginNotice"), data.ok ? "密码已重置，请用新密码登录" : (data.error || "重置失败"), !!data.ok);
+      if (data.ok) {
+        $("#forgotBox").style.display = "none";
+        $("#user").value = $("#forgotUser").value.trim();
+        $("#forgotCode").value = ""; $("#forgotPass").value = "";
+      }
     });
 
     $("#logoutBtn").addEventListener("click", () => {

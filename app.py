@@ -142,7 +142,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_height_cm": 0,
     "print_caption_font_size": 7.2,
     "print_caption_position": "left",
-    "watermark_ocr_enabled": True,
+    "watermark_ocr_enabled": False,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
         {"label": "题名", "source": "title", "value": ""},
@@ -3345,9 +3345,32 @@ def api_cloud_register():
         str(payload.get("password") or ""),
         str(payload.get("code") or "").strip(),
         str(payload.get("invite_code") or "").strip(),
+        str(payload.get("email") or "").strip(),
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "注册失败")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/cloud/forgot-password", methods=["POST"])
+def api_cloud_forgot_password():
+    payload = request.get_json(silent=True) or {}
+    result = cloud_client.forgot_password(str(payload.get("account") or "").strip())
+    if not result.get("ok"):
+        return jsonify({"ok": False, "error": result.get("error", "发送失败")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/cloud/reset-password", methods=["POST"])
+def api_cloud_reset_password():
+    payload = request.get_json(silent=True) or {}
+    result = cloud_client.reset_password(
+        str(payload.get("account") or "").strip(),
+        str(payload.get("code") or "").strip(),
+        str(payload.get("new_password") or ""),
+    )
+    if not result.get("ok"):
+        return jsonify({"ok": False, "error": result.get("error", "重置失败")}), 400
     return jsonify(result)
 
 
@@ -3901,7 +3924,7 @@ def api_upload(project_code):
             files,
             title,
             photo_date,
-            read_engineering_settings().get("watermark_ocr_enabled", True),
+            read_engineering_settings().get("watermark_ocr_enabled", False),
             form_title=str(request.form.get("title") or "").strip(),
             form_date=str(request.form.get("photo_date") or "").strip(),
         )
@@ -3959,7 +3982,7 @@ def api_upload_folder():
                     400,
                 )
         files = sorted(files, key=lambda item: natural_sort_key(item.filename or ""))
-        enabled_ocr = read_engineering_settings().get("watermark_ocr_enabled", True)
+        enabled_ocr = read_engineering_settings().get("watermark_ocr_enabled", False)
         added = []
         for file_storage in files:
             title, photo_date = parse_photo_name_parts(file_storage.filename)
@@ -4048,7 +4071,7 @@ def api_upload_auto_match():
                     except Exception:
                         pass
                 per_file_meta = {}
-                if read_engineering_settings().get("watermark_ocr_enabled", True):
+                if read_engineering_settings().get("watermark_ocr_enabled", False):
                     meta = _watermark_meta_for_upload(file_storage)
                     if meta:
                         if not f_title and meta.get("title"):

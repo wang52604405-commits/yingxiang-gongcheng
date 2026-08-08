@@ -231,13 +231,30 @@ def send_code(account: str):
     return _post_json(f"{base}/api/send-code", {"account": account})
 
 
-def register(account: str, password: str, code: str, invite_code: str = ""):
-    """注册账号（用手机/QQ/邮箱），可填邀请码。"""
+def register(account: str, password: str, code: str, invite_code: str = "", email: str = ""):
+    """注册账号（用手机/QQ/邮箱），可填邀请码与邮箱。"""
     base = server_url()
     payload = {"username": account, "password": password, "code": code}
+    if email:
+        payload["email"] = email.strip()
     if invite_code:
         payload["invite_code"] = invite_code.strip().upper()
     return _post_json(f"{base}/api/register", payload)
+
+
+def forgot_password(account: str):
+    """找回密码：向账号绑定邮箱发送验证码。"""
+    base = server_url()
+    return _post_json(f"{base}/api/forgot-password", {"account": account})
+
+
+def reset_password(account: str, code: str, new_password: str):
+    """用验证码重置密码。"""
+    base = server_url()
+    return _post_json(
+        f"{base}/api/reset-password",
+        {"account": account, "code": code, "new_password": new_password},
+    )
 
 
 def invite_status(token: str = ""):

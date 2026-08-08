@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS cloud_thumbs (
     UNIQUE (project_id, photo_name),
     FOREIGN KEY (project_id) REFERENCES cloud_projects(id)
 );
+
+CREATE TABLE IF NOT EXISTS mail_codes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_key   TEXT UNIQUE NOT NULL,      -- reset:{account} / 注册账号
+    code       TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 # 老库升级：accounts 表缺少的新列，启动时补上
@@ -81,6 +89,7 @@ ACCOUNTS_EXTRA_COLUMNS = {
     "invite_code": "TEXT",
     "inviter_id": "INTEGER DEFAULT 0",
     "invite_reward_months": "INTEGER DEFAULT 0",
+    "email": "TEXT DEFAULT ''",
 }
 
 

@@ -208,6 +208,7 @@
         <div class="row">
           <button class="btn primary" id="cloudLoginBtn">登录</button>
           <button class="btn" id="showRegBtn">没有账号？去注册</button>
+          <span class="link" id="showForgotBtn" style="margin-left:auto;cursor:pointer;color:var(--accent2);font-size:13px;">忘记密码？</span>
         </div>
       </div>
 
@@ -216,11 +217,29 @@
         <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
         <label for="regPass">密码</label>
         <input id="regPass" type="password" placeholder="至少 6 位" autocomplete="new-password">
+        <label for="regEmail">邮箱（选填，用于找回密码）</label>
+        <input id="regEmail" type="email" placeholder="you@example.com">
         <label for="regInvite">邀请码（选填）</label>
         <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
         <div class="row">
           <button class="btn primary" id="regBtn">注册</button>
           <button class="btn" id="backLoginBtn">返回登录</button>
+        </div>
+      </div>
+
+      <div id="accountForgotForm" style="display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
+        <label for="forgotUser">账号</label>
+        <input id="forgotUser" placeholder="手机号 / QQ / 邮箱">
+        <label for="forgotCode">邮箱验证码</label>
+        <div class="row" style="align-items:flex-end;">
+          <input id="forgotCode" placeholder="6 位验证码" style="flex:1;margin:0;">
+          <button class="btn" id="forgotSendBtn">发送验证码</button>
+        </div>
+        <label for="forgotPass">新密码</label>
+        <input id="forgotPass" type="password" placeholder="至少 6 位">
+        <div class="row">
+          <button class="btn primary" id="forgotResetBtn">重置密码</button>
+          <button class="btn" id="backLoginBtn2">返回登录</button>
         </div>
       </div>
     </div>
@@ -310,7 +329,9 @@
 
     $("#regBtn").addEventListener("click", async () => {
       const payload = { username: $("#regUser").value.trim(), password: $("#regPass").value };
+      const email = $("#regEmail").value.trim();
       const inv = $("#regInvite").value.trim();
+      if (email) payload.email = email;
       if (inv) payload.invite_code = inv;
       const d = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
       notice(d.ok ? "注册成功，请登录" : (d.error || "注册失败"), !d.ok);
@@ -319,6 +340,47 @@
         $("#accountLoginForm").style.display = "block";
         $("#cloudUser").value = payload.username;
       }
+    });
+
+    // ---- 忘记密码 ----
+    $("#showForgotBtn").addEventListener("click", () => {
+      $("#accountLoginForm").style.display = "none";
+      $("#accountForgotForm").style.display = "block";
+    });
+    $("#backLoginBtn2").addEventListener("click", () => {
+      $("#accountForgotForm").style.display = "none";
+      $("#accountLoginForm").style.display = "block";
+    });
+
+    let forgotCooldown = 0;
+    $("#forgotSendBtn").addEventListener("click", async () => {
+      const account = $("#forgotUser").value.trim();
+      if (!account) { notice("请输入账号", true); return; }
+      if (forgotCooldown > 0) { notice(`请 ${forgotCooldown} 秒后再发送`, true); return; }
+      const d = await api("/api/forgot-password", { method: "POST", body: JSON.stringify({ account }) });
+      if (!d.ok) { notice(d.error || "发送失败", true); return; }
+      notice(`验证码已发送到 ${d.email}，10 分钟内有效`);
+      forgotCooldown = 60;
+      const timer = setInterval(() => {
+        forgotCooldown--;
+        $("#forgotSendBtn").textContent = forgotCooldown > 0 ? `重新发送(${forgotCooldown}s)` : "发送验证码";
+        if (forgotCooldown <= 0) clearInterval(timer);
+      }, 1000);
+    });
+
+    $("#forgotResetBtn").addEventListener("click", async () => {
+      const account = $("#forgotUser").value.trim();
+      const code = $("#forgotCode").value.trim();
+      const newPass = $("#forgotPass").value;
+      if (!account || !code || !newPass) { notice("请填写账号、验证码和新密码", true); return; }
+      const d = await api("/api/reset-password", { method: "POST", body: JSON.stringify({
+        account, code, new_password: newPass }) });
+      if (!d.ok) { notice(d.error || "重置失败", true); return; }
+      notice("密码已重置，请用新密码登录");
+      $("#accountForgotForm").style.display = "none";
+      $("#accountLoginForm").style.display = "block";
+      $("#forgotUser").value = ""; $("#forgotCode").value = ""; $("#forgotPass").value = "";
+      $("#cloudUser").value = account;
     });
 
     $("#logoutBtn").addEventListener("click", () => {
