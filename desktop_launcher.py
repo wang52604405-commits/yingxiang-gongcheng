@@ -34,6 +34,27 @@ DEFAULT_DATA_DIR = r"D:\工程影像资料"
 COPYRIGHT_NOTICE = "版权声明：本软件仅限授权单位和授权机器使用，禁止复制传播、反编译、破解授权、绕过限制或二次销售。"
 
 
+def friendly_error(exc):
+    """把英文异常转成客户能看懂的中文提示。"""
+    msg = str(exc)
+    low = msg.lower()
+    if "ascii" in low or "encode" in low:
+        return "网络地址含特殊字符，下载失败"
+    if "timed out" in low or "timeout" in low:
+        return "连接服务器超时，请检查网络后重试"
+    if "urlopen" in low or "http" in low or "ssl" in low or "certificate" in low:
+        return "无法连接更新服务器，请检查网络后重试"
+    if "refused" in low or "connection" in low or "connect" in low:
+        return "无法连接服务器，请稍后重试"
+    if "404" in low:
+        return "更新文件不存在，请联系管理员"
+    if "permission" in low or "denied" in low or "access" in low:
+        return "没有权限访问，请以管理员身份运行"
+    if "disk" in low or "space" in low:
+        return "磁盘空间不足，请清理后重试"
+    return msg or "未知错误"
+
+
 def _ver_tuple(version):
     m = re.match(r"A(\d{8})-(\d+)\.(\d+)", version or "")
     if not m:
@@ -273,7 +294,7 @@ class DesktopLauncher:
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
         except Exception as exc:
-            self.status.set(f"服务启动失败：{exc}")
+            self.status.set(f"服务启动失败：{friendly_error(exc)}")
             return
 
         for _ in range(30):
@@ -349,7 +370,7 @@ class DesktopLauncher:
                             pct = int(done * 100 / total)
                             win.after(0, lambda p=pct: (prog.configure(value=p), pct_lbl.configure(text=f"{p}%")))
             except Exception as exc:
-                win.after(0, lambda: (win.destroy(), messagebox.showerror("更新失败", f"下载失败：{exc}")))
+                win.after(0, lambda: (win.destroy(), messagebox.showerror("更新失败", f"下载失败：{friendly_error(exc)}")))
                 return
             win.after(0, lambda: (win.destroy(), self.finish_update(target)))
 
