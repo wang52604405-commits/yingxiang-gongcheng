@@ -10033,6 +10033,12 @@
 
     async function refreshAll(options = {}) {
       const skipOtherImages = Boolean(options.skipOtherImages);
+      // 刷新即归位：灌注桩单元自动按桩号连体+施工完成时间排回正确位置（未登录或失败不阻塞刷新）
+      try {
+        await apiJson("/api/auto-sort-piles-all", { method: "POST" });
+      } catch (error) {
+        // 静默忽略（如未登录）
+      }
       const [projectInfoData, projectsData, settingsData] = await Promise.all([
         apiJson("/api/project-info"),
         apiJson("/api/projects?slim=1"),

@@ -1065,6 +1065,9 @@ class AlbumManager:
                 photo["process_code"] = self._process_code(data, photo.get("process_name"))
             new_id = self._archive_id_for_photo(data, photo, category, index)
             new_filename = self._photo_filename(category, new_id, ext)
+            if new_filename == old_filename and str(photo.get("id") or "") == new_id:
+                # 顺序未变，无需重命名（刷新自动归位时避免无谓的文件搬移）
+                continue
             new_thumb = photos_dir / self._thumb_filename(new_filename)
             temp_path = photos_dir / f".renumber-{index}-{new_filename}"
             if old_path.exists():
@@ -4027,6 +4030,46 @@ def api_auto_sort_piles(project_code):
         return jsonify({"ok": True, "photos": photos, "unmatched": unmatched})
     except Exception as exc:
         return json_error(str(exc), 400)
+
+
+@app.route("/api/auto-sort-piles-all", methods=["POST"])
+def api_auto_sort_piles_all():
+    """刷新时调用：全部灌注桩单元按桩号连体+施工完成时间自动归位并重新编号。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        projects = manager.list_projects()
+        sorted_units = 0
+        photo_count = 0
+        unmatched = {}
+        for project in projects:
+            code = project.get("project_code")
+            if not code:
+                continue
+            with manager._project_write_lock(code):
+                data = manager.get_project(code)
+                if not is_pile_unit(data):
+                    continue
+                manager._auto_sort_piles_locked(code, data)
+            sorted_units += 1
+            photo_count += len(data.get("photos") or [])
+            bad = [
+                str(p.get("title") or p.get("id") or "")
+                for p in data.get("photos", [])
+                if photo_pile_number(p) is None
+            ]
+            if bad:
+                unmatched[str(code)] = bad
+        manager.invalidate_projects_cache()
+        return jsonify({
+            "ok": True,
+            "sorted_units": sorted_units,
+            "photo_count": photo_count,
+            "unmatched": unmatched,
+        })
+    except Exception as exc:
+        return json_error(str(exc), 500)
 
 
 @app.route("/api/renumber-all", methods=["POST"])
