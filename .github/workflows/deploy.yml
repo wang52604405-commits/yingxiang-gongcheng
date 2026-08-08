@@ -55,7 +55,6 @@ jobs:
   deploy-auth:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 10
-    if: ${{ github.event_name == 'workflow_dispatch' || contains(join(github.event.commits.*.modified, ','), 'server/') }}
     env:
       HTTPS_PROXY: http://127.0.0.1:7897
       HTTP_PROXY: http://127.0.0.1:7897
@@ -64,8 +63,24 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 判断是否改动 server/
+        id: check
+        shell: powershell
+        run: |
+          $changed = git diff --name-only HEAD^ HEAD 2>$null | Select-String '^server/'
+          if ($changed) {
+            Write-Host "server/ 有变更，执行授权中心部署"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=true"
+          } else {
+            Write-Host "server/ 无变更，跳过授权中心部署"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=false"
+          }
 
       - name: 部署授权中心到阿里云
+        if: steps.check.outputs.run_deploy == 'true'
         shell: powershell
         run: |
           python deploy_auth.py
