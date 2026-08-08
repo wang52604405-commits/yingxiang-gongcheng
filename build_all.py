@@ -47,6 +47,10 @@ def step3_inno():
 
 def step4_verify_no_key():
     print("\n[4/5] Verify installer has no private key ...")
+    if not PRIVATE_KEY.exists():
+        # 私钥不在当前目录（GitHub Actions checkout 无 keys/，被 gitignore 排除）时跳过
+        print("  [SKIP] 私钥不在本目录，跳过对比")
+        return True
     key = PRIVATE_KEY.read_bytes()
     data = INSTALLER.read_bytes()
     ok = key not in data
