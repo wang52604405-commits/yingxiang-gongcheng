@@ -34,7 +34,7 @@ Name: "autostart"; Description: "开机自动启动本地服务入口"; GroupDes
 
 [Files]
 ; onedir 程序目录整体安装（启动无需解压，速度快）
-Source: "dist\工程影像管理平台\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\工程影像管理平台\*"; DestDir: "{app}"; Excludes: "trial.json,license.dat,cloud_account.json,cloud_config.json,product_config_cache.json,*.log"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
