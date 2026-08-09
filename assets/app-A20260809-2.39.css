@@ -6886,3 +6886,15 @@
       button:active, .unit-card:active, .tree-row:active { transform: none; }
       .side-load-skeleton span, .first-load-skeleton span { animation: none; }
     }
+
+    /* 打印等浅色 secondary 按钮 hover 保持浅背景+深色文字，避免深字深底看不清 */
+    #printConstructionBtn:hover,
+    #printSupervisionBtn:hover,
+    #exportZipBtn:hover,
+    #renumberPhotosBtn:hover,
+    button[data-renumber-photos]:hover,
+    button.secondary:hover {
+      color: #0d5481 !important;
+      background: #eef6fb !important;
+      border-color: #9fc5e2 !important;
+    }

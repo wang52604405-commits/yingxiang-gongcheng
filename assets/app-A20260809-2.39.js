@@ -1690,12 +1690,15 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function expandAdaptiveTree() {
-      // 首屏只展开合同；单位和分部由用户按需展开，避免大工程一次创建数千节点。
+      // 项目划分树固定全部展开（合同→单位→分部），始终可见
       if (!state.treeRoot) return;
       state.expanded.clear();
-      state.treeRoot.children.forEach((contract) => {
-        state.expanded.add(contract.key);
-      });
+      const walk = (node) => {
+        if (!node.children.length) return;
+        state.expanded.add(node.key);
+        node.children.forEach(walk);
+      };
+      state.treeRoot.children.forEach(walk);
     }
 
     function renderTree() {
@@ -1725,10 +1728,8 @@ const $ = (selector) => document.querySelector(selector);
         if (!node) return;
         if (node.type === "part") {
           openPart(node);
-        } else {
-          state.expanded.has(key) ? state.expanded.delete(key) : state.expanded.add(key);
-          renderTree();
         }
+        // 项目划分树固定展开，点击不折叠
       };
     }
 
@@ -3248,28 +3249,36 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
-    // 首屏冷启动加载动画：进度条跟随真实加载阶段推进，页面数据全部显示才到 100% 消失
+    // 首屏冷启动加载动画：进度条跟随真实加载阶段推进；加载再快也保证至少显示 1.6 秒走完，页面数据全部显示才消失
+    const BOOT_MIN_MS = 1200;
+    let bootStartedAt = 0;
+    function bootStart() {
+      bootStartedAt = Date.now();
+    }
     function bootProgress(percent) {
       const fill = $("#bootLoaderFill");
       const num = $("#bootLoaderPercent");
       if (!fill) return;
       const target = Math.min(100, Math.max(0, Number(percent) || 0));
-      // 直接到真实阶段（CSS transition 负责平滑），百分比即时更新，进度永远不落后于真实加载
       fill.style.width = `${target}%`;
       if (num) num.textContent = String(Math.round(target));
     }
     function bootDone() {
+      // 平滑到 100%；若加载过快则等待满最小时长，保证进度条可见
+      const elapsed = Date.now() - (bootStartedAt || Date.now());
+      const wait = Math.max(0, BOOT_MIN_MS - elapsed);
       bootProgress(100);
       setTimeout(() => {
         const loader = $("#bootLoader");
         if (!loader) return;
         loader.classList.add("is-done");
         setTimeout(() => loader.remove(), 500);
-      }, 200);
+      }, wait + 150);
     }
 
     async function loadBootstrap(options = {}) {
       const skipOtherImages = Boolean(options.skipOtherImages);
+      bootStart();
       bootProgress(8);
       const data = await apiJson("/api/bootstrap");
       bootProgress(42);
