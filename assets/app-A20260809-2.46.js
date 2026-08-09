@@ -2055,6 +2055,10 @@ const $ = (selector) => document.querySelector(selector);
     function renderConstructionOverview() {
       const contracts = state.treeRoot?.children || [];
       const overviewDensity = densityClass(Number(state.dashboard.project_count || 0), countParts(state.treeRoot));
+      // 主界面项目结构树固定展开所有单位工程（含其分部）
+      if (state.treeRoot?.children?.length) {
+        contracts.forEach((contract) => contract.children.forEach((unit) => state.overviewExpandedUnits.add(unit.key)));
+      }
       $("#constructionModuleGrid").innerHTML = contracts.length ? `
         <div class="blueprint-tree ${overviewDensity}">
           ${contracts.map((contract) => `
@@ -2123,9 +2127,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#constructionModuleGrid").querySelectorAll("[data-overview-unit]").forEach((button) => {
         button.addEventListener("click", (event) => {
           if (event.target.closest("[data-delete-hierarchy]")) return;
-          const key = button.dataset.overviewUnit;
-          state.overviewExpandedUnits.has(key) ? state.overviewExpandedUnits.delete(key) : state.overviewExpandedUnits.add(key);
-          renderConstructionOverview();
+          // 主界面项目结构树固定展开，点击不折叠
         });
       });
     }
