@@ -26,7 +26,7 @@ PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
 DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260809-2.31"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260809-2.32"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -39,9 +39,10 @@ DEFAULT_PRODUCT_CONFIG = {
         "beta_free_access": True,
         "thumb_max_side": 720,
         "thumb_quality": 76,
+        "max_thumb_bytes": 99 * 1024,
         "max_thumbs_per_project": 240,
         "max_projects_per_sync": 200,
-        "max_thumb_b64": 600000,
+        "max_thumb_b64": 140000,
     },
     "logging": {"enabled": True, "max_message": 2000, "max_stack": 12000, "max_context": 8000},
 }
@@ -573,7 +574,8 @@ def check_update(current: str = ""):
 # 云预览同步：单次最多同步的照片数/缩略图大小限制
 CLOUD_SYNC_MAX_PROJECTS = 200
 CLOUD_SYNC_MAX_THUMBS_PER_PROJECT = 240
-CLOUD_THUMB_MAX_B64 = 600_000
+CLOUD_THUMB_MAX_B64 = 140_000
+CLOUD_THUMB_MAX_BYTES = 99 * 1024
 
 
 def cloud_preview_limits() -> dict:
@@ -582,9 +584,10 @@ def cloud_preview_limits() -> dict:
         "enabled": bool(cloud.get("enabled", True)),
         "thumb_max_side": max(320, int(cloud.get("thumb_max_side") or 720)),
         "thumb_quality": max(40, int(cloud.get("thumb_quality") or 76)),
+        "max_thumb_bytes": max(40_000, min(99 * 1024, int(cloud.get("max_thumb_bytes") or CLOUD_THUMB_MAX_BYTES))),
         "max_projects": max(1, int(cloud.get("max_projects_per_sync") or CLOUD_SYNC_MAX_PROJECTS)),
         "max_thumbs_per_project": max(1, int(cloud.get("max_thumbs_per_project") or CLOUD_SYNC_MAX_THUMBS_PER_PROJECT)),
-        "max_thumb_b64": max(100000, int(cloud.get("max_thumb_b64") or CLOUD_THUMB_MAX_B64)),
+        "max_thumb_b64": max(60_000, min(140_000, int(cloud.get("max_thumb_b64") or CLOUD_THUMB_MAX_B64))),
     }
 
 

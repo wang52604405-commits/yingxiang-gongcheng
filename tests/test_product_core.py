@@ -182,6 +182,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
                 {"thumb_max_side": 720, "thumb_quality": 76, "max_thumb_b64": 600000},
             )
         self.assertLess(len(base64.b64encode(raw_thumb)), 600000)
+        self.assertLessEqual(len(raw_thumb), 99 * 1024)
         with Image.open(io.BytesIO(raw_thumb)) as image:
             self.assertEqual(max(image.size), 720)
 
@@ -311,14 +312,67 @@ class DesktopSecurityContractTest(unittest.TestCase):
         Image.effect_noise((4200, 2800), 48).convert("RGB").save(source, "JPEG", quality=100)
         source_bytes = source.getvalue()
         source.seek(0)
-        target = Path(self.temp.name) / "optimized-upload.jpg"
+        target = self.desktop.manager._photos_dir("OPT-CHECK") / "optimized-upload.jpg"
         result = self.desktop.manager._save_optimized_upload(
             FileStorage(stream=source, filename="现场原图.jpg"), target
         )
         self.assertTrue(result["optimized"])
         self.assertLess(target.stat().st_size, len(source_bytes))
+        self.assertLessEqual(target.stat().st_size, 300 * 1024)
+        backup = self.desktop.manager._original_path("OPT-CHECK", result["original_backup"])
+        self.assertTrue(backup.exists())
+        self.assertEqual(backup.stat().st_size, len(source_bytes))
+        self.assertTrue(self.desktop.manager._ensure_thumbnail("OPT-CHECK", target.name))
+        self.assertTrue((target.parent / self.desktop.manager._thumb_filename(target.name)).exists())
         with Image.open(target) as optimized:
-            self.assertLessEqual(max(optimized.size), 4096)
+            self.assertLessEqual(max(optimized.size), 3200)
+
+    def test_bootstrap_is_compact_paginated_and_assets_are_cached(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "性能验收用户"
+        for index in range(1, 26):
+            self.desktop.manager.create_project(
+                f"PERF-{index:03d}",
+                f"性能单元{index:03d}",
+                source_fields={
+                    "合同工程名称": "性能测试合同",
+                    "单位工程名称": "性能测试单位工程",
+                    "单位工程编码": "PERF-U",
+                    "分部工程名称": "性能测试分部",
+                    "分部工程编码": "PERF-P",
+                    "单元工程名称": f"性能单元{index:03d}",
+                    "单元工程编码": f"PERF-{index:03d}",
+                },
+                project_order=index,
+            )
+        response = self.client.get("/api/bootstrap")
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(len(response.data), 150 * 1024)
+        data = response.get_json()
+        parts = [
+            part
+            for contract in data["hierarchy"]
+            for unit in contract["units"]
+            for part in unit["parts"]
+            if part["name"] == "性能测试分部"
+        ]
+        self.assertEqual(len(parts), 1)
+        units = self.client.get(
+            f"/api/units?part_key={parts[0]['part_key']}&page=1&page_size=20"
+        ).get_json()
+        self.assertEqual(units["total"], 25)
+        self.assertEqual(len(units["projects"]), 20)
+        self.assertEqual(units["pages"], 2)
+
+        index_response = self.client.get("/", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(index_response.headers.get("Content-Encoding"), "gzip")
+        asset_response = self.client.get(
+            "/assets/app-A20260809-2.32.js", headers={"Accept-Encoding": "gzip"}
+        )
+        self.assertEqual(asset_response.headers.get("Content-Encoding"), "gzip")
+        self.assertIn("immutable", asset_response.headers.get("Cache-Control", ""))
+        asset_response.close()
+        index_response.close()
 
 
 if __name__ == "__main__":

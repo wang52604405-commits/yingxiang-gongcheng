@@ -1,4 +1,5 @@
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -14,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, send_from_directory, session
+from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -299,6 +301,31 @@ app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ALBUMS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.after_request
+def _compress_text_responses(response):
+    """压缩首页和 JSON；版本化静态资源由 asset_file 直接提供预压缩文件。"""
+    if response.status_code != 200 or response.direct_passthrough:
+        return response
+    if "gzip" not in request.headers.get("Accept-Encoding", "").lower():
+        return response
+    if response.headers.get("Content-Encoding"):
+        return response
+    mimetype = str(response.mimetype or "")
+    if not (mimetype.startswith("text/") or mimetype in {"application/json", "application/javascript"}):
+        return response
+    payload = response.get_data()
+    if len(payload) < 1024:
+        return response
+    compressed = gzip.compress(payload, compresslevel=6)
+    if len(compressed) >= len(payload):
+        return response
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(compressed))
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 
 @app.before_request
@@ -951,6 +978,8 @@ class AlbumManager:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self._projects_cache = {}
+        self._hierarchy_cache = {}
+        self._revision = 1
         self._write_locks = {}
         self._write_locks_guard = threading.Lock()
 
@@ -965,6 +994,137 @@ class AlbumManager:
 
     def invalidate_projects_cache(self):
         self._projects_cache = {}
+        self._hierarchy_cache = {}
+        self._revision += 1
+
+    def revision(self):
+        return self._revision
+
+    @staticmethod
+    def _hierarchy_field(fields, aliases, fallback=""):
+        for key in aliases:
+            value = fields.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return str(fallback or "").strip()
+
+    @staticmethod
+    def _split_hierarchy_name_code(value):
+        raw = str(value or "").strip()
+        match = re.match(r"^(.*?)\s*[（(]\s*([^（）()]+)\s*[）)]\s*$", raw)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+        return raw, ""
+
+    def project_hierarchy(self, project):
+        fields = project.get("source_fields") or {}
+        unit_combined = self._hierarchy_field(fields, ["单位工程名称及编码", "单位工程"])
+        part_combined = self._hierarchy_field(fields, ["分部工程名称及编码", "分部工程", "分项工程"])
+        unit_fallback_name, unit_fallback_code = self._split_hierarchy_name_code(unit_combined)
+        part_fallback_name, part_fallback_code = self._split_hierarchy_name_code(part_combined)
+        return {
+            "contract_name": self._hierarchy_field(fields, ["合同工程名称"]),
+            "unit_project_name": self._hierarchy_field(fields, ["单位工程名称"], unit_fallback_name),
+            "unit_project_code": self._hierarchy_field(fields, ["单位工程编码", "单位工程编号"], unit_fallback_code),
+            "part_name": self._hierarchy_field(fields, ["分部工程名称", "分项工程名称"], part_fallback_name),
+            "part_code": self._hierarchy_field(fields, ["分部工程编码", "分部工程编号", "分项工程编码"], part_fallback_code),
+            "unit_name": self._hierarchy_field(fields, ["单元工程名称", "单元名称"], project.get("project_name")),
+            "unit_code": self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"], project.get("display_project_code") or project.get("project_code")),
+        }
+
+    def part_key(self, hierarchy):
+        identity = [
+            active_engineering_project_id(),
+            hierarchy.get("contract_name", ""),
+            hierarchy.get("unit_project_name", ""),
+            hierarchy.get("unit_project_code", ""),
+            hierarchy.get("part_name", ""),
+            hierarchy.get("part_code", ""),
+        ]
+        return hashlib.sha256(json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:20]
+
+    def slim_project(self, project):
+        hierarchy = self.project_hierarchy(project)
+        return {
+            "project_code": project.get("project_code", ""),
+            "display_project_code": project.get("display_project_code", ""),
+            "project_name": project.get("project_name", ""),
+            "photo_count": int(project.get("photo_count") or 0),
+            "construction_photo_count": int(project.get("construction_photo_count") or 0),
+            "supervision_photo_count": int(project.get("supervision_photo_count") or 0),
+            "latest_upload": project.get("latest_upload", ""),
+            "project_order": project.get("project_order"),
+            "source_fields": {
+                "合同工程名称": hierarchy["contract_name"],
+                "单位工程名称": hierarchy["unit_project_name"],
+                "单位工程编码": hierarchy["unit_project_code"],
+                "分部工程名称": hierarchy["part_name"],
+                "分部工程编码": hierarchy["part_code"],
+                "单元工程名称": hierarchy["unit_name"],
+                "单元工程编码": hierarchy["unit_code"],
+            },
+        }
+
+    def hierarchy_snapshot(self):
+        cache_key = active_engineering_project_id()
+        cached = self._hierarchy_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        projects = self.list_projects()
+        contracts = {}
+        dashboard = {"project_count": 0, "photo_count": 0, "construction_photo_count": 0, "supervision_photo_count": 0}
+        for project in projects:
+            hierarchy = self.project_hierarchy(project)
+            if not hierarchy["contract_name"] or not hierarchy["unit_project_name"] or not hierarchy["part_name"]:
+                continue
+            dashboard["project_count"] += 1
+            for field in ("photo_count", "construction_photo_count", "supervision_photo_count"):
+                dashboard[field] += int(project.get(field) or 0)
+            contract = contracts.setdefault(hierarchy["contract_name"], {
+                "name": hierarchy["contract_name"], "photo_count": 0, "construction_photo_count": 0,
+                "supervision_photo_count": 0, "unit_count": 0, "units": {},
+            })
+            unit_identity = (hierarchy["unit_project_name"], hierarchy["unit_project_code"])
+            unit = contract["units"].setdefault(unit_identity, {
+                "name": hierarchy["unit_project_name"], "code": hierarchy["unit_project_code"],
+                "photo_count": 0, "construction_photo_count": 0, "supervision_photo_count": 0,
+                "unit_count": 0, "parts": {},
+            })
+            part_identity = (hierarchy["part_name"], hierarchy["part_code"])
+            part = unit["parts"].setdefault(part_identity, {
+                "name": hierarchy["part_name"], "code": hierarchy["part_code"],
+                "part_key": self.part_key(hierarchy), "photo_count": 0,
+                "construction_photo_count": 0, "supervision_photo_count": 0, "unit_count": 0,
+            })
+            for node in (contract, unit, part):
+                node["photo_count"] += int(project.get("photo_count") or 0)
+                node["construction_photo_count"] += int(project.get("construction_photo_count") or 0)
+                node["supervision_photo_count"] += int(project.get("supervision_photo_count") or 0)
+                node["unit_count"] += 1
+        result = []
+        for contract in contracts.values():
+            units = []
+            for unit in contract.pop("units").values():
+                unit["parts"] = list(unit["parts"].values())
+                units.append(unit)
+            contract["units"] = units
+            result.append(contract)
+        snapshot = {"hierarchy": result, "dashboard": dashboard}
+        self._hierarchy_cache[cache_key] = snapshot
+        return snapshot
+
+    def projects_for_part(self, part_key, query=""):
+        query_text = str(query or "").strip().lower()
+        matches = []
+        for project in self.list_projects():
+            hierarchy = self.project_hierarchy(project)
+            if self.part_key(hierarchy) != str(part_key or ""):
+                continue
+            slim = self.slim_project(project)
+            if query_text and query_text not in json.dumps(slim, ensure_ascii=False).lower():
+                continue
+            matches.append(slim)
+        return matches
 
     def _safe_code(self, code):
         cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", str(code or "").strip())
@@ -1032,12 +1192,21 @@ class AlbumManager:
     THUMB_SUFFIX = "thumb_"
     THUMB_MAX_SIDE = 480
     THUMB_QUALITY = 80
-    PHOTO_MAX_SIDE = 4096
-    PHOTO_JPEG_QUALITY = 92
+    PHOTO_MAX_SIDE = 3200
+    PHOTO_MAX_BYTES = 300 * 1024
+    PHOTO_MIN_TARGET_BYTES = 72 * 1024
+    PHOTO_JPEG_QUALITY = 88
 
     def _thumb_filename(self, filename):
         stem = Path(str(filename)).stem
         return f"{self.THUMB_SUFFIX}{stem}.webp"
+
+    def _originals_dir(self, project_code):
+        """每个单元独立保存永久原图；随工程备份移动，不参与日常列表扫描。"""
+        return self._project_dir(project_code) / "_originals"
+
+    def _original_path(self, project_code, filename):
+        return self._originals_dir(project_code) / Path(str(filename)).name
 
     def _find_original(self, project_code, thumb_filename):
         """根据缩略图名反查原图文件路径。"""
@@ -1059,71 +1228,6 @@ class AlbumManager:
         except Exception:
             return False
 
-    def _save_optimized_upload(self, file_storage, target):
-        """保存视觉高质量原图：控制超大像素、去除无用元数据，并只在文件确实变小时替换。
-
-        4096px 足以覆盖 6 寸高精度打印；JPEG 使用 4:4:4 高质量编码。处理失败时保留原文件，
-        因此不会因为压缩器异常导致客户照片丢失。
-        """
-        original_bytes = 0
-        try:
-            file_storage.stream.seek(0)
-            raw = file_storage.stream.read()
-            original_bytes = len(raw)
-            file_storage.stream.seek(0)
-        except Exception:
-            raw = b""
-        if not raw:
-            file_storage.save(target)
-            stored_bytes = target.stat().st_size if target.exists() else 0
-            return {"original_bytes": original_bytes, "stored_bytes": stored_bytes, "optimized": False}
-        try:
-            from PIL import Image, ImageOps
-
-            with Image.open(io.BytesIO(raw)) as opened:
-                image = ImageOps.exif_transpose(opened)
-                image.load()
-                original_size = image.size
-                if max(image.size) > self.PHOTO_MAX_SIDE:
-                    image.thumbnail((self.PHOTO_MAX_SIDE, self.PHOTO_MAX_SIDE), Image.LANCZOS)
-                resized = image.size != original_size
-                output = io.BytesIO()
-                suffix = target.suffix.lower()
-                if suffix in {".jpg", ".jpeg"}:
-                    if image.mode not in {"RGB", "L"}:
-                        if "A" in image.getbands():
-                            background = Image.new("RGB", image.size, "white")
-                            background.paste(image, mask=image.getchannel("A"))
-                            image = background
-                        else:
-                            image = image.convert("RGB")
-                    image.save(
-                        output,
-                        "JPEG",
-                        quality=self.PHOTO_JPEG_QUALITY,
-                        subsampling=0,
-                        optimize=True,
-                        progressive=True,
-                    )
-                else:
-                    image.save(output, "PNG", optimize=True, compress_level=9)
-                optimized = output.getvalue()
-            # 没有缩小像素时，压缩结果若没有明显变小就保留用户原文件，避免重复编码无收益。
-            use_optimized = resized or len(optimized) + 4096 < len(raw)
-            payload = optimized if use_optimized else raw
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(payload)
-            return {
-                "original_bytes": len(raw),
-                "stored_bytes": len(payload),
-                "optimized": use_optimized,
-                "pixel_width": image.size[0],
-                "pixel_height": image.size[1],
-            }
-        except Exception:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(raw)
-            return {"original_bytes": len(raw), "stored_bytes": len(raw), "optimized": False}
         try:
             photos_dir = self._photos_dir(project_code)
             name = Path(str(filename)).name
@@ -1144,10 +1248,141 @@ class AlbumManager:
                 if img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
                 thumb_path.parent.mkdir(parents=True, exist_ok=True)
-                img.save(thumb_path, "WEBP", quality=self.THUMB_QUALITY, method=4)
+                temp_path = thumb_path.with_suffix(thumb_path.suffix + ".tmp")
+                img.save(temp_path, "WEBP", quality=self.THUMB_QUALITY, method=4)
+                os.replace(temp_path, thumb_path)
             return True
         except Exception:
             return False
+
+    def _encode_jpeg_to_budget(self, image, target_bytes):
+        """逐级调质量和像素，优先保清晰度，并确保不超过目标大小。"""
+        from PIL import Image
+
+        if image.mode not in {"RGB", "L"}:
+            if "A" in image.getbands():
+                background = Image.new("RGB", image.size, "white")
+                background.paste(image, mask=image.getchannel("A"))
+                image = background
+            else:
+                image = image.convert("RGB")
+        if max(image.size) > self.PHOTO_MAX_SIDE:
+            image.thumbnail((self.PHOTO_MAX_SIDE, self.PHOTO_MAX_SIDE), Image.LANCZOS)
+        best = b""
+        working = image
+        while True:
+            for quality in (88, 84, 80, 76, 72, 68, 64, 60, 56, 52):
+                output = io.BytesIO()
+                working.save(
+                    output,
+                    "JPEG",
+                    quality=quality,
+                    subsampling=2,
+                    optimize=True,
+                    progressive=True,
+                )
+                payload = output.getvalue()
+                if not best or len(payload) < len(best):
+                    best = payload
+                if len(payload) <= target_bytes:
+                    return payload, working.size
+            if max(working.size) <= 1280:
+                return best, working.size
+            next_size = (max(960, int(working.width * 0.84)), max(720, int(working.height * 0.84)))
+            resized = working.copy()
+            resized.thumbnail(next_size, Image.LANCZOS)
+            if resized.size == working.size:
+                return best, working.size
+            working = resized
+
+    def _encode_png_to_budget(self, image, target_bytes):
+        """PNG 保持格式；通过调色板和逐级缩放控制体积。"""
+        from PIL import Image
+
+        if max(image.size) > self.PHOTO_MAX_SIDE:
+            image.thumbnail((self.PHOTO_MAX_SIDE, self.PHOTO_MAX_SIDE), Image.LANCZOS)
+        working = image
+        best = b""
+        while True:
+            candidates = [working]
+            if working.mode not in {"P", "1"}:
+                converted = working.convert("RGBA" if "A" in working.getbands() else "RGB")
+                candidates.extend([
+                    converted.quantize(colors=256, method=Image.Quantize.FASTOCTREE),
+                    converted.quantize(colors=128, method=Image.Quantize.FASTOCTREE),
+                    converted.quantize(colors=64, method=Image.Quantize.FASTOCTREE),
+                ])
+            for candidate in candidates:
+                output = io.BytesIO()
+                candidate.save(output, "PNG", optimize=True, compress_level=9)
+                payload = output.getvalue()
+                if not best or len(payload) < len(best):
+                    best = payload
+                if len(payload) <= target_bytes:
+                    return payload, working.size
+            if max(working.size) <= 640:
+                return best, working.size
+            resized = working.copy()
+            resized.thumbnail((max(640, int(working.width * 0.82)), max(480, int(working.height * 0.82))), Image.LANCZOS)
+            if resized.size == working.size:
+                return best, working.size
+            working = resized
+
+    def _save_optimized_upload(self, file_storage, target):
+        """永久备份原图，并生成约原文件四分之一且最大 300KB 的日常使用图。"""
+        original_bytes = 0
+        try:
+            file_storage.stream.seek(0)
+            raw = file_storage.stream.read()
+            original_bytes = len(raw)
+            file_storage.stream.seek(0)
+        except Exception:
+            raw = b""
+        if not raw:
+            file_storage.save(target)
+            stored_bytes = target.stat().st_size if target.exists() else 0
+            return {"original_bytes": original_bytes, "stored_bytes": stored_bytes, "optimized": False}
+        try:
+            from PIL import Image, ImageOps
+
+            project_code = target.parent.parent.name
+            backup_path = self._original_path(project_code, target.name)
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            if not backup_path.exists():
+                temp_backup = backup_path.with_suffix(backup_path.suffix + ".tmp")
+                temp_backup.write_bytes(raw)
+                os.replace(temp_backup, backup_path)
+
+            with Image.open(io.BytesIO(raw)) as opened:
+                image = ImageOps.exif_transpose(opened)
+                image.load()
+                pixel_size = image.size
+                if len(raw) <= self.PHOTO_MAX_BYTES and max(image.size) <= self.PHOTO_MAX_SIDE:
+                    optimized = raw
+                else:
+                    target_bytes = min(self.PHOTO_MAX_BYTES, max(self.PHOTO_MIN_TARGET_BYTES, len(raw) // 4))
+                    if target.suffix.lower() in {".jpg", ".jpeg"}:
+                        optimized, pixel_size = self._encode_jpeg_to_budget(image, target_bytes)
+                    else:
+                        optimized, pixel_size = self._encode_png_to_budget(image, target_bytes)
+            use_optimized = len(optimized) < len(raw)
+            payload = optimized if use_optimized else raw
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temp_target = target.with_suffix(target.suffix + ".tmp")
+            temp_target.write_bytes(payload)
+            os.replace(temp_target, target)
+            return {
+                "original_bytes": len(raw),
+                "stored_bytes": len(payload),
+                "optimized": use_optimized,
+                "pixel_width": pixel_size[0],
+                "pixel_height": pixel_size[1],
+                "original_backup": backup_path.name,
+            }
+        except Exception:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+            return {"original_bytes": len(raw), "stored_bytes": len(raw), "optimized": False}
 
     def _normalize_category(self, category):
         category = str(category or "construction").strip()
@@ -1336,10 +1571,20 @@ class AlbumManager:
                     pass
 
         for photo, temp_path, new_path, new_id, new_filename in staged:
+            old_backup_name = str(photo.get("original_backup") or "")
             if temp_path and temp_path.exists():
                 if new_path.exists():
                     new_path.unlink()
                 temp_path.rename(new_path)
+            if old_backup_name:
+                old_backup = self._original_path(project_code, old_backup_name)
+                new_backup = self._original_path(project_code, new_filename)
+                if old_backup.exists() and old_backup != new_backup:
+                    new_backup.parent.mkdir(parents=True, exist_ok=True)
+                    if new_backup.exists():
+                        new_backup.unlink()
+                    old_backup.rename(new_backup)
+                photo["original_backup"] = new_filename
             self._ensure_thumbnail(project_code, new_filename)
             photo["id"] = new_id
             photo["category"] = category
@@ -1459,6 +1704,50 @@ class AlbumManager:
         data = self.get_project(project_code)
         return [self._photo_item(data, photo) for photo in data.get("photos", [])]
 
+    def optimize_existing_photo(self, project_code, photo_id):
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            photo = next((item for item in data.get("photos", []) if str(item.get("id")) == str(photo_id)), None)
+            if not photo:
+                raise ValueError("照片不存在")
+            target = self._photos_dir(project_code) / Path(str(photo.get("filename") or "")).name
+            if not target.exists():
+                raise ValueError("照片文件不存在")
+            raw = target.read_bytes()
+            result = self._save_optimized_upload(FileStorage(stream=io.BytesIO(raw), filename=target.name), target)
+            photo["original_bytes"] = int(result.get("original_bytes") or len(raw))
+            photo["stored_bytes"] = int(result.get("stored_bytes") or target.stat().st_size)
+            photo["optimized"] = bool(result.get("optimized"))
+            photo["original_backup"] = str(result.get("original_backup") or photo.get("original_backup") or "")
+            thumb = self._photos_dir(project_code) / self._thumb_filename(target.name)
+            thumb.unlink(missing_ok=True)
+            self._ensure_thumbnail(project_code, target.name)
+            self._write_metadata(project_code, data)
+            return self._photo_item(data, photo)
+
+    def restore_original_photo(self, project_code, photo_id):
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            photo = next((item for item in data.get("photos", []) if str(item.get("id")) == str(photo_id)), None)
+            if not photo:
+                raise ValueError("照片不存在")
+            backup_name = str(photo.get("original_backup") or "")
+            backup = self._original_path(project_code, backup_name) if backup_name else None
+            if not backup or not backup.exists():
+                raise ValueError("该照片没有可恢复的原图备份")
+            target = self._photos_dir(project_code) / Path(str(photo.get("filename") or "")).name
+            temp_target = target.with_suffix(target.suffix + ".restore")
+            shutil.copy2(backup, temp_target)
+            os.replace(temp_target, target)
+            photo["stored_bytes"] = target.stat().st_size
+            photo["original_bytes"] = backup.stat().st_size
+            photo["optimized"] = False
+            thumb = self._photos_dir(project_code) / self._thumb_filename(target.name)
+            thumb.unlink(missing_ok=True)
+            self._ensure_thumbnail(project_code, target.name)
+            self._write_metadata(project_code, data)
+            return self._photo_item(data, photo)
+
     def add_photos(self, project_code, files, category="construction", title="", photo_date="", photographer="", description="", uploaded_by="", orientation="landscape", process_name="", process_code="", per_file_meta=None):
         with self._project_write_lock(project_code):
             return self._add_photos_locked(project_code, files, category, title, photo_date, photographer, description, uploaded_by, orientation, process_name, process_code, per_file_meta)
@@ -1514,6 +1803,7 @@ class AlbumManager:
                 "original_bytes": int(compression.get("original_bytes") or 0),
                 "stored_bytes": int(compression.get("stored_bytes") or 0),
                 "optimized": bool(compression.get("optimized")),
+                "original_backup": str(compression.get("original_backup") or ""),
             }
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
@@ -1572,6 +1862,12 @@ class AlbumManager:
                 filename = self._photo_filename("supervision", photo_id, ext)
                 target = photos_dir / filename
             shutil.copy2(src_path, target)
+            source_backup_name = str(photo.get("original_backup") or "")
+            source_backup = self._original_path(project_code, source_backup_name) if source_backup_name else None
+            target_backup = self._original_path(project_code, filename)
+            if source_backup and source_backup.exists():
+                target_backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_backup, target_backup)
             self._ensure_thumbnail(project_code, filename)
             detected = detect_photo_orientation(target)
             orientation = self._normalize_orientation(detected or photo.get("orientation"))
@@ -1592,6 +1888,10 @@ class AlbumManager:
                 "original_name": str(photo.get("original_name") or src_path.name),
                 "upload_time": now_text(),
                 "filename": filename,
+                "original_bytes": int(photo.get("original_bytes") or src_path.stat().st_size),
+                "stored_bytes": int(target.stat().st_size),
+                "optimized": bool(photo.get("optimized")),
+                "original_backup": filename if target_backup.exists() else "",
             }
             data["photos"].append(item)
             added.append(self._photo_item(data, item))
@@ -2415,6 +2715,98 @@ class AlbumManager:
 
 manager = AlbumManager(ALBUMS_DIR)
 
+PHOTO_OPTIMIZATION_STATUS_PATH = DATA_DIR / "photo_optimization_status.json"
+_photo_optimization_lock = threading.Lock()
+_photo_optimization_thread = None
+_photo_optimization_pause = threading.Event()
+_photo_optimization_status = {
+    "state": "idle", "total": 0, "completed": 0, "optimized": 0,
+    "failed": 0, "saved_bytes": 0, "current": "", "errors": [],
+}
+
+
+def _public_photo_optimization_status():
+    with _photo_optimization_lock:
+        status = dict(_photo_optimization_status)
+        status["errors"] = list(status.get("errors") or [])[-10:]
+        status["paused"] = _photo_optimization_pause.is_set()
+        return status
+
+
+def _persist_photo_optimization_status():
+    try:
+        status = _public_photo_optimization_status()
+        temp_path = PHOTO_OPTIMIZATION_STATUS_PATH.with_suffix(".tmp")
+        temp_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(temp_path, PHOTO_OPTIMIZATION_STATUS_PATH)
+    except OSError:
+        pass
+
+
+def _photo_optimization_worker():
+    global _photo_optimization_thread
+    try:
+        work = []
+        for project in manager.list_projects(include_other=True):
+            code = str(project.get("project_code") or "")
+            if not code:
+                continue
+            try:
+                data = manager.get_project(code)
+                for photo in data.get("photos", []):
+                    target = manager._photos_dir(code) / Path(str(photo.get("filename") or "")).name
+                    backup_name = str(photo.get("original_backup") or "")
+                    backup_exists = bool(backup_name and manager._original_path(code, backup_name).exists())
+                    if target.exists() and (target.stat().st_size > manager.PHOTO_MAX_BYTES or not backup_exists):
+                        work.append((code, str(photo.get("id") or ""), target.stat().st_size))
+            except Exception:
+                continue
+        with _photo_optimization_lock:
+            _photo_optimization_status.update({
+                "state": "running", "total": len(work), "completed": 0,
+                "optimized": 0, "failed": 0, "saved_bytes": 0, "current": "", "errors": [],
+            })
+        _persist_photo_optimization_status()
+        for code, photo_id, before_size in work:
+            while _photo_optimization_pause.is_set():
+                threading.Event().wait(0.25)
+            with _photo_optimization_lock:
+                _photo_optimization_status["current"] = f"{code} / {photo_id}"
+            try:
+                item = manager.optimize_existing_photo(code, photo_id)
+                after_size = int(item.get("stored_bytes") or before_size)
+                with _photo_optimization_lock:
+                    _photo_optimization_status["completed"] += 1
+                    if after_size < before_size:
+                        _photo_optimization_status["optimized"] += 1
+                        _photo_optimization_status["saved_bytes"] += before_size - after_size
+            except Exception as exc:
+                with _photo_optimization_lock:
+                    _photo_optimization_status["completed"] += 1
+                    _photo_optimization_status["failed"] += 1
+                    _photo_optimization_status.setdefault("errors", []).append(f"{code}/{photo_id}: {exc}")
+            if _photo_optimization_status["completed"] % 10 == 0:
+                _persist_photo_optimization_status()
+        with _photo_optimization_lock:
+            _photo_optimization_status["state"] = "complete"
+            _photo_optimization_status["current"] = ""
+        _persist_photo_optimization_status()
+    finally:
+        with _photo_optimization_lock:
+            _photo_optimization_thread = None
+
+
+def ensure_photo_optimizer_started(delay_seconds=2.0):
+    global _photo_optimization_thread
+    with _photo_optimization_lock:
+        if _photo_optimization_thread and _photo_optimization_thread.is_alive():
+            return
+        def delayed_worker():
+            threading.Event().wait(max(0, float(delay_seconds)))
+            _photo_optimization_worker()
+        _photo_optimization_thread = threading.Thread(target=delayed_worker, name="photo-optimizer", daemon=True)
+        _photo_optimization_thread.start()
+
 
 def app_license_status():
     status = licensing.license_status()
@@ -3130,10 +3522,11 @@ def _cloud_thumbnail_bytes(project_code, filename, limits):
         return b""
     side = max(320, int(limits.get("thumb_max_side") or 720))
     quality = max(40, min(92, int(limits.get("thumb_quality") or 76)))
+    max_bytes = max(40_000, min(99 * 1024, int(limits.get("max_thumb_bytes") or 99 * 1024)))
     try:
         stat = original.stat()
         cache_key = hashlib.sha256(
-            f"{original.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{side}|{quality}".encode("utf-8")
+            f"{original.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{side}|{quality}|{max_bytes}".encode("utf-8")
         ).hexdigest()[:24]
         cache_dir = CLOUD_THUMB_CACHE_DIR / manager._safe_code(project_code)
         cache_path = cache_dir / f"{cache_key}.webp"
@@ -3145,9 +3538,22 @@ def _cloud_thumbnail_bytes(project_code, filename, limits):
             img.thumbnail((side, side), Image.LANCZOS)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
-            memory = io.BytesIO()
-            img.save(memory, "WEBP", quality=quality, method=4)
-            raw = memory.getvalue()
+            raw = b""
+            working = img.copy()
+            while True:
+                for candidate_quality in range(quality, 39, -6):
+                    memory = io.BytesIO()
+                    working.save(memory, "WEBP", quality=candidate_quality, method=4)
+                    raw = memory.getvalue()
+                    if len(raw) <= max_bytes:
+                        break
+                if len(raw) <= max_bytes or max(working.size) <= 480:
+                    break
+                next_image = working.copy()
+                next_image.thumbnail((max(480, int(working.width * 0.82)), max(360, int(working.height * 0.82))), Image.LANCZOS)
+                if next_image.size == working.size:
+                    break
+                working = next_image
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path.write_bytes(raw)
         return raw
@@ -4365,6 +4771,129 @@ def api_projects():
     return jsonify({"ok": True, "projects": projects})
 
 
+@app.route("/api/bootstrap")
+def api_bootstrap():
+    user = current_user()
+    if not user:
+        return jsonify({
+            "ok": True, "user": None, "revision": manager.revision(),
+            "dashboard": {}, "hierarchy": [], "optimization_status": _public_photo_optimization_status(),
+        })
+    engineering_data = read_engineering_projects()
+    snapshot = manager.hierarchy_snapshot()
+    response = jsonify({
+        "ok": True,
+        "user": user,
+        "revision": manager.revision(),
+        "project_info": _public_project(current_engineering_project(engineering_data)),
+        "engineering_projects": [_public_project(item) for item in engineering_data.get("projects", [])],
+        "active_engineering_project_id": engineering_data.get("active_id"),
+        "settings": read_engineering_settings(),
+        "dashboard": snapshot["dashboard"],
+        "hierarchy": snapshot["hierarchy"],
+        "optimization_status": _public_photo_optimization_status(),
+    })
+    ensure_photo_optimizer_started()
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.set_etag(hashlib.sha256(response.get_data()).hexdigest())
+    return response.make_conditional(request)
+
+
+@app.route("/api/revision")
+def api_revision():
+    return jsonify({
+        "ok": True,
+        "authenticated": bool(current_user()),
+        "revision": manager.revision(),
+        "optimization_status": _public_photo_optimization_status(),
+    })
+
+
+@app.route("/api/units")
+def api_units():
+    user, error = login_required_json()
+    if error:
+        return error
+    part_key = str(request.args.get("part_key") or "").strip()
+    if not part_key:
+        return json_error("缺少分部标识 part_key", 400)
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+        page_size = max(1, min(100, int(request.args.get("page_size") or 20)))
+    except (TypeError, ValueError):
+        return json_error("分页参数无效", 400)
+    projects = manager.projects_for_part(part_key, request.args.get("q", ""))
+    total = len(projects)
+    start = (page - 1) * page_size
+    return jsonify({
+        "ok": True, "part_key": part_key, "page": page, "page_size": page_size,
+        "total": total, "pages": max(1, (total + page_size - 1) // page_size),
+        "projects": projects[start:start + page_size],
+    })
+
+
+@app.route("/api/photo-optimization/status")
+def api_photo_optimization_status():
+    return jsonify({"ok": True, "status": _public_photo_optimization_status()})
+
+
+@app.route("/api/photo-optimization/start", methods=["POST"])
+def api_photo_optimization_start():
+    user, error = login_required_json()
+    if error:
+        return error
+    _photo_optimization_pause.clear()
+    ensure_photo_optimizer_started(delay_seconds=0)
+    return jsonify({"ok": True, "status": _public_photo_optimization_status()})
+
+
+@app.route("/api/photo-optimization/pause", methods=["POST"])
+def api_photo_optimization_pause():
+    user, error = login_required_json()
+    if error:
+        return error
+    _photo_optimization_pause.set()
+    return jsonify({"ok": True, "status": _public_photo_optimization_status()})
+
+
+@app.route("/api/photos/<path:project_code>/<photo_id>/optimize", methods=["POST"])
+def api_optimize_photo(project_code, photo_id):
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        return jsonify({"ok": True, "photo": manager.optimize_existing_photo(project_code, photo_id)})
+    except Exception as exc:
+        return json_error(str(exc), 400)
+
+
+@app.route("/api/photos/<path:project_code>/<photo_id>/restore-original", methods=["POST"])
+def api_restore_original_photo(project_code, photo_id):
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        return jsonify({"ok": True, "photo": manager.restore_original_photo(project_code, photo_id)})
+    except Exception as exc:
+        return json_error(str(exc), 400)
+
+
+@app.route("/originals/<path:project_code>/<photo_id>")
+def original_photo_file(project_code, photo_id):
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        data = manager.get_project(project_code)
+        photo = next((item for item in data.get("photos", []) if str(item.get("id")) == str(photo_id)), None)
+        backup_name = str((photo or {}).get("original_backup") or "")
+        if not backup_name:
+            return "not found", 404
+        return send_from_directory(manager._originals_dir(project_code), Path(backup_name).name)
+    except Exception:
+        return "not found", 404
+
+
 @app.route("/api/projects", methods=["POST"])
 def api_create_project():
     data = request.get_json(silent=True) or request.form
@@ -5163,7 +5692,25 @@ def thumb_file(project_code, filename):
 @app.route("/assets/<path:filename>")
 def asset_file(filename):
     safe_name = secure_filename(filename)
-    return send_from_directory(BASE_DIR / "assets", safe_name)
+    asset_dir = BASE_DIR / "assets"
+    asset_path = asset_dir / safe_name
+    if not safe_name or not asset_path.is_file():
+        return "not found", 404
+    use_gzip = "gzip" in request.headers.get("Accept-Encoding", "").lower()
+    gzip_path = asset_dir / f"{safe_name}.gz"
+    response = send_file(gzip_path if use_gzip and gzip_path.is_file() else asset_path, conditional=True)
+    if safe_name.endswith(".css"):
+        response.mimetype = "text/css"
+    elif safe_name.endswith(".js"):
+        response.mimetype = "application/javascript"
+    if use_gzip and gzip_path.is_file():
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Vary"] = "Accept-Encoding"
+    if re.search(r"-A\d{8}-\d+\.\d+\.(?:css|js)$", safe_name):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
 
 
 @app.route("/print/<category>/batch")
@@ -5412,6 +5959,11 @@ def delete_photo(project_code, photo_id):
                     thumb_target = photos_dir / manager._thumb_filename(photo.get("filename", ""))
                     if thumb_target.exists():
                         thumb_target.unlink()
+                    backup_name = str(photo.get("original_backup") or "")
+                    if backup_name:
+                        original_target = manager._original_path(project_code, backup_name)
+                        if original_target.exists():
+                            original_target.unlink()
                     deleted = True
                 else:
                     kept.append(photo)
