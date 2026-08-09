@@ -964,8 +964,16 @@
     .grid-2 { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(340px, .9fr); gap: 12px; align-items: start; }
     .overview-grid {
       min-height: 0;
-      grid-template-columns: minmax(0, 1fr);
-      align-items: stretch;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+      align-items: start;
+    }
+    .overview-grid > .overview-board:not(.recent-uploads-board) {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .overview-grid .recent-uploads-board {
+      grid-column: 2;
+      grid-row: 1;
     }
     .panel {
       border: 1px solid var(--line);
@@ -990,6 +998,55 @@
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
     }
+    .recent-uploads-list {
+      display: grid;
+      gap: 6px;
+      max-height: 100%;
+      overflow: auto;
+    }
+    .recent-upload-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .recent-upload-item:hover { border-color: var(--click-line); background: var(--click); }
+    .recent-upload-main {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+    .recent-upload-title {
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .recent-upload-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .recent-upload-unit::before { content: "单元 · "; color: var(--muted); }
+    .recent-upload-part::before { content: "分部 · "; color: var(--muted); }
+    .recent-upload-info {
+      flex: 0 0 auto;
+      display: grid;
+      gap: 3px;
+      text-align: right;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .recent-upload-who { color: #0c6b6e; font-weight: 700; }
     .overview-board .panel-body {
       min-height: 0;
       overflow: auto;

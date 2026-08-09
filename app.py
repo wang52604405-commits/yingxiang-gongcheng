@@ -4838,6 +4838,57 @@ def api_bootstrap():
     return response.make_conditional(request)
 
 
+@app.route("/api/recent-uploads")
+def api_recent_uploads():
+    """最近上传的照片记录：上传人、单位/单元/分部、题名、日期、缩略图。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        limit = max(1, min(100, int(request.args.get("limit") or 20)))
+        scope = str(request.args.get("scope") or "construction").strip()
+        include_other = scope == "other"
+        records = []
+        for project in manager.list_projects(include_other=include_other):
+            code = str(project.get("project_code") or "")
+            if not code:
+                continue
+            is_other = bool(project.get("is_other_image"))
+            if scope == "construction" and is_other:
+                continue
+            if scope == "other" and not is_other:
+                continue
+            try:
+                data = manager.get_project(code)
+            except Exception:
+                continue
+            hierarchy = manager.project_hierarchy(project)
+            unit_name = hierarchy.get("unit_project_name") or project.get("project_name") or ""
+            part_name = hierarchy.get("part_name") or ""
+            for photo in data.get("photos", []):
+                if not photo.get("upload_time"):
+                    continue
+                filename = str(photo.get("filename") or "")
+                if not filename:
+                    continue
+                records.append({
+                    "project_code": code,
+                    "unit": unit_name,
+                    "part": part_name,
+                    "display_code": project.get("display_project_code") or project.get("project_code") or code,
+                    "title": str(photo.get("title") or photo.get("original_name") or photo.get("filename") or ""),
+                    "photo_date": str(photo.get("photo_date") or ""),
+                    "upload_time": str(photo.get("upload_time") or ""),
+                    "uploaded_by": str(photo.get("uploaded_by") or ""),
+                    "category": str(photo.get("category") or ""),
+                    "thumb_url": manager._thumb_url(code, filename),
+                })
+        records.sort(key=lambda item: str(item.get("upload_time") or ""), reverse=True)
+        return jsonify({"ok": True, "records": records[:limit]})
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
 @app.route("/api/revision")
 def api_revision():
     return jsonify({

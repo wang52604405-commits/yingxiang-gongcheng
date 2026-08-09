@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260809-2.43.css">
+  <link rel="stylesheet" href="/assets/app-A20260809-2.44.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：只首次进入时显示，数据加载完自动淡出 -->
@@ -288,6 +288,12 @@
               <div class="panel-head"><h3>其它影像分类</h3><span class="pill">层级视图</span></div>
               <div class="panel-body">
                 <div id="otherModuleGrid" class="module-grid"></div>
+              </div>
+            </section>
+            <section class="panel overview-board recent-uploads-board">
+              <div class="panel-head"><h3>最近上传</h3><span class="pill" id="recentUploadsCount">0 条</span></div>
+              <div class="panel-body">
+                <div id="recentUploadsList" class="recent-uploads-list"><div class="empty">暂无最近上传记录。</div></div>
               </div>
             </section>
           </div>
@@ -758,6 +764,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260809-2.43.js"></script>
+  <script defer src="/assets/app-A20260809-2.44.js"></script>
 </body>
 </html>

@@ -2003,10 +2003,53 @@ const $ = (selector) => document.querySelector(selector);
       $("#overviewSub").textContent = isOther ? "其它影像分类，点击进入详情。" : "施工影像项目结构，点击进入详情。";
       const conPanel = $("#constructionModuleGrid")?.closest(".panel");
       const otherPanel = $("#otherModuleGrid")?.closest(".panel");
+      const recentPanel = $("#recentUploadsList")?.closest(".panel");
       if (conPanel) conPanel.style.display = isOther ? "none" : "";
       if (otherPanel) otherPanel.style.display = isOther ? "" : "none";
+      if (recentPanel) recentPanel.style.display = "";
       renderConstructionOverview();
       renderOtherOverview();
+      loadRecentUploads(isOther ? "other" : "construction");
+    }
+
+    let recentUploadsLoading = false;
+    async function loadRecentUploads(scope = "construction") {
+      if (recentUploadsLoading) return;
+      recentUploadsLoading = true;
+      try {
+        const data = await apiJson(`/api/recent-uploads?limit=20&scope=${scope}`);
+        const records = data.records || [];
+        const list = $("#recentUploadsList");
+        const count = $("#recentUploadsCount");
+        if (count) count.textContent = `${records.length} 条`;
+        if (!list) return;
+        if (!records.length) {
+          list.innerHTML = `<div class="empty">暂无最近上传记录。</div>`;
+          return;
+        }
+        list.innerHTML = records.map((rec) => `
+          <div class="recent-upload-item" data-code="${escapeHtml(rec.project_code)}">
+            <div class="recent-upload-main">
+              <strong class="recent-upload-title" title="${escapeHtml(rec.title)}">${escapeHtml(rec.title || "未命名照片")}</strong>
+              <span class="recent-upload-meta">
+                ${rec.unit ? `<span class="recent-upload-unit" title="${escapeHtml(rec.unit)}">${escapeHtml(rec.unit)}</span>` : ""}
+                ${rec.part ? `<span class="recent-upload-part">${escapeHtml(rec.part)}</span>` : ""}
+              </span>
+            </div>
+            <span class="recent-upload-info">
+              <span class="recent-upload-who">${escapeHtml(rec.uploaded_by || "—")}</span>
+              <span class="recent-upload-when">${escapeHtml(rec.photo_date || rec.upload_time || "")}</span>
+            </span>
+          </div>
+        `).join("");
+        list.querySelectorAll("[data-code]").forEach((row) => {
+          row.addEventListener("click", () => loadProject(row.dataset.code, "detail").catch((error) => showNotice(error.message, true)));
+        });
+      } catch (error) {
+        // 静默失败，不阻塞主界面
+      } finally {
+        recentUploadsLoading = false;
+      }
     }
 
     function renderConstructionOverview() {
