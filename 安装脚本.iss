@@ -4,8 +4,8 @@
 [Setup]
 AppId={{8E7C6C39-8E2F-4B4E-9B1A-9F8D3C4E5A6B}
 AppName=工程影像管理平台
-AppVersion=A20260809-2.50
-AppVerName=工程影像管理平台 A20260809-2.50
+AppVersion=A20260809-2.51
+AppVerName=工程影像管理平台 A20260809-2.51
 AppPublisher=工程影像管理平台
 DefaultDirName={localappdata}\工程影像管理平台
 DefaultGroupName=工程影像管理平台
@@ -45,7 +45,7 @@ Name: "{autodesktop}\工程影像管理平台"; Filename: "{app}\工程影像管
 [Registry]
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "DataDir"; ValueData: "{code:GetDataDir}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260809-2.50"
+Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260809-2.51"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "工程影像管理平台"; ValueData: """{app}\工程影像管理平台.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
