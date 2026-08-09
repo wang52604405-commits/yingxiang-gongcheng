@@ -3427,7 +3427,16 @@ const $ = (selector) => document.querySelector(selector);
       state.allProjectsLoaded = true;
       state.treeRoot = buildTree(state.projects);
       expandAdaptiveTree();
-      if (selectedPart) state.selectedPart = findPartNode(selectedPartName, selectedPartCode);
+      if (selectedPart) {
+        const updated = findPartNode(selectedPartName, selectedPartCode);
+        if (updated) {
+          // 保留原 part 对象(含已加载的单元列表)，仅更新字段
+          selectedPart.name = updated.name;
+          selectedPart.code = updated.code;
+          selectedPart.key = updated.key;
+          selectedPart.partKey = updated.partKey;
+        }
+      }
       renderTree();
       renderOverview();
     }
