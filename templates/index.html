@@ -2685,6 +2685,67 @@
       font-weight: 700;
     }
     .batch-project.active .batch-check { background: var(--primary); }
+    .print-setup-modal {
+      width: min(94vw, 860px);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+    .print-setup-body { padding: 16px; }
+    .print-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .print-mode-card {
+      display: grid;
+      gap: 7px;
+      min-height: 118px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfdff;
+      text-align: left;
+      color: var(--text);
+    }
+    .print-mode-card.active {
+      border-color: #62a3d7;
+      background: #edf7ff;
+      box-shadow: 0 0 0 3px rgba(23, 105, 170, .1);
+    }
+    .print-mode-card strong { font-size: 16px; }
+    .print-mode-card span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .print-custom-panel {
+      display: none;
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+    .print-custom-panel.open { display: block; }
+    .print-custom-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .print-custom-grid label,
+    .print-field-options label { display: grid; gap: 5px; color: #334155; font-size: 12px; font-weight: 700; }
+    .print-custom-grid input,
+    .print-custom-grid select { width: 100%; min-width: 0; }
+    .print-field-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .print-field-options label { display: inline-flex; align-items: center; grid-template-columns: auto 1fr; }
+    .print-field-options input { margin: 0; }
+    .print-setup-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
     @media (max-width: 760px) {
       .modal-backdrop {
         align-items: flex-end;
@@ -2695,7 +2756,8 @@
       .upload-choice-modal,
       .project-picker-modal,
       .photo-edit-modal,
-      .batch-print-modal {
+      .batch-print-modal,
+      .print-setup-modal {
         width: 100%;
         max-width: none;
         max-height: 88vh;
@@ -6566,6 +6628,8 @@
       .upload-modal-form {
         grid-template-columns: 1fr !important;
       }
+      .print-mode-grid { grid-template-columns: 1fr; }
+      .print-custom-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     .folder-review-modal {
       width: min(1240px, 96vw);
@@ -7047,6 +7111,63 @@
           </section>
         </div>
 
+        <div id="printSetupModal" class="modal-backdrop" aria-hidden="true">
+          <section class="print-setup-modal" role="dialog" aria-modal="true" aria-labelledby="printSetupTitle">
+            <div class="upload-choice-head">
+              <div>
+                <h3 id="printSetupTitle">打印设置</h3>
+                <p>先选择常用默认方案，或展开自定义排版后再进入打印预览。</p>
+              </div>
+              <button class="ghost" type="button" id="closePrintSetupBtn">关闭</button>
+            </div>
+            <div class="print-setup-body">
+              <div class="print-mode-grid">
+                <button class="print-mode-card active" type="button" data-print-mode="default">
+                  <strong>默认打印</strong>
+                  <span>5寸照片 · A4横版 · 每页4张 · 题名/编号/日期在照片下方 · 紧凑页边距</span>
+                </button>
+                <button class="print-mode-card" type="button" data-print-mode="custom">
+                  <strong>用户自定义</strong>
+                  <span>可调整照片尺寸、每页数量、文字标签位置、字号、页边距、间距和裁切方式。</span>
+                </button>
+              </div>
+              <div id="printCustomPanel" class="print-custom-panel">
+                <div class="print-custom-grid">
+                  <label>纸张方向<select id="printSetupLayout"><option value="landscape">A4 横版</option><option value="portrait">A4 竖版</option></select></label>
+                  <label>每页照片数量<input id="printSetupPageSize" type="number" min="1" max="12" step="1" value="4"></label>
+                  <label>照片规格<select id="printSetupPreset"><option value="4inch">4寸 10.2×7.6cm</option><option value="5inch" selected>5寸 12.7×8.9cm</option><option value="6inch">6寸 15.2×10.2cm</option><option value="custom">自定义尺寸</option></select></label>
+                  <label>图片填充<select id="printSetupImageFit"><option value="cover">铺满裁切</option><option value="contain">完整显示（可留白）</option></select></label>
+                  <label>照片宽度(cm)<input id="printSetupPhotoWidth" type="number" min="1" max="30" step="0.1" value="12.7"></label>
+                  <label>照片高度(cm)<input id="printSetupPhotoHeight" type="number" min="1" max="30" step="0.1" value="8.9"></label>
+                  <label>文字标签位置<select id="printSetupCaptionPosition"><option value="bottom" selected>照片下方</option><option value="top">照片上方</option><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="hidden">不显示标签</option></select></label>
+                  <label>标签区域宽/高(mm)<input id="printSetupCaptionSize" type="number" min="4" max="60" step="1" value="7"></label>
+                  <label>标签字号(px)<input id="printSetupCaptionFont" type="number" min="5" max="14" step="0.1" value="7.2"></label>
+                  <label>上页边距(mm)<input id="printSetupMarginTop" type="number" min="0" max="30" step="1" value="6"></label>
+                  <label>右页边距(mm)<input id="printSetupMarginRight" type="number" min="0" max="30" step="1" value="6"></label>
+                  <label>下页边距(mm)<input id="printSetupMarginBottom" type="number" min="0" max="30" step="1" value="6"></label>
+                  <label>左页边距(mm)<input id="printSetupMarginLeft" type="number" min="0" max="30" step="1" value="6"></label>
+                  <label>照片横向间距(mm)<input id="printSetupHorizontalGap" type="number" min="0" max="20" step="0.5" value="2"></label>
+                  <label>照片纵向间距(mm)<input id="printSetupVerticalGap" type="number" min="0" max="20" step="0.5" value="2"></label>
+                  <label>页标题<select id="printSetupShowPageTitle"><option value="1">显示单元名称和页码</option><option value="0">不显示</option></select></label>
+                </div>
+                <div class="print-field-options" aria-label="文字标签内容">
+                  <strong>标签内容</strong>
+                  <label><input type="checkbox" value="title" data-print-caption-field checked>题名</label>
+                  <label><input type="checkbox" value="id" data-print-caption-field checked>照片编号</label>
+                  <label><input type="checkbox" value="project_name" data-print-caption-field>单元工程</label>
+                  <label><input type="checkbox" value="photo_date" data-print-caption-field checked>拍摄日期</label>
+                  <label><input type="checkbox" value="photographer" data-print-caption-field>摄影人</label>
+                  <label><input type="checkbox" value="description" data-print-caption-field>描述</label>
+                </div>
+              </div>
+            </div>
+            <div class="print-setup-actions">
+              <button class="secondary" type="button" id="cancelPrintSetupBtn">取消</button>
+              <button type="button" id="confirmPrintSetupBtn">进入打印预览</button>
+            </div>
+          </section>
+        </div>
+
         <div id="photoPreviewModal" class="modal-backdrop" aria-hidden="true">
           <section class="photo-preview-modal" role="dialog" aria-modal="true" aria-labelledby="photoPreviewTitle">
             <div class="photo-preview-head">
@@ -7308,6 +7429,8 @@
       batchPrintCategory: "construction",
       batchPrintMode: "print",
       printPageSize: 4,
+      printSetupMode: "default",
+      pendingPrintUrl: "",
       batchSelectedCodes: new Set(),
       batchVisibleCodes: [],
       photoPreviewScale: 1,
@@ -7947,8 +8070,9 @@
         showNotice(`请先选择要${state.batchPrintMode === "pdf" ? "导出PDF" : "批量打印"}的单元工程。`, true);
         return;
       }
-      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?codes=${encodeURIComponent(codes.join(","))}&mode=${encodeURIComponent(state.batchPrintMode)}&${printParams()}`;
-      window.open(url, "_blank");
+      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?codes=${encodeURIComponent(codes.join(","))}&mode=${encodeURIComponent(state.batchPrintMode)}`;
+      closeBatchPrint();
+      openPrintSetup(url);
     }
 
     function renderProjectPicker() {
@@ -11043,19 +11167,129 @@
       requireSelected(() => { window.location.href = `/api/export/${encodeURIComponent(state.selectedCode)}/zip`; });
     }
 
-    function printParams(category = "") {
-      const settings = state.engineeringSettings || {};
-      const params = new URLSearchParams({
-        layout: settings.print_layout || "landscape",
-        page_size: String(settings.print_page_size || 4)
+    function setPrintSetupMode(mode) {
+      state.printSetupMode = mode === "custom" ? "custom" : "default";
+      document.querySelectorAll("[data-print-mode]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.printMode === state.printSetupMode);
       });
-      const ids = category ? selectedPrintIds(category) : [];
-      if (ids.length) params.set("ids", ids.join(","));
-      return params.toString();
+      $("#printCustomPanel").classList.toggle("open", state.printSetupMode === "custom");
     }
 
-    $("#printConstructionBtn").addEventListener("click", () => requireSelected(() => window.open(`/print/construction/${encodeURIComponent(state.selectedCode)}?${printParams("construction")}`, "_blank")));
-    $("#printSupervisionBtn").addEventListener("click", () => requireSelected(() => window.open(`/print/supervision/${encodeURIComponent(state.selectedCode)}?${printParams("supervision")}`, "_blank")));
+    function syncPrintSetupPreset() {
+      const sizes = { "4inch": [10.2, 7.6], "5inch": [12.7, 8.9], "6inch": [15.2, 10.2] };
+      const size = sizes[$("#printSetupPreset").value];
+      if (size) {
+        $("#printSetupPhotoWidth").value = size[0];
+        $("#printSetupPhotoHeight").value = size[1];
+      }
+      const custom = !size;
+      $("#printSetupPhotoWidth").disabled = !custom;
+      $("#printSetupPhotoHeight").disabled = !custom;
+    }
+
+    function loadPrintSetupValues() {
+      const settings = state.engineeringSettings || {};
+      $("#printSetupLayout").value = settings.print_layout || "landscape";
+      $("#printSetupPageSize").value = String(settings.print_page_size || 4);
+      $("#printSetupPreset").value = settings.print_photo_preset || "5inch";
+      $("#printSetupPhotoWidth").value = settings.print_photo_width_cm || 12.7;
+      $("#printSetupPhotoHeight").value = settings.print_photo_height_cm || 8.9;
+      $("#printSetupCaptionPosition").value = settings.print_caption_position || "bottom";
+      $("#printSetupCaptionSize").value = settings.print_caption_size_mm || 7;
+      $("#printSetupCaptionFont").value = settings.print_caption_font_size || 7.2;
+      $("#printSetupMarginTop").value = settings.print_margin_top_mm ?? 6;
+      $("#printSetupMarginRight").value = settings.print_margin_right_mm ?? 6;
+      $("#printSetupMarginBottom").value = settings.print_margin_bottom_mm ?? 6;
+      $("#printSetupMarginLeft").value = settings.print_margin_left_mm ?? 6;
+      $("#printSetupHorizontalGap").value = settings.print_horizontal_gap_mm ?? 2;
+      $("#printSetupVerticalGap").value = settings.print_vertical_gap_mm ?? 2;
+      $("#printSetupImageFit").value = settings.print_image_fit || "cover";
+      $("#printSetupShowPageTitle").value = settings.print_show_page_title === false ? "0" : "1";
+      const fields = new Set(settings.print_caption_fields || ["title", "id", "photo_date"]);
+      document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
+      syncPrintSetupPreset();
+    }
+
+    function openPrintSetup(url) {
+      state.pendingPrintUrl = url;
+      loadPrintSetupValues();
+      setPrintSetupMode("default");
+      $("#printSetupModal").classList.add("open");
+      $("#printSetupModal").setAttribute("aria-hidden", "false");
+    }
+
+    function closePrintSetup() {
+      $("#printSetupModal").classList.remove("open");
+      $("#printSetupModal").setAttribute("aria-hidden", "true");
+      state.pendingPrintUrl = "";
+    }
+
+    function printSetupParams() {
+      if (state.printSetupMode === "default") {
+        return new URLSearchParams({
+          layout: "landscape", page_size: "4", photo_preset: "5inch",
+          caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
+          margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4",
+          horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
+          show_page_title: "1", caption_fields: "title,id,photo_date"
+        });
+      }
+      const pageSize = Math.max(1, Math.min(12, Number($("#printSetupPageSize").value || 4)));
+      const fields = Array.from(document.querySelectorAll("[data-print-caption-field]:checked")).map((input) => input.value);
+      return new URLSearchParams({
+        layout: $("#printSetupLayout").value,
+        page_size: String(pageSize),
+        photo_preset: $("#printSetupPreset").value,
+        photo_width_cm: $("#printSetupPhotoWidth").value || "12.7",
+        photo_height_cm: $("#printSetupPhotoHeight").value || "8.9",
+        caption_position: $("#printSetupCaptionPosition").value,
+        caption_size_mm: $("#printSetupCaptionSize").value || "7",
+        caption_font_size: $("#printSetupCaptionFont").value || "7.2",
+        margin_top_mm: $("#printSetupMarginTop").value || "0",
+        margin_right_mm: $("#printSetupMarginRight").value || "0",
+        margin_bottom_mm: $("#printSetupMarginBottom").value || "0",
+        margin_left_mm: $("#printSetupMarginLeft").value || "0",
+        horizontal_gap_mm: $("#printSetupHorizontalGap").value || "0",
+        vertical_gap_mm: $("#printSetupVerticalGap").value || "0",
+        image_fit: $("#printSetupImageFit").value,
+        show_page_title: $("#printSetupShowPageTitle").value,
+        caption_fields: fields.join(",")
+      });
+    }
+
+    function confirmPrintSetup() {
+      if (!state.pendingPrintUrl) return;
+      const url = new URL(state.pendingPrintUrl, window.location.origin);
+      printSetupParams().forEach((value, key) => url.searchParams.set(key, value));
+      const target = `${url.pathname}${url.search}`;
+      closePrintSetup();
+      window.open(target, "_blank");
+    }
+
+    function openUnitPrint(category) {
+      requireSelected(() => {
+        const url = new URL(`/print/${encodeURIComponent(category)}/${encodeURIComponent(state.selectedCode)}`, window.location.origin);
+        const ids = selectedPrintIds(category);
+        if (ids.length) url.searchParams.set("ids", ids.join(","));
+        openPrintSetup(`${url.pathname}${url.search}`);
+      });
+    }
+
+    document.querySelectorAll("[data-print-mode]").forEach((button) => button.addEventListener("click", () => setPrintSetupMode(button.dataset.printMode)));
+    $("#printSetupPreset").addEventListener("change", syncPrintSetupPreset);
+    $("#printSetupCaptionPosition").addEventListener("change", () => {
+      const side = ["left", "right"].includes($("#printSetupCaptionPosition").value);
+      const current = Number($("#printSetupCaptionSize").value || 0);
+      if (side && current < 16) $("#printSetupCaptionSize").value = "32";
+      if (!side && current > 20) $("#printSetupCaptionSize").value = "7";
+    });
+    $("#closePrintSetupBtn").addEventListener("click", closePrintSetup);
+    $("#cancelPrintSetupBtn").addEventListener("click", closePrintSetup);
+    $("#confirmPrintSetupBtn").addEventListener("click", confirmPrintSetup);
+    $("#printSetupModal").addEventListener("click", (event) => { if (event.target.id === "printSetupModal") closePrintSetup(); });
+
+    $("#printConstructionBtn").addEventListener("click", () => openUnitPrint("construction"));
+    $("#printSupervisionBtn").addEventListener("click", () => openUnitPrint("supervision"));
     $("#menuPrintConstructionBtn").addEventListener("click", () => openBatchPrint("construction", "print"));
     $("#menuPrintSupervisionBtn").addEventListener("click", () => openBatchPrint("supervision", "print"));
     $("#renumberAllBtn").addEventListener("click", renumberAllPhotos);

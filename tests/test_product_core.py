@@ -271,6 +271,54 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn("复制施工照片", html)
         self.assertIn("4寸（10.2×7.6cm）", html)
         self.assertIn("审核批量导入结果", html)
+        self.assertIn("默认打印", html)
+        self.assertIn("每页照片数量", html)
+        self.assertIn("文字标签位置", html)
+        self.assertIn("printSetupMarginTop", html)
+
+    def test_default_print_is_four_5inch_photos_and_upload_is_optimized(self):
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        photos = [
+            {"id": f"SY-{index}", "detail_rows": [{"label": "题名", "value": f"照片{index}"}]}
+            for index in range(1, 5)
+        ]
+        settings = {
+            "print_margin_top_mm": 4,
+            "print_margin_right_mm": 4,
+            "print_margin_bottom_mm": 4,
+            "print_margin_left_mm": 4,
+            "print_horizontal_gap_mm": 2,
+            "print_vertical_gap_mm": 2,
+            "print_caption_position": "bottom",
+            "print_caption_size_mm": 7,
+            "print_show_page_title": True,
+        }
+        pages = self.desktop.layout_fixed_photo_pages(
+            photos,
+            layout="landscape",
+            page_size=4,
+            photo_width_mm=127,
+            photo_height_mm=89,
+            print_settings=settings,
+        )
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages[0]), 4)
+        self.assertTrue(all(item["_caption_position"] == "bottom" for item in pages[0]))
+
+        source = io.BytesIO()
+        Image.effect_noise((4200, 2800), 48).convert("RGB").save(source, "JPEG", quality=100)
+        source_bytes = source.getvalue()
+        source.seek(0)
+        target = Path(self.temp.name) / "optimized-upload.jpg"
+        result = self.desktop.manager._save_optimized_upload(
+            FileStorage(stream=source, filename="现场原图.jpg"), target
+        )
+        self.assertTrue(result["optimized"])
+        self.assertLess(target.stat().st_size, len(source_bytes))
+        with Image.open(target) as optimized:
+            self.assertLessEqual(max(optimized.size), 4096)
 
 
 if __name__ == "__main__":

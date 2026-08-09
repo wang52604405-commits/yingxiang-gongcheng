@@ -150,7 +150,17 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_width_cm": 12.7,
     "print_photo_height_cm": 8.9,
     "print_caption_font_size": 7.2,
-    "print_caption_position": "left",
+    "print_caption_position": "bottom",
+    "print_caption_size_mm": 7.0,
+    "print_margin_top_mm": 6.0,
+    "print_margin_right_mm": 6.0,
+    "print_margin_bottom_mm": 6.0,
+    "print_margin_left_mm": 6.0,
+    "print_horizontal_gap_mm": 2.0,
+    "print_vertical_gap_mm": 2.0,
+    "print_image_fit": "cover",
+    "print_show_page_title": True,
+    "print_caption_fields": ["title", "id", "photo_date"],
     "watermark_ocr_enabled": True,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
@@ -635,7 +645,7 @@ def read_engineering_settings():
         settings["print_page_size"] = int(settings.get("print_page_size", 4))
     except (TypeError, ValueError):
         settings["print_page_size"] = 4
-    if settings["print_page_size"] not in {1, 2, 4}:
+    if not 1 <= settings["print_page_size"] <= 12:
         settings["print_page_size"] = 4
     settings["print_layout"] = "portrait" if settings.get("print_layout") == "portrait" else "landscape"
     settings["print_photo_preset"] = settings.get("print_photo_preset") if settings.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else "5inch"
@@ -648,7 +658,27 @@ def read_engineering_settings():
         settings["print_caption_font_size"] = max(5, min(14, float(settings.get("print_caption_font_size", 7.2))))
     except (TypeError, ValueError):
         settings["print_caption_font_size"] = 7.2
-    settings["print_caption_position"] = settings.get("print_caption_position") if settings.get("print_caption_position") in {"left", "right", "top", "bottom"} else "left"
+    settings["print_caption_position"] = settings.get("print_caption_position") if settings.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else "bottom"
+    for field, default_value, minimum, maximum in [
+        ("print_caption_size_mm", 7.0, 4.0, 60.0),
+        ("print_margin_top_mm", 6.0, 0.0, 30.0),
+        ("print_margin_right_mm", 6.0, 0.0, 30.0),
+        ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
+        ("print_margin_left_mm", 6.0, 0.0, 30.0),
+        ("print_horizontal_gap_mm", 2.0, 0.0, 20.0),
+        ("print_vertical_gap_mm", 2.0, 0.0, 20.0),
+    ]:
+        try:
+            settings[field] = max(minimum, min(maximum, float(settings.get(field, default_value))))
+        except (TypeError, ValueError):
+            settings[field] = default_value
+    settings["print_image_fit"] = settings.get("print_image_fit") if settings.get("print_image_fit") in {"cover", "contain"} else "cover"
+    settings["print_show_page_title"] = bool(settings.get("print_show_page_title", True))
+    allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+    caption_fields = settings.get("print_caption_fields")
+    if not isinstance(caption_fields, list):
+        caption_fields = ["title", "id", "photo_date"]
+    settings["print_caption_fields"] = [field for field in caption_fields if field in allowed_caption_fields]
     fields = settings.get("photo_detail_fields")
     if not isinstance(fields, list) or not fields:
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
@@ -671,8 +701,8 @@ def write_engineering_settings(payload):
         page_size = int(payload.get("print_page_size", current.get("print_page_size", 4)))
     except (TypeError, ValueError) as exc:
         raise ValueError("每页张数必须是数字") from exc
-    if page_size not in {1, 2, 4}:
-        raise ValueError("每页张数只能选择 1、2、4")
+    if not 1 <= page_size <= 12:
+        raise ValueError("每页张数只能填写 1 到 12")
     current["print_page_size"] = page_size
     current["print_photo_preset"] = payload.get("print_photo_preset") if payload.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else current.get("print_photo_preset", "5inch")
     current["print_photo_width_cm"] = normalize_print_photo_size(payload.get("print_photo_width_cm", current.get("print_photo_width_cm", 0)))
@@ -684,7 +714,25 @@ def write_engineering_settings(payload):
         current["print_caption_font_size"] = max(5, min(14, float(payload.get("print_caption_font_size", current.get("print_caption_font_size", 7.2)))))
     except (TypeError, ValueError) as exc:
         raise ValueError("照片说明字号必须是数字") from exc
-    current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"left", "right", "top", "bottom"} else current.get("print_caption_position", "left")
+    current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else current.get("print_caption_position", "bottom")
+    for field, default_value, minimum, maximum in [
+        ("print_caption_size_mm", 7.0, 4.0, 60.0),
+        ("print_margin_top_mm", 6.0, 0.0, 30.0),
+        ("print_margin_right_mm", 6.0, 0.0, 30.0),
+        ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
+        ("print_margin_left_mm", 6.0, 0.0, 30.0),
+        ("print_horizontal_gap_mm", 2.0, 0.0, 20.0),
+        ("print_vertical_gap_mm", 2.0, 0.0, 20.0),
+    ]:
+        try:
+            current[field] = max(minimum, min(maximum, float(payload.get(field, current.get(field, default_value)))))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} 必须是数字") from exc
+    current["print_image_fit"] = payload.get("print_image_fit") if payload.get("print_image_fit") in {"cover", "contain"} else current.get("print_image_fit", "cover")
+    current["print_show_page_title"] = bool(payload.get("print_show_page_title", current.get("print_show_page_title", True)))
+    if isinstance(payload.get("print_caption_fields"), list):
+        allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+        current["print_caption_fields"] = [field for field in payload.get("print_caption_fields") if field in allowed_caption_fields]
     # OCR 是批量自动归档的核心能力，不允许旧设置把它关闭。
     current["watermark_ocr_enabled"] = True
     if isinstance(payload.get("photo_detail_fields"), list):
@@ -984,6 +1032,8 @@ class AlbumManager:
     THUMB_SUFFIX = "thumb_"
     THUMB_MAX_SIDE = 480
     THUMB_QUALITY = 80
+    PHOTO_MAX_SIDE = 4096
+    PHOTO_JPEG_QUALITY = 92
 
     def _thumb_filename(self, filename):
         stem = Path(str(filename)).stem
@@ -1008,6 +1058,72 @@ class AlbumManager:
             from PIL import Image, ImageOps
         except Exception:
             return False
+
+    def _save_optimized_upload(self, file_storage, target):
+        """保存视觉高质量原图：控制超大像素、去除无用元数据，并只在文件确实变小时替换。
+
+        4096px 足以覆盖 6 寸高精度打印；JPEG 使用 4:4:4 高质量编码。处理失败时保留原文件，
+        因此不会因为压缩器异常导致客户照片丢失。
+        """
+        original_bytes = 0
+        try:
+            file_storage.stream.seek(0)
+            raw = file_storage.stream.read()
+            original_bytes = len(raw)
+            file_storage.stream.seek(0)
+        except Exception:
+            raw = b""
+        if not raw:
+            file_storage.save(target)
+            stored_bytes = target.stat().st_size if target.exists() else 0
+            return {"original_bytes": original_bytes, "stored_bytes": stored_bytes, "optimized": False}
+        try:
+            from PIL import Image, ImageOps
+
+            with Image.open(io.BytesIO(raw)) as opened:
+                image = ImageOps.exif_transpose(opened)
+                image.load()
+                original_size = image.size
+                if max(image.size) > self.PHOTO_MAX_SIDE:
+                    image.thumbnail((self.PHOTO_MAX_SIDE, self.PHOTO_MAX_SIDE), Image.LANCZOS)
+                resized = image.size != original_size
+                output = io.BytesIO()
+                suffix = target.suffix.lower()
+                if suffix in {".jpg", ".jpeg"}:
+                    if image.mode not in {"RGB", "L"}:
+                        if "A" in image.getbands():
+                            background = Image.new("RGB", image.size, "white")
+                            background.paste(image, mask=image.getchannel("A"))
+                            image = background
+                        else:
+                            image = image.convert("RGB")
+                    image.save(
+                        output,
+                        "JPEG",
+                        quality=self.PHOTO_JPEG_QUALITY,
+                        subsampling=0,
+                        optimize=True,
+                        progressive=True,
+                    )
+                else:
+                    image.save(output, "PNG", optimize=True, compress_level=9)
+                optimized = output.getvalue()
+            # 没有缩小像素时，压缩结果若没有明显变小就保留用户原文件，避免重复编码无收益。
+            use_optimized = resized or len(optimized) + 4096 < len(raw)
+            payload = optimized if use_optimized else raw
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+            return {
+                "original_bytes": len(raw),
+                "stored_bytes": len(payload),
+                "optimized": use_optimized,
+                "pixel_width": image.size[0],
+                "pixel_height": image.size[1],
+            }
+        except Exception:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+            return {"original_bytes": len(raw), "stored_bytes": len(raw), "optimized": False}
         try:
             photos_dir = self._photos_dir(project_code)
             name = Path(str(filename)).name
@@ -1371,7 +1487,7 @@ class AlbumManager:
                 filename = self._photo_filename(category, photo_id, ext)
                 target = photos_dir / filename
 
-            file_storage.save(target)
+            compression = self._save_optimized_upload(file_storage, target)
             self._ensure_thumbnail(project_code, filename)
             detected = detect_photo_orientation(target)
             if detected:
@@ -1395,6 +1511,9 @@ class AlbumManager:
                 "upload_time": now_text(),
                 "filename": filename,
                 "watermark_text": str(meta.get("watermark_text") or "").strip(),
+                "original_bytes": int(compression.get("original_bytes") or 0),
+                "stored_bytes": int(compression.get("stored_bytes") or 0),
+                "optimized": bool(compression.get("optimized")),
             }
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
@@ -2402,7 +2521,7 @@ def print_page_size_from_request():
         value = int(request.args.get("page_size") or read_engineering_settings().get("print_page_size") or 4)
     except (TypeError, ValueError):
         value = 4
-    return value if value in {1, 2, 4} else 4
+    return value if 1 <= value <= 12 else 4
 
 
 PRINT_PHOTO_PRESETS_CM = {
@@ -2425,6 +2544,32 @@ def print_settings_from_request():
     settings["print_photo_preset"] = preset
     settings["print_photo_width_cm"] = width_cm
     settings["print_photo_height_cm"] = height_cm
+    def request_float(name, default, minimum, maximum):
+        try:
+            return max(minimum, min(maximum, float(request.args.get(name, default))))
+        except (TypeError, ValueError):
+            return default
+
+    position = str(request.args.get("caption_position") or settings.get("print_caption_position") or "bottom")
+    settings["print_caption_position"] = position if position in {"hidden", "left", "right", "top", "bottom"} else "bottom"
+    settings["print_caption_font_size"] = request_float("caption_font_size", settings.get("print_caption_font_size", 7.2), 5.0, 14.0)
+    settings["print_caption_size_mm"] = request_float("caption_size_mm", settings.get("print_caption_size_mm", 7.0), 4.0, 60.0)
+    for side in ("top", "right", "bottom", "left"):
+        key = f"print_margin_{side}_mm"
+        settings[key] = request_float(f"margin_{side}_mm", settings.get(key, 6.0), 0.0, 30.0)
+    settings["print_horizontal_gap_mm"] = request_float("horizontal_gap_mm", settings.get("print_horizontal_gap_mm", 2.0), 0.0, 20.0)
+    settings["print_vertical_gap_mm"] = request_float("vertical_gap_mm", settings.get("print_vertical_gap_mm", 2.0), 0.0, 20.0)
+    image_fit = str(request.args.get("image_fit") or settings.get("print_image_fit") or "cover")
+    settings["print_image_fit"] = image_fit if image_fit in {"cover", "contain"} else "cover"
+    show_page_title = str(request.args.get("show_page_title", "1" if settings.get("print_show_page_title", True) else "0")).lower()
+    settings["print_show_page_title"] = show_page_title not in {"0", "false", "no", "off"}
+    allowed_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+    raw_fields = request.args.get("caption_fields")
+    if raw_fields is None:
+        fields = settings.get("print_caption_fields") or ["title", "id", "photo_date"]
+    else:
+        fields = [item.strip() for item in str(raw_fields).split(",") if item.strip()]
+    settings["print_caption_fields"] = [field for field in fields if field in allowed_fields]
     return settings
 
 
@@ -2435,7 +2580,7 @@ def print_photo_ids_from_request():
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
-def photo_detail_rows(project, photo):
+def photo_detail_rows(project, photo, print_settings=None):
     settings = read_engineering_settings()
     fields = settings.get("photo_detail_fields") or DEFAULT_ENGINEERING_SETTINGS["photo_detail_fields"]
     source = {}
@@ -2451,8 +2596,35 @@ def photo_detail_rows(project, photo):
         value = str(field.get("value") or "").strip() if key == "custom" else str(source.get(key) or "").strip()
         if not value:
             continue
-        rows.append({"label": label, "value": value})
-    return rows
+        rows.append({"label": label, "value": value, "source": key})
+    if print_settings is None:
+        return rows
+    allowed = print_settings.get("print_caption_fields") or []
+    if not allowed or print_settings.get("print_caption_position") == "hidden":
+        return []
+    row_by_source = {row.get("source"): row for row in rows}
+    source_labels = {
+        "title": "题名",
+        "id": "编号",
+        "project_name": "单元工程",
+        "photo_date": "拍摄日期",
+        "photographer": "摄影人",
+        "description": "描述",
+    }
+    source = {}
+    source.update(project.get("source_fields", {}) if isinstance(project, dict) else {})
+    source.update(project or {})
+    source.update(photo or {})
+    filtered = []
+    for key in allowed:
+        row = row_by_source.get(key)
+        if row:
+            filtered.append(row)
+            continue
+        value = str(source.get(key) or "").strip()
+        if value:
+            filtered.append({"label": source_labels.get(key, key), "value": value, "source": key})
+    return filtered
 
 
 def is_pile_unit(data):
@@ -2543,13 +2715,13 @@ def pile_photos_key(data, photos, photo):
     )
 
 
-def enrich_print_photos(project, photos):
+def enrich_print_photos(project, photos, print_settings=None):
     result = []
     processes = project.get("processes") or []
     process_order = {name: index for index, name in enumerate(processes)}
     for photo in photos:
         item = dict(photo)
-        item["detail_rows"] = photo_detail_rows(project, item)
+        item["detail_rows"] = photo_detail_rows(project, item, print_settings)
         item["_process_order"] = process_order.get(item.get("process_name"), 9999)
         result.append(item)
     if is_pile_unit(project):
@@ -2577,7 +2749,7 @@ def _print_caption_h(photo, single_line=False):
     return round(max(6.0, rows * 4.8 + 1.0), 1)
 
 
-def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_width_mm=None, photo_height_mm=None):
+def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_width_mm=None, photo_height_mm=None, print_settings=None):
     """按所选照片尺寸自动排版：
     支持 4/5/6 寸及自定义尺寸，竖版照片自动加 90° 旋转横放；
     说明文字排在照片下方（照片之外）；
@@ -2588,17 +2760,26 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_widt
         page_size = int(page_size)
     except (TypeError, ValueError):
         page_size = 2
-    if page_size not in (1, 2, 4):
-        page_size = 2
-    single_line = page_size == 4
-    if page_size == 4:
-        # 4 张/页只支持 A4 横版 + 最小页边距
-        layout = "landscape"
-        page_w, page_h = 283.0, 190.0
-    elif layout == "portrait":
-        page_w, page_h = 166.0, 242.0
+    if not 1 <= page_size <= 12:
+        page_size = 4
+    settings = print_settings or {}
+    margin_top = float(settings.get("print_margin_top_mm", 6.0))
+    margin_right = float(settings.get("print_margin_right_mm", 6.0))
+    margin_bottom = float(settings.get("print_margin_bottom_mm", 6.0))
+    margin_left = float(settings.get("print_margin_left_mm", 6.0))
+    horizontal_gap = float(settings.get("print_horizontal_gap_mm", PRINT_FIXED_GAP))
+    vertical_gap = float(settings.get("print_vertical_gap_mm", PRINT_FIXED_GAP))
+    caption_position = str(settings.get("print_caption_position") or "bottom")
+    caption_size = float(settings.get("print_caption_size_mm", 7.0))
+    show_page_title = bool(settings.get("print_show_page_title", True))
+    if layout == "portrait":
+        paper_w, paper_h = 210.0, 297.0
     else:
-        page_w, page_h = 256.0, 158.0
+        paper_w, paper_h = 297.0, 210.0
+    page_w = max(20.0, paper_w - margin_left - margin_right)
+    title_h = 7.5 if show_page_title else 0.0
+    page_h = max(20.0, paper_h - margin_top - margin_bottom - title_h)
+    single_line = page_size >= 4
     pages = []
     current = []
     row_y = 0.0
@@ -2607,16 +2788,26 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_widt
     for photo in photos:
         width = float(photo_width_mm or PHOTO_5IN_LANDSCAPE[0])
         height = float(photo_height_mm or PHOTO_5IN_LANDSCAPE[1])
-        caption_h = _print_caption_h(photo, single_line=single_line)
-        block_h = height + caption_h
+        has_caption = bool(photo.get("detail_rows")) and caption_position != "hidden"
+        caption_extent = caption_size if has_caption else 0.0
+        if caption_position in {"left", "right"}:
+            block_w = width + caption_extent
+            block_h = height
+            caption_h = height
+            caption_w = caption_extent
+        else:
+            block_w = width
+            block_h = height + caption_extent
+            caption_h = caption_extent
+            caption_w = width
         rotate = int(photo.get("rotation") or 0) % 360
         if str(photo.get("orientation") or "landscape") == "portrait":
             rotate = (rotate + 90) % 360
-        if x > 0 and x + width > page_w + 0.5:
-            row_y += row_h + PRINT_FIXED_GAP
+        if x > 0 and x + block_w > page_w + 0.5:
+            row_y += row_h + vertical_gap
             x = 0.0
             row_h = 0.0
-        if row_y + block_h > page_h + 0.5 and current:
+        if (row_y + block_h > page_h + 0.5 or len(current) >= page_size) and current:
             pages.append(current)
             current = []
             row_y = 0.0
@@ -2625,10 +2816,13 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_widt
         item = dict(photo)
         item["_left"] = round(x, 1)
         item["_top"] = round(row_y, 1)
-        item["_w"] = width
+        item["_w"] = round(block_w, 1)
         item["_h"] = height
+        item["_photo_w"] = width
+        item["_caption_w"] = round(caption_w, 1)
         item["_block_h"] = round(block_h, 1)
         item["_caption_h"] = caption_h
+        item["_caption_position"] = caption_position
         item["_rotate"] = rotate
         current.append(item)
         if page_size == 1:
@@ -2638,7 +2832,7 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_widt
             x = 0.0
             row_h = 0.0
             continue
-        x += width + PRINT_FIXED_GAP
+        x += block_w + horizontal_gap
         row_h = max(row_h, block_h)
     if current:
         pages.append(current)
@@ -4987,8 +5181,6 @@ def print_album_category_batch(category):
         print_settings = print_settings_from_request()
         photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
         photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
-        if page_size == 4:
-            layout = "landscape"
         if not codes:
             return "请选择要打印的单元工程", 400
         project_groups = []
@@ -5000,12 +5192,12 @@ def print_album_category_batch(category):
             ]
             if not project_photos:
                 continue
-            enriched = enrich_print_photos(project, project_photos)
+            enriched = enrich_print_photos(project, project_photos, print_settings)
             project_groups.append({
                 "project_code": project.get("project_code") or code,
                 "project_name": project.get("project_name") or project.get("name") or "",
                 "photos": enriched,
-                "pages": layout_fixed_photo_pages(enriched, layout, page_size, photo_width_mm, photo_height_mm),
+                "pages": layout_fixed_photo_pages(enriched, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
             })
         project = {
             "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 个单元",
@@ -5041,8 +5233,6 @@ def print_album_category(category, project_code):
         print_settings = print_settings_from_request()
         photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
         photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
-        if page_size == 4:
-            layout = "landscape"
         photos = [
             photo for photo in manager.get_photos(project_code)
             if manager._normalize_category(photo.get("category")) == category
@@ -5050,11 +5240,11 @@ def print_album_category(category, project_code):
         selected_ids = print_photo_ids_from_request()
         if selected_ids:
             photos = [photo for photo in photos if str(photo.get("id") or "") in selected_ids]
-        photos = enrich_print_photos(project, photos)
+        photos = enrich_print_photos(project, photos, print_settings)
         project_groups = [{
             "project_code": project.get("project_code") or project_code,
             "project_name": project.get("project_name") or project.get("name") or "",
-            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm),
+            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
         }]
         return render_template(
             "print.html",
@@ -5084,17 +5274,15 @@ def print_album(project_code):
         print_settings = print_settings_from_request()
         photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
         photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
-        if page_size == 4:
-            layout = "landscape"
         photos = manager.get_photos(project_code)
         selected_ids = print_photo_ids_from_request()
         if selected_ids:
             photos = [photo for photo in photos if str(photo.get("id") or "") in selected_ids]
-        photos = enrich_print_photos(project, photos)
+        photos = enrich_print_photos(project, photos, print_settings)
         project_groups = [{
             "project_code": project.get("project_code") or project_code,
             "project_name": project.get("project_name") or project.get("name") or "",
-            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm),
+            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
         }]
         return render_template("print.html", project=project, photos=photos, project_groups=project_groups, category="", category_label="全部影像", print_layout=layout, print_page_size=page_size, print_settings=print_settings, watermark_text=watermark_text_for_user())
     except Exception as exc:

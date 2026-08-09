@@ -26,7 +26,7 @@ PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
 DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260809-2.30"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260809-2.31"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
