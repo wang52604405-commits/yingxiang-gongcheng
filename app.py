@@ -4001,6 +4001,13 @@ def ensure_other_image_projects(nodes, path_parts=None, order_start=0):
         name = str(node.get("name") or code).strip()
         folder_name = str(node.get("folder_name") or name).strip()
         current_path = path_parts + [folder_name]
+        # 已存在的其它影像节点跳过，避免每次刷新都重写 metadata 并清空缓存
+        metadata_path = manager._metadata_path(code)
+        if metadata_path.exists():
+            existing = manager.get_project(code)
+            if (existing.get("source_fields") or {}).get(OTHER_IMAGE_MARKER):
+                order = ensure_other_image_projects(node.get("children", []) or [], current_path, order)
+                continue
         manager.create_project(
             code,
             name,

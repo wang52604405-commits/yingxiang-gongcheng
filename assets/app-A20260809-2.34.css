@@ -1111,6 +1111,7 @@
       gap: 4px;
       align-items: start;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     .unit-card-photo-counts span {
       display: grid;
@@ -1131,10 +1132,17 @@
       display: flex;
       justify-content: flex-end;
       gap: 8px;
+      min-width: 0;
       color: var(--muted);
       font-size: 10px;
     }
     .unit-card-meta span:first-child { display: none; }
+    .unit-card-meta span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
     .unit-combined {
       display: block;
       padding: 10px;
