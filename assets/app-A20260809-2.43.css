@@ -2905,9 +2905,9 @@
       color: var(--text);
     }
     .print-mode-card.active {
-      border-color: #62a3d7;
-      background: #edf7ff;
-      box-shadow: 0 0 0 3px rgba(15, 138, 122, .1);
+      border-color: #7cc9a0;
+      background: #e8f6ee;
+      box-shadow: 0 0 0 3px rgba(22, 128, 92, .12);
     }
     .print-mode-card strong { font-size: 16px; }
     .print-mode-card span { color: var(--muted); font-size: 13px; line-height: 1.5; }
@@ -2920,11 +2920,29 @@
       background: #f8fafc;
     }
     .print-custom-panel.open { display: block; }
-    .print-custom-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .print-custom-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 14px; }
     .print-custom-grid label,
     .print-field-options label { display: grid; gap: 5px; color: #334155; font-size: 12px; font-weight: 700; }
+    .print-custom-grid label > span { color: var(--muted); font-weight: 400; font-size: 11px; }
     .print-custom-grid input,
-    .print-custom-grid select { width: 100%; min-width: 0; }
+    .print-custom-grid select {
+      width: 100%;
+      min-width: 0;
+      min-height: 32px;
+      padding: 5px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+    .print-custom-grid input:focus,
+    .print-custom-grid select:focus {
+      outline: none;
+      border-color: #7cc9a0;
+      box-shadow: 0 0 0 3px rgba(22, 128, 92, .12);
+    }
     .print-field-options {
       display: flex;
       flex-wrap: wrap;
@@ -2933,8 +2951,36 @@
       padding-top: 12px;
       border-top: 1px solid var(--line);
     }
-    .print-field-options label { display: inline-flex; align-items: center; grid-template-columns: auto 1fr; }
-    .print-field-options input { margin: 0; }
+    .print-field-options label { display: inline-flex; align-items: center; gap: 7px; grid-template-columns: auto 1fr; }
+    .print-field-options input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      border: 1.5px solid #b9cbd8;
+      border-radius: 5px;
+      background: #fff;
+      cursor: pointer;
+      position: relative;
+      transition: background .15s ease, border-color .15s ease;
+    }
+    .print-field-options input[type="checkbox"]:hover { border-color: #7cc9a0; }
+    .print-field-options input[type="checkbox"]:checked {
+      background: #1f9d66;
+      border-color: #1f9d66;
+    }
+    .print-field-options input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 1px;
+      width: 5px;
+      height: 10px;
+      border: solid #fff;
+      border-width: 0 2.5px 2.5px 0;
+      transform: rotate(45deg);
+    }
     .print-setup-actions {
       display: flex;
       justify-content: flex-end;
