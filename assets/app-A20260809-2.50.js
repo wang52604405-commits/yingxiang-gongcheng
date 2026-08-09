@@ -1485,6 +1485,7 @@ const $ = (selector) => document.querySelector(selector);
         contract.order = Math.min(contract.order, order);
         unit.order = Math.min(unit.order, order);
         part.order = Math.min(part.order, order);
+        part.partKey = project.part_key || part.partKey || "";
         part.projects.push(project);
       }
       sortTree(root);
@@ -3420,22 +3421,14 @@ const $ = (selector) => document.querySelector(selector);
     async function ensureAllProjectsLoaded() {
       if (state.allProjectsLoaded) return;
       const data = await apiJson("/api/projects?slim=1");
-      const selectedPart = state.selectedPart;
-      const selectedPartName = selectedPart?.name || "";
-      const selectedPartCode = selectedPart?.code || "";
       state.projects = data.projects || [];
       state.allProjectsLoaded = true;
-      state.treeRoot = buildTree(state.projects);
-      expandAdaptiveTree();
-      if (selectedPart) {
-        const updated = findPartNode(selectedPartName, selectedPartCode);
-        if (updated) {
-          // 保留原 part 对象(含已加载的单元列表)，仅更新字段
-          selectedPart.name = updated.name;
-          selectedPart.code = updated.code;
-          selectedPart.key = updated.key;
-          selectedPart.partKey = updated.partKey;
-        }
+      // 不再重建 treeRoot：buildTree 建的 part 节点缺 partKey，会导致点分部后
+      // loadPartPage 用空 part_key 请求返回空(单元列表变 0 条)。保留
+      // loadBootstrap 用 hierarchy 建的树(含 partKey)。
+      if (!state.treeRoot?.children?.length && state.projects.length) {
+        state.treeRoot = buildTree(state.projects);
+        expandAdaptiveTree();
       }
       renderTree();
       renderOverview();

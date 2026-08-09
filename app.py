@@ -1058,6 +1058,7 @@ class AlbumManager:
             "supervision_photo_count": int(project.get("supervision_photo_count") or 0),
             "latest_upload": project.get("latest_upload", ""),
             "project_order": project.get("project_order"),
+            "part_key": self.part_key(hierarchy),
             "source_fields": {
                 "合同工程名称": hierarchy["contract_name"],
                 "单位工程名称": hierarchy["unit_project_name"],
@@ -4808,6 +4809,7 @@ def api_projects():
                     for key, value in source_fields.items()
                     if key in hierarchy_keys
                 },
+                "part_key": manager.part_key(manager.project_hierarchy(project)),
             })
         projects = slim_projects
     return jsonify({"ok": True, "projects": projects})
