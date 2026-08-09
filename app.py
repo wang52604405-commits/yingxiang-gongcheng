@@ -10,7 +10,7 @@ import sys
 import threading
 import traceback
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, jsonify, redirect, render_template, request, send_file, send_from_directory, session
@@ -146,8 +146,9 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "unit_order_digits": 3,
     "print_layout": "landscape",
     "print_page_size": 4,
-    "print_photo_width_cm": 0,
-    "print_photo_height_cm": 0,
+    "print_photo_preset": "5inch",
+    "print_photo_width_cm": 12.7,
+    "print_photo_height_cm": 8.9,
     "print_caption_font_size": 7.2,
     "print_caption_position": "left",
     "watermark_ocr_enabled": True,
@@ -209,7 +210,7 @@ def default_standard_unit_rules():
         {"keywords": ["排水沟"], "standard_unit_name": "现浇混凝土排水沟单元工程", "division_type": unit, "processes": []},
         {"keywords": ["止水"], "standard_unit_name": "面板表面止水单元工程", "division_type": unit, "processes": []},
         {"keywords": ["预制构件安装", "T梁安装"], "standard_unit_name": "混凝土预制构件安装单元工程", "division_type": unit, "processes": []},
-        {"keywords": ["普通混凝土", "钢筋混凝土", "混凝土垫层", "混凝土护底", "混凝土底板", "混凝土墙身", "混凝土中墩", "混凝土边墩", "混凝土缝墩", "混凝土检修板", "混凝土铺装", "混凝土"], "standard_unit_name": "普通混凝土单元工程", "division_type": process, "processes": ["普通混凝土备仓", "普通混凝土浇筑"]},
+        {"keywords": ["普通混凝土", "钢筋混凝土", "混凝土垫层", "混凝土护底", "混凝土底板", "混凝土墙身", "混凝土中墩", "混凝土边墩", "混凝土缝墩", "混凝土检修板", "混凝土铺装", "混凝土"], "standard_unit_name": "普通混凝土单元工程", "division_type": unit, "processes": []},
         {"keywords": ["植草"], "standard_unit_name": "植草防护单元工程", "division_type": unit, "processes": []},
         {"keywords": ["植树"], "standard_unit_name": "植树防护单元工程", "division_type": unit, "processes": []},
     ]
@@ -235,7 +236,11 @@ def standard_rules_from_checklist():
 
 
 def standard_unit_rules():
-    return default_standard_unit_rules() + standard_rules_from_checklist()
+    rules = default_standard_unit_rules() + standard_rules_from_checklist()
+    for rule in rules:
+        rule["division_type"] = "unit"
+        rule["processes"] = []
+    return rules
 
 
 def match_standard_unit(unit_name):
@@ -246,8 +251,8 @@ def match_standard_unit(unit_name):
             if keyword and (keyword in str(unit_name or "") or keyword in text or (keyword_text and keyword_text in text)):
                 return {
                     "standard_unit_name": rule.get("standard_unit_name", ""),
-                    "division_type": rule.get("division_type") or "unit",
-                    "processes": list(rule.get("processes") or []),
+                    "division_type": "unit",
+                    "processes": [],
                     "match_keyword": keyword,
                 }
     return {"standard_unit_name": "", "division_type": "unit", "processes": [], "match_keyword": ""}
@@ -281,6 +286,7 @@ def _load_or_create_secret_key():
 app = Flask(__name__)
 app.secret_key = _load_or_create_secret_key()
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024 * 1024
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ALBUMS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -632,6 +638,10 @@ def read_engineering_settings():
     if settings["print_page_size"] not in {1, 2, 4}:
         settings["print_page_size"] = 4
     settings["print_layout"] = "portrait" if settings.get("print_layout") == "portrait" else "landscape"
+    settings["print_photo_preset"] = settings.get("print_photo_preset") if settings.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else "5inch"
+    preset_sizes = {"4inch": (10.2, 7.6), "5inch": (12.7, 8.9), "6inch": (15.2, 10.2)}
+    if settings["print_photo_preset"] in preset_sizes:
+        settings["print_photo_width_cm"], settings["print_photo_height_cm"] = preset_sizes[settings["print_photo_preset"]]
     settings["print_photo_width_cm"] = normalize_print_photo_size(settings.get("print_photo_width_cm", 0))
     settings["print_photo_height_cm"] = normalize_print_photo_size(settings.get("print_photo_height_cm", 0))
     try:
@@ -642,6 +652,7 @@ def read_engineering_settings():
     fields = settings.get("photo_detail_fields")
     if not isinstance(fields, list) or not fields:
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
+    settings["watermark_ocr_enabled"] = True
     return settings
 
 
@@ -663,14 +674,19 @@ def write_engineering_settings(payload):
     if page_size not in {1, 2, 4}:
         raise ValueError("每页张数只能选择 1、2、4")
     current["print_page_size"] = page_size
+    current["print_photo_preset"] = payload.get("print_photo_preset") if payload.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else current.get("print_photo_preset", "5inch")
     current["print_photo_width_cm"] = normalize_print_photo_size(payload.get("print_photo_width_cm", current.get("print_photo_width_cm", 0)))
     current["print_photo_height_cm"] = normalize_print_photo_size(payload.get("print_photo_height_cm", current.get("print_photo_height_cm", 0)))
+    preset_sizes = {"4inch": (10.2, 7.6), "5inch": (12.7, 8.9), "6inch": (15.2, 10.2)}
+    if current["print_photo_preset"] in preset_sizes:
+        current["print_photo_width_cm"], current["print_photo_height_cm"] = preset_sizes[current["print_photo_preset"]]
     try:
         current["print_caption_font_size"] = max(5, min(14, float(payload.get("print_caption_font_size", current.get("print_caption_font_size", 7.2)))))
     except (TypeError, ValueError) as exc:
         raise ValueError("照片说明字号必须是数字") from exc
     current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"left", "right", "top", "bottom"} else current.get("print_caption_position", "left")
-    current["watermark_ocr_enabled"] = bool(payload.get("watermark_ocr_enabled", current.get("watermark_ocr_enabled", True)))
+    # OCR 是批量自动归档的核心能力，不允许旧设置把它关闭。
+    current["watermark_ocr_enabled"] = True
     if isinstance(payload.get("photo_detail_fields"), list):
         fields = []
         for item in payload.get("photo_detail_fields"):
@@ -855,6 +871,7 @@ def auth_register():
     except ValueError as exc:
         return json_error(str(exc), 401)
     session["username"] = username
+    session.permanent = bool(payload.get("remember", True))
     return jsonify({"ok": True, "user": current_user()})
 
 
@@ -869,6 +886,7 @@ def auth_login():
     except ValueError as exc:
         return json_error(str(exc), 401)
     session["username"] = username
+    session.permanent = bool(payload.get("remember", True))
     return jsonify({"ok": True, "user": current_user()})
 
 
@@ -936,6 +954,16 @@ class AlbumManager:
         data.setdefault("keywords", "")
         data.setdefault("source_fields", {})
         data.setdefault("photos", [])
+        # 产品统一按单元管理，不再划分或保存“工序”。旧数据读取时同步清空。
+        data["division_type"] = "unit"
+        data["processes"] = []
+        if isinstance(data.get("source_fields"), dict):
+            data["source_fields"]["划分类型"] = "不划分工序单元"
+            data["source_fields"]["工序名称列表"] = ""
+        for photo in data.get("photos", []):
+            if isinstance(photo, dict):
+                photo["process_name"] = ""
+                photo["process_code"] = ""
         return data
 
     def _write_metadata(self, project_code, data):
@@ -1063,8 +1091,8 @@ class AlbumManager:
         item.setdefault("photo_date", "")
         item.setdefault("photographer", "")
         item.setdefault("description", "")
-        item.setdefault("process_name", "")
-        item.setdefault("process_code", "")
+        item["process_name"] = ""
+        item["process_code"] = ""
         item.setdefault("uploaded_by", "")
         item["rotation"] = normalize_photo_rotation(item.get("rotation"))
         orientation = self._normalize_orientation(item.get("orientation"))
@@ -1113,11 +1141,6 @@ class AlbumManager:
 
     def _sequence_scope(self, data, photo, category):
         category = self._normalize_category(category)
-        settings = read_engineering_settings()
-        process_name = str((photo or {}).get("process_name") or "").strip()
-        process_code = str((photo or {}).get("process_code") or "").strip() or self._process_code(data, process_name)
-        if data.get("division_type") == "process" and process_code:
-            return (category, process_name or process_code)
         return (category, "")
 
     def _archive_id_for_photo(self, data, photo, category, sequence):
@@ -1133,7 +1156,7 @@ class AlbumManager:
         process_code = str((photo or {}).get("process_code") or "").strip() or self._process_code(data, process_name)
         unit_order_digits = int(settings.get("unit_order_digits") or 3)
         unit_order = f"{self._project_unit_order(data):0{unit_order_digits}d}"
-        use_process = data.get("division_type") == "process" and bool(process_code)
+        use_process = False
         if settings.get("numbering_mode") == "unit_order":
             if use_process:
                 template = rule.get("process_template") or "{unit_order}-{process_code}-{category}{seq}"
@@ -1230,14 +1253,10 @@ class AlbumManager:
         data["engineering_project_id"] = active_engineering_project_id()
         match = match_standard_unit(data["project_name"])
         if source_fields:
-            match = {
-                "standard_unit_name": source_fields.get("匹配标准单元") or match.get("standard_unit_name", ""),
-                "division_type": "process" if source_fields.get("划分类型") == "划分工序单元" else match.get("division_type", "unit"),
-                "processes": [p.strip() for p in str(source_fields.get("工序名称列表") or "").split("、") if p.strip()] or match.get("processes", []),
-            }
+            match["standard_unit_name"] = source_fields.get("匹配标准单元") or match.get("standard_unit_name", "")
         data["standard_unit_name"] = match.get("standard_unit_name", "")
-        data["division_type"] = match.get("division_type") or "unit"
-        data["processes"] = list(match.get("processes") or [])
+        data["division_type"] = "unit"
+        data["processes"] = []
         if project_order is not None:
             try:
                 data["project_order"] = int(project_order)
@@ -1248,6 +1267,8 @@ class AlbumManager:
         source_fields["内部项目编码"] = safe_code
         source_fields["工程项目ID"] = active_engineering_project_id()
         source_fields["工程项目名称"] = current_engineering_project().get("project_name", "")
+        source_fields["划分类型"] = "不划分工序单元"
+        source_fields["工序名称列表"] = ""
         data["source_fields"] = source_fields
         data.setdefault("photos", [])
         self._write_metadata(safe_code, data)
@@ -1330,8 +1351,8 @@ class AlbumManager:
         data = self.get_project(project_code)
         category = self._normalize_category(category)
         orientation = self._normalize_orientation(orientation)
-        process_name = str(process_name or "").strip()
-        process_code = str(process_code or "").strip() or self._process_code(data, process_name)
+        process_name = ""
+        process_code = ""
         photos_dir = self._photos_dir(project_code)
         photos_dir.mkdir(parents=True, exist_ok=True)
         added = []
@@ -1364,8 +1385,8 @@ class AlbumManager:
                 "photo_date": str(meta.get("photo_date") or photo_date or "").strip(),
                 "photographer": str(photographer or "").strip(),
                 "description": str(description or "").strip(),
-                "process_name": process_name,
-                "process_code": process_code,
+                "process_name": "",
+                "process_code": "",
                 "uploaded_by": str(uploaded_by or "").strip(),
                 "orientation": orientation,
                 "orientation_label": PHOTO_ORIENTATION_LABELS[orientation],
@@ -1387,8 +1408,8 @@ class AlbumManager:
 
     def _copy_to_supervision_locked(self, project_code, process_name="", process_code=""):
         data = self.get_project(project_code)
-        process_name = str(process_name or "").strip()
-        process_code = str(process_code or "").strip() or self._process_code(data, process_name)
+        process_name = ""
+        process_code = ""
         photos_dir = self._photos_dir(project_code)
         photos_dir.mkdir(parents=True, exist_ok=True)
         source_photos = [
@@ -1422,8 +1443,8 @@ class AlbumManager:
             if not src_path.exists():
                 continue
             ext = Path(src_path.name).suffix.lower() or ".jpg"
-            photo_process_name = str(photo.get("process_name") or "").strip()
-            photo_process_code = str(photo.get("process_code") or "").strip() or self._process_code(data, photo_process_name)
+            photo_process_name = ""
+            photo_process_code = ""
             photo_id = self._next_id(data["project_code"], "supervision", photo_process_name, photo_process_code)
             filename = self._photo_filename("supervision", photo_id, ext)
             target = photos_dir / filename
@@ -1476,9 +1497,8 @@ class AlbumManager:
                         photo["photographer"] = str(updates.get("photographer") or "").strip()
                     if "description" in updates:
                         photo["description"] = str(updates.get("description") or "").strip()
-                    if "process_name" in updates:
-                        photo["process_name"] = str(updates.get("process_name") or "").strip()
-                        photo["process_code"] = str(updates.get("process_code") or "").strip() or self._process_code(data, photo["process_name"])
+                    photo["process_name"] = ""
+                    photo["process_code"] = ""
                     if "orientation" in updates:
                         orientation = self._normalize_orientation(updates.get("orientation"))
                         photo["orientation"] = orientation
@@ -2385,6 +2405,29 @@ def print_page_size_from_request():
     return value if value in {1, 2, 4} else 4
 
 
+PRINT_PHOTO_PRESETS_CM = {
+    "4inch": (10.2, 7.6),
+    "5inch": (12.7, 8.9),
+    "6inch": (15.2, 10.2),
+}
+
+
+def print_settings_from_request():
+    settings = read_engineering_settings()
+    preset = str(request.args.get("photo_preset") or settings.get("print_photo_preset") or "5inch")
+    if preset not in {*PRINT_PHOTO_PRESETS_CM, "custom"}:
+        preset = "5inch"
+    if preset in PRINT_PHOTO_PRESETS_CM:
+        width_cm, height_cm = PRINT_PHOTO_PRESETS_CM[preset]
+    else:
+        width_cm = normalize_print_photo_size(request.args.get("photo_width_cm") or settings.get("print_photo_width_cm")) or 12.7
+        height_cm = normalize_print_photo_size(request.args.get("photo_height_cm") or settings.get("print_photo_height_cm")) or 8.9
+    settings["print_photo_preset"] = preset
+    settings["print_photo_width_cm"] = width_cm
+    settings["print_photo_height_cm"] = height_cm
+    return settings
+
+
 def print_photo_ids_from_request():
     raw = str(request.args.get("ids") or "").strip()
     if not raw:
@@ -2519,7 +2562,7 @@ def enrich_print_photos(project, photos):
     return sorted(result, key=lambda p: (p.get("_process_order", 9999), p.get("process_name", ""), manager._id_number(p.get("id")), p.get("upload_time", "")))
 
 
-PHOTO_5IN_LANDSCAPE = (127.0, 89.0)  # 5 寸横版（mm），竖版照片打印时自动转 90° 横放
+PHOTO_5IN_LANDSCAPE = (127.0, 89.0)
 PRINT_FIXED_GAP = 2.0
 
 
@@ -2534,9 +2577,9 @@ def _print_caption_h(photo, single_line=False):
     return round(max(6.0, rows * 4.8 + 1.0), 1)
 
 
-def layout_fixed_photo_pages(photos, layout="landscape", page_size=2):
-    """按 5 寸横版固定尺寸自动排版：
-    所有照片都按 127x89mm 打印，竖版照片自动加 90° 旋转横放；
+def layout_fixed_photo_pages(photos, layout="landscape", page_size=2, photo_width_mm=None, photo_height_mm=None):
+    """按所选照片尺寸自动排版：
+    支持 4/5/6 寸及自定义尺寸，竖版照片自动加 90° 旋转横放；
     说明文字排在照片下方（照片之外）；
     每页 2 张（标准页边距、说明多行）或每页 4 张（2x2，最小页边距、说明一行）；
     返回 [{照片信息..., _left, _top, _w, _h, _block_h, _caption_h, _rotate}, ...] 的页列表。
@@ -2562,7 +2605,8 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=2):
     row_h = 0.0
     x = 0.0
     for photo in photos:
-        width, height = PHOTO_5IN_LANDSCAPE
+        width = float(photo_width_mm or PHOTO_5IN_LANDSCAPE[0])
+        height = float(photo_height_mm or PHOTO_5IN_LANDSCAPE[1])
         caption_h = _print_caption_h(photo, single_line=single_line)
         block_h = height + caption_h
         rotate = int(photo.get("rotation") or 0) % 360
@@ -2606,7 +2650,6 @@ PHOTO_STATISTICS_COLUMNS = [
     "单元编码",
     "单元名称",
     "影像类别",
-    "工序",
     "照片编号",
     "照片名称",
     "原文件名",
@@ -2672,7 +2715,6 @@ def export_photo_statistics_xlsx(codes=""):
                 display_code,
                 unit_name,
                 PHOTO_CATEGORY_LABELS.get(category, category),
-                str(photo.get("process_name") or "").strip(),
                 str(photo.get("id") or "").strip(),
                 title or original_name,
                 original_name,
@@ -2725,7 +2767,7 @@ def validate_upload_files(files):
 
 
 def _watermark_meta_for_upload(file_storage):
-    """对单张照片做水印文字 OCR，返回 {title, photo_date, watermark_text} 或 None。"""
+    """对单张照片做水印 OCR；施工内容固定作为题名，施工区域用于匹配单元。"""
     if not file_storage:
         return None
     try:
@@ -2740,8 +2782,9 @@ def _watermark_meta_for_upload(file_storage):
         meta["title"] = fields["title"]
     if fields.get("photo_date"):
         meta["photo_date"] = fields["photo_date"]
-    if fields.get("watermark_text"):
-        meta["watermark_text"] = fields["watermark_text"]
+    for key in ("construction_area", "construction_content", "project_name", "watermark_text"):
+        if fields.get(key):
+            meta[key] = fields[key]
     return meta or None
 
 
@@ -2765,7 +2808,7 @@ def _enrich_watermark_metadata(files, shared_title, shared_date, enabled, form_t
         if not meta:
             continue
         per_file_meta[file_storage.filename] = meta
-        if not form_title and not shared_title and meta.get("title"):
+        if not form_title and meta.get("title"):
             shared_title = meta["title"]
         if not form_date and not shared_date and meta.get("photo_date"):
             shared_date = meta["photo_date"]
@@ -3172,6 +3215,122 @@ def match_folder_to_project(folder_name):
                 best = project
     candidates.sort(key=lambda item: item[1], reverse=True)
     return best, [item[0] for item in candidates[:5]]
+
+
+def _match_signal_score(signal, candidate, source_kind, field_kind):
+    """单条信号与项目字段的匹配分。层级字段只辅助，单元编码/名称才可高置信自动建议。"""
+    signal_key = normalize_match_text(signal)
+    candidate_key = normalize_match_text(candidate)
+    if not signal_key or not candidate_key or len(candidate_key) < 2:
+        return 0
+    exact = signal_key == candidate_key
+    contained = candidate_key in signal_key or (len(signal_key) >= 4 and signal_key in candidate_key)
+    if not exact and not contained:
+        return 0
+    unit_weights = {
+        "area": (980, 860),
+        "folder": (920, 780),
+        "filename": (880, 740),
+        "project": (620, 500),
+        "content": (360, 260),
+    }
+    hierarchy_weights = {
+        "area": (430, 330),
+        "folder": (380, 290),
+        "filename": (320, 240),
+        "project": (260, 190),
+        "content": (120, 80),
+    }
+    weights = unit_weights if field_kind == "unit" else hierarchy_weights
+    exact_score, contains_score = weights.get(source_kind, (0, 0))
+    return exact_score if exact else contains_score + min(60, len(candidate_key) * 3)
+
+
+def match_photo_to_projects(filename="", relative_path="", ocr_fields=None, limit=5):
+    """多重规则匹配：施工区域 > 文件夹 > 文件名 > OCR工程名 > 施工内容关键词。"""
+    ocr_fields = ocr_fields or {}
+    folder = str(Path(str(relative_path or "").replace("\\", "/")).parent).replace("\\", "/")
+    if folder in {"", "."}:
+        folder = ""
+    signals = [
+        ("area", "施工区域", ocr_fields.get("construction_area", "")),
+        ("folder", "文件夹", folder),
+        ("filename", "文件名", Path(filename or "").stem),
+        ("project", "水印工程名", ocr_fields.get("project_name", "")),
+        ("content", "施工内容", ocr_fields.get("construction_content") or ocr_fields.get("title", "")),
+    ]
+    ranked = []
+    for project in manager.list_projects():
+        fields = project.get("source_fields") or {}
+        unit_values = [
+            project.get("project_code", ""), project.get("display_project_code", ""),
+            project.get("project_name", ""), fields.get("单元工程编码", ""), fields.get("单元工程名称", ""),
+        ]
+        hierarchy_values = [
+            fields.get("分部工程编码", ""), fields.get("分部工程名称", ""),
+            fields.get("单位工程编码", ""), fields.get("单位工程名称", ""),
+            fields.get("合同工程名称", ""), project.get("keywords", ""),
+        ]
+        score = 0
+        reasons = []
+        for source_kind, source_label, signal in signals:
+            best_signal_score = 0
+            best_value = ""
+            best_field_kind = ""
+            for candidate in unit_values:
+                candidate_score = _match_signal_score(signal, candidate, source_kind, "unit")
+                if candidate_score > best_signal_score:
+                    best_signal_score, best_value, best_field_kind = candidate_score, candidate, "unit"
+            for candidate in hierarchy_values:
+                candidate_score = _match_signal_score(signal, candidate, source_kind, "hierarchy")
+                if candidate_score > best_signal_score:
+                    best_signal_score, best_value, best_field_kind = candidate_score, candidate, "hierarchy"
+            if best_signal_score:
+                score += best_signal_score
+                field_label = "单元" if best_field_kind == "unit" else "上级划分"
+                reasons.append(f"{source_label}匹配{field_label}“{best_value}”")
+        if score:
+            ranked.append({
+                "project": project,
+                "score": score,
+                "reasons": reasons,
+            })
+    ranked.sort(key=lambda item: (item["score"], len(item["reasons"])), reverse=True)
+    top = ranked[0] if ranked else None
+    second_score = ranked[1]["score"] if len(ranked) > 1 else 0
+    top_score = top["score"] if top else 0
+    gap = top_score - second_score
+    ambiguous = bool(top and second_score and gap < max(80, int(top_score * 0.12)))
+    if top_score >= 850 and not ambiguous:
+        confidence, confidence_label = "high", "高"
+    elif top_score >= 560 and not ambiguous:
+        confidence, confidence_label = "medium", "中"
+    else:
+        confidence, confidence_label = "low", "低"
+    alternatives = []
+    for item in ranked[:max(1, int(limit or 5))]:
+        project = item["project"]
+        source_fields = project.get("source_fields") or {}
+        alternatives.append({
+            "project_code": project.get("project_code", ""),
+            "display_project_code": project.get("display_project_code") or source_fields.get("单元工程编码") or project.get("project_code", ""),
+            "project_name": project.get("project_name", ""),
+            "unit_name": source_fields.get("单位工程名称", ""),
+            "part_name": source_fields.get("分部工程名称", ""),
+            "score": item["score"],
+            "reasons": item["reasons"],
+        })
+    selected = top["project"] if top else {}
+    return {
+        "project_code": selected.get("project_code", ""),
+        "project_name": selected.get("project_name", ""),
+        "confidence": confidence,
+        "confidence_label": confidence_label,
+        "ambiguous": ambiguous,
+        "score": top_score,
+        "reasons": top.get("reasons", []) if top else ["未找到可匹配的项目划分"],
+        "alternatives": alternatives,
+    }
 
 
 def clean_folder_title(name):
@@ -3616,6 +3775,7 @@ def api_cloud_login():
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "登录失败")}), 400
     session["username"] = str(result.get("account") or payload.get("username") or "").strip()
+    session.permanent = bool(payload.get("remember", True))
     result["user"] = {"username": session["username"]}
     return jsonify(result)
 
@@ -3656,6 +3816,7 @@ def api_cloud_register():
         return jsonify({"ok": False, "error": "注册已完成，但自动登录失败，请返回登录页重新登录"}), 400
     result = {**registration, **login_result}
     session["username"] = str(login_result.get("account") or payload.get("username") or "").strip()
+    session.permanent = bool(payload.get("remember", True))
     result["user"] = {"username": session["username"]}
     data = read_engineering_projects()
     active = current_engineering_project(data)
@@ -4256,7 +4417,7 @@ def api_upload(project_code):
             files,
             title,
             photo_date,
-            read_engineering_settings().get("watermark_ocr_enabled", False),
+            True,
             form_title=str(request.form.get("title") or "").strip(),
             form_date=str(request.form.get("photo_date") or "").strip(),
         )
@@ -4314,7 +4475,6 @@ def api_upload_folder():
                     400,
                 )
         files = sorted(files, key=lambda item: natural_sort_key(item.filename or ""))
-        enabled_ocr = read_engineering_settings().get("watermark_ocr_enabled", False)
         added = []
         for file_storage in files:
             title, photo_date = parse_photo_name_parts(file_storage.filename)
@@ -4326,14 +4486,13 @@ def api_upload_folder():
                 except Exception:
                     pass
             per_file_meta = {}
-            if enabled_ocr:
-                meta = _watermark_meta_for_upload(file_storage)
-                if meta:
-                    if not title and meta.get("title"):
-                        title = meta["title"]
-                    if not photo_date and meta.get("photo_date"):
-                        photo_date = meta["photo_date"]
-                    per_file_meta[file_storage.filename] = meta
+            meta = _watermark_meta_for_upload(file_storage)
+            if meta:
+                if meta.get("title"):
+                    title = meta["title"]
+                if not photo_date and meta.get("photo_date"):
+                    photo_date = meta["photo_date"]
+                per_file_meta[file_storage.filename] = meta
             added.extend(manager.add_photos(
                 project["project_code"],
                 [file_storage],
@@ -4351,6 +4510,128 @@ def api_upload_folder():
             "project_name": project.get("project_name"),
             "photos": manager.get_photos(project["project_code"]),
         })
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
+@app.route("/api/upload-match-preview", methods=["POST"])
+def api_upload_match_preview():
+    """只识别、不写入：返回每张照片的题名、区域、候选单元、置信度和依据。"""
+    _user, error = login_required_json()
+    if error:
+        return error
+    files = request.files.getlist("files")
+    if not files:
+        return json_error("请选择文件夹中的照片")
+    try:
+        files = validate_upload_files(files)
+        if len(files) > 500:
+            return json_error("单次最多审核 500 张照片，请分批导入。", 400)
+        try:
+            relative_paths = json.loads(request.form.get("relative_paths") or "[]")
+        except json.JSONDecodeError:
+            relative_paths = []
+        if not isinstance(relative_paths, list):
+            relative_paths = []
+        rows = []
+        for index, file_storage in enumerate(files):
+            relative_path = str(relative_paths[index] if index < len(relative_paths) else file_storage.filename or "")
+            parsed_title, parsed_date = parse_photo_name_parts(file_storage.filename)
+            meta = _watermark_meta_for_upload(file_storage) or {}
+            title = str(meta.get("construction_content") or meta.get("title") or parsed_title or "").strip()
+            photo_date = str(meta.get("photo_date") or parsed_date or "").strip()
+            if not photo_date:
+                try:
+                    file_storage.stream.seek(0)
+                    photo_date = photo_exif_date(file_storage.stream)
+                    file_storage.stream.seek(0)
+                except Exception:
+                    pass
+            match = match_photo_to_projects(file_storage.filename, relative_path, meta)
+            rows.append({
+                "index": index,
+                "filename": file_storage.filename,
+                "relative_path": relative_path,
+                "title": title,
+                "photo_date": photo_date,
+                "construction_area": str(meta.get("construction_area") or ""),
+                "construction_content": str(meta.get("construction_content") or ""),
+                "watermark_project_name": str(meta.get("project_name") or ""),
+                "watermark_text": str(meta.get("watermark_text") or ""),
+                **match,
+            })
+        return jsonify({
+            "ok": True,
+            "rows": rows,
+            "summary": {
+                "total": len(rows),
+                "high": sum(1 for row in rows if row["confidence"] == "high"),
+                "medium": sum(1 for row in rows if row["confidence"] == "medium"),
+                "low": sum(1 for row in rows if row["confidence"] == "low"),
+                "unmatched": sum(1 for row in rows if not row.get("project_code")),
+            },
+        })
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
+@app.route("/api/upload-match-commit", methods=["POST"])
+def api_upload_match_commit():
+    """提交用户审核后的批量匹配结果；没有明确单元的照片不会被写入。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    files = request.files.getlist("files")
+    if not files:
+        return json_error("没有待导入照片")
+    try:
+        files = validate_upload_files(files)
+        assignments = json.loads(request.form.get("assignments") or "[]")
+        if not isinstance(assignments, list) or len(assignments) != len(files):
+            return json_error("审核结果与照片数量不一致，请重新审核。", 400)
+        selected = [item for item in assignments if isinstance(item, dict) and item.get("include", True)]
+        if not selected:
+            return json_error("请至少勾选一张照片。", 400)
+        for item in selected:
+            code = str(item.get("project_code") or "").strip()
+            if not code:
+                return json_error(f"“{item.get('filename') or '照片'}”尚未选择归档单元。", 400)
+            manager.get_project(code)
+        limit_response = trial_upload_limit_response(len(selected))
+        if limit_response:
+            return limit_response
+        category = manager._normalize_category(request.form.get("category", "construction"))
+        groups = {}
+        total_added = 0
+        for index, (file_storage, item) in enumerate(zip(files, assignments)):
+            if not isinstance(item, dict) or not item.get("include", True):
+                continue
+            code = str(item.get("project_code") or "").strip()
+            title = str(item.get("title") or "").strip()
+            photo_date = str(item.get("photo_date") or "").strip()
+            meta = {
+                "title": title,
+                "photo_date": photo_date,
+                "watermark_text": str(item.get("watermark_text") or "")[:4000],
+            }
+            added = manager.add_photos(
+                code,
+                [file_storage],
+                category=category,
+                title=title,
+                photo_date=photo_date,
+                photographer=str(request.form.get("photographer") or "").strip(),
+                uploaded_by=user["username"],
+                orientation="landscape",
+                per_file_meta={file_storage.filename: meta},
+            )
+            total_added += len(added)
+            group = groups.setdefault(code, {"project_code": code, "project_name": manager.get_project(code).get("project_name", code), "count": 0})
+            group["count"] += len(added)
+        sync_cloud_preview_async()
+        return jsonify({"ok": True, "added_count": total_added, "project_count": len(groups), "groups": list(groups.values())})
+    except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+        return json_error(str(exc), 400)
     except Exception as exc:
         return json_error(str(exc), 500)
 
@@ -4403,14 +4684,13 @@ def api_upload_auto_match():
                     except Exception:
                         pass
                 per_file_meta = {}
-                if read_engineering_settings().get("watermark_ocr_enabled", False):
-                    meta = _watermark_meta_for_upload(file_storage)
-                    if meta:
-                        if not f_title and meta.get("title"):
-                            f_title = meta["title"]
-                        if not per_date and meta.get("photo_date"):
-                            per_date = meta["photo_date"]
-                        per_file_meta[file_storage.filename] = meta
+                meta = _watermark_meta_for_upload(file_storage)
+                if meta:
+                    if meta.get("title"):
+                        f_title = meta["title"]
+                    if not per_date and meta.get("photo_date"):
+                        per_date = meta["photo_date"]
+                    per_file_meta[file_storage.filename] = meta
                 added = manager.add_photos(
                     code,
                     [file_storage],
@@ -4704,6 +4984,9 @@ def print_album_category_batch(category):
         mode = str(request.args.get("mode") or "print").strip().lower()
         layout = print_layout_from_request()
         page_size = print_page_size_from_request()
+        print_settings = print_settings_from_request()
+        photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
+        photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
         if page_size == 4:
             layout = "landscape"
         if not codes:
@@ -4722,7 +5005,7 @@ def print_album_category_batch(category):
                 "project_code": project.get("project_code") or code,
                 "project_name": project.get("project_name") or project.get("name") or "",
                 "photos": enriched,
-                "pages": layout_fixed_photo_pages(enriched, layout, page_size),
+                "pages": layout_fixed_photo_pages(enriched, layout, page_size, photo_width_mm, photo_height_mm),
             })
         project = {
             "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 个单元",
@@ -4737,7 +5020,7 @@ def print_album_category_batch(category):
             category=category,
             print_layout=layout,
             print_page_size=page_size,
-            print_settings=read_engineering_settings(),
+            print_settings=print_settings,
             watermark_text=watermark_text_for_user(),
             category_label=f"{PHOTO_CATEGORY_LABELS.get(category, category)}{'批量导出PDF' if mode == 'pdf' else '批量打印'}",
         )
@@ -4755,6 +5038,9 @@ def print_album_category(category, project_code):
         project = manager.get_project(project_code)
         layout = print_layout_from_request()
         page_size = print_page_size_from_request()
+        print_settings = print_settings_from_request()
+        photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
+        photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
         if page_size == 4:
             layout = "landscape"
         photos = [
@@ -4768,7 +5054,7 @@ def print_album_category(category, project_code):
         project_groups = [{
             "project_code": project.get("project_code") or project_code,
             "project_name": project.get("project_name") or project.get("name") or "",
-            "pages": layout_fixed_photo_pages(photos, layout, page_size),
+            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm),
         }]
         return render_template(
             "print.html",
@@ -4778,7 +5064,7 @@ def print_album_category(category, project_code):
             category=category,
             print_layout=layout,
             print_page_size=page_size,
-            print_settings=read_engineering_settings(),
+            print_settings=print_settings,
             watermark_text=watermark_text_for_user(),
             category_label=PHOTO_CATEGORY_LABELS.get(category, category),
         )
@@ -4795,6 +5081,9 @@ def print_album(project_code):
         project = manager.get_project(project_code)
         layout = print_layout_from_request()
         page_size = print_page_size_from_request()
+        print_settings = print_settings_from_request()
+        photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
+        photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
         if page_size == 4:
             layout = "landscape"
         photos = manager.get_photos(project_code)
@@ -4805,9 +5094,9 @@ def print_album(project_code):
         project_groups = [{
             "project_code": project.get("project_code") or project_code,
             "project_name": project.get("project_name") or project.get("name") or "",
-            "pages": layout_fixed_photo_pages(photos, layout, page_size),
+            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm),
         }]
-        return render_template("print.html", project=project, photos=photos, project_groups=project_groups, category="", category_label="全部影像", print_layout=layout, print_page_size=page_size, print_settings=read_engineering_settings(), watermark_text=watermark_text_for_user())
+        return render_template("print.html", project=project, photos=photos, project_groups=project_groups, category="", category_label="全部影像", print_layout=layout, print_page_size=page_size, print_settings=print_settings, watermark_text=watermark_text_for_user())
     except Exception as exc:
         return str(exc), 404
 

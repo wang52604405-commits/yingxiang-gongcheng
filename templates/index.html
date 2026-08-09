@@ -1112,6 +1112,24 @@
       letter-spacing: 0;
       white-space: nowrap;
     }
+    .unit-card-photo-counts {
+      display: grid;
+      grid-template-columns: repeat(2, auto);
+      gap: 4px;
+      align-items: start;
+      white-space: nowrap;
+    }
+    .unit-card-photo-counts span {
+      display: grid;
+      gap: 1px;
+      min-width: 40px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      text-align: center;
+      background: #eaf3f9;
+    }
+    .unit-card-photo-counts small { color: #526579; font-size: 9px; font-weight: 700; }
+    .unit-card-photo-counts b { color: #0f4f7a; font-size: 20px; line-height: 1; }
     .unit-card .code {
       font-size: 10px;
       overflow-wrap: anywhere;
@@ -6549,6 +6567,49 @@
         grid-template-columns: 1fr !important;
       }
     }
+    .folder-review-modal {
+      width: min(1240px, 96vw);
+      max-width: none;
+      max-height: 92vh;
+      overflow: hidden;
+    }
+    .folder-review-help {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      color: #1e3a5f;
+      background: #eff6ff;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .folder-review-table-wrap {
+      max-height: 62vh;
+      overflow: auto;
+      border: 1px solid #d8e0ea;
+      border-radius: 8px;
+    }
+    .folder-review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .folder-review-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 9px;
+      text-align: left;
+      color: #334155;
+      background: #f1f5f9;
+      border-bottom: 1px solid #cbd5e1;
+    }
+    .folder-review-table td { min-width: 130px; padding: 9px; vertical-align: top; border-bottom: 1px solid #e5e7eb; }
+    .folder-review-table td:first-child { min-width: 58px; text-align: center; }
+    .folder-review-table input[type="text"],
+    .folder-review-table input[type="date"] { width: 100%; min-height: 36px; margin: 2px 0; }
+    .folder-review-file { max-width: 260px; overflow-wrap: anywhere; font-weight: 700; }
+    .folder-review-meta { margin-top: 5px; color: #64748b; line-height: 1.45; overflow-wrap: anywhere; }
+    .match-confidence { display: inline-flex; margin-bottom: 5px; padding: 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .match-confidence.high { color: #166534; background: #dcfce7; }
+    .match-confidence.medium { color: #92400e; background: #fef3c7; }
+    .match-confidence.low { color: #991b1b; background: #fee2e2; }
   </style>
 </head>
 <body>
@@ -6563,6 +6624,7 @@
       <div class="auth-form">
         <label>账号<input id="gateUsername" type="text" placeholder="手机号 / QQ / 邮箱" autocomplete="username"></label>
         <label>密码<input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"></label>
+        <label class="settings-checkbox"><input id="gateRemember" type="checkbox" checked> 记住登录（30 天内免重复登录）</label>
         <div class="auth-actions">
           <button type="button" id="gateLoginBtn">登录</button>
           <button class="secondary" type="button" id="gateRegisterBtn">注册</button>
@@ -6881,6 +6943,7 @@
                   <div class="photo-section-head">
                     <h3 class="photo-section-title">监理单元影像</h3>
                     <div class="photo-section-actions">
+                      <button class="secondary" type="button" disabled>复制施工照片</button>
                       <button type="button" data-unit-upload="supervision">上传</button>
                     </div>
                   </div>
@@ -7099,16 +7162,16 @@
           <section class="project-settings-panel" data-project-settings-panel="matching">
             <h4>导入匹配</h4>
             <div class="project-settings-card">
-              <strong>项目划分导入后自动匹配标准单元</strong>
-              <p class="import-hint">系统按单元名称识别是否划分工序，并写入单元 metadata。不会新建工序项目，也不会改变原项目划分层级。</p>
+              <strong>多重规则自动匹配单元</strong>
+              <p class="import-hint">优先读取照片水印“施工区域”，再结合文件夹名、文件名、水印工程名和项目划分层级匹配单位、分部、单元。</p>
             </div>
             <div class="project-settings-card">
-              <strong>划分工序单元</strong>
-              <p class="import-hint">详情页按工序分组显示，每个工序下分别显示施工影像和监理影像；旧照片没有工序字段时归入“未分工序”。</p>
+              <strong>先审核，后导入</strong>
+              <p class="import-hint">批量文件夹导入先显示施工区域、题名、候选单元、置信度和匹配依据。低置信度或多候选必须由客户确认。</p>
             </div>
             <div class="project-settings-card">
-              <strong>不划分工序单元</strong>
-              <p class="import-hint">保持原单元级展示和编号逻辑，施工影像、监理影像不拆分。</p>
+              <strong>统一按单元管理</strong>
+              <p class="import-hint">不再创建、识别或展示“工序”。施工内容只作为照片题名，不会生成“混凝土备仓”等工序。</p>
             </div>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="fields">
@@ -7117,19 +7180,19 @@
               <label>描述位置<select id="settingsPrintCaptionPositionInput" class="orientation-select"><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="top">照片上方</option><option value="bottom">照片下方</option></select></label>
             </div>
             <label class="wide">照片详情字段<textarea id="settingsPhotoFieldsInput" placeholder="每行一个字段：标签=来源，例如：施工部位=project_name；桩号=自定义文字"></textarea></label>
-            <label class="settings-checkbox"><input type="checkbox" id="settingsWatermarkOcrInput"> 上传时自动识别水印相机文字（日期、地点、备注自动填入题名）</label>
-            <p class="import-hint">字段来源可用：id、title、project_name、photo_date、photographer、description、process_name、process_code。描述位置可选左、右、上、下四种，打印页会自动按这个方向排版。</p>
+            <p class="import-hint">上传时自动识别水印：施工内容写入题名，施工区域用于匹配项目划分，拍摄时间写入照片日期。字段来源可用：id、title、project_name、photo_date、photographer、description。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="print">
             <h4>打印设置</h4>
             <div class="project-settings-grid">
               <label>默认打印版式<select id="settingsPrintLayoutInput" class="orientation-select"><option value="landscape">横版</option><option value="portrait">竖版</option></select></label>
               <label>默认每页张数<select id="settingsPrintPageSizeInput" class="orientation-select"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></label>
+              <label>照片尺寸<select id="settingsPrintPhotoPresetInput" class="orientation-select"><option value="4inch">4寸（10.2×7.6cm）</option><option value="5inch">5寸（12.7×8.9cm）</option><option value="6inch">6寸（15.2×10.2cm）</option><option value="custom">自定义尺寸</option></select></label>
               <label>照片宽度(厘米)<input id="settingsPrintPhotoWidthInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
               <label>照片高度(厘米)<input id="settingsPrintPhotoHeightInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
               <label>照片说明字号<input id="settingsPrintCaptionFontSizeInput" type="number" min="5" max="14" step="0.1" placeholder="7.2"></label>
             </div>
-            <p class="import-hint">照片宽高不填或填 0 时自动贴合边框；填写后按厘米固定照片区域尺寸并居中显示。</p>
+            <p class="import-hint">选择 4寸、5寸或6寸后自动填写标准尺寸；选择“自定义尺寸”可自行输入宽高。版式和每页张数会按实际可用空间自动分页。</p>
           </section>
         </div>
         <div class="project-settings-actions">
@@ -7138,6 +7201,30 @@
           <button type="submit">保存</button>
         </div>
       </form>
+    </section>
+  </div>
+
+  <div id="folderReviewModal" class="modal-backdrop" aria-hidden="true">
+    <section class="machine-id-modal folder-review-modal" role="dialog" aria-modal="true" aria-labelledby="folderReviewTitle">
+      <div class="upload-choice-head">
+        <div>
+          <h3 id="folderReviewTitle">审核批量导入结果</h3>
+          <p id="folderReviewSummary">正在识别施工区域、施工内容和项目划分……</p>
+        </div>
+        <button class="ghost" type="button" id="closeFolderReviewBtn">关闭</button>
+      </div>
+      <div class="folder-review-help">施工内容已作为题名；施工区域用于匹配单位、分部和单元。请特别检查低置信度和“多候选”项目，确认后才会写入工程。</div>
+      <datalist id="folderReviewProjects"></datalist>
+      <div class="folder-review-table-wrap">
+        <table class="folder-review-table">
+          <thead><tr><th>导入</th><th>照片 / 水印</th><th>题名与日期</th><th>匹配单元</th><th>判断依据</th></tr></thead>
+          <tbody id="folderReviewRows"></tbody>
+        </table>
+      </div>
+      <div class="photo-edit-actions">
+        <button class="secondary" type="button" id="cancelFolderReviewBtn">取消</button>
+        <button type="button" id="confirmFolderReviewBtn">确认并导入</button>
+      </div>
     </section>
   </div>
 
@@ -7226,6 +7313,9 @@
       photoPreviewScale: 1,
       photoPreviewFitScale: 1,
       editingPhoto: null,
+      folderReviewFiles: [],
+      folderReviewRows: [],
+      folderReviewCategory: "construction",
       batchTouchY: 0,
       photoSelectMode: {},
       selectedPrintPhotos: {},
@@ -7262,12 +7352,11 @@
     }
 
     function selectedProcesses() {
-      const project = state.selectedProject || {};
-      return Array.isArray(project.processes) ? project.processes.filter(Boolean) : [];
+      return [];
     }
 
     function isProcessProject() {
-      return (state.selectedProject || {}).division_type === "process" && selectedProcesses().length > 0;
+      return false;
     }
 
     function processCodeForName(name) {
@@ -8200,8 +8289,6 @@
     const NUMBER_TEMPLATE_LABELS = [
       ["{unit_code}", "【单元编号】"],
       ["{unit_order}", "【单元顺序号】"],
-      ["{process_code}", "【工序编号】"],
-      ["{process_order}", "【工序顺序号】"],
       ["{seq}", "【流水号】"],
       ["{category}", "【类别】"],
       ["{code}", "【单元编号】"]
@@ -8234,6 +8321,22 @@
       });
     }
 
+    function syncPrintPhotoPresetInputs() {
+      const preset = $("#settingsPrintPhotoPresetInput").value;
+      const sizes = {
+        "4inch": [10.2, 7.6],
+        "5inch": [12.7, 8.9],
+        "6inch": [15.2, 10.2]
+      };
+      const custom = preset === "custom";
+      $("#settingsPrintPhotoWidthInput").disabled = !custom;
+      $("#settingsPrintPhotoHeightInput").disabled = !custom;
+      if (sizes[preset]) {
+        $("#settingsPrintPhotoWidthInput").value = sizes[preset][0];
+        $("#settingsPrintPhotoHeightInput").value = sizes[preset][1];
+      }
+    }
+
     function openProjectInfoModal() {
       const settings = state.engineeringSettings || {};
       const rules = settings.numbering_rules || {};
@@ -8263,11 +8366,12 @@
       $("#settingsSupervisionDigits").value = supervision.digits || 3;
       $("#settingsPrintLayoutInput").value = settings.print_layout || "landscape";
       $("#settingsPrintPageSizeInput").value = String(settings.print_page_size || 4);
+      $("#settingsPrintPhotoPresetInput").value = settings.print_photo_preset || "5inch";
       $("#settingsPrintPhotoWidthInput").value = settings.print_photo_width_cm || "";
       $("#settingsPrintPhotoHeightInput").value = settings.print_photo_height_cm || "";
       $("#settingsPrintCaptionFontSizeInput").value = settings.print_caption_font_size || 7.2;
       $("#settingsPrintCaptionPositionInput").value = settings.print_caption_position || "left";
-      $("#settingsWatermarkOcrInput").checked = settings.watermark_ocr_enabled !== false;
+      syncPrintPhotoPresetInputs();
       $("#settingsPhotoFieldsInput").value = (settings.photo_detail_fields || []).map((field) => `${field.label || ""}=${field.source === "custom" ? (field.value || "") : (field.source || "")}`).join("\n");
       setProjectSettingsTab("info");
       $("#projectInfoModal").classList.add("open");
@@ -8343,7 +8447,7 @@
       const photoFields = $("#settingsPhotoFieldsInput").value.split(/\r?\n/).map((line) => {
         const [label, ...rest] = line.split("=");
         const value = rest.join("=").trim();
-        const source = ["id", "title", "project_name", "photo_date", "photographer", "description", "process_name", "process_code"].includes(value) ? value : "custom";
+        const source = ["id", "title", "project_name", "photo_date", "photographer", "description"].includes(value) ? value : "custom";
         return { label: (label || "").trim(), source, value: source === "custom" ? value : "" };
       }).filter((field) => field.label);
       const constructionUnitTemplate = readableToNumberTemplate($("#settingsConstructionUnitTemplate").value);
@@ -8355,11 +8459,12 @@
         unit_order_digits: Number($("#settingsUnitOrderDigitsInput").value || 3),
         print_layout: $("#settingsPrintLayoutInput").value,
         print_page_size: Number($("#settingsPrintPageSizeInput").value || 4),
+        print_photo_preset: $("#settingsPrintPhotoPresetInput").value,
         print_photo_width_cm: Number($("#settingsPrintPhotoWidthInput").value || 0),
         print_photo_height_cm: Number($("#settingsPrintPhotoHeightInput").value || 0),
         print_caption_font_size: Number($("#settingsPrintCaptionFontSizeInput").value || 7.2),
         print_caption_position: $("#settingsPrintCaptionPositionInput").value,
-        watermark_ocr_enabled: $("#settingsWatermarkOcrInput").checked,
+        watermark_ocr_enabled: true,
         photo_detail_fields: photoFields,
         numbering_rules: {
           construction: {
@@ -8494,10 +8599,11 @@
       const passwordInput = $("#gatePassword");
       const username = usernameInput.value.trim();
       const password = passwordInput.value;
+      const remember = $("#gateRemember") ? $("#gateRemember").checked : true;
       const data = await apiJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password, remember })
       });
       state.auth.user = data.user || null;
       passwordInput.value = "";
@@ -9238,7 +9344,10 @@
           <span class="code">${escapeHtml(projectDisplayCode(project))}</span>
           <span class="unit-card-main">
             <strong>${escapeHtml(projectName(project))}</strong>
-            <span class="unit-card-photo-count">${Number(project.photo_count || 0)}</span>
+            <span class="unit-card-photo-counts" aria-label="施工和监理照片数量">
+              <span><small>施工</small><b>${Number(project.construction_photo_count || 0)}</b></span>
+              <span><small>监理</small><b>${Number(project.supervision_photo_count || 0)}</b></span>
+            </span>
           </span>
           <span class="unit-card-meta">
             <span>${Number(project.photo_count || 0)} 张照片</span>
@@ -9372,11 +9481,8 @@
         const titlePrefix = group.name ? `${group.code ? group.code + " " : ""}${group.name} · ` : "";
         const sectionKey = photoSectionKey(key, group.name);
         const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
-        const constructionPhotos = key === "supervision"
-          ? categoryPhotos("construction").filter(processMatches)
-          : [];
-        const useConstructionBtn = key === "supervision" && constructionPhotos.length && photos.length < constructionPhotos.length
-          ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">使用施工照片</button>`
+        const useConstructionBtn = key === "supervision"
+          ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">复制施工照片</button>`
           : "";
         return `
           <section class="photo-section" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
@@ -9422,7 +9528,7 @@
       host.querySelectorAll("button[data-use-construction]").forEach((button) => {
         button.addEventListener("click", async () => {
           const processName = button.dataset.processName || "";
-          if (!window.confirm("该单元监理影像暂无照片。将复制本单元施工照片并自动生成监理编号（JY…），确定继续吗？")) return;
+          if (!window.confirm("将本单元尚未复制的施工照片复制到监理影像，并自动生成监理编号（JY…）。已复制照片会自动跳过，确定继续吗？")) return;
           try {
             if (!(await ensureAuthenticated("使用施工照片"))) return;
             const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/copy-construction-to-supervision`, {
@@ -9433,7 +9539,7 @@
             state.photos = data.photos || [];
             state.selectedPrintPhotos = {};
             renderPhotos();
-            showNotice(`已使用 ${data.added ? data.added.length : 0} 张施工照片生成监理影像。`);
+            showNotice(`已复制 ${data.added ? data.added.length : 0} 张施工照片到监理影像。`);
           } catch (error) {
             showNotice(error.message, true);
           }
@@ -9728,6 +9834,9 @@
         showNotice("请选择 JPG/PNG 照片后再自动匹配上传。", true);
         return;
       }
+      await previewFolderImport(files, state.uploadChoiceCategory || "construction");
+      closeUploadChoiceModal();
+      return;
       const form = new FormData();
       let photoDate = $("#uploadModalDate").value;
       // 日期为空时：先从文件名提取，取不到则提交由后端 EXIF 兜底
@@ -9822,12 +9931,104 @@
       showNotice("照片已上传，当前页面已刷新。");
     }
 
-    async function uploadFolder(folder, files) {
+    function folderProjectLabel(project) {
+      if (!project) return "";
+      const fields = project.source_fields || {};
+      const code = project.display_project_code || fields["单元工程编码"] || project.project_code || "";
+      return code + "｜" + (project.project_name || fields["单元工程名称"] || code);
+    }
+
+    function resolveFolderProject(value) {
+      const text = String(value || "").trim();
+      return state.projects.find((project) => folderProjectLabel(project) === text)
+        || state.projects.find((project) => String(project.project_code || "") === text)
+        || null;
+    }
+
+    function closeFolderReview() {
+      $("#folderReviewModal").classList.remove("open");
+      $("#folderReviewModal").setAttribute("aria-hidden", "true");
+      state.folderReviewFiles = [];
+      state.folderReviewRows = [];
+      $("#folderReviewRows").innerHTML = "";
+    }
+
+    function renderFolderReview() {
+      const rows = state.folderReviewRows || [];
+      $("#folderReviewProjects").innerHTML = state.projects
+        .map((project) => '<option value="' + escapeHtml(folderProjectLabel(project)) + '"></option>')
+        .join("");
+      const high = rows.filter((row) => row.confidence === "high").length;
+      const medium = rows.filter((row) => row.confidence === "medium").length;
+      const low = rows.length - high - medium;
+      $("#folderReviewSummary").textContent = "共 " + rows.length + " 张：高置信 " + high + " 张，中置信 " + medium + " 张，需重点审核 " + low + " 张。";
+      $("#folderReviewRows").innerHTML = rows.map((row, index) => {
+        const project = state.projects.find((item) => item.project_code === row.project_code);
+        const unitValue = folderProjectLabel(project);
+        const confidenceText = row.ambiguous ? "多候选 · 必须确认" : ((row.confidence_label || "低") + "置信");
+        const reasons = (row.reasons || []).slice(0, 3).join("；");
+        return '<tr data-review-index="' + index + '">'
+          + '<td><input type="checkbox" data-review-include checked aria-label="导入此照片"></td>'
+          + '<td><div class="folder-review-file">' + escapeHtml(row.relative_path || row.filename || "") + '</div>'
+          + '<div class="folder-review-meta">施工区域：' + escapeHtml(row.construction_area || "未识别") + '<br>施工内容：' + escapeHtml(row.construction_content || "未识别") + '</div></td>'
+          + '<td><input type="text" data-review-title value="' + escapeHtml(row.title || "") + '" placeholder="施工内容 / 照片题名">'
+          + '<input type="date" data-review-date value="' + escapeHtml(String(row.photo_date || "").slice(0, 10)) + '"></td>'
+          + '<td><span class="match-confidence ' + escapeHtml(row.confidence || "low") + '">' + escapeHtml(confidenceText) + '</span>'
+          + '<input type="text" data-review-project list="folderReviewProjects" value="' + escapeHtml(unitValue) + '" placeholder="输入单元编码或名称"></td>'
+          + '<td><div class="folder-review-meta">' + escapeHtml(reasons || "未找到匹配依据，请手动选择单元") + '</div></td>'
+          + '</tr>';
+      }).join("");
+      $("#folderReviewModal").classList.add("open");
+      $("#folderReviewModal").setAttribute("aria-hidden", "false");
+    }
+
+    async function previewFolderImport(files, category = "construction") {
       const form = new FormData();
-      form.append("folder_name", folder);
-      form.append("category", "construction");
+      const relativePaths = files.map((file) => file.webkitRelativePath || file.relativePath || file.name);
       files.forEach((file) => form.append("files", file, file.name));
-      return await apiJson("/api/upload-folder", { method: "POST", body: form });
+      form.append("relative_paths", JSON.stringify(relativePaths));
+      showNotice("正在识别水印并匹配项目划分，请稍候……");
+      const data = await apiJson("/api/upload-match-preview", { method: "POST", body: form });
+      state.folderReviewFiles = files;
+      state.folderReviewRows = data.rows || [];
+      state.folderReviewCategory = category;
+      renderFolderReview();
+    }
+
+    async function commitFolderReview() {
+      const tableRows = Array.from(document.querySelectorAll("#folderReviewRows tr[data-review-index]"));
+      const assignments = tableRows.map((tr) => {
+        const index = Number(tr.dataset.reviewIndex || 0);
+        const row = state.folderReviewRows[index] || {};
+        const project = resolveFolderProject(tr.querySelector("[data-review-project]").value);
+        return {
+          index,
+          filename: row.filename || "",
+          include: tr.querySelector("[data-review-include]").checked,
+          project_code: project ? project.project_code : "",
+          title: tr.querySelector("[data-review-title]").value.trim(),
+          photo_date: tr.querySelector("[data-review-date]").value,
+          watermark_text: row.watermark_text || ""
+        };
+      });
+      const missing = assignments.find((item) => item.include && !item.project_code);
+      if (missing) {
+        showNotice("仍有勾选照片未选择有效单元，请先完成审核。", true);
+        return;
+      }
+      const form = new FormData();
+      state.folderReviewFiles.forEach((file) => form.append("files", file, file.name));
+      form.append("category", state.folderReviewCategory || "construction");
+      form.append("assignments", JSON.stringify(assignments));
+      $("#confirmFolderReviewBtn").disabled = true;
+      try {
+        const data = await apiJson("/api/upload-match-commit", { method: "POST", body: form });
+        closeFolderReview();
+        await refreshAll();
+        showNotice("审核导入完成：共 " + Number(data.added_count || 0) + " 张，归档到 " + Number(data.project_count || 0) + " 个单元。");
+      } finally {
+        $("#confirmFolderReviewBtn").disabled = false;
+      }
     }
 
     $("#folderImportBtn").addEventListener("click", () => $("#folderImportInput").click());
@@ -9836,32 +10037,12 @@
       event.target.value = "";
       if (!files.length) return;
       if (!(await ensureAuthenticated("导入文件夹"))) return;
-      const groups = new Map();
-      for (const file of files) {
-        const rel = file.webkitRelativePath || file.relativePath || "";
-        const folder = rel.split("/")[0] || "照片";
-        if (!groups.has(folder)) groups.set(folder, []);
-        groups.get(folder).push(file);
+      const imageFiles = normalizeImageFiles(files);
+      if (!imageFiles.length) {
+        showNotice("文件夹中没有可导入的 JPG/PNG 照片。", true);
+        return;
       }
-      let imported = 0;
-      const failures = [];
-      for (const [folder, list] of groups) {
-        try {
-          const data = await uploadFolder(folder, list);
-          imported += data.added ? data.added.length : 0;
-        } catch (error) {
-          failures.push(`“${folder}”：${error.message}`);
-        }
-      }
-      if (imported > 0) {
-        await refreshAll();
-        const extra = failures.length ? `；${failures.length} 个文件夹失败（${failures[0]}）` : "";
-        showNotice(`文件夹导入完成，共导入 ${imported} 张照片${extra}。`, failures.length > 0);
-      } else if (failures.length) {
-        showNotice(`文件夹导入失败：${failures[0]}`, true);
-      } else {
-        showNotice("文件夹中没有可导入的照片。", true);
-      }
+      await previewFolderImport(imageFiles, "construction");
     });
 
     async function openPhotoEdit(category, photoId) {
@@ -10213,15 +10394,17 @@
         renderOtherImagesTree();
         renderOverview();
       }
-      if (state.viewMode === "part" && state.selectedPart) {
+      if (state.selectedPart) {
         const updated = findNode(state.treeRoot, state.selectedPart.key);
         if (updated) {
           state.selectedPart = updated;
-          renderPart();
+          if (state.viewMode === "part") renderPart();
         } else {
           state.selectedPart = null;
-          setView("overview");
-          renderOverview();
+          if (state.viewMode === "part") {
+            setView("overview");
+            renderOverview();
+          }
         }
       }
     }
@@ -10433,6 +10616,13 @@
     });
     document.querySelectorAll("[data-project-settings-tab]").forEach((button) => {
       button.addEventListener("click", () => setProjectSettingsTab(button.dataset.projectSettingsTab));
+    });
+    $("#settingsPrintPhotoPresetInput").addEventListener("change", syncPrintPhotoPresetInputs);
+    $("#closeFolderReviewBtn").addEventListener("click", closeFolderReview);
+    $("#cancelFolderReviewBtn").addEventListener("click", closeFolderReview);
+    $("#confirmFolderReviewBtn").addEventListener("click", () => commitFolderReview().catch((error) => showNotice(error.message, true)));
+    $("#folderReviewModal").addEventListener("click", (event) => {
+      if (event.target.id === "folderReviewModal") closeFolderReview();
     });
     $("#projectInfoModal").addEventListener("click", (event) => {
       if (event.target.id === "projectInfoModal") closeProjectInfoModal();

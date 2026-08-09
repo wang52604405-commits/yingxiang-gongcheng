@@ -10,6 +10,9 @@
 {% if page_size not in [1, 2, 4] %}{% set page_size = 2 %}{% endif %}
 {% if page_size == 4 %}{% set layout = "landscape" %}{% endif %}
 {% set print_settings = print_settings or {} %}
+{% set photo_preset = print_settings.get("print_photo_preset", "5inch") %}
+{% set photo_width_cm = print_settings.get("print_photo_width_cm", 12.7) %}
+{% set photo_height_cm = print_settings.get("print_photo_height_cm", 8.9) %}
 {% set caption_font_size = [print_settings.get("print_caption_font_size", 7.2) or 7.2, 7.5]|min %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
 <head>
@@ -179,7 +182,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">打印预览里请取消“页眉和页脚”，缩放选“默认/100%”。照片按 5 寸铺满，说明文字在照片底部。</span>
+      <span class="print-tip">打印预览里请取消“页眉和页脚”，缩放选“默认/100%”。照片按所选尺寸排版，说明文字在照片底部。</span>
       <label>打印版式
         <select id="printLayoutSelect">
           <option value="landscape" {% if layout == "landscape" %}selected{% endif %}>横版</option>
@@ -190,6 +193,14 @@
         <select id="printPageSizeSelect">
           <option value="2" {% if page_size == 2 %}selected{% endif %}>2 张（标准边距）</option>
           <option value="4" {% if page_size == 4 %}selected{% endif %}>4 张（最小边距）</option>
+        </select>
+      </label>
+      <label>照片尺寸
+        <select id="printPhotoPresetSelect">
+          <option value="4inch" {% if photo_preset == "4inch" %}selected{% endif %}>4寸</option>
+          <option value="5inch" {% if photo_preset == "5inch" %}selected{% endif %}>5寸</option>
+          <option value="6inch" {% if photo_preset == "6inch" %}selected{% endif %}>6寸</option>
+          <option value="custom" {% if photo_preset == "custom" %}selected{% endif %}>自定义</option>
         </select>
       </label>
       <button onclick="window.print()">打印</button>
@@ -248,6 +259,16 @@
     pageSizeSelect.addEventListener("change", () => {
       const url = new URL(window.location.href);
       url.searchParams.set("page_size", pageSizeSelect.value);
+      window.location.href = url.toString();
+    });
+    const photoPresetSelect = document.getElementById("printPhotoPresetSelect");
+    photoPresetSelect.addEventListener("change", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("photo_preset", photoPresetSelect.value);
+      {% if photo_preset == "custom" %}
+      url.searchParams.set("photo_width_cm", "{{ photo_width_cm }}");
+      url.searchParams.set("photo_height_cm", "{{ photo_height_cm }}");
+      {% endif %}
       window.location.href = url.toString();
     });
     document.title = "";

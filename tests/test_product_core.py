@@ -194,8 +194,83 @@ class DesktopSecurityContractTest(unittest.TestCase):
         ]
         fields = self.desktop.watermark_ocr.extract_fields(lines)
         self.assertEqual(fields["title"], "左岸连接堤")
+        self.assertEqual(fields["construction_content"], "左岸连接堤")
+        self.assertEqual(fields["construction_area"], "")
+        self.assertEqual(fields["project_name"], "洺河龙泉缓洪工程")
         self.assertEqual(fields["photo_date"], "2026-06-05")
         self.assertEqual(self.desktop.watermark_text_for_user(), "")
+
+    def test_multi_rule_match_process_disabled_and_print_presets(self):
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        project = self.desktop.manager.create_project(
+            "YNLQ-001-01-001",
+            "左岸连接堤",
+            source_fields={
+                "合同工程名称": "洺河龙泉缓洪工程",
+                "单位工程名称": "龙泉河单位工程",
+                "分部工程名称": "左岸连接工程",
+                "单元工程名称": "左岸连接堤",
+                "单元工程编码": "YNLQ-001-01-001",
+                "划分类型": "划分工序单元",
+                "工序名称列表": "普通混凝土备仓、普通混凝土浇筑",
+            },
+        )
+        self.assertEqual(project["division_type"], "unit")
+        self.assertEqual(project["processes"], [])
+        self.assertEqual(project["source_fields"]["工序名称列表"], "")
+
+        result = self.desktop.match_photo_to_projects(
+            "IMG_20260605.jpg",
+            "批量照片/左岸连接堤/IMG_20260605.jpg",
+            {
+                "construction_area": "左岸连接堤",
+                "construction_content": "混凝土浇筑完成",
+                "project_name": "洺河龙泉缓洪工程",
+            },
+        )
+        self.assertEqual(result["project_code"], project["project_code"])
+        self.assertEqual(result["confidence"], "high")
+        self.assertTrue(any("施工区域匹配单元" in reason for reason in result["reasons"]))
+
+        image_bytes = io.BytesIO()
+        Image.new("RGB", (640, 480), (100, 120, 140)).save(image_bytes, "JPEG")
+        image_bytes.seek(0)
+        self.desktop.manager.add_photos(
+            project["project_code"],
+            [FileStorage(stream=image_bytes, filename="施工照片.jpg")],
+            category="construction",
+            title="基槽验收",
+            photo_date="2026-08-09",
+        )
+        copied = self.desktop.manager.copy_construction_to_supervision(project["project_code"])
+        self.assertEqual(len(copied), 1)
+        photos = self.desktop.manager.get_project(project["project_code"])["photos"]
+        self.assertEqual(sum(photo["category"] == "construction" for photo in photos), 1)
+        self.assertEqual(sum(photo["category"] == "supervision" for photo in photos), 1)
+
+        with self.desktop.app.test_request_context("/?photo_preset=6inch"):
+            settings = self.desktop.print_settings_from_request()
+        self.assertEqual(settings["print_photo_preset"], "6inch")
+        self.assertEqual(settings["print_photo_width_cm"], 15.2)
+        self.assertEqual(settings["print_photo_height_cm"], 10.2)
+
+    def test_remember_login_and_required_product_controls_are_visible(self):
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "长期登录测试员", "remember": True},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        with self.client.session_transaction() as session:
+            self.assertTrue(session.permanent)
+            self.assertEqual(session.get("username"), "长期登录测试员")
+
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("记住登录（30 天内免重复登录）", html)
+        self.assertIn("复制施工照片", html)
+        self.assertIn("4寸（10.2×7.6cm）", html)
+        self.assertIn("审核批量导入结果", html)
 
 
 if __name__ == "__main__":

@@ -60,15 +60,28 @@ def _clean_line(text):
     return text
 
 
-def _pick_title(lines):
-    """从水印文本行里保守挑一句当题名：备注 > 工程特征行 > 地点行。"""
+def _label_value(lines, *labels):
+    """读取水印键值字段，兼容 OCR 把中文标签识别成带空格的形式。"""
+    label_pattern = "|".join(re.escape(label) for label in labels)
     for line in lines:
-        compact = re.sub(r"\s+", "", line)
-        match = re.search(r"(?:施工内容|施工部位|备注)[:：]?(.+)", compact)
-        if match and match.group(1).strip():
-            candidate = _clean_line(match.group(1))
-            if candidate and "请输入" not in candidate:
-                return candidate[:60]
+        compact = re.sub(r"\s+", "", str(line or ""))
+        match = re.search(rf"(?:{label_pattern})[:：]?(.+)", compact)
+        if not match:
+            continue
+        candidate = _clean_line(match.group(1))
+        if candidate and "请输入" not in candidate:
+            return candidate[:100]
+    return ""
+
+
+def _pick_title(lines):
+    """施工内容是题名；没有施工内容时才使用兼容字段兜底。"""
+    construction_content = _label_value(lines, "施工内容")
+    if construction_content:
+        return construction_content[:60]
+    fallback = _label_value(lines, "施工部位", "备注")
+    if fallback:
+        return fallback[:60]
     for line in lines:
         if "请输入" in line:
             continue
@@ -104,7 +117,7 @@ def ocr_lines(image_bytes) -> list:
 
 
 def extract_fields(lines) -> dict:
-    """从文本行解析出 {photo_date, title, watermark_text}，任何字段都可能为空。"""
+    """从水印解析施工区域、施工内容、工程名、日期等结构化字段。"""
     lines = [str(line or "").strip() for line in (lines or [])]
     lines = [line for line in lines if line]
     date = ""
@@ -112,10 +125,24 @@ def extract_fields(lines) -> dict:
         date = _parse_date(line)
         if date:
             break
-    title = _pick_title(lines)
+    construction_area = _label_value(lines, "施工区域")
+    construction_content = _label_value(lines, "施工内容")
+    title = construction_content or _pick_title(lines)
+    project_name = ""
+    known_labels = re.compile(r"施工区域|施工内容|施工部位|拍摄时间|天气|地点|经度|纬度|备注")
+    for line in lines:
+        compact = re.sub(r"\s+", "", line)
+        if not compact or known_labels.search(compact) or _DATE_RE.search(compact):
+            continue
+        if len(compact) >= 4 and re.search(r"工程|项目|标段", compact):
+            project_name = compact[:100]
+            break
     return {
         "photo_date": date,
         "title": title,
+        "construction_area": construction_area,
+        "construction_content": construction_content,
+        "project_name": project_name,
         "watermark_text": "\n".join(lines),
     }
 
@@ -125,4 +152,11 @@ def recognize_watermark(image_bytes) -> dict:
     try:
         return extract_fields(ocr_lines(image_bytes))
     except Exception:
-        return {"photo_date": "", "title": "", "watermark_text": ""}
+        return {
+            "photo_date": "",
+            "title": "",
+            "construction_area": "",
+            "construction_content": "",
+            "project_name": "",
+            "watermark_text": "",
+        }
