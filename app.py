@@ -4815,6 +4815,7 @@ def api_bootstrap():
         return jsonify({
             "ok": True, "user": None, "revision": manager.revision(),
             "dashboard": {}, "hierarchy": [], "optimization_status": _public_photo_optimization_status(),
+            "app_version": cloud_client.APP_VERSION,
         })
     engineering_data = read_engineering_projects()
     snapshot = manager.hierarchy_snapshot()
@@ -4829,6 +4830,7 @@ def api_bootstrap():
         "dashboard": snapshot["dashboard"],
         "hierarchy": snapshot["hierarchy"],
         "optimization_status": _public_photo_optimization_status(),
+        "app_version": cloud_client.APP_VERSION,
     })
     ensure_photo_optimizer_started()
     response.headers["Cache-Control"] = "private, no-cache"

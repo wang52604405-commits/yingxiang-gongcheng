@@ -3276,6 +3276,7 @@ const $ = (selector) => document.querySelector(selector);
         return;
       }
       state.revision = Number(data.revision || 0);
+      if (data.app_version && $("#appVersionBadge")) $("#appVersionBadge").textContent = "v" + data.app_version.replace(/^A\d{8}-/, "");
       state.projectInfo = data.project_info || {};
       state.engineeringProjects = data.engineering_projects || [];
       // 删除工程后 active 可能失效：若返回的 active_id 不在当前工程列表里，回退到第一个工程，避免顶部残留已删工程名
@@ -3388,6 +3389,7 @@ const $ = (selector) => document.querySelector(selector);
 
     $("#supportBtn").addEventListener("click", (event) => {
       event.stopPropagation();
+      closeTopMenus("supportPanel");
       $("#supportPanel").classList.toggle("open");
       $("#supportPanel").setAttribute("aria-hidden", $("#supportPanel").classList.contains("open") ? "false" : "true");
       if ($("#supportPanel").classList.contains("open")) {
@@ -3706,22 +3708,40 @@ const $ = (selector) => document.querySelector(selector);
     $("#topOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
     $("#constructionOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
     $("#otherOverviewBtn")?.addEventListener("click", () => openOverview("other"));
+    function closeTopMenus(except) {
+      const menus = {
+        printMenu: $("#printMenu"),
+        settingsMenu: $("#settingsMenu"),
+        actionsMenu: $("#actionsMenu"),
+        quickMenu: $("#quickMenu"),
+        projectImportMenu: $("#projectImportMenu"),
+        supportPanel: $("#supportPanel"),
+      };
+      Object.entries(menus).forEach(([name, el]) => {
+        if (!el) return;
+        if (name === except) return;
+        el.classList.remove("open");
+      });
+      if (except !== "supportPanel") $("#supportPanel")?.setAttribute("aria-hidden", "true");
+    }
     $("#printMenuBtn")?.addEventListener("click", (event) => {
       event.stopPropagation();
+      closeTopMenus("printMenu");
       $("#printMenu")?.classList.toggle("open");
     });
     $("#settingsMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
+      closeTopMenus("settingsMenu");
       $("#settingsMenu").classList.toggle("open");
-      $("#actionsMenu").classList.remove("open");
     });
     $("#actionsMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
+      closeTopMenus("actionsMenu");
       $("#actionsMenu").classList.toggle("open");
-      $("#settingsMenu").classList.remove("open");
     });
     $("#quickMenuBtn")?.addEventListener("click", (event) => {
       event.stopPropagation();
+      closeTopMenus("quickMenu");
       $("#quickMenu")?.classList.toggle("open");
     });
     $("#projectImportMenuBtn").addEventListener("click", (event) => {

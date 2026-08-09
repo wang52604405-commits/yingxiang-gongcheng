@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260809-2.36.css">
+  <link rel="stylesheet" href="/assets/app-A20260809-2.37.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：只首次进入时显示，数据加载完自动淡出 -->
@@ -48,6 +48,10 @@
         <div class="brand-mark">影</div>
         <h1>工程影像管理平台</h1>
       </div>
+      <div class="top-filter-group" aria-label="工程影像筛选">
+        <button id="topConstructionBtn" class="active" type="button">施工影像</button>
+        <button id="topOtherBtn" type="button">其它影像</button>
+      </div>
       <div class="top-batch-actions" aria-label="批量打印">
         <select id="engineeringProjectSelect" class="project-select" title="当前工程"></select>
         <div class="project-import-wrap">
@@ -62,12 +66,9 @@
             <button class="danger-tool" type="button" id="clearProjectsBtn">删除划分</button>
           </div>
         </div>
-        <div class="top-filter-group" aria-label="工程影像筛选">
-          <button id="topConstructionBtn" class="active" type="button">施工影像</button>
-          <button id="topOtherBtn" type="button">其它影像</button>
-        </div>
       </div>
       <div class="top-actions">
+        <span class="app-version-badge" id="appVersionBadge" title="当前软件版本"></span>
         <button type="button" id="refreshBtn" title="重新读取工程、统计和照片数据">刷新</button>
         <div class="settings-menu-wrap actions-menu-wrap">
           <button type="button" id="actionsMenuBtn">操作</button>
@@ -135,24 +136,25 @@
                   </div>
                 </section>
                 <section class="support-panel-section" data-support-panel="share">
-                  <div class="share-points-box">
-                    <div style="width:100%;">
-                      <strong>邀请进度</strong>
-                      <p class="support-note">把邀请码发给好友；好友完成注册并首次登录软件后才记为有效邀请，同一设备重复注册不计入。</p>
-                      <div style="margin:10px 0;padding:12px;background:#eef6f0;border-radius:8px;text-align:center;">
-                        <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">我的邀请码</div>
-                        <div id="inviteCodeDisplay" style="font-size:24px;font-weight:800;color:var(--primary);letter-spacing:3px;font-family:Consolas,monospace;">— — — —</div>
-                        <button type="button" id="copyInviteCodeBtn" style="margin-top:8px;">复制邀请码</button>
-                      </div>
-                      <div style="margin:12px 0;padding:12px;background:#f4f8fb;border-radius:8px;text-align:center;">
-                        <div id="inviteProgressText" style="font-size:16px;font-weight:700;color:#12344d;">已邀请 0 人</div>
-                        <div id="inviteProgressRemain" style="font-size:13px;color:var(--muted);margin-top:4px;">还差 10 人即可免费使用 1 个月</div>
-                        <div style="height:8px;border-radius:999px;background:#dce6ee;margin-top:10px;overflow:hidden;">
-                          <div id="inviteProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#116fa6);border-radius:999px;transition:width 200ms cubic-bezier(.23,1,.32,1);"></div>
+                  <div class="share-hero">
+                    <p class="support-note">把邀请码发给好友；好友完成注册并首次登录软件后才记为有效邀请，同一设备重复注册不计入。</p>
+                    <div class="share-hero-cards">
+                      <div class="share-card">
+                        <p class="share-card-label">我的邀请码</p>
+                        <div class="share-code" id="inviteCodeDisplay">— — — —</div>
+                        <div class="share-card-actions">
+                          <button type="button" id="copyInviteCodeBtn">复制邀请码</button>
                         </div>
                       </div>
-                      <div id="inviteRewardInfo" style="font-size:12px;color:var(--muted);text-align:center;">已通过邀请免费获得 0 个月使用</div>
+                      <div class="share-card">
+                        <div class="share-progress-count" id="inviteProgressText">已邀请 0 人</div>
+                        <p class="share-progress-sub" id="inviteProgressRemain">还差 10 人即可免费使用 1 个月</p>
+                        <div class="share-progress-bar">
+                          <div class="share-progress-fill" id="inviteProgressBar"></div>
+                        </div>
+                      </div>
                     </div>
+                    <p class="share-reward" id="inviteRewardInfo">已通过邀请免费获得 0 个月使用</p>
                   </div>
                 </section>
                 <section class="support-panel-section" data-support-panel="poster">
@@ -756,6 +758,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260809-2.36.js"></script>
+  <script defer src="/assets/app-A20260809-2.37.js"></script>
 </body>
 </html>
