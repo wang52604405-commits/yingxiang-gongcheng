@@ -366,8 +366,15 @@ class DesktopSecurityContractTest(unittest.TestCase):
 
         index_response = self.client.get("/", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(index_response.headers.get("Content-Encoding"), "gzip")
+        # 从 index.html 提取版本化 asset 文件名，避免 bump 版本后硬编码失效
+        import gzip as _gzip
+        import re as _re
+        index_html = _gzip.decompress(index_response.data).decode("utf-8")
+        asset_match = _re.search(r"/assets/(app-A\d{8}-\d+\.\d+\.js)", index_html)
+        self.assertIsNotNone(asset_match, "index.html 中未找到版本化 JS asset")
+        asset_name = asset_match.group(1)
         asset_response = self.client.get(
-            "/assets/app-A20260809-2.32.js", headers={"Accept-Encoding": "gzip"}
+            f"/assets/{asset_name}", headers={"Accept-Encoding": "gzip"}
         )
         self.assertEqual(asset_response.headers.get("Content-Encoding"), "gzip")
         self.assertIn("immutable", asset_response.headers.get("Cache-Control", ""))

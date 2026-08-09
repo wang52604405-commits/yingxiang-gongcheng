@@ -979,6 +979,7 @@ class AlbumManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self._projects_cache = {}
         self._hierarchy_cache = {}
+        self._photos_cache = {}
         self._revision = 1
         self._write_locks = {}
         self._write_locks_guard = threading.Lock()
@@ -995,6 +996,7 @@ class AlbumManager:
     def invalidate_projects_cache(self):
         self._projects_cache = {}
         self._hierarchy_cache = {}
+        self._photos_cache = {}
         self._revision += 1
 
     def revision(self):
@@ -1701,8 +1703,19 @@ class AlbumManager:
         return data
 
     def get_photos(self, project_code):
-        data = self.get_project(project_code)
-        return [self._photo_item(data, photo) for photo in data.get("photos", [])]
+        key = self._safe_code(project_code)
+        path = self._metadata_path(key)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        cached = self._photos_cache.get(key)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+        data = self.get_project(key)
+        items = [self._photo_item(data, photo) for photo in data.get("photos", [])]
+        self._photos_cache[key] = (mtime, items)
+        return items
 
     def optimize_existing_photo(self, project_code, photo_id):
         with self._project_write_lock(project_code):
@@ -1808,6 +1821,7 @@ class AlbumManager:
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
             added.append(self._photo_item(data, item))
+        self._ensure_pile_sorted(project_code, data)
         return added
 
     def copy_construction_to_supervision(self, project_code, process_name="", process_code=""):
@@ -1898,6 +1912,7 @@ class AlbumManager:
         if not added:
             raise ValueError("施工照片文件不存在，无法复制")
         self._write_metadata(data["project_code"], data)
+        self._ensure_pile_sorted(project_code, data)
         return added
 
     def update_photo(self, project_code, photo_id, **updates):
@@ -1925,6 +1940,7 @@ class AlbumManager:
                     if "rotation" in updates:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
                     self._write_metadata(data["project_code"], data)
+                    self._ensure_pile_sorted(project_code, data)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
 
@@ -2044,6 +2060,13 @@ class AlbumManager:
             self._renumber_category(project_code, data, category)
         self._write_metadata(data["project_code"], data)
         self.invalidate_projects_cache()
+
+    def _ensure_pile_sorted(self, project_code, data):
+        """照片变更后统一钩子：若为灌注桩单元则按桩号连体排序并重新编号。须在已持有写锁时调用。"""
+        if is_pile_unit(data):
+            self._auto_sort_piles_locked(project_code, data)
+            return True
+        return False
 
     def classify(self, prompt):
         text = str(prompt or "").strip().lower()
@@ -5969,6 +5992,7 @@ def delete_photo(project_code, photo_id):
                     kept.append(photo)
             data["photos"] = kept
             manager._write_metadata(project_code, data)
+            manager._ensure_pile_sorted(project_code, data)
         return jsonify({"ok": True, "deleted": deleted, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc))
