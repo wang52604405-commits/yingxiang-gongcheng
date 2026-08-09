@@ -21,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260809-2.51"
+APP_VERSION = "A20260809-2.52"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -89,6 +89,83 @@ def is_port_open(host="127.0.0.1", port=PORT):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.4)
         return sock.connect_ex((host, port)) == 0
+
+
+def listener_pid(port=PORT):
+    """Return the Windows PID listening on the application port, if any."""
+    if os.name != "nt":
+        return 0
+    try:
+        output = subprocess.check_output(
+            ["netstat", "-ano", "-p", "tcp"],
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    suffix = f":{int(port)}"
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) >= 5 and fields[0].upper() == "TCP":
+            if fields[1].endswith(suffix) and fields[3].upper() == "LISTENING":
+                try:
+                    return int(fields[4])
+                except ValueError:
+                    return 0
+    return 0
+
+
+def process_name(pid):
+    """Read a process image name without depending on an extra package."""
+    if not pid or os.name != "nt":
+        return ""
+    try:
+        output = subprocess.check_output(
+            ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
+            text=True,
+            encoding="mbcs",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        ).strip()
+        if output and not output.startswith("INFO:"):
+            return output.split(",", 1)[0].strip('"')
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def terminate_stale_server():
+    """Stop an old copy of our server occupying the reserved port."""
+    pid = listener_pid()
+    if not pid or process_name(pid).lower() != SERVER_EXE_NAME.lower():
+        return False
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except OSError:
+        return False
+    for _ in range(20):
+        if not is_port_open():
+            return True
+        time.sleep(0.15)
+    return not is_port_open()
+
+
+def local_server_version():
+    """Read the version served on localhost without requiring login."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/bootstrap", timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return str(data.get("app_version") or "")
+    except Exception:
+        return ""
 
 
 def local_ip():
@@ -284,10 +361,15 @@ class DesktopLauncher:
 
     def start_server(self):
         if is_port_open():
-            self.status.set(f"服务已运行：{self.local_url}")
-            self.progress.stop()
-            self.progress.configure(mode="determinate", value=100, maximum=100)
-            return
+            served_version = local_server_version()
+            if served_version == APP_VERSION:
+                self.status.set(f"服务已运行：{self.local_url}")
+                self.progress.stop()
+                self.progress.configure(mode="determinate", value=100, maximum=100)
+                return
+            if not terminate_stale_server():
+                self.status.set(f"端口 {PORT} 被其他程序占用，请关闭后重试")
+                return
 
         if getattr(sys, "frozen", False):
             ok, problems = tamper_guard.verify_installation(self.base)

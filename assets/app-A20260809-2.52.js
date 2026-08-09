@@ -461,8 +461,50 @@ const $ = (selector) => document.querySelector(selector);
 
     function pickerProjectCount(node) {
       if (!node) return 0;
-      if (node.type === "part") return node.projects.length;
+      if (node.type === "part") return node.projects.length || Number(node.unitCount || 0);
       return node.children.reduce((sum, childNode) => sum + pickerProjectCount(childNode), 0);
+    }
+
+    function partHierarchyLookupKey(part) {
+      const unit = part?.parent;
+      const contract = unit?.parent;
+      return [contract?.name, unit?.name, unit?.code, part?.name, part?.code]
+        .map((value) => String(value || "").trim())
+        .join("\u001f");
+    }
+
+    function projectHierarchyLookupKey(project) {
+      const h = getHierarchy(project);
+      return [h.contractName, h.unitProjectName, h.unitProjectCode, h.partName, h.partCode]
+        .map((value) => String(value || "").trim())
+        .join("\u001f");
+    }
+
+    function hydrateTreeProjects(root, projects) {
+      const parts = [];
+      const byPartKey = new Map();
+      const byHierarchy = new Map();
+      const walk = (node) => {
+        if (!node) return;
+        if (node.type === "part") {
+          node.projects = [];
+          parts.push(node);
+          if (node.partKey) byPartKey.set(String(node.partKey), node);
+          byHierarchy.set(partHierarchyLookupKey(node), node);
+          return;
+        }
+        node.children.forEach(walk);
+      };
+      walk(root);
+      (projects || []).forEach((project) => {
+        const partKey = String(project?.part_key || "");
+        const part = (partKey && byPartKey.get(partKey)) || byHierarchy.get(projectHierarchyLookupKey(project));
+        if (part) part.projects.push(project);
+      });
+      parts.forEach((part) => {
+        part.projects.sort((a, b) => (projectOrder(a) - projectOrder(b)) || compareNatural(projectCode(a), projectCode(b)));
+        if (part.projects.length) part.unitCount = part.projects.length;
+      });
     }
 
     function ensurePickerExpanded() {
@@ -3423,12 +3465,13 @@ const $ = (selector) => document.querySelector(selector);
       const data = await apiJson("/api/projects?slim=1");
       state.projects = data.projects || [];
       state.allProjectsLoaded = true;
-      // 不再重建 treeRoot：buildTree 建的 part 节点缺 partKey，会导致点分部后
-      // loadPartPage 用空 part_key 请求返回空(单元列表变 0 条)。保留
-      // loadBootstrap 用 hierarchy 建的树(含 partKey)。
+      // 保留 bootstrap 构建的节点和 partKey，同时把完整单元列表挂回原节点。
+      // 批量打印、单位选择器和分部页因此共用同一份完整数据，不再出现“0 个”。
       if (!state.treeRoot?.children?.length && state.projects.length) {
         state.treeRoot = buildTree(state.projects);
         expandAdaptiveTree();
+      } else {
+        hydrateTreeProjects(state.treeRoot, state.projects);
       }
       renderTree();
       renderOverview();
