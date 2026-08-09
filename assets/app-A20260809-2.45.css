@@ -2941,14 +2941,22 @@
     .batch-project.active .batch-check { background: var(--primary); }
     .print-setup-modal {
       width: min(94vw, 860px);
-      max-height: calc(100vh - 40px);
-      overflow: auto;
+      height: min(92vh, 780px);
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #fff;
       box-shadow: var(--shadow);
     }
-    .print-setup-body { padding: 16px; }
+    .print-setup-body {
+      padding: 16px;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
     .print-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .print-mode-card {
       display: grid;
