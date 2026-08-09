@@ -807,28 +807,41 @@ def auth_me():
     return jsonify({"ok": True, "user": current_user()})
 
 
-def lan_access_password():
-    """局域网访问口令：数据目录 lan_access.json 中配置；未配置则返回空（不限制）。
+def lan_access_config():
+    """局域网访问控制：数据目录 lan_access.json 中配置；未配置则返回空（不限制）。
 
-    本机访问（127.0.0.1）始终免口令，仅局域网请求校验，避免影响桌面软件体验。
+    支持两种格式：
+      {"password": "xxx"}            仅密码
+      {"username": "xxx", "password": "xxx"}   账号+密码
+    本机访问（127.0.0.1）始终免登录，仅局域网请求校验。
     """
     try:
         path = DATA_DIR / "lan_access.json"
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
-            return str(data.get("password") or "").strip()
+            username = str(data.get("username") or "").strip()
+            password = str(data.get("password") or "").strip()
+            return {"username": username, "password": password}
     except (OSError, ValueError):
         pass
-    return ""
+    return {"username": "", "password": ""}
 
 
 def _require_lan_password(payload):
-    """局域网请求需校验访问口令；本机或未配置口令时直接放行。"""
-    lan_pwd = lan_access_password()
-    if lan_pwd and not is_local_setup_request():
-        supplied = str(payload.get("password") or "").strip()
-        if supplied != lan_pwd:
-            raise ValueError("局域网访问口令错误，请联系管理员")
+    """局域网请求需校验访问账号+密码；本机或未配置时直接放行。"""
+    cfg = lan_access_config()
+    if not cfg["password"] or is_local_setup_request():
+        return
+    supplied_user = str(payload.get("username") or "").strip()
+    supplied_pwd = str(payload.get("password") or "").strip()
+    if cfg["username"]:
+        # 账号+密码模式
+        if supplied_user != cfg["username"] or supplied_pwd != cfg["password"]:
+            raise ValueError("访问账号或密码错误，请联系管理员")
+    else:
+        # 仅密码模式
+        if supplied_pwd != cfg["password"]:
+            raise ValueError("局域网访问密码错误，请联系管理员")
 
 
 @app.route("/api/auth/register", methods=["POST"])
