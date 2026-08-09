@@ -1366,11 +1366,28 @@ const $ = (selector) => document.querySelector(selector);
       return true;
     }
 
+    function saveLoginCredentials(username, password) {
+      try {
+        localStorage.setItem("album-login-account", String(username || "").trim());
+        if (password) localStorage.setItem("album-login-password", password);
+      } catch (e) {}
+    }
+    function restoreLoginCredentials() {
+      try {
+        const savedAccount = localStorage.getItem("album-login-account");
+        const savedPassword = localStorage.getItem("album-login-password");
+        if (savedAccount && $("#gateUsername") && !$("#gateUsername").value) $("#gateUsername").value = savedAccount;
+        if (savedPassword && $("#gatePassword") && !$("#gatePassword").value) $("#gatePassword").value = savedPassword;
+      } catch (e) {}
+    }
+
     async function submitAuth(url) {
       const usernameInput = $("#gateUsername");
       const passwordInput = $("#gatePassword");
       const username = usernameInput.value.trim();
       const password = passwordInput.value;
+      // 登录前先记住，失败也保留账号
+      saveLoginCredentials(username, password);
       const data = await apiJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1378,10 +1395,6 @@ const $ = (selector) => document.querySelector(selector);
       });
       state.auth.user = data.user || null;
       passwordInput.value = "";
-      try {
-        localStorage.setItem("album-login-account", username);
-        localStorage.setItem("album-login-password", password);
-      } catch (e) {}
       renderAuth();
       showNotice("已进入软件");
     }
@@ -2015,7 +2028,6 @@ const $ = (selector) => document.querySelector(selector);
                       <div class="blueprint-metrics">
                         ${metricBadge(projectCount(unit), "单元")}
                         ${photoMetricBadges(unit)}
-                        <button class="secondary mini" type="button" data-delete-hierarchy="unitProject" data-name="${escapeHtml(unit.name)}" data-code="${escapeHtml(unit.code || "")}">×</button>
                       </div>
                         <span class="picker-caret">${state.overviewExpandedUnits.has(unit.key) ? "▾" : "▸"}</span>
                     </button>
@@ -2029,9 +2041,6 @@ const $ = (selector) => document.querySelector(selector);
                               <span class="blueprint-part-inline-metrics">${photoMetricBadges(part)}</span>
                             </span>
                           </button>
-                          <span class="blueprint-part-actions">
-                            <button class="secondary mini" type="button" data-delete-hierarchy="part" data-name="${escapeHtml(part.name)}" data-code="${escapeHtml(part.code || "")}">×</button>
-                          </span>
                         </div>
                       `).join("") || `<div class="empty">暂无分部工程</div>`}
                     </div>` : ""}
@@ -3239,7 +3248,7 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
-    // 首屏冷启动加载动画：进度按真实加载阶段推进，加载完淡出
+    // 首屏冷启动加载动画：进度条跟随真实加载阶段推进，加载完 100% 工程页面全部显示
     function bootProgress(percent) {
       const fill = $("#bootLoaderFill");
       const num = $("#bootLoaderPercent");
@@ -3262,12 +3271,7 @@ const $ = (selector) => document.querySelector(selector);
       renderAuth();
       if (!state.auth.user) {
         // 未登录：回填上次记住的账号和密码，方便再次登录
-        try {
-          const savedAccount = localStorage.getItem("album-login-account");
-          const savedPassword = localStorage.getItem("album-login-password");
-          if (savedAccount && $("#gateUsername")) $("#gateUsername").value = savedAccount;
-          if (savedPassword && $("#gatePassword")) $("#gatePassword").value = savedPassword;
-        } catch (e) {}
+        restoreLoginCredentials();
         bootDone();
         return;
       }
@@ -3293,12 +3297,13 @@ const $ = (selector) => document.querySelector(selector);
       renderOverview();
       bootProgress(70);
       if (skipOtherImages) {
+        // 主界面已渲染：进度推到 100% 并显示工程页面；其它影像后台静默补充
+        bootProgress(100);
+        bootDone();
         const idleLoadOtherImages = () => apiJson("/api/other-images/tree").then((otherImagesData) => {
           state.otherImages = otherImagesData.tree || { nodes: [], photo_count: 0 };
           renderOtherImagesTree();
           renderOverview();
-          bootProgress(100);
-          bootDone();
         }).catch((error) => showNotice(error.message, true));
         if ("requestIdleCallback" in window) requestIdleCallback(idleLoadOtherImages, { timeout: 1500 });
         else setTimeout(idleLoadOtherImages, 50);
@@ -3620,6 +3625,11 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true)));
     $("#gateRegisterBtn").addEventListener("click", () => { window.location.href = "/license?register=1"; });
+    // 输入即记住账号密码，未登录回填
+    ["gateUsername", "gatePassword"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("input", () => saveLoginCredentials($("#gateUsername")?.value, $("#gatePassword")?.value));
+    });
     $("#cloudLoginBtn").addEventListener("click", async () => {
       const user = $("#cloudUser").value.trim();
       const pass = $("#cloudPass").value;
