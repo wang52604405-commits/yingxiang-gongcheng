@@ -3397,7 +3397,11 @@ const $ = (selector) => document.querySelector(selector);
       if (state.selectedPart) {
         const updated = findNode(state.treeRoot, state.selectedPart.key);
         if (updated) {
-          state.selectedPart = updated;
+          // 保留原 part 对象(含已加载的单元列表 projects)，避免重载后列表被清空
+          state.selectedPart.name = updated.name;
+          state.selectedPart.code = updated.code;
+          state.selectedPart.key = updated.key;
+          state.selectedPart.partKey = updated.partKey;
           if (state.viewMode === "part") renderPart();
         } else {
           state.selectedPart = null;
