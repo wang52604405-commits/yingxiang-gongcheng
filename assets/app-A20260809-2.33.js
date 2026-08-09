@@ -20,6 +20,8 @@ const $ = (selector) => document.querySelector(selector);
       treeLevelFilter: "all",
       unitPage: 1,
       pageSize: 20,
+      photoPage: { construction: 1, supervision: 1 },
+      photoPageSize: 18,
       unitImages: null,
       activeUnitImageCategory: "",
       unitImagePickerKey: "",
@@ -1369,14 +1371,17 @@ const $ = (selector) => document.querySelector(selector);
       const passwordInput = $("#gatePassword");
       const username = usernameInput.value.trim();
       const password = passwordInput.value;
-      const remember = $("#gateRemember") ? $("#gateRemember").checked : true;
       const data = await apiJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, remember })
+        body: JSON.stringify({ username, password, remember: true })
       });
       state.auth.user = data.user || null;
       passwordInput.value = "";
+      try {
+        localStorage.setItem("album-login-account", username);
+        localStorage.setItem("album-login-password", password);
+      } catch (e) {}
       renderAuth();
       showNotice("已进入软件");
     }
@@ -2160,7 +2165,7 @@ const $ = (selector) => document.querySelector(selector);
       part.loading = true;
       part.loadError = "";
       renderPart();
-      const data = await apiJson(`/api/units?part_key=${encodeURIComponent(part.partKey)}&page=${Math.max(1, Number(page || 1))}&page_size=${state.pageSize}`);
+      const data = await apiJson(`/api/units?part_key=${encodeURIComponent(part.partKey)}&page=1&page_size=10000`);
       if (state.selectedPart !== part) return;
       part.projects = data.projects || [];
       part.currentPage = Number(data.page || 1);
@@ -2209,12 +2214,9 @@ const $ = (selector) => document.querySelector(selector);
             <span>${escapeHtml(project.latest_upload || "-")}</span>
           </span>
         </button>
-      `).join("") + `${Number(part.totalPages || 1) > 1 ? `<div class="unit-pagination"><button class="secondary" type="button" data-part-page="${Math.max(1, Number(part.currentPage || 1) - 1)}" ${Number(part.currentPage || 1) <= 1 ? "disabled" : ""}>上一页</button><span>第 ${Number(part.currentPage || 1)} / ${Number(part.totalPages || 1)} 页</span><button class="secondary" type="button" data-part-page="${Math.min(Number(part.totalPages || 1), Number(part.currentPage || 1) + 1)}" ${Number(part.currentPage || 1) >= Number(part.totalPages || 1) ? "disabled" : ""}>下一页</button></div>` : ""}` : `<div class="empty">该分部工程下暂无单元工程。</div>`;
+      `).join("") : `<div class="empty">该分部工程下暂无单元工程。</div>`;
       unitRows.querySelectorAll("[data-unit-code]").forEach((button) => {
         button.addEventListener("click", () => loadProject(button.dataset.unitCode, "detail"));
-      });
-      unitRows.querySelectorAll("[data-part-page]").forEach((button) => {
-        button.addEventListener("click", () => loadPartPage(part, Number(button.dataset.partPage || 1)));
       });
     }
 
@@ -2225,6 +2227,7 @@ const $ = (selector) => document.querySelector(selector);
       setRouteUnitCode(state.selectedCode);
       if (!findOtherNode(state.selectedCode)) state.selectedOtherCode = "";
       state.photos = data.photos || [];
+      state.photoPage = { construction: 1, supervision: 1 };
       state.selectedPrintPhotos = {};
       renderUnit();
       setView("unit");
@@ -2250,6 +2253,10 @@ const $ = (selector) => document.querySelector(selector);
 
     // 列表缩略图占位：缩略图未生成时显示灰色占位，绝不回退加载原图
     const THUMB_PLACEHOLDER = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="100%" height="100%" fill="#eef2f1"/><text x="50%" y="50%" fill="#9aa5a1" font-size="16" text-anchor="middle" dominant-baseline="middle">图片加载中</text></svg>');
+
+    // 照片列表分批渲染：每批 120 张，滚动到底自动加载下一批，避免一次性渲染上千节点
+    const PHOTOS_BATCH = 120;
+    let photoLazyObserver = null;
 
     function photoCardHTML(photo, key, sectionKey, isSelectMode) {
       const orientation = normalizePhotoOrientation(photo.orientation);
@@ -2277,6 +2284,46 @@ const $ = (selector) => document.querySelector(selector);
     function photosForSection(key, groupName) {
       const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
       return categoryPhotos(key).filter(processMatches);
+    }
+
+    function loadMorePhotos(sectionEl) {
+      const listEl = sectionEl.querySelector(".photos");
+      if (!listEl) return;
+      const key = sectionEl.dataset.category;
+      const groupName = sectionEl.dataset.processName || "";
+      const sectionKey = sectionEl.dataset.photoSection;
+      const photos = photosForSection(key, groupName);
+      const rendered = parseInt(listEl.dataset.rendered || "0", 10);
+      if (rendered >= photos.length) return;
+      const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
+      const next = photos.slice(rendered, rendered + PHOTOS_BATCH);
+      listEl.insertAdjacentHTML("beforeend", next.map((photo) => photoCardHTML(photo, key, sectionKey, isSelectMode)).join(""));
+      listEl.dataset.rendered = String(rendered + next.length);
+    }
+
+    function setupLazyPhotoLoad() {
+      if (photoLazyObserver) {
+        photoLazyObserver.disconnect();
+        photoLazyObserver = null;
+      }
+      document.querySelectorAll("#photoSectionsHost .photo-section").forEach((sectionEl) => {
+        const listEl = sectionEl.querySelector(".photos");
+        const key = sectionEl.dataset.category;
+        const groupName = sectionEl.dataset.processName || "";
+        const total = photosForSection(key, groupName).length;
+        const rendered = parseInt(listEl?.dataset.rendered || "0", 10);
+        if (rendered < total) {
+          photoLazyObserver = photoLazyObserver || new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                const sec = entry.target.closest(".photo-section");
+                if (sec) loadMorePhotos(sec);
+              }
+            });
+          }, { rootMargin: "500px 0px" });
+          photoLazyObserver.observe(listEl);
+        }
+      });
     }
 
     function renderPhotos() {
@@ -2321,8 +2368,8 @@ const $ = (selector) => document.querySelector(selector);
               <div class="actions"><button type="submit">上传照片</button></div>
               <div id="${sectionId}UploadResult" class="inline-result" style="display:none;"></div>
             </form>
-            <div id="${sectionId}PhotosList" class="photos" data-rendered="${photos.length}">
-              ${photos.length ? photos.map((photo) => photoCardHTML(photo, key, sectionKey, isSelectMode)).join("") : `<div class="empty">暂无照片。</div>`}
+            <div id="${sectionId}PhotosList" class="photos" data-rendered="${Math.min(photos.length, PHOTOS_BATCH)}">
+              ${photos.length ? photos.slice(0, PHOTOS_BATCH).map((photo) => photoCardHTML(photo, key, sectionKey, isSelectMode)).join("") : `<div class="empty">暂无照片。</div>`}
             </div>
           </section>
         `;
@@ -2737,6 +2784,7 @@ const $ = (selector) => document.querySelector(selector);
 
       const data = await apiJson(`/api/upload/${encodeURIComponent(state.selectedCode)}`, { method: "POST", body: form });
       state.photos = data.photos || [];
+      state.photoPage[key] = Math.max(1, Math.ceil(categoryPhotos(key).length / state.photoPageSize));
       if (sourceForm) sourceForm.reset();
       else $(`#${key}UploadForm`)?.reset();
       renderPhotos();
@@ -3196,7 +3244,16 @@ const $ = (selector) => document.querySelector(selector);
       const data = await apiJson("/api/bootstrap");
       state.auth.user = data.user || null;
       renderAuth();
-      if (!state.auth.user) return;
+      if (!state.auth.user) {
+        // 未登录：回填上次记住的账号和密码，方便再次登录
+        try {
+          const savedAccount = localStorage.getItem("album-login-account");
+          const savedPassword = localStorage.getItem("album-login-password");
+          if (savedAccount && $("#gateUsername")) $("#gateUsername").value = savedAccount;
+          if (savedPassword && $("#gatePassword")) $("#gatePassword").value = savedPassword;
+        } catch (e) {}
+        return;
+      }
       state.revision = Number(data.revision || 0);
       state.projectInfo = data.project_info || {};
       state.engineeringProjects = data.engineering_projects || [];
@@ -3805,6 +3862,16 @@ const $ = (selector) => document.querySelector(selector);
     });
     initPhotoForms();
 
+    photoCategories.forEach(({ key }) => {
+      $(`#${key}PrevPhotoPage`).addEventListener("click", () => {
+        state.photoPage[key] -= 1;
+        renderPhotos();
+      });
+      $(`#${key}NextPhotoPage`).addEventListener("click", () => {
+        state.photoPage[key] += 1;
+        renderPhotos();
+      });
+    });
     $("#importForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       try {

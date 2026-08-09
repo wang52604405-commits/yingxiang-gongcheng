@@ -18,7 +18,6 @@
       <div class="auth-form">
         <label>账号<input id="gateUsername" type="text" placeholder="手机号 / QQ / 邮箱" autocomplete="username"></label>
         <label>密码<input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"></label>
-        <label class="settings-checkbox"><input id="gateRemember" type="checkbox" checked> 记住登录（30 天内免重复登录）</label>
         <div class="auth-actions">
           <button type="button" id="gateLoginBtn">登录</button>
           <button class="secondary" type="button" id="gateRegisterBtn">注册</button>
@@ -281,7 +280,7 @@
           <div class="page-head">
             <div>
               <h2 id="partTitle">分部工程</h2>
-              <p id="partSub">单元工程列表，每页 20 条。</p>
+              <p id="partSub">单元工程列表，滚轮滑动浏览。</p>
             </div>
             <button class="secondary" type="button" id="backOverviewBtn">返回施工影像一览</button>
           </div>
@@ -326,6 +325,11 @@
                     <div class="actions"><button type="submit">上传照片</button></div>
                   </form>
                   <div id="constructionPhotosList" class="photos"></div>
+                  <div class="photo-pager">
+                    <button class="secondary" type="button" id="constructionPrevPhotoPage">上一页</button>
+                    <span id="constructionPhotoPageInfo" class="code">1 / 1</span>
+                    <button class="secondary" type="button" id="constructionNextPhotoPage">下一页</button>
+                  </div>
                 </section>
 
                 <section class="photo-section">
@@ -345,6 +349,11 @@
                     <div class="actions"><button type="submit">上传照片</button></div>
                   </form>
                   <div id="supervisionPhotosList" class="photos"></div>
+                  <div class="photo-pager">
+                    <button class="secondary" type="button" id="supervisionPrevPhotoPage">上一页</button>
+                    <span id="supervisionPhotoPageInfo" class="code">1 / 1</span>
+                    <button class="secondary" type="button" id="supervisionNextPhotoPage">下一页</button>
+                  </div>
                 </section>
               </section>
             </div>

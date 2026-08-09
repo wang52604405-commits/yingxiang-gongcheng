@@ -1049,12 +1049,6 @@
       grid-template-rows: auto minmax(0, 1fr);
       overflow: hidden;
     }
-    #unitView {
-      height: calc(100vh - 76px);
-      min-height: 0;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-    }
     .part-scroll-panel {
       min-height: 0;
       display: grid;
@@ -1153,15 +1147,18 @@
     .photo-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .photo-section {
       min-height: 0;
+      max-height: min(72vh, 780px);
+      height: min(72vh, 780px);
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
       padding: 8px;
       display: grid;
-      grid-template-rows: auto auto auto;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
       align-content: start;
       gap: 7px;
       box-shadow: 0 4px 12px rgba(20, 35, 55, .04);
+      overflow: hidden;
     }
     .photo-section:nth-child(1) { border-left: 4px solid #16a34a; }
     .photo-section:nth-child(2) { border-left: 4px solid #0891b2; }
@@ -1320,7 +1317,15 @@
       grid-auto-rows: max-content;
       align-content: start;
       gap: 8px;
-      height: auto;
+      height: 100%;
+      min-height: 0;
+      max-height: none;
+      overflow-y: scroll;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      padding-right: 4px;
+      -webkit-overflow-scrolling: touch;
     }
     .photo {
       position: relative;
@@ -1535,6 +1540,13 @@
     }
     .photo-meta { padding: 2px 6px 3px; display: grid; gap: 1px; font-size: 11px; line-height: 1.2; color: var(--muted); }
     .photo-meta strong { color: var(--text); font-size: 11px; }
+    .photo-pager {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      padding-top: 2px;
+    }
     .empty {
       padding: 18px;
       text-align: center;
@@ -6678,14 +6690,6 @@
     }
     .side-load-skeleton span { min-height: 28px; }
     @keyframes loading-shimmer { to { background-position: -200% 0; } }
-    .unit-pagination {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      padding: 10px;
-    }
     .blueprint-unit-head { width: 100%; border: 0; text-align: left; }
     .storage-optimization-status {
       display: grid;

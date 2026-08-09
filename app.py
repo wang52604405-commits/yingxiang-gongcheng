@@ -980,6 +980,7 @@ class AlbumManager:
         self._projects_cache = {}
         self._hierarchy_cache = {}
         self._photos_cache = {}
+        self._part_units_cache = {}
         self._revision = 1
         self._write_locks = {}
         self._write_locks_guard = threading.Lock()
@@ -997,6 +998,7 @@ class AlbumManager:
         self._projects_cache = {}
         self._hierarchy_cache = {}
         self._photos_cache = {}
+        self._part_units_cache = {}
         self._revision += 1
 
     def revision(self):
@@ -1116,6 +1118,10 @@ class AlbumManager:
         return snapshot
 
     def projects_for_part(self, part_key, query=""):
+        cache_key = (str(part_key or ""), str(query or ""), self._revision)
+        cached = self._part_units_cache.get(cache_key)
+        if cached is not None:
+            return cached
         query_text = str(query or "").strip().lower()
         matches = []
         for project in self.list_projects():
@@ -1126,6 +1132,7 @@ class AlbumManager:
             if query_text and query_text not in json.dumps(slim, ensure_ascii=False).lower():
                 continue
             matches.append(slim)
+        self._part_units_cache[cache_key] = matches
         return matches
 
     def _safe_code(self, code):
@@ -4842,7 +4849,7 @@ def api_units():
         return json_error("缺少分部标识 part_key", 400)
     try:
         page = max(1, int(request.args.get("page") or 1))
-        page_size = max(1, min(100, int(request.args.get("page_size") or 20)))
+        page_size = max(1, min(10000, int(request.args.get("page_size") or 20)))
     except (TypeError, ValueError):
         return json_error("分页参数无效", 400)
     projects = manager.projects_for_part(part_key, request.args.get("q", ""))

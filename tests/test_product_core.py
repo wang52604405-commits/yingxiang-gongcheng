@@ -268,7 +268,6 @@ class DesktopSecurityContractTest(unittest.TestCase):
             self.assertEqual(session.get("username"), "长期登录测试员")
 
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn("记住登录（30 天内免重复登录）", html)
         self.assertIn("复制施工照片", html)
         self.assertIn("4寸（10.2×7.6cm）", html)
         self.assertIn("审核批量导入结果", html)
