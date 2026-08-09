@@ -2026,11 +2026,13 @@ const $ = (selector) => document.querySelector(selector);
                         <strong>${escapeHtml(unit.name)}</strong>
                         <span>${escapeHtml(unit.code || "未填写编码")}</span>
                       </div>
-                      <div class="blueprint-metrics">
-                        ${metricBadge(projectCount(unit), "单元")}
-                        ${photoMetricBadges(unit)}
-                      </div>
+                      <div class="blueprint-unit-actions">
+                        <div class="blueprint-metrics">
+                          ${metricBadge(projectCount(unit), "单元")}
+                          ${photoMetricBadges(unit)}
+                        </div>
                         <span class="picker-caret">${state.overviewExpandedUnits.has(unit.key) ? "▾" : "▸"}</span>
+                      </div>
                     </button>
                     ${state.overviewExpandedUnits.has(unit.key) ? `<div class="blueprint-parts">
                       ${unit.children.map((part) => `

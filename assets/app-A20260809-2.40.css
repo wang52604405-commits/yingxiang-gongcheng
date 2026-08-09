@@ -1030,6 +1030,17 @@
       gap: 10px;
       align-items: flex-start;
     }
+    .blueprint-unit-head > div:first-child {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .blueprint-unit-head > .blueprint-unit-actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
     .blueprint-contract-head {
       padding: 10px 12px;
       color: #17344f;
@@ -1269,6 +1280,14 @@
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: start;
       gap: 6px;
+    }
+    .unit-card-main .unit-card-photo-counts {
+      justify-self: end;
+    }
+    .unit-card-main > strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .unit-card-photo-count {
       color: #0c6b6e;
