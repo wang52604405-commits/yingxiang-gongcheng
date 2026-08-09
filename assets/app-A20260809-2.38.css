@@ -1249,6 +1249,7 @@
       border-radius: 8px;
       text-align: left;
       white-space: normal;
+      overflow: hidden;
       box-shadow: 0 4px 12px rgba(20, 35, 55, .04);
     }
     .unit-card:hover {
@@ -1305,6 +1306,8 @@
       justify-content: flex-end;
       gap: 8px;
       min-width: 0;
+      flex-shrink: 0;
+      align-self: end;
       color: var(--muted);
       font-size: 10px;
     }

@@ -3248,18 +3248,24 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
-    // 首屏冷启动加载动画：进度条跟随真实加载阶段推进，加载完 100% 工程页面全部显示
+    // 首屏冷启动加载动画：进度条跟随真实加载阶段推进，页面数据全部显示才到 100% 消失
     function bootProgress(percent) {
       const fill = $("#bootLoaderFill");
       const num = $("#bootLoaderPercent");
-      if (fill) fill.style.width = `${Math.min(100, Math.max(0, Number(percent) || 0))}%`;
-      if (num) num.textContent = String(Math.round(Math.min(100, Math.max(0, Number(percent) || 0))));
+      if (!fill) return;
+      const target = Math.min(100, Math.max(0, Number(percent) || 0));
+      // 直接到真实阶段（CSS transition 负责平滑），百分比即时更新，进度永远不落后于真实加载
+      fill.style.width = `${target}%`;
+      if (num) num.textContent = String(Math.round(target));
     }
     function bootDone() {
-      const loader = $("#bootLoader");
-      if (!loader) return;
-      loader.classList.add("is-done");
-      setTimeout(() => loader.remove(), 500);
+      bootProgress(100);
+      setTimeout(() => {
+        const loader = $("#bootLoader");
+        if (!loader) return;
+        loader.classList.add("is-done");
+        setTimeout(() => loader.remove(), 500);
+      }, 200);
     }
 
     async function loadBootstrap(options = {}) {
@@ -3292,13 +3298,14 @@ const $ = (selector) => document.querySelector(selector);
       state.printPageSize = Number(state.engineeringSettings.print_page_size || 4);
       state.treeRoot = buildTreeFromHierarchy(state.hierarchy);
       expandAdaptiveTree();
+      // 渲染工程树是同步阻塞（单元多时耗时），先推到 85%，阻塞期间进度条动画持续
+      bootProgress(85);
       renderEngineeringProjectSelect();
       renderTree();
       renderProjectInfo();
       renderOverview();
-      bootProgress(70);
       if (skipOtherImages) {
-        // 主界面已渲染：进度推到 100% 并显示工程页面；其它影像后台静默补充
+        // 主界面已渲染：进度到 100% 并显示工程页面；其它影像后台静默补充
         bootProgress(100);
         bootDone();
         const idleLoadOtherImages = () => apiJson("/api/other-images/tree").then((otherImagesData) => {
