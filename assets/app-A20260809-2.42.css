@@ -626,6 +626,7 @@
     .auth-status { font-size: 13px; white-space: nowrap; color: rgba(255,255,255,.92); }
 
     .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; height: calc(100vh - 56px); overflow: hidden; }
+    .layout.is-other { grid-template-columns: minmax(0, 1fr); }
     .sidebar {
       background: var(--side);
       color: var(--text);

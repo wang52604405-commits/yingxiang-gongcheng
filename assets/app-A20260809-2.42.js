@@ -1844,6 +1844,11 @@ const $ = (selector) => document.querySelector(selector);
       $("#sideOtherBtn").classList.toggle("active", isOther);
       $("#topConstructionBtn")?.classList.toggle("active", !isOther);
       $("#topOtherBtn")?.classList.toggle("active", isOther);
+      // 其它影像不需要左侧树状结构，整体隐藏让主界面占满
+      const treeWrap = $(".tree-wrap");
+      if (treeWrap) treeWrap.style.display = isOther ? "none" : "";
+      const layout = $(".layout");
+      if (layout) layout.classList.toggle("is-other", isOther);
       $("#constructionSidePanel").style.display = isOther ? "none" : "";
       $("#otherSidePanel").style.display = isOther ? "" : "none";
     }
@@ -1993,8 +1998,13 @@ const $ = (selector) => document.querySelector(selector);
       $("#otherOverviewPhotos").textContent = state.otherImages.photo_count || 0;
       $("#constructionOverviewBtn").classList.toggle("active", state.overviewScope === "construction");
       $("#otherOverviewBtn").classList.toggle("active", state.overviewScope === "other");
-      $("#overviewTitle").textContent = "工程影像总览";
-      $("#overviewSub").textContent = "上方为施工影像项目结构，下方为其它影像分类结构。";
+      const isOther = state.overviewScope === "other";
+      $("#overviewTitle").textContent = isOther ? "工程其它影像" : "工程影像总览";
+      $("#overviewSub").textContent = isOther ? "其它影像分类，点击进入详情。" : "施工影像项目结构，点击进入详情。";
+      const conPanel = $("#constructionModuleGrid")?.closest(".panel");
+      const otherPanel = $("#otherModuleGrid")?.closest(".panel");
+      if (conPanel) conPanel.style.display = isOther ? "none" : "";
+      if (otherPanel) otherPanel.style.display = isOther ? "" : "none";
       renderConstructionOverview();
       renderOtherOverview();
     }
@@ -2341,11 +2351,16 @@ const $ = (selector) => document.querySelector(selector);
     function renderPhotos() {
       const host = $("#photoSectionsHost");
       if (!host) return;
+      // 其它影像单元只有施工影像，不显示监理栏
+      const isOtherUnit = Boolean(findOtherNode(state.selectedCode));
+      const categories = isOtherUnit
+        ? photoCategories.filter((c) => c.key !== "supervision")
+        : photoCategories;
       const groups = isProcessProject()
         ? selectedProcesses().map((name) => ({ name, code: processCodeForName(name) }))
         : [{ name: "", code: "" }];
       host.className = `photo-side photo-sections ${groups.length > 1 ? "is-process-layout" : ""}`;
-      host.innerHTML = groups.map((group, groupIndex) => photoCategories.map(({ key }) => {
+      host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
         const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
