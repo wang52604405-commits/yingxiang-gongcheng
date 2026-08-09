@@ -4,5 +4,6 @@
 
 flask
 openpyxl
+xlrd>=2.0.1
 Pillow
 rapidocr-onnxruntime

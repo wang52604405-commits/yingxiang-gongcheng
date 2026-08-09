@@ -123,7 +123,8 @@ def _normalized_product_config(value=None) -> dict:
     pricing["price_label"] = str(pricing.get("price_label") or "内测会员价")[:40]
     free = product["free"]
     free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
-    free["watermark_enabled"] = bool(free.get("watermark_enabled", True))
+    # 免费版 300 张为完整可用额度，不叠加产品水印。
+    free["watermark_enabled"] = False
     free["upload_expiry_enabled"] = bool(free.get("upload_expiry_enabled", False))
     invite = product["invite"]
     invite["enabled"] = bool(invite.get("enabled", True))

@@ -4,8 +4,8 @@
 [Setup]
 AppId={{8E7C6C39-8E2F-4B4E-9B1A-9F8D3C4E5A6B}
 AppName=工程影像管理平台
-AppVersion=A20260809-2.28
-AppVerName=工程影像管理平台 A20260809-2.28
+AppVersion=A20260809-2.29
+AppVerName=工程影像管理平台 A20260809-2.29
 AppPublisher=工程影像管理平台
 DefaultDirName={localappdata}\工程影像管理平台
 DefaultGroupName=工程影像管理平台
@@ -44,7 +44,7 @@ Name: "{autodesktop}\工程影像管理平台"; Filename: "{app}\工程影像管
 [Registry]
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "DataDir"; ValueData: "{code:GetDataDir}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260809-2.28"
+Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260809-2.29"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "工程影像管理平台"; ValueData: """{app}\工程影像管理平台.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
@@ -60,11 +60,15 @@ Type: dirifempty; Name: "{app}"
 
 [Code]
 function GetDataDir(Param: String): String;
+var
+  ExistingDataDir: String;
 begin
-  if DirExists('D:\') then
-    Result := 'D:\工程影像资料'
+  { 升级安装保留原数据目录；首次安装使用当前 Windows 用户独立目录。 }
+  if RegQueryStringValue(HKCU, 'Software\工程影像管理平台', 'DataDir', ExistingDataDir) and
+     (ExistingDataDir <> '') then
+    Result := ExistingDataDir
   else
-    Result := 'C:\工程影像资料';
+    Result := ExpandConstant('{localappdata}\工程影像管理平台\data');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

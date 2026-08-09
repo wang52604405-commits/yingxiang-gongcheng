@@ -43,6 +43,7 @@ class ServerProductContractTest(unittest.TestCase):
         product = self.client.get("/api/product-config").get_json()["product"]
         self.assertEqual(product["free"]["photo_limit"], 300)
         self.assertFalse(product["free"]["upload_expiry_enabled"])
+        self.assertFalse(product["free"]["watermark_enabled"])
         self.assertEqual(product["pricing"]["price_label"], "内测会员价")
         self.assertEqual(product["logging"]["retention_days"], 90)
         self.assertEqual(product["logging"]["max_records"], 5000)
@@ -183,6 +184,18 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertLess(len(base64.b64encode(raw_thumb)), 600000)
         with Image.open(io.BytesIO(raw_thumb)) as image:
             self.assertEqual(max(image.size), 720)
+
+    def test_ocr_prefers_construction_content_and_free_export_has_no_watermark(self):
+        lines = [
+            "洺河龙泉缓洪工程",
+            "施工区域：请输入内容…",
+            "施 工 内 容：左岸连接堤",
+            "拍摄时间：2026.06.05 15:34",
+        ]
+        fields = self.desktop.watermark_ocr.extract_fields(lines)
+        self.assertEqual(fields["title"], "左岸连接堤")
+        self.assertEqual(fields["photo_date"], "2026-06-05")
+        self.assertEqual(self.desktop.watermark_text_for_user(), "")
 
 
 if __name__ == "__main__":

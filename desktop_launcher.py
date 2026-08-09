@@ -21,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260809-2.28"
+APP_VERSION = "A20260809-2.29"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -31,7 +31,7 @@ ICON_FILE_NAME = "app_icon.ico"
 APP_REG_KEY = r"Software\工程影像管理平台"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\工程影像管理平台"
-DEFAULT_DATA_DIR = r"D:\工程影像资料"
+DEFAULT_DATA_DIR = str(Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / APP_TITLE / "data")
 COPYRIGHT_NOTICE = "版权声明：本软件仅限授权单位和授权机器使用，禁止复制传播、反编译、破解授权、绕过限制或二次销售。"
 
 
@@ -221,7 +221,7 @@ class DesktopLauncher:
         actions.pack(fill="x", pady=(4, 0))
         self.make_button(actions, "打开软件", lambda: self.open_app(), primary=True).pack(side="left", fill="x", expand=True)
         self.make_button(actions, "本机配置", lambda: self.open_app(self.setup_url)).pack(side="left", fill="x", expand=True, padx=(10, 0))
-        self.make_button(actions, "账号激活", lambda: self.open_app(f"{self.local_url}/license")).pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self.make_button(actions, "账号与会员", lambda: self.open_app(f"{self.local_url}/license")).pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         bottom = tk.Frame(panel, bg="#161b22")
         bottom.pack(fill="x", pady=(14, 0))

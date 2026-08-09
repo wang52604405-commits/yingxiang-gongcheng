@@ -423,7 +423,7 @@
           method: "POST",
           body: JSON.stringify({ product: {
             pricing: { monthly_price: Number($("#cfgMonthly").value), lifetime_price: Number($("#cfgLifetime").value), price_label: $("#cfgPriceLabel").value.trim() },
-            free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: true },
+            free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: false },
             invite: { milestone: Number($("#cfgInviteMilestone").value), reward_days: Number($("#cfgInviteDays").value), enabled: true },
             cloud_preview: { thumb_max_side: Number($("#cfgThumbSide").value), thumb_quality: Number($("#cfgThumbQuality").value), max_thumbs_per_project: Number($("#cfgThumbCount").value), beta_free_access: $("#cfgBetaCloud").checked },
             logging: { enabled: $("#cfgLogging").checked }

@@ -63,10 +63,15 @@ def _clean_line(text):
 def _pick_title(lines):
     """从水印文本行里保守挑一句当题名：备注 > 工程特征行 > 地点行。"""
     for line in lines:
-        match = re.search(r"备注\s*[:：]\s*(.+)", line)
+        compact = re.sub(r"\s+", "", line)
+        match = re.search(r"(?:施工内容|施工部位|备注)[:：]?(.+)", compact)
         if match and match.group(1).strip():
-            return _clean_line(match.group(1))
+            candidate = _clean_line(match.group(1))
+            if candidate and "请输入" not in candidate:
+                return candidate[:60]
     for line in lines:
+        if "请输入" in line:
+            continue
         if _ENGINEERING_MARKERS.search(line) and not _DATE_RE.search(line):
             return _clean_line(line)[:60]
     for line in lines:

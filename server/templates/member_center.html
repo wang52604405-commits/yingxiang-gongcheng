@@ -141,7 +141,7 @@
         <div class="desc">适合体验与小额使用</div>
         <ul>
           <li>最多 <span id="freeLimitText">300</span> 张照片</li>
-          <li>打印 / 导出带水印</li>
+          <li>正常打印 / 导出，无产品水印</li>
           <li>局域网内完整使用</li>
           <li class="no">无限上传</li>
           <li class="no">无水印导出</li>
@@ -468,7 +468,7 @@
     // 开通会员 / 免费：扫码付款 + 联系作者开通
     $("#monthlyBtn").addEventListener("click", () => notice(`微信扫码付款 ${productConfig.pricing?.monthly_price || 15} 元（备注账号），然后加作者微信发送：付款截图 + 账号 + 机器ID，确认后开通月度会员。` + (username ? " 当前账号：" + username : "")));
     $("#lifetimeBtn").addEventListener("click", () => notice(`微信扫码付款 ${productConfig.pricing?.lifetime_price || 169} 元（备注账号），然后加作者微信发送：付款截图 + 账号 + 机器ID，确认后开通终身会员。` + (username ? " 当前账号：" + username : "")));
-    $("#freeBtn").addEventListener("click", () => notice(`免费版无需开通，直接注册使用（${productConfig.free?.photo_limit || 300} 张照片，打印/导出带水印）。`));
+    $("#freeBtn").addEventListener("click", () => notice(`免费版无需开通，注册后永久免费使用（${productConfig.free?.photo_limit || 300} 张照片，无产品水印）。`));
 
     // 云预览入口
     $("#previewBtn").addEventListener("click", async () => {

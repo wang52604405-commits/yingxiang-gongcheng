@@ -28,12 +28,18 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime with a clear message
     load_workbook = None
 
+try:
+    import xlrd
+except ImportError:  # pragma: no cover - handled at runtime with a clear message
+    xlrd = None
+
 
 BASE_DIR = Path(__file__).resolve().parent
 APP_DISPLAY_NAME = "工程影像管理平台"
 SETUP_CONFIG_PATH = BASE_DIR / "album_config.json"
 PORTABLE_DATA_DIR = BASE_DIR / "data"
-DATA_DIR = Path(os.environ.get("ALBUM_DATA_DIR", r"D:\工程影像资料")).expanduser()
+DEFAULT_USER_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "工程影像管理平台" / "data"
+DATA_DIR = Path(os.environ.get("ALBUM_DATA_DIR", str(DEFAULT_USER_DATA_DIR))).expanduser()
 ALBUMS_DIR = DATA_DIR / "albums"
 USERS_PATH = DATA_DIR / "users.json"
 OTHER_IMAGES_PATH = DATA_DIR / "other_images.json"
@@ -144,7 +150,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_height_cm": 0,
     "print_caption_font_size": 7.2,
     "print_caption_position": "left",
-    "watermark_ocr_enabled": False,
+    "watermark_ocr_enabled": True,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
         {"label": "题名", "source": "title", "value": ""},
@@ -157,7 +163,9 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "numbering_rules": DEFAULT_NUMBERING_RULES,
 }
 EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+LEGACY_EXCEL_EXTENSIONS = {".xls"}
 PROJECT_IMPORT_EXTENSIONS = EXCEL_EXTENSIONS | {".csv"}
+PROJECT_IMPORT_EXTENSIONS |= LEGACY_EXCEL_EXTENSIONS
 PROJECT_TEMPLATE_HEADERS = [
     "合同工程名称",
     "单位工程名称",
@@ -1640,6 +1648,12 @@ class AlbumManager:
             rows = list(ws.iter_rows(values_only=True))
             if not rows:
                 continue
+            converted = self._legacy_division_records(rows)
+            if converted:
+                result = self.import_projects_from_records(converted, f"{ws.title}（自动识别）")
+                created += result["created"]
+                skipped += result["skipped"]
+                continue
             header_index, headers = self._find_header(rows)
             if header_index is None:
                 continue
@@ -1705,6 +1719,109 @@ class AlbumManager:
             "total": created,
             "source": str(path),
         }
+
+    def import_projects_from_xls(self, source):
+        """读取客户常用的旧版 Excel 文件，并自动识别项目划分层级。"""
+        if xlrd is None:
+            raise RuntimeError("缺少旧版 Excel 读取组件，请重新安装最新版软件")
+        path = Path(source)
+        if not path.exists():
+            raise FileNotFoundError(f"找不到项目划分表：{path}")
+        book = xlrd.open_workbook(str(path), on_demand=True)
+        created = 0
+        skipped = 0
+        recognized = False
+        try:
+            for sheet in book.sheets():
+                rows = [sheet.row_values(index) for index in range(sheet.nrows)]
+                converted = self._legacy_division_records(rows)
+                if not converted:
+                    continue
+                recognized = True
+                result = self.import_projects_from_records(converted, f"{sheet.name}（自动识别）")
+                created += result["created"]
+                skipped += result["skipped"]
+        finally:
+            book.release_resources()
+        if not recognized:
+            raise ValueError("未识别到项目划分明细，请确认文件中包含单位工程、分部工程、单元工程名称和编码")
+        return {"created": created, "skipped": skipped, "updated": 0, "total": created, "source": str(path)}
+
+    def _legacy_division_records(self, rows):
+        """把常见的合并单元格项目划分表自动转换为软件的八列结构。"""
+        if len(rows) < 3:
+            return []
+        header_index = None
+        for index, raw_row in enumerate(rows[:20]):
+            values = [self._cell_text(value) for value in raw_row]
+            joined = " ".join(values)
+            if "单位工程" in joined and "分部工程" in joined and "单元工程" in joined:
+                header_index = index
+                break
+        if header_index is None:
+            return []
+        headers = [self._cell_text(value).replace(" ", "") for value in rows[header_index]]
+        unit_col = next((i for i, value in enumerate(headers) if "单位工程" in value), None)
+        part_col = next((i for i, value in enumerate(headers) if "分部工程" in value), None)
+        item_name_col = next((i for i, value in enumerate(headers) if "单元工程名称" in value), None)
+        item_code_col = next((i for i, value in enumerate(headers) if "单元工程编号" in value or "单元工程编码" in value), None)
+        if None in {unit_col, part_col, item_name_col, item_code_col}:
+            return []
+
+        title = ""
+        for raw_row in rows[:header_index]:
+            for value in raw_row:
+                text = self._cell_text(value)
+                if "项目划分" in text:
+                    title = re.sub(r"[\r\n]*项目划分及编码一览表.*$", "", text).strip()
+                    break
+            if title:
+                break
+
+        carry_unit = ""
+        carry_part = ""
+        records = []
+        code_re = re.compile(r"[A-Za-z]+\d+(?:-\d+)+")
+
+        def split_name_code(value):
+            text = self._cell_text(value)
+            match = code_re.search(text)
+            if not match:
+                return text, ""
+            name = (text[:match.start()] + text[match.end():]).strip(" \r\n-、，")
+            return name, match.group(0)
+
+        for raw_row in rows[header_index + 1:]:
+            values = [self._cell_text(value) for value in raw_row]
+            if len(values) <= max(unit_col, part_col, item_name_col, item_code_col):
+                continue
+            if values[unit_col]:
+                carry_unit = values[unit_col]
+            if values[part_col]:
+                carry_part = values[part_col]
+            item_name = values[item_name_col]
+            item_code = values[item_code_col]
+            if not item_name or not item_code or not code_re.fullmatch(item_code):
+                continue
+            unit_name, unit_code = split_name_code(carry_unit)
+            part_name, part_code = split_name_code(carry_part)
+            parts = item_code.split("-")
+            unit_code = unit_code or "-".join(parts[:2])
+            part_code = part_code or "-".join(parts[:-1])
+            markers = "".join(re.findall(r"^[●★☆▲△◆◇]+", item_name))
+            clean_item_name = re.sub(r"^[●★☆▲△◆◇]+", "", item_name).strip()
+            keywords = " ".join(filter(None, ["重要隐蔽" if "●" in markers else "", "关键部位" if "★" in markers else ""]))
+            records.append({
+                "合同工程名称": title,
+                "单位工程名称": unit_name or unit_code,
+                "单位工程编码": unit_code,
+                "分部工程名称": part_name or part_code,
+                "分部工程编码": part_code,
+                "单元工程名称": clean_item_name,
+                "单元工程编码": item_code,
+                "关键词": keywords,
+            })
+        return records
 
     def import_projects_from_records(self, records, source_label="粘贴导入"):
         created = 0
@@ -2699,10 +2816,8 @@ WATERMARK_TEXT = "乐嵘聚合"  # 免费版打印/导出水印文字
 
 
 def watermark_text_for_user():
-    """免费版返回水印文字，会员返回空（无水印）。"""
-    free_cfg = cloud_client.product_config().get("free", {})
-    enabled = bool(free_cfg.get("watermark_enabled", True))
-    return "" if is_member_user() or not enabled else WATERMARK_TEXT
+    """所有版本正常打印和导出，不叠加产品水印。"""
+    return ""
 
 
 def add_watermark_to_image(file_path, text=WATERMARK_TEXT):
@@ -3487,6 +3602,8 @@ def api_cloud_login():
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "登录失败")}), 400
+    session["username"] = str(result.get("account") or payload.get("username") or "").strip()
+    result["user"] = {"username": session["username"]}
     return jsonify(result)
 
 
@@ -3517,6 +3634,16 @@ def api_cloud_register():
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "注册失败")}), 400
+    registration = dict(result)
+    login_result = cloud_client.login(
+        str(payload.get("username") or "").strip(),
+        str(payload.get("password") or ""),
+    )
+    if not login_result.get("ok"):
+        return jsonify({"ok": False, "error": "注册已完成，但自动登录失败，请返回登录页重新登录"}), 400
+    result = {**registration, **login_result}
+    session["username"] = str(login_result.get("account") or payload.get("username") or "").strip()
+    result["user"] = {"username": session["username"]}
     data = read_engineering_projects()
     active = current_engineering_project(data)
     active["delete_password_hash"] = generate_password_hash(delete_password)
@@ -3574,6 +3701,7 @@ def api_cloud_download_update():
 
 @app.route("/api/cloud/logout", methods=["POST"])
 def api_cloud_logout():
+    session.pop("username", None)
     return jsonify(cloud_client.logout())
 
 
@@ -3933,7 +4061,7 @@ def api_import_projects():
 
         ext = Path(uploaded.filename).suffix.lower()
         if ext not in PROJECT_IMPORT_EXTENSIONS:
-            return json_error("项目划分表只支持 .xlsx/.xlsm/.csv 文件")
+            return json_error("支持直接导入 .xls/.xlsx/.xlsm/.csv 项目划分文件")
 
         if ext in EXCEL_EXTENSIONS and load_workbook is None:
             return json_error("缺少 openpyxl，请先运行：pip install -r requirements.txt", 500)
@@ -3953,6 +4081,8 @@ def api_import_projects():
 
         if temp_ext == ".csv":
             result = manager.import_projects_from_text(read_text_with_fallback(temp_path))
+        elif temp_ext in LEGACY_EXCEL_EXTENSIONS:
+            result = manager.import_projects_from_xls(temp_path)
         else:
             result = manager.import_projects_from_xlsx(temp_path)
         return jsonify({

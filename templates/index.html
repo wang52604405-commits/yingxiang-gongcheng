@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>邯郸缓洪影像资料平台</title>
+  <title>工程影像管理平台</title>
   <style>
     :root {
       --bg: #f4f6f8;
@@ -6236,10 +6236,8 @@
     .auth-screen,
     .app,
     .layout {
-      background-image: url("/assets/wallpaper.jpg") !important;
+      background-image: linear-gradient(135deg, rgba(223, 232, 240, .96), rgba(244, 247, 250, .98) 48%, rgba(219, 231, 226, .96)) !important;
       background-size: cover !important;
-      background-position: center center !important;
-      background-repeat: no-repeat !important;
       background-attachment: fixed !important;
     }
 
@@ -6558,17 +6556,17 @@
     <div class="auth-card">
       <div class="brand">
         <div class="brand-mark">影</div>
-        <h1>邯郸缓洪影像资料平台</h1>
+        <h1>工程影像管理平台</h1>
       </div>
-      <h2>输入姓名后进入施工影像一览</h2>
-      <p>照片会记录上传者姓名；删除照片仍需要安全密码。</p>
+      <h2>账号登录</h2>
+      <p>登录后进入工程工作台；首次使用请直接注册账号。</p>
       <div class="auth-form">
-        <label>姓名<input id="gateUsername" type="text" placeholder="请输入姓名" autocomplete="name"></label>
-        <label>口令<input id="gatePassword" type="password" placeholder="局域网访问口令（本机可留空）" autocomplete="current-password"></label>
+        <label>账号<input id="gateUsername" type="text" placeholder="手机号 / QQ / 邮箱" autocomplete="username"></label>
+        <label>密码<input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"></label>
         <div class="auth-actions">
-          <button type="button" id="gateLoginBtn">进入软件</button>
+          <button type="button" id="gateLoginBtn">登录</button>
+          <button class="secondary" type="button" id="gateRegisterBtn">注册</button>
         </div>
-        <button class="secondary auth-machine-btn" type="button" id="gateMachineIdBtn">查询机器ID</button>
       </div>
       <div id="gateNotice" class="notice"></div>
     </div>
@@ -6578,17 +6576,17 @@
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark">影</div>
-        <h1>邯郸缓洪影像资料平台</h1>
+        <h1>工程影像管理平台</h1>
       </div>
       <div class="top-batch-actions" aria-label="批量打印">
         <select id="engineeringProjectSelect" class="project-select" title="当前工程"></select>
         <div class="project-import-wrap">
-          <button class="top-quick-btn" type="button" id="projectImportMenuBtn">项目划分</button>
+          <button class="top-quick-btn" type="button" id="projectImportMenuBtn">一键导入项目划分</button>
           <div class="project-import-menu" id="projectImportMenu">
             <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载模板</button>
             <label class="file-tool">
               <span class="file-label" id="importFileLabel">选择文件</span>
-              <input id="importFile" type="file" accept=".xlsx,.xlsm,.csv">
+              <input id="importFile" type="file" accept=".xls,.xlsx,.xlsm,.csv">
             </label>
             <button type="submit" form="importForm">导入表格</button>
             <button class="danger-tool" type="button" id="clearProjectsBtn">删除划分</button>
@@ -6614,7 +6612,7 @@
           </div>
         </div>
         <div class="support-wrap">
-          <button type="button" id="supportBtn">免费使用</button>
+          <button type="button" id="supportBtn">账号与会员</button>
           <div id="supportPanel" class="support-panel" aria-hidden="true">
             <h3>免费使用与分享</h3>
             <div class="support-settings-form">
@@ -6636,7 +6634,7 @@
                       <strong id="pricingLabel">会员收费标准（内测会员价）：</strong><br>
                       ・ 月度会员 <strong><span id="monthlyPriceText">15</span> 元</strong>/月：无限上传、打印/导出无水印<br>
                       ・ 终身会员 <strong><span id="lifetimePriceText">169</span> 元</strong>：一次买断，永久使用<br>
-                      ・ 免费版：永久免费 <span id="freePhotoLimitText">300</span> 张照片，打印/导出带水印<br>
+                      ・ 免费版：永久免费 <span id="freePhotoLimitText">300</span> 张照片，正常打印/导出，无产品水印<br>
                       <span style="color:#9a6700">当前价格仅用于小范围内测，正式定价以后续公告为准。</span>
                     </div>
                     <div style="margin-top:8px;padding:10px;background:#eef6f0;border-radius:8px;">
@@ -8485,7 +8483,7 @@
       state.auth.user = data.user || null;
       renderAuth();
       if (!state.auth.user) {
-        showNotice(`请先输入姓名后再${actionText}。`, true);
+        showNotice(`请先登录账号再${actionText}。`, true);
         return false;
       }
       return true;
@@ -10330,7 +10328,7 @@
         subText = license.machine_id ? `机器ID：${license.machine_id}` : "授权已生效。";
       } else if (license.free_forever) {
         mainText = "免费版：永久免费";
-        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 300} 张，打印和导出带水印。`;
+        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 300} 张，可正常打印和导出，无产品水印。`;
       } else if (license.upload_locked) {
         mainText = "软件试用已到期";
         subText = trialExpiry ? `试用到期时间：${trialExpiry}，请联系管理员继续使用。` : "请联系管理员继续使用。";
@@ -10451,7 +10449,7 @@
     $("#setupPageBtn").addEventListener("click", () => window.open("/setup", "_blank"));
     $("#checkUpdateBtn").addEventListener("click", () => checkForUpdate(true).catch((error) => showNotice(error.message, true)));
     $("#machineIdBtn").addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
-    $("#gateMachineIdBtn").addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
+    $("#gateMachineIdBtn")?.addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#closeMachineIdBtn").addEventListener("click", closeMachineIdModal);
     $("#copyMachineIdBtn").addEventListener("click", () => copyMachineId().catch((error) => showNotice(error.message, true)));
     $("#openLicensePageBtn").addEventListener("click", () => window.open("/license", "_blank"));
@@ -10492,7 +10490,8 @@
     $("#otherImageModal").addEventListener("click", (event) => {
       if (event.target.id === "otherImageModal") closeOtherImageModal();
     });
-    $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/auth/login", "gate").catch((error) => showNotice(error.message, true)));
+    $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true)));
+    $("#gateRegisterBtn").addEventListener("click", () => { window.location.href = "/license?register=1"; });
     $("#cloudLoginBtn").addEventListener("click", async () => {
       const user = $("#cloudUser").value.trim();
       const pass = $("#cloudPass").value;
@@ -10555,15 +10554,16 @@
       $(`#${id}`).addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
-          submitAuth("/api/auth/login", "gate").catch((error) => showNotice(error.message, true));
+          submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true));
         }
       });
     });
     $("#logoutBtn").addEventListener("click", async () => {
+      try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (error) {}
       await apiJson("/api/auth/logout", { method: "POST" });
       state.auth.user = null;
       renderAuth();
-      showNotice("已清除姓名，可重新输入。");
+      showNotice("已退出账号。");
     });
     $("#topOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
     $("#constructionOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
@@ -10588,7 +10588,7 @@
     });
     $("#projectImportMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
-      $("#projectImportMenu").classList.toggle("open");
+      $("#importFile").click();
     });
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".print-menu-wrap")) $("#printMenu")?.classList.remove("open");
@@ -10776,7 +10776,8 @@
         await refreshAll();
         $("#importForm").reset();
         $("#importFileLabel").textContent = "选择文件";
-        showNotice(data.message || "项目划分表已导入。");
+        const result = data.result || {};
+        showNotice(`自动转换导入完成：成功 ${result.created || 0} 个单元，跳过 ${result.skipped || 0} 行。`);
       } catch (error) {
         showNotice(error.message || "项目划分导入失败。", true);
       }
@@ -10785,6 +10786,7 @@
     $("#importFile").addEventListener("change", () => {
       const file = $("#importFile").files[0];
       $("#importFileLabel").textContent = file ? file.name : "选择文件";
+      if (file) $("#importForm").requestSubmit();
     });
 
     $("#downloadProjectTemplateBtn").addEventListener("click", () => {

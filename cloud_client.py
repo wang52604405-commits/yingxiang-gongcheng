@@ -26,12 +26,12 @@ PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
 DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260809-2.28"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260809-2.29"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
     "pricing": {"monthly_price": 15, "lifetime_price": 169, "price_label": "内测会员价"},
-    "free": {"photo_limit": 300, "watermark_enabled": True, "upload_expiry_enabled": False},
+    "free": {"photo_limit": 300, "watermark_enabled": False, "upload_expiry_enabled": False},
     "invite": {"enabled": True, "milestone": 10, "reward_days": 30},
     "cloud_preview": {
         "enabled": True,
@@ -62,7 +62,8 @@ def _get_json(url, timeout=15):
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("ALBUM_DATA_DIR", r"D:\工程影像资料")).expanduser()
+    default_dir = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "工程影像管理平台" / "data"
+    return Path(os.environ.get("ALBUM_DATA_DIR", str(default_dir))).expanduser()
 
 
 def cloud_config_path() -> Path:
@@ -402,7 +403,7 @@ def login(username: str, password: str):
     code = activated.get("license_code", "")
     if code:
         licensing.write_installed_license(code)  # 会员才有授权码，本地验签并写入 license.dat
-    # is_member：账号有有效授权即会员（无限使用、无水印）；否则免费版（300张+水印）
+    # is_member：账号有有效权益即会员（无限使用）；否则免费版（300 张、无产品水印）。
     is_member = bool(activated.get("is_member")) or bool((activated.get("license") or {}).get("has_license"))
     account = {
         "username": username,
@@ -495,7 +496,7 @@ def status():
 
 
 def membership_status():
-    """当前会员状态：登录的账号有有效授权=会员（无限、无水印）；否则免费版（300张+水印）。
+    """当前会员状态：登录账号有有效权益即会员；否则为 300 张免费版。
 
     未登录或服务器未部署时按免费版处理（保守），登录后按账号等级。
     返回 {"is_member": bool, "member_tier": "free"|"member", "account": str}

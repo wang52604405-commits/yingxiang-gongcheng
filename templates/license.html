@@ -174,7 +174,7 @@
         <div class="desc">适合体验与小额使用</div>
         <ul>
           <li>最多 <span id="freeLimitText">300</span> 张照片</li>
-          <li>打印 / 导出带水印</li>
+          <li>正常打印 / 导出，无产品水印</li>
           <li>局域网内完整使用</li>
           <li class="no">无限上传</li>
           <li class="no">无水印导出</li>
@@ -288,16 +288,6 @@
       </div>
     </div>
 
-    <!-- 授权码激活（折叠） -->
-    <div class="section-title">已有授权码</div>
-    <div class="card">
-      <p class="sub">从管理员 / 作者处获得授权码后，粘贴到下方直接激活。</p>
-      <textarea id="licenseCodeInput" placeholder="把管理员发来的授权码粘贴到这里"></textarea>
-      <div class="row" style="margin-top:12px;">
-        <button class="btn primary" id="activateBtn">激活授权</button>
-      </div>
-    </div>
-
     <div id="notice" class="notice"></div>
 
     <div class="terms">
@@ -369,7 +359,7 @@
       } else {
         $("#statusBadge").className = "badge free";
         $("#statusBadge").textContent = status.free_forever ? "免费版 · 永久" : "免费版";
-        $("#status").textContent = `免费版永久免费，已使用 ${status.photo_count || 0} / ${status.free_photo_limit || 300} 张；打印和导出带水印。`;
+        $("#status").textContent = `免费版永久免费，已使用 ${status.photo_count || 0} / ${status.free_photo_limit || 300} 张；正常打印和导出，无产品水印。`;
         highlightPlan(0);
       }
     }
@@ -390,12 +380,12 @@
     function renderCloud(data) {
       const el = $("#cloudStatus");
       if (data.logged_in) {
-        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用，无水印）" : `免费版（${productConfig.free?.photo_limit || 300} 张照片，打印/导出带水印）`}`;
+        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用）" : `免费版（${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`}`;
         $("#accountLoginForm").style.display = "block";
         $("#cloudLogoutBtn").style.display = "inline-block";
         $("#showRegBtn").style.display = "none";
       } else {
-        el.textContent = `未登录（当前为免费版：${productConfig.free?.photo_limit || 300} 张照片，打印/导出带水印）`;
+        el.textContent = `未登录（注册后可永久免费使用 ${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`;
         $("#accountLoginForm").style.display = "block";
         $("#cloudLogoutBtn").style.display = "none";
         $("#showRegBtn").style.display = "inline-block";
@@ -438,22 +428,6 @@
       Promise.all([refreshStatus(), refreshCloud()])
         .then(() => showNotice("状态已刷新。"))
         .catch((error) => showNotice(error.message, true));
-    });
-
-    // ---- 激活授权码 ----
-    $("#activateBtn").addEventListener("click", async () => {
-      const licenseCode = $("#licenseCodeInput").value.trim();
-      if (!licenseCode) { showNotice("请先粘贴授权码。", true); return; }
-      try {
-        const data = await apiJson("/api/license/activate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ license_code: licenseCode })
-        });
-        $("#licenseCodeInput").value = "";
-        renderStatus(data.license);
-        showNotice("授权已激活，可以继续使用。");
-      } catch (error) { showNotice(error.message, true); }
     });
 
     // ---- 登录 / 注册切换 ----
@@ -508,7 +482,8 @@
           body: JSON.stringify({ username, password, invite_code: inviteCode, email, delete_password: deletePassword, delete_password_confirm: deletePasswordConfirm })
         });
         $("#regUser").value = ""; $("#regPass").value = ""; $("#regInvite").value = "";
-        showNotice(`注册成功，工程删除密码已安全保存，请牢记。你的邀请码：${data.account?.invite_code || ""}${data.invited_by ? `（经 ${data.invited_by} 邀请）` : ""}`);
+        showNotice("注册并登录成功，正在进入工程工作台……");
+        setTimeout(() => { window.location.href = "/"; }, 600);
       } catch (error) { showNotice(error.message, true); }
     });
 
@@ -561,7 +536,15 @@
     });
     $("#freeCurrentBtn").disabled = true;
 
-    loadProduct().then(() => Promise.all([refreshStatus(), refreshCloud()])).catch(() => {});
+    loadProduct()
+      .then(() => Promise.all([refreshStatus(), refreshCloud()]))
+      .then(() => {
+        if (new URLSearchParams(location.search).get("register") === "1") {
+          $("#accountLoginForm").style.display = "none";
+          $("#accountRegForm").style.display = "block";
+        }
+      })
+      .catch(() => {});
   </script>
 </body>
 </html>

@@ -65,7 +65,7 @@ DEFAULT_PRODUCT_CONFIG = {
     },
     "free": {
         "photo_limit": 300,
-        "watermark_enabled": True,
+        "watermark_enabled": False,
         "upload_expiry_enabled": False,
     },
     "invite": {
