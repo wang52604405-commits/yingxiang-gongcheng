@@ -3239,9 +3239,25 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
+    // 首屏冷启动加载动画：进度按真实加载阶段推进，加载完淡出
+    function bootProgress(percent) {
+      const fill = $("#bootLoaderFill");
+      const num = $("#bootLoaderPercent");
+      if (fill) fill.style.width = `${Math.min(100, Math.max(0, Number(percent) || 0))}%`;
+      if (num) num.textContent = String(Math.round(Math.min(100, Math.max(0, Number(percent) || 0))));
+    }
+    function bootDone() {
+      const loader = $("#bootLoader");
+      if (!loader) return;
+      loader.classList.add("is-done");
+      setTimeout(() => loader.remove(), 500);
+    }
+
     async function loadBootstrap(options = {}) {
       const skipOtherImages = Boolean(options.skipOtherImages);
+      bootProgress(8);
       const data = await apiJson("/api/bootstrap");
+      bootProgress(42);
       state.auth.user = data.user || null;
       renderAuth();
       if (!state.auth.user) {
@@ -3252,6 +3268,7 @@ const $ = (selector) => document.querySelector(selector);
           if (savedAccount && $("#gateUsername")) $("#gateUsername").value = savedAccount;
           if (savedPassword && $("#gatePassword")) $("#gatePassword").value = savedPassword;
         } catch (e) {}
+        bootDone();
         return;
       }
       state.revision = Number(data.revision || 0);
@@ -3274,11 +3291,14 @@ const $ = (selector) => document.querySelector(selector);
       renderTree();
       renderProjectInfo();
       renderOverview();
+      bootProgress(70);
       if (skipOtherImages) {
         const idleLoadOtherImages = () => apiJson("/api/other-images/tree").then((otherImagesData) => {
           state.otherImages = otherImagesData.tree || { nodes: [], photo_count: 0 };
           renderOtherImagesTree();
           renderOverview();
+          bootProgress(100);
+          bootDone();
         }).catch((error) => showNotice(error.message, true));
         if ("requestIdleCallback" in window) requestIdleCallback(idleLoadOtherImages, { timeout: 1500 });
         else setTimeout(idleLoadOtherImages, 50);
@@ -3287,6 +3307,8 @@ const $ = (selector) => document.querySelector(selector);
         state.otherImages = otherImagesData.tree || { nodes: [], photo_count: 0 };
         renderOtherImagesTree();
         renderOverview();
+        bootProgress(100);
+        bootDone();
       }
       if (state.selectedPart) {
         const updated = findNode(state.treeRoot, state.selectedPart.key);

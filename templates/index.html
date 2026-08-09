@@ -4,9 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260809-2.34.css">
+  <link rel="stylesheet" href="/assets/app-A20260809-2.35.css">
 </head>
 <body>
+  <!-- 首屏冷启动加载动画：只首次进入时显示，数据加载完自动淡出 -->
+  <div id="bootLoader" class="boot-loader" role="status" aria-live="polite">
+    <div class="boot-loader-card">
+      <div class="boot-loader-ring" aria-hidden="true">
+        <div class="boot-loader-ring-track"></div>
+        <div class="boot-loader-ring-spin"></div>
+      </div>
+      <p class="boot-loader-title">正在加载数据</p>
+      <div class="boot-loader-bar" aria-hidden="true">
+        <div class="boot-loader-bar-fill" id="bootLoaderFill"></div>
+      </div>
+      <p class="boot-loader-percent"><span id="bootLoaderPercent">0</span>%</p>
+    </div>
+  </div>
+
   <section class="auth-screen" aria-label="登录注册">
     <div class="auth-card">
       <div class="brand">
@@ -741,6 +756,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260809-2.34.js"></script>
+  <script defer src="/assets/app-A20260809-2.35.js"></script>
 </body>
 </html>

@@ -25,6 +25,88 @@
       --shadow: 0 12px 28px rgba(20, 32, 45, .07);
       --shadow-soft: 0 4px 12px rgba(20, 32, 45, .05);
     }
+    .boot-loader {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      background: rgba(232, 240, 248, 0.55);
+      backdrop-filter: blur(10px) saturate(1.2);
+      -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    }
+    .boot-loader-card {
+      display: grid;
+      justify-items: center;
+      gap: 16px;
+      padding: 36px 46px 32px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      border-radius: 20px;
+      box-shadow: 0 24px 60px rgba(16, 48, 84, 0.14);
+    }
+    .boot-loader-ring {
+      position: relative;
+      width: 64px;
+      height: 64px;
+    }
+    .boot-loader-ring-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 5px solid #e3ebf3;
+    }
+    .boot-loader-ring-spin {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 5px solid transparent;
+      border-top-color: #0b78d0;
+      border-right-color: #00a7c8;
+      animation: bootSpin 1s linear infinite;
+    }
+    @keyframes bootSpin {
+      to { transform: rotate(360deg); }
+    }
+    .boot-loader-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: .5px;
+    }
+    .boot-loader-bar {
+      width: 240px;
+      height: 7px;
+      border-radius: 999px;
+      background: #e3ebf3;
+      overflow: hidden;
+      position: relative;
+    }
+    .boot-loader-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #0b78d0, #00a7c8, #16c1a6);
+      background-size: 200% 100%;
+      transition: width .45s cubic-bezier(.4, 0, .2, 1);
+      animation: bootFlow 1.4s linear infinite;
+    }
+    @keyframes bootFlow {
+      from { background-position: 0% 0; }
+      to { background-position: -200% 0; }
+    }
+    .boot-loader-percent {
+      margin: -4px 0 0;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+    }
+    .boot-loader.is-done {
+      opacity: 0;
+      transition: opacity .45s ease;
+      pointer-events: none;
+    }
 
     * { box-sizing: border-box; }
     html, body { height: 100%; }
