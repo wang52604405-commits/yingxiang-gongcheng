@@ -2336,7 +2336,7 @@ class AlbumManager:
                 skipped += 1
                 continue
             code_key = self._name_key(safe_code)
-            if not code_key or code_key in seen_codes:
+            if not code_key:
                 skipped += 1
                 continue
 
@@ -2350,9 +2350,14 @@ class AlbumManager:
             normalized_fields["划分类型"] = "划分工序单元" if match.get("division_type") == "process" else "不划分工序单元"
             normalized_fields["工序名称列表"] = "、".join(match.get("processes") or [])
             normalized_fields["匹配关键词"] = match.get("match_keyword", "")
+            existed = code_key in seen_codes
+            # 同一编码重新导入：复用已有单元(保留照片)，更新划分信息
             self.create_project(safe_code, project_name, keywords, normalized_fields, import_order)
-            created += 1
-            seen_codes.add(code_key)
+            if existed:
+                skipped += 1
+            else:
+                created += 1
+                seen_codes.add(code_key)
 
         return {
             "created": created,
