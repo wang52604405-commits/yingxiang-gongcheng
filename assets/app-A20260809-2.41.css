@@ -1283,6 +1283,7 @@
     }
     .unit-card-main .unit-card-photo-counts {
       justify-self: end;
+      margin-top: -1em;
     }
     .unit-card-main > strong {
       min-width: 0;
