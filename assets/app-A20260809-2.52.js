@@ -1383,17 +1383,19 @@ const $ = (selector) => document.querySelector(selector);
         if (manual) showNotice("当前已是最新版本。");
         return;
       }
-      // 有新版本：显示更新内容和下载
+      // 有新版本：自动下载并静默安装（本机服务），安装后重启软件生效
       const changelog = (data.changelog || []).join("\n");
       const fixes = (data.fixes || []).join("\n");
-      const detail = `发现新版本 ${data.latest_version}\n\n【更新内容】\n${changelog || "（无）"}\n\n【修复内容】\n${fixes || "（无）"}\n\n是否下载最新安装包？`;
+      const detail = `发现新版本 ${data.latest_version}\n\n【更新内容】\n${changelog || "（无）"}\n\n是否立即下载并安装新版本？安装完成后请重启软件。`;
       const go = confirm(detail);
       if (go) {
-        if (data.download_url) {
-          window.open(data.download_url, "_blank");
-        } else {
-          window.location.href = "/api/cloud/download-update";
-        }
+        apiJson("/api/cloud/apply-update", { method: "POST" }).then((r) => {
+          if (r && r.ok) {
+            showNotice(r.message || "已开始安装，请安装完成后重启软件。");
+          } else {
+            showNotice((r && r.error) || "自动更新失败", true);
+          }
+        }).catch((error) => showNotice(error.message || "自动更新失败", true));
       }
     }
 

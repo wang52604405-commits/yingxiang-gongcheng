@@ -4712,6 +4712,39 @@ def api_cloud_download_update():
     return redirect(url)
 
 
+@app.route("/api/cloud/apply-update", methods=["POST"])
+def api_cloud_apply_update():
+    """下载最新安装包并静默安装（本机服务有权限）。安装完成后需重启软件。"""
+    if not getattr(sys, "frozen", False):
+        return jsonify({"ok": False, "error": "仅安装版支持自动更新"}), 400
+    try:
+        result = cloud_client.check_update()
+        url = result.get("download_url") or ""
+        if not url or not result.get("has_update"):
+            return jsonify({"ok": False, "error": "当前已是最新版本"}), 400
+        import urllib.request
+        install_dir = Path(sys.executable).resolve().parent
+        installer = install_dir / "album-update-installer.exe"
+        # 下载安装包
+        req = urllib.request.Request(url, headers={"User-Agent": "album-updater/1.0"})
+        with urllib.request.urlopen(req, timeout=180) as resp, open(installer, "wb") as out:
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        if not installer.exists() or installer.stat().st_size == 0:
+            return jsonify({"ok": False, "error": "安装包下载失败"}), 500
+        # 静默安装（Inno Setup），安装后自动覆盖服务并重启
+        subprocess.Popen(
+            [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", f"/DIR={install_dir}"],
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        return jsonify({"ok": True, "message": "安装包已下载并开始安装，安装完成后请重启软件"})
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
 @app.route("/api/cloud/logout", methods=["POST"])
 def api_cloud_logout():
     session.pop("username", None)
