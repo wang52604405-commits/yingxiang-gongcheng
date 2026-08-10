@@ -3419,16 +3419,9 @@ def export_photo_statistics_xlsx(codes=""):
         source_fields = data.get("source_fields") or {}
         display_code = data.get("display_project_code") or source_fields.get("单元工程编码") or code
         unit_name = data.get("project_name") or code
-        photos = list(data.get("photos") or [])
-        if is_pile_unit(data):
-            # 灌注桩：每根桩三个工序连体，桩之间按拍摄时间排序
-            photos.sort(key=lambda p: (
-                0 if manager._normalize_category(p.get("category")) == "construction" else 1,
-            ) + pile_photos_key(data, photos, p) + (
-                pile_process_order(data, p),
-                manager._id_number(p.get("id")),
-            ))
-        else:
+        # 用 get_photos（已按三根一体排序+重编号），保证编号与顺序一致
+        photos = list(manager.get_photos(code))
+        if not is_pile_unit(data):
             photos.sort(key=lambda p: (
                 0 if manager._normalize_category(p.get("category")) == "construction" else 1,
                 str(p.get("process_name") or ""),
