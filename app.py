@@ -570,6 +570,27 @@ def write_portable_setup(port: int):
     return payload
 
 
+def _auto_renumber_piles_all():
+    """启动后自动把所有灌注桩单元按桩号连体+施工完成时间重排(三根一体)，后台执行。"""
+    try:
+        projects = manager.list_projects()
+        for project in projects:
+            code = str(project.get("project_code") or "")
+            if not code:
+                continue
+            try:
+                with manager._project_write_lock(code):
+                    data = manager.get_project(code)
+                    if not is_pile_unit(data):
+                        continue
+                    manager._auto_sort_piles_locked(code, data)
+            except Exception:
+                continue
+        manager.invalidate_projects_cache()
+    except Exception:
+        pass
+
+
 def _auto_sync_feishu_all():
     """启动后自动全量同步已有照片到飞书台账（后台，去重，失败静默）。"""
     try:
@@ -625,6 +646,8 @@ def run_lan_server():
     print("Keep this window open while other computers use the system.")
     # 启动后稍候同步一次云预览（缩略图+编号），不阻塞主服务
     threading.Timer(3.0, sync_cloud_preview_async).start()
+    # 启动后自动把灌注桩单元按桩号连体+时间重排(三根一体)，不阻塞
+    threading.Timer(6.0, _auto_renumber_piles_all).start()
     # 启动后自动全量同步已有照片到飞书台账（后台，不阻塞）
     threading.Timer(8.0, _auto_sync_feishu_all).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
@@ -2139,7 +2162,7 @@ class AlbumManager:
                     dated.append((pile, group))
                 else:
                     undated.append((pile, group))
-            dated.sort(key=lambda item: (pile_group_date(data, item[1]), item[0]))
+            dated.sort(key=lambda item: (item[0] if item[0] is not None else (10 ** 12),))
             undated.sort(key=lambda item: item[0])
             for _, group in dated:
                 ordered.extend(group)
