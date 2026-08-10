@@ -13,15 +13,16 @@
     .fp-fab:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(51,112,255,.45); }
     .fp-mask { position: fixed; inset: 0; z-index: 10000; background: rgba(15,23,42,.55);
       display: flex; align-items: center; justify-content: center; }
-    .fp-box { width: min(920px, 92vw); max-height: 86vh; background: #fff; border-radius: 14px;
-      overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 30px 70px rgba(0,0,0,.35);
-      font-family: "Microsoft YaHei",sans-serif; }
+    .fp-box { width: min(1200px, 96vw); height: min(88vh, 780px); min-height: 400px; background: #fff;
+      border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;
+      box-shadow: 0 30px 70px rgba(0,0,0,.35); font-family: "Microsoft YaHei",sans-serif; }
     .fp-head { display: flex; align-items: center; justify-content: space-between;
-      padding: 16px 20px; border-bottom: 1px solid #e8ebf0; }
+      padding: 16px 20px; border-bottom: 1px solid #e8ebf0; flex: 0 0 auto; }
     .fp-head h3 { margin: 0; font-size: 16px; color: #1f2d3d; }
     .fp-close { border: none; background: #f2f4f7; color: #555; width: 30px; height: 30px;
       border-radius: 50%; cursor: pointer; font-size: 16px; }
-    .fp-body { padding: 16px 20px; overflow: auto; }
+    .fp-body { padding: 16px 20px; overflow: hidden; flex: 1 1 auto; min-height: 0;
+      display: flex; flex-direction: column; }
     .fp-config { display: grid; grid-template-columns: auto 1fr auto; gap: 10px 12px;
       align-items: center; margin-bottom: 14px; padding: 14px; background: #f7f9fc;
       border-radius: 10px; font-size: 13px; color: #333; }
@@ -35,9 +36,14 @@
     .fp-status.bad { color: #dc2626; }
     .fp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .fp-table th { background: #f2f4f7; color: #55606e; text-align: left; padding: 9px 10px;
-      border-bottom: 1px solid #e3e7ee; position: sticky; top: 0; }
-    .fp-table td { padding: 8px 10px; border-bottom: 1px solid #f0f2f6; color: #333; }
-    .fp-table tr:hover td { background: #f8faff; }
+      border-bottom: 1px solid #e3e7ee; position: sticky; top: 0; z-index: 1; }
+    .fp-table td { padding: 8px 10px; border-bottom: 1px solid #f0f2f6; color: #333; white-space: nowrap; }
+    .fp-table tr:hover td { background: #eaf2ff; }
+    .fp-table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid #e8ebf0;
+      border-radius: 8px; }
+    .fp-search { width: 100%; box-sizing: border-box; padding: 8px 12px; margin-bottom: 10px;
+      border: 1px solid #d9dee7; border-radius: 8px; font-size: 13px; flex: 0 0 auto; }
+    .fp-search:focus { outline: none; border-color: #3370ff; box-shadow: 0 0 0 3px rgba(51,112,255,.12); }
     .fp-empty { text-align: center; color: #9aa3b0; padding: 30px 0; font-size: 13px; }
     .fp-loading { text-align: center; color: #9aa3b0; padding: 20px 0; font-size: 13px; }
     .fp-fab .fp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -140,8 +146,13 @@
     body.appendChild(el("p", { class: "fp-tip" },
       "每个客户使用独立台账表，数据互不可见。若需启用飞书同步：在下方填入本表 app_token / table_id 并勾选“启用同步”。"));
 
+    var tableSearch = el("input", { type: "text", class: "fp-search", placeholder: "搜索：编码 / 单元 / 题名 / 编号…" });
+    tableSearch.oninput = function () { renderTable(allRows || []); };
+    body.appendChild(tableSearch);
+    var tableScroll = el("div", { class: "fp-table-scroll" });
     var tableWrap = el("div");
-    body.appendChild(tableWrap);
+    tableScroll.appendChild(tableWrap);
+    body.appendChild(tableScroll);
 
     mask.appendChild(box);
     box.appendChild(head);
@@ -163,21 +174,51 @@
       });
     }
 
+    var allRows = [];
+    var sortCol = "";
+    var sortDir = 1;
     function renderTable(rows) {
-      if (!rows || !rows.length) {
-        tableWrap.innerHTML = '<div class="fp-empty">台账暂无记录（上传照片后自动同步到这里）</div>';
+      var kw = (tableSearch.value || "").trim().toLowerCase();
+      var filtered = rows;
+      if (kw) {
+        filtered = (rows || []).filter(function (row) {
+          return cols.some(function (c) {
+            var v = row[c];
+            return v != null && String(v).toLowerCase().indexOf(kw) >= 0;
+          });
+        });
+      }
+      if (!filtered || !filtered.length) {
+        tableWrap.innerHTML = '<div class="fp-empty">' + (kw ? "没有匹配的记录。" : "台账暂无记录（上传照片后自动同步到这里）") + "</div>";
         return;
       }
-      var cols = ["项目编码", "单元工程", "照片编号", "题名", "拍摄者", "拍摄时间", "照片说明"];
       var t = el("table", { class: "fp-table" });
       var thead = el("thead");
       var tr = el("tr");
-      cols.forEach(function (c) { tr.appendChild(el("th", null, c)); });
+      cols.forEach(function (c) {
+        var th = el("th", null, c);
+        th.style.cursor = "pointer";
+        th.title = "点击按此列排序";
+        th.onclick = function () {
+          var dir = sortCol === c ? (sortDir === 1 ? -1 : 1) : 1;
+          sortCol = c; sortDir = dir;
+          var sorted = (allRows || []).slice();
+          sorted.sort(function (a, b) {
+            var av = a[c], bv = b[c];
+            if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+            return String(av == null ? "" : av).localeCompare(String(bv == null ? "" : bv), "zh-CN") * dir;
+          });
+          renderTable(sorted);
+        };
+        tr.appendChild(th);
+      });
       thead.appendChild(tr);
       t.appendChild(thead);
       var tbody = el("tbody");
-      rows.forEach(function (row) {
+      filtered.forEach(function (row) {
         var r = el("tr");
+        r.style.cursor = "pointer";
+        r.title = "点击打开对应单元";
         cols.forEach(function (c) {
           var v = row[c];
           if (c === "拍摄时间" && typeof v === "number") {
@@ -185,6 +226,17 @@
           }
           r.appendChild(el("td", null, v == null ? "" : String(v)));
         });
+        r.onclick = function () {
+          var code = row["项目编码"] || row["project_code"] || "";
+          if (!code) return;
+          var maskEl = mask;
+          try { if (maskEl && maskEl.parentNode) maskEl.parentNode.removeChild(maskEl); } catch (e) {}
+          if (typeof loadProject === "function") {
+            loadProject(code, "detail").catch(function (err) { if (window.showNotice) showNotice(err && err.message || "打开失败", true); });
+          } else if (window.location) {
+            window.location.href = "/?unit=" + encodeURIComponent(code);
+          }
+        };
         tbody.appendChild(r);
       });
       t.appendChild(tbody);
@@ -192,11 +244,16 @@
       tableWrap.appendChild(t);
     }
 
+    var cols = ["项目编码", "单元工程", "照片编号", "题名", "拍摄者", "拍摄时间", "照片说明"];
     function refreshRecords() {
       tableWrap.innerHTML = '<div class="fp-loading">加载台账…</div>';
       api("/api/feishu/records").then(function (r) {
-        if (r.ok) renderTable(r.rows);
-        else tableWrap.innerHTML = '<div class="fp-empty">' + (r.error || "读取失败") + "</div>";
+        if (r.ok) {
+          allRows = r.rows || [];
+          renderTable(allRows);
+        } else {
+          tableWrap.innerHTML = '<div class="fp-empty">' + (r.error || "读取失败") + "</div>";
+        }
       }).catch(function () {
         tableWrap.innerHTML = '<div class="fp-empty">读取失败：接口不可用</div>';
       });
