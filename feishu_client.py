@@ -103,6 +103,18 @@ def is_configured(cfg: dict = None) -> bool:
                 and cfg.get("app_token") and cfg.get("table_id"))
 
 
+_DATE_FIELDS = {"拍摄时间"}
+
+
+def _feishu_field_value(key: str, value):
+    """把字段值转成飞书多维表格 API 格式：文本 -> 字符串，日期 -> [毫秒]"""
+    if value is None:
+        return None
+    if key in _DATE_FIELDS:
+        return [int(value)] if str(value).isdigit() else str(value)
+    return str(value)
+
+
 def add_record(fields: dict, cfg: dict = None) -> dict:
     """往台账表追加一条记录；失败返回 {"ok": False, "error": ...}"""
     cfg = cfg or load_config()
@@ -111,9 +123,14 @@ def add_record(fields: dict, cfg: dict = None) -> dict:
     token = get_token(cfg)
     if not token:
         return {"ok": False, "error": "飞书 token 获取失败"}
+    payload_fields = {}
+    for key, value in (fields or {}).items():
+        formatted = _feishu_field_value(key, value)
+        if formatted is not None:
+            payload_fields[key] = formatted
     r = _request("POST",
                  "/bitable/v1/apps/%s/tables/%s/records" % (cfg["app_token"], cfg["table_id"]),
-                 {"fields": fields}, token)
+                 {"fields": payload_fields}, token)
     if r.get("code") == 0:
         return {"ok": True}
     return {"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))}
@@ -134,16 +151,27 @@ def list_records(page_size=100, cfg: dict = None) -> dict:
         rows = []
         for it in items:
             f = it.get("fields") or {}
+            def _text(key):
+                v = f.get(key)
+                if isinstance(v, list):
+                    if v and isinstance(v[0], dict):
+                        return str(v[0].get("text") or "")
+                    if v and isinstance(v[0], (int, float, str)):
+                        return str(v[0])
+                    return ""
+                return str(v) if v is not None else ""
             rows.append({
                 "record_id": it.get("record_id", ""),
-                "项目编码": f.get("项目编码", [{}])[0].get("text") if isinstance(f.get("项目编码"), list) else f.get("项目编码", ""),
-                "单元工程": f.get("单元工程", ""),
-                "照片编号": f.get("照片编号", ""),
-                "题名": f.get("题名", ""),
-                "拍摄者": f.get("拍摄者", ""),
-                "拍摄时间": f.get("拍摄时间", ""),
-                "照片说明": f.get("照片说明", ""),
-                "缩略图链接": f.get("缩略图链接", ""),
+                "项目编码": _text("项目编码"),
+                "单位工程": _text("单位工程"),
+                "分部工程": _text("分部工程"),
+                "单元工程": _text("单元工程"),
+                "照片编号": _text("照片编号"),
+                "题名": _text("题名"),
+                "拍摄者": _text("拍摄者"),
+                "拍摄时间": _text("拍摄时间"),
+                "照片说明": _text("照片说明"),
+                "缩略图链接": _text("缩略图链接"),
             })
         return {"ok": True, "rows": rows, "total": len(rows)}
     return {"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))}
