@@ -2961,6 +2961,7 @@
     .print-mode-card {
       display: grid;
       gap: 7px;
+      min-width: 0;
       min-height: 118px;
       padding: 14px;
       border: 1px solid var(--line);
@@ -2968,14 +2969,34 @@
       background: #fbfdff;
       text-align: left;
       color: var(--text);
+      white-space: normal;
+      overflow: hidden;
+    }
+    .print-mode-card:hover {
+      color: var(--text);
+      background: #f4f8fb;
+      border-color: #a9c7d9;
+      box-shadow: 0 6px 16px rgba(15, 50, 75, .08);
+      transform: none;
     }
     .print-mode-card.active {
       border-color: #7cc9a0;
       background: #e8f6ee;
       box-shadow: 0 0 0 3px rgba(22, 128, 92, .12);
     }
+    .print-mode-card.active:hover {
+      color: var(--text);
+      background: #e1f3e9;
+      border-color: #60b98a;
+    }
     .print-mode-card strong { font-size: 16px; }
-    .print-mode-card span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .print-mode-card span {
+      min-width: 0;
+      color: #51677f;
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
     .print-custom-panel {
       display: none;
       margin-top: 14px;
