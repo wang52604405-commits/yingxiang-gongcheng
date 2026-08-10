@@ -2162,7 +2162,7 @@ class AlbumManager:
                     dated.append((pile, group))
                 else:
                     undated.append((pile, group))
-            dated.sort(key=lambda item: (item[0] if item[0] is not None else (10 ** 12),))
+            dated.sort(key=lambda item: (pile_group_date(data, item[1]), item[0] if item[0] is not None else (10 ** 12)))
             undated.sort(key=lambda item: item[0])
             for _, group in dated:
                 ordered.extend(group)
