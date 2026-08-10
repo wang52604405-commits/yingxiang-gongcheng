@@ -146,8 +146,28 @@
     body.appendChild(cfgWrap);
     body.appendChild(tipRow);
 
-    // 顶部工具条：设置(收起配置) + 搜索，台账表格直接满铺显示
+    // 顶部工具条：全量同步 + 设置(收起配置) + 搜索，台账表格直接满铺显示
     var toolBar = el("div", { class: "fp-toolbar" });
+    var syncBtn = el("button", { class: "fp-btn", type: "button" }, "全量同步");
+    syncBtn.onclick = function () {
+      syncBtn.textContent = "同步中…";
+      syncBtn.disabled = true;
+      api("/api/feishu/sync-all", { method: "POST" }).then(function (r) {
+        syncBtn.textContent = "全量同步";
+        syncBtn.disabled = false;
+        if (r && r.ok) {
+          showToast("同步完成：新增 " + (r.synced || 0) + " 条，已存在 " + (r.skipped || 0) + " 条，失败 " + (r.failed || 0) + " 条");
+          refreshRecords();
+        } else {
+          showToast((r && r.error) || "同步失败", true);
+        }
+      }).catch(function () {
+        syncBtn.textContent = "全量同步";
+        syncBtn.disabled = false;
+        showToast("同步失败：接口不可用", true);
+      });
+    };
+    toolBar.appendChild(syncBtn);
     var settingsBtn = el("button", { class: "fp-btn ghost", type: "button" }, "设置");
     settingsBtn.onclick = function () {
       var show = cfgWrap.style.display === "none";

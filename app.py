@@ -1834,31 +1834,38 @@ class AlbumManager:
         self._ensure_pile_sorted(project_code, data)
         return added
 
+    def _feishu_fields(self, project_code, item):
+        """把照片转成飞书台账字段（含单位/分部/单元层级）。"""
+        project = self.get_project(project_code) or {}
+        photo_date = str(item.get("photo_date") or "").strip()
+        date_ms = ""
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
+            try:
+                date_ms = int(datetime.strptime(photo_date, fmt).timestamp() * 1000)
+                break
+            except ValueError:
+                continue
+        hierarchy = self.project_hierarchy(project)
+        return {
+            "项目编码": str(project_code or ""),
+            "单位工程": str(hierarchy.get("unit_project_name") or ""),
+            "分部工程": str(hierarchy.get("part_name") or ""),
+            "单元工程": str(project.get("project_name") or project_code or ""),
+            "照片编号": str(item.get("id") or ""),
+            "题名": str(item.get("title") or ""),
+            "拍摄时间": date_ms,
+            "拍摄者": str(item.get("photographer") or ""),
+            "照片说明": str(item.get("description") or ""),
+            "缩略图链接": "",
+        }
+
     def _sync_photo_to_feishu(self, project_code, item):
         """上传照片后自动把编号/信息写入飞书台账（后台线程，失败静默）。"""
         try:
             cfg = feishu_client.load_config()
             if not feishu_client.is_configured(cfg):
                 return
-            project = self.get_project(project_code) or {}
-            photo_date = str(item.get("photo_date") or "").strip()
-            date_ms = ""
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
-                try:
-                    date_ms = int(datetime.strptime(photo_date, fmt).timestamp() * 1000)
-                    break
-                except ValueError:
-                    continue
-            fields = {
-                "项目编码": str(project_code or ""),
-                "单元工程": str(project.get("project_name") or project_code or ""),
-                "照片编号": str(item.get("id") or ""),
-                "题名": str(item.get("title") or ""),
-                "拍摄时间": date_ms,
-                "拍摄者": str(item.get("photographer") or ""),
-                "照片说明": str(item.get("description") or ""),
-                "缩略图链接": "",
-            }
+            fields = self._feishu_fields(project_code, item)
             def worker():
                 try:
                     feishu_client.add_record(fields, cfg)
@@ -3736,6 +3743,61 @@ def feishu_test():
     if r.get("code") == 0:
         return jsonify({"ok": True, "message": "飞书连接正常"})
     return jsonify({"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))})
+
+
+@app.route("/api/feishu/sync-all", methods=["POST"])
+def feishu_sync_all():
+    """全量同步：把已有照片(含单位/分部/单元/题名/日期等)全部写入飞书台账，按照片编号去重。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    cfg = feishu_client.load_config()
+    if not feishu_client.is_configured(cfg):
+        return jsonify({"ok": False, "error": "飞书未配置或未启用"})
+    try:
+        # 已同步的照片编号（去重）
+        existing = set()
+        try:
+            res = feishu_client.list_records(page_size=1000, cfg=cfg)
+            if res.get("ok"):
+                for row in res.get("rows") or []:
+                    pid = str(row.get("照片编号") or "").strip()
+                    if pid:
+                        existing.add(pid)
+        except Exception:
+            pass
+        # 遍历所有项目照片
+        synced = 0
+        skipped = 0
+        failed = 0
+        for project in manager.list_projects(include_other=False):
+            code = str(project.get("project_code") or "")
+            if not code:
+                continue
+            try:
+                data = manager.get_project(code)
+            except Exception:
+                continue
+            for photo in data.get("photos", []):
+                pid = str(photo.get("id") or "").strip()
+                if not pid:
+                    continue
+                if pid in existing:
+                    skipped += 1
+                    continue
+                try:
+                    fields = manager._feishu_fields(code, photo)
+                    r = feishu_client.add_record(fields, cfg)
+                    if r.get("ok"):
+                        synced += 1
+                        existing.add(pid)
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+        return jsonify({"ok": True, "synced": synced, "skipped": skipped, "failed": failed})
+    except Exception as exc:
+        return json_error(str(exc), 500)
 
 
 def sync_cloud_preview_async():
