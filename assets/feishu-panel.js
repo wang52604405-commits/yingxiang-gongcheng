@@ -199,6 +199,8 @@
         statusEl.textContent = s.configured ? "已配置并启用" : "未配置";
         shareUrl = s.share_url || "";
         shareBtn.style.display = s.configured && shareUrl ? "" : "none";
+        // 已配置则隐藏"设置"按钮(全自动)，未配置才显示供用户配置
+        if (settingsBtn) settingsBtn.style.display = s.configured ? "none" : "";
       }).catch(function () {
         statusEl.className = "fp-status bad";
         statusEl.textContent = "接口不可用";

@@ -570,6 +570,44 @@ def write_portable_setup(port: int):
     return payload
 
 
+def _auto_sync_feishu_all():
+    """启动后自动全量同步已有照片到飞书台账（后台，去重，失败静默）。"""
+    try:
+        cfg = feishu_client.load_config()
+        if not feishu_client.is_configured(cfg):
+            return
+        existing = set()
+        try:
+            res = feishu_client.list_records(page_size=1000, cfg=cfg)
+            if res.get("ok"):
+                for row in res.get("rows") or []:
+                    pid = str(row.get("照片编号") or "").strip()
+                    if pid:
+                        existing.add(pid)
+        except Exception:
+            pass
+        for project in manager.list_projects(include_other=False):
+            code = str(project.get("project_code") or "")
+            if not code:
+                continue
+            try:
+                data = manager.get_project(code)
+            except Exception:
+                continue
+            for photo in data.get("photos", []):
+                pid = str(photo.get("id") or "").strip()
+                if not pid or pid in existing:
+                    continue
+                try:
+                    r = feishu_client.add_record(manager._feishu_fields(code, photo), cfg)
+                    if r.get("ok"):
+                        existing.add(pid)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def run_lan_server():
     host = runtime_host()
     port = runtime_port()
@@ -587,6 +625,8 @@ def run_lan_server():
     print("Keep this window open while other computers use the system.")
     # 启动后稍候同步一次云预览（缩略图+编号），不阻塞主服务
     threading.Timer(3.0, sync_cloud_preview_async).start()
+    # 启动后自动全量同步已有照片到飞书台账（后台，不阻塞）
+    threading.Timer(8.0, _auto_sync_feishu_all).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
