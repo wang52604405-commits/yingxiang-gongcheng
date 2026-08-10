@@ -41,8 +41,9 @@
     .fp-table tr:hover td { background: #eaf2ff; }
     .fp-table-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid #e8ebf0;
       border-radius: 8px; }
-    .fp-search { width: 100%; box-sizing: border-box; padding: 8px 12px; margin-bottom: 10px;
-      border: 1px solid #d9dee7; border-radius: 8px; font-size: 13px; flex: 0 0 auto; }
+    .fp-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex: 0 0 auto; }
+    .fp-search { flex: 1 1 auto; box-sizing: border-box; padding: 8px 12px;
+      border: 1px solid #d9dee7; border-radius: 8px; font-size: 13px; min-width: 0; }
     .fp-search:focus { outline: none; border-color: #3370ff; box-shadow: 0 0 0 3px rgba(51,112,255,.12); }
     .fp-empty { text-align: center; color: #9aa3b0; padding: 30px 0; font-size: 13px; }
     .fp-loading { text-align: center; color: #9aa3b0; padding: 20px 0; font-size: 13px; }
@@ -118,6 +119,7 @@
 
     var body = el("div", { class: "fp-body" });
     var cfgWrap = el("div", { class: "fp-config" });
+    cfgWrap.style.display = "none";
     var enChk = el("input", { type: "checkbox" });
     var tokenInput = el("input", { type: "text", placeholder: "多维表格 app_token（自动填充，一般无需改）" });
     var tableInput = el("input", { type: "text", placeholder: "table_id（自动填充，一般无需改）" });
@@ -137,18 +139,27 @@
     cfgWrap.appendChild(tableInput);
     var saveBtn = el("button", { class: "fp-btn", type: "button" }, "保存配置");
     cfgWrap.appendChild(saveBtn);
-    body.appendChild(cfgWrap);
     var tipRow = el("div");
     tipRow.appendChild(shareBtn);
     tipRow.appendChild(el("span", { class: "fp-tip" },
       "  照片上传后自动同步到本客户台账；在外地时点“远程查看”，手机打开飞书链接即可看到本表。"));
+    body.appendChild(cfgWrap);
     body.appendChild(tipRow);
-    body.appendChild(el("p", { class: "fp-tip" },
-      "每个客户使用独立台账表，数据互不可见。若需启用飞书同步：在下方填入本表 app_token / table_id 并勾选“启用同步”。"));
 
+    // 顶部工具条：设置(收起配置) + 搜索，台账表格直接满铺显示
+    var toolBar = el("div", { class: "fp-toolbar" });
+    var settingsBtn = el("button", { class: "fp-btn ghost", type: "button" }, "设置");
+    settingsBtn.onclick = function () {
+      var show = cfgWrap.style.display === "none";
+      cfgWrap.style.display = show ? "grid" : "none";
+      tipRow.style.display = show ? "" : "none";
+      settingsBtn.textContent = show ? "收起设置" : "设置";
+    };
+    toolBar.appendChild(settingsBtn);
     var tableSearch = el("input", { type: "text", class: "fp-search", placeholder: "搜索：编码 / 单元 / 题名 / 编号…" });
     tableSearch.oninput = function () { renderTable(allRows || []); };
-    body.appendChild(tableSearch);
+    toolBar.appendChild(tableSearch);
+    body.appendChild(toolBar);
     var tableScroll = el("div", { class: "fp-table-scroll" });
     var tableWrap = el("div");
     tableScroll.appendChild(tableWrap);
