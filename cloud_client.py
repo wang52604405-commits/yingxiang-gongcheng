@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 客户端云账号模块：连接授权中心服务器，完成登录、本机激活与离线缓冲。
 
@@ -26,7 +26,7 @@ PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
 DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260810-2.53"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260810-2.54"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -640,3 +640,4 @@ def _get_json_auth(url: str, token: str = ""):
             return {"ok": False, "error": f"服务器错误（{exc.code}）"}
     except Exception as exc:
         return {"ok": False, "error": f"无法连接授权服务器：{exc}"}
+

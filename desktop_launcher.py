@@ -1,4 +1,4 @@
-import os
+﻿import os
 import hashlib
 import json
 import re
@@ -21,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260810-2.53"
+APP_VERSION = "A20260810-2.54"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -521,3 +521,4 @@ Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force
 
 if __name__ == "__main__":
     DesktopLauncher().run()
+

@@ -3705,6 +3705,7 @@ def feishu_status():
         "configured": feishu_client.is_configured(cfg),
         "app_token": cfg.get("app_token", ""),
         "table_id": cfg.get("table_id", ""),
+        "share_url": cfg.get("share_url", ""),
     })
 
 

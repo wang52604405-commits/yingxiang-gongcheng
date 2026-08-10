@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 FEISHU_CONFIG_NAME = "feishu_config.json"
+FEISHU_DEFAULTS_NAME = "feishu_defaults.json"
 BASE_URL = "https://open.feishu.cn/open-apis"
 
 _token_cache = {"token": None, "exp": 0}
@@ -20,19 +22,40 @@ def _config_path() -> Path:
     return Path(data).expanduser() / FEISHU_CONFIG_NAME
 
 
+def _defaults_path() -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).resolve().parent
+        p = base / "assets" / FEISHU_DEFAULTS_NAME
+        if p.exists():
+            return p
+    p = Path(__file__).resolve().parent / "assets" / FEISHU_DEFAULTS_NAME
+    return p if p.exists() else None
+
+
 def load_config() -> dict:
-    path = _config_path()
     cfg = {}
-    if path.exists():
+    dp = _defaults_path()
+    if dp and dp.exists():
         try:
-            cfg = json.loads(path.read_text(encoding="utf-8-sig"))
+            cfg = json.loads(dp.read_text(encoding="utf-8-sig"))
         except Exception:
             cfg = {}
+    path = _config_path()
+    if path.exists():
+        try:
+            cfg.update(json.loads(path.read_text(encoding="utf-8-sig")))
+        except Exception:
+            pass
+    for key in ("app_id", "app_secret", "app_token", "table_id"):
+        env_val = os.environ.get("FEISHU_" + key.upper(), "")
+        if env_val:
+            cfg[key] = env_val
     cfg.setdefault("enabled", False)
-    cfg.setdefault("app_id", os.environ.get("FEISHU_APP_ID", ""))
-    cfg.setdefault("app_secret", os.environ.get("FEISHU_APP_SECRET", ""))
-    cfg.setdefault("app_token", os.environ.get("FEISHU_APP_TOKEN", ""))
-    cfg.setdefault("table_id", os.environ.get("FEISHU_TABLE_ID", ""))
+    if not cfg.get("enabled") and cfg.get("app_id") and cfg.get("app_secret") \
+            and cfg.get("app_token") and cfg.get("table_id"):
+        cfg["enabled"] = True
+    if not cfg.get("share_url") and cfg.get("app_token"):
+        cfg["share_url"] = "https://feishu.cn/base/" + cfg["app_token"]
     return cfg
 
 

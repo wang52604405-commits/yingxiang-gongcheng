@@ -40,6 +40,15 @@
     .fp-table tr:hover td { background: #f8faff; }
     .fp-empty { text-align: center; color: #9aa3b0; padding: 30px 0; font-size: 13px; }
     .fp-loading { text-align: center; color: #9aa3b0; padding: 20px 0; font-size: 13px; }
+    .fp-fab .fp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 8px; background: #9aa3b0; vertical-align: middle; }
+    .fp-fab .fp-dot.ok { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.7); }
+    .fp-tip { font-size: 12px; color: #8a919c; margin: 10px 0 4px; line-height: 1.7; }
+    .fp-toast { position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
+      z-index: 10001; background: rgba(20,30,45,.92); color: #fff; padding: 10px 18px;
+      border-radius: 10px; font-size: 13px; font-family: "Microsoft YaHei",sans-serif;
+      box-shadow: 0 8px 24px rgba(0,0,0,.3); opacity: 0; transition: opacity .25s; pointer-events: none; }
+    .fp-toast.show { opacity: 1; }
   `;
   document.head.appendChild(style);
 
@@ -49,6 +58,44 @@
     if (text != null) n.textContent = text;
     return n;
   }
+
+  function showToast(text) {
+    var t = document.querySelector(".fp-toast");
+    if (!t) {
+      t = el("div", { class: "fp-toast" });
+      document.body.appendChild(t);
+    }
+    t.textContent = text;
+    t.classList.add("show");
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.classList.remove("show"); }, 2800);
+  }
+
+  (function () {
+    var origFetch = window.fetch;
+    if (!origFetch) return;
+    window.fetch = function () {
+      var url = arguments[0] && arguments[0].url ? arguments[0].url : String(arguments[0] || "");
+      return origFetch.apply(this, arguments).then(function (resp) {
+        try {
+          if (/\/api\/upload/.test(url) && resp.ok) {
+            resp.clone().json().then(function (data) {
+              if (data && data.ok && data.added && data.added.length) {
+                api("/api/feishu/status").then(function (s) {
+                  if (s.configured) {
+                    showToast("照片已同步至飞书台账（" + data.added.length + " 张）");
+                    var dot = document.querySelector(".fp-fab .fp-dot");
+                    if (dot) dot.className = "fp-dot ok";
+                  }
+                });
+              }
+            }).catch(function () {});
+          }
+        } catch (e) {}
+        return resp;
+      });
+    };
+  })();
 
   function api(path, opts) {
     return fetch(path, opts).then(function (r) { return r.json(); });
@@ -69,6 +116,10 @@
     var tokenInput = el("input", { type: "text", placeholder: "多维表格 app_token（自动填充，一般无需改）" });
     var tableInput = el("input", { type: "text", placeholder: "table_id（自动填充，一般无需改）" });
     var statusEl = el("span", { class: "fp-status" }, "加载中…");
+    var shareUrl = "";
+    var shareBtn = el("button", { class: "fp-btn ghost", type: "button" }, "远程查看（手机可开）");
+    shareBtn.style.display = "none";
+    shareBtn.onclick = function () { if (shareUrl) window.open(shareUrl, "_blank"); };
 
     cfgWrap.appendChild(el("span", null, "启用同步"));
     cfgWrap.appendChild(enChk);
@@ -81,6 +132,13 @@
     var saveBtn = el("button", { class: "fp-btn", type: "button" }, "保存配置");
     cfgWrap.appendChild(saveBtn);
     body.appendChild(cfgWrap);
+    var tipRow = el("div");
+    tipRow.appendChild(shareBtn);
+    tipRow.appendChild(el("span", { class: "fp-tip" },
+      "  照片上传后自动同步到本客户台账；在外地时点“远程查看”，手机打开飞书链接即可看到本表。"));
+    body.appendChild(tipRow);
+    body.appendChild(el("p", { class: "fp-tip" },
+      "每个客户使用独立台账表，数据互不可见。若需启用飞书同步：在下方填入本表 app_token / table_id 并勾选“启用同步”。"));
 
     var tableWrap = el("div");
     body.appendChild(tableWrap);
@@ -97,6 +155,8 @@
         tableInput.value = s.table_id || "";
         statusEl.className = "fp-status " + (s.configured ? "ok" : "bad");
         statusEl.textContent = s.configured ? "已配置并启用" : "未配置";
+        shareUrl = s.share_url || "";
+        shareBtn.style.display = s.configured && shareUrl ? "" : "none";
       }).catch(function () {
         statusEl.className = "fp-status bad";
         statusEl.textContent = "接口不可用";
@@ -158,14 +218,25 @@
       });
     };
 
+    var refreshBtn = el("button", { class: "fp-btn ghost", type: "button" }, "刷新台账");
+    refreshBtn.style.marginLeft = "8px";
+    refreshBtn.onclick = refreshRecords;
+    cfgWrap.appendChild(refreshBtn);
+
     refreshStatus();
     refreshRecords();
   }
 
   function init() {
-    var fab = el("button", { class: "fp-fab" }, "飞书台账");
+    var fab = el("button", { class: "fp-fab" });
+    fab.appendChild(el("span", { class: "fp-dot" }));
+    fab.appendChild(document.createTextNode("飞书台账"));
     fab.onclick = openPanel;
     document.body.appendChild(fab);
+    api("/api/feishu/status").then(function (s) {
+      var dot = fab.querySelector(".fp-dot");
+      if (dot && s.configured) dot.className = "fp-dot ok";
+    }).catch(function () {});
   }
 
   if (document.readyState === "loading") {
