@@ -21,7 +21,8 @@ UninstallDisplayName=工程影像管理平台
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
+; 更新或安装时强制关闭正在运行的桌面启动器和后台服务，避免旧文件被保留导致版本未更新。
+CloseApplications=force
 CloseApplicationsFilter=工程影像管理平台.exe,album_server.exe
 SetupLogging=yes
 

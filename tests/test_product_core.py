@@ -13,6 +13,20 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+class DesktopUpdateCommandTest(unittest.TestCase):
+    def test_update_targets_the_running_install_directory(self):
+        from desktop_launcher import build_update_command
+
+        temp_root = Path(tempfile.gettempdir())
+        installer = temp_root / "album update.exe"
+        install_dir = temp_root / "工程影像 客户安装目录"
+        command = build_update_command(installer, install_dir)
+
+        self.assertEqual(command[0], str(installer.resolve()))
+        self.assertIn('/DIR="' + str(install_dir.resolve()) + '"', command)
+        self.assertIn("/CLOSEAPPLICATIONS", command)
+
+
 class ServerProductContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

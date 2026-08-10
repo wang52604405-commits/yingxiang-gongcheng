@@ -124,6 +124,29 @@ def read_reg_value(subkey, name, default=""):
         return default
 
 
+def build_update_command(target, install_dir):
+    """Build the unattended installer command for an in-place update.
+
+    Inno Setup falls back to ``DefaultDirName`` when ``/DIR`` is omitted.
+    That is unsafe for customers who selected a different install directory:
+    the new package is then installed beside the old one and the existing
+    shortcut keeps launching the old executable.
+    """
+    command = [
+        str(Path(target).resolve()),
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/CLOSEAPPLICATIONS",
+    ]
+    directory = Path(install_dir).expanduser()
+    if directory.is_absolute():
+        # Keep the quotes as part of the argument. This is the syntax Inno
+        # Setup expects when the path contains spaces.
+        command.append(f'/DIR="{directory.resolve()}"')
+    return command
+
+
 class DesktopLauncher:
     def __init__(self):
         self.root = tk.Tk()
@@ -398,11 +421,13 @@ class DesktopLauncher:
             self.stop_server()
         except Exception:
             pass
+        # Always update the directory containing the launcher that just
+        # checked for the update.  Relying on Inno Setup's default directory
+        # can create a second installation and leave the customer's shortcut
+        # pointing at the old version forever.
+        command = build_update_command(target, self.base)
+        subprocess.Popen(command, cwd=str(Path(target).resolve().parent))
         self.root.destroy()
-        subprocess.Popen(
-            [str(target), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-            cwd=str(target.parent),
-        )
 
     def open_app(self, url=None):
         """以原生窗口打开软件界面（WebView2），不再依赖浏览器窗口。
