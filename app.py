@@ -24,6 +24,7 @@ import licensing
 import cloud_client
 import tamper_guard
 import watermark_ocr
+import feishu_client
 
 try:
     from openpyxl import load_workbook
@@ -1828,9 +1829,44 @@ class AlbumManager:
             }
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
+            self._sync_photo_to_feishu(project_code, item)
             added.append(self._photo_item(data, item))
         self._ensure_pile_sorted(project_code, data)
         return added
+
+    def _sync_photo_to_feishu(self, project_code, item):
+        """上传照片后自动把编号/信息写入飞书台账（后台线程，失败静默）。"""
+        try:
+            cfg = feishu_client.load_config()
+            if not feishu_client.is_configured(cfg):
+                return
+            project = self.get_project(project_code) or {}
+            photo_date = str(item.get("photo_date") or "").strip()
+            date_ms = ""
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    date_ms = int(datetime.strptime(photo_date, fmt).timestamp() * 1000)
+                    break
+                except ValueError:
+                    continue
+            fields = {
+                "项目编码": str(project_code or ""),
+                "单元工程": str(project.get("project_name") or project_code or ""),
+                "照片编号": str(item.get("id") or ""),
+                "题名": str(item.get("title") or ""),
+                "拍摄时间": date_ms,
+                "拍摄者": str(item.get("photographer") or ""),
+                "照片说明": str(item.get("description") or ""),
+                "缩略图链接": "",
+            }
+            def worker():
+                try:
+                    feishu_client.add_record(fields, cfg)
+                except Exception:
+                    pass
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception:
+            pass
 
     def copy_construction_to_supervision(self, project_code, process_name="", process_code=""):
         """把施工照片复制一份为监理影像，并按监理编号规则重新编号（JY...）。"""
@@ -3658,6 +3694,47 @@ def _build_cloud_sync_payload(max_thumbs=None):
             "thumbs": thumbs,
         })
     return projects_payload
+
+
+@app.route("/api/feishu/status")
+def feishu_status():
+    cfg = feishu_client.load_config()
+    return jsonify({
+        "ok": True,
+        "enabled": bool(cfg.get("enabled")),
+        "configured": feishu_client.is_configured(cfg),
+        "app_token": cfg.get("app_token", ""),
+        "table_id": cfg.get("table_id", ""),
+    })
+
+
+@app.route("/api/feishu/config", methods=["POST"])
+def feishu_config():
+    data = request.get_json(silent=True) or {}
+    cfg = feishu_client.load_config()
+    for key in ("enabled", "app_id", "app_secret", "app_token", "table_id"):
+        if key in data:
+            cfg[key] = data[key]
+    cfg["enabled"] = bool(cfg.get("enabled"))
+    feishu_client.save_config(cfg)
+    return jsonify({"ok": True, "configured": feishu_client.is_configured(cfg)})
+
+
+@app.route("/api/feishu/records")
+def feishu_records():
+    return jsonify(feishu_client.list_records())
+
+
+@app.route("/api/feishu/test", methods=["POST"])
+def feishu_test():
+    cfg = feishu_client.load_config()
+    token = feishu_client.get_token(cfg)
+    if not token:
+        return jsonify({"ok": False, "error": "token 获取失败，请检查 App ID/Secret"})
+    r = feishu_client._request("GET", "/bitable/v1/apps/%s/tables" % cfg.get("app_token", ""), token=token)
+    if r.get("code") == 0:
+        return jsonify({"ok": True, "message": "飞书连接正常"})
+    return jsonify({"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))})
 
 
 def sync_cloud_preview_async():
