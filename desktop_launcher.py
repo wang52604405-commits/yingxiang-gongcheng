@@ -21,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260812-2.55"
+APP_VERSION = "A20260812-2.56"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
