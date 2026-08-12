@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260809-2.52.css">
+  <link rel="stylesheet" href="/assets/app-A20260812-2.55.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：只首次进入时显示，数据加载完自动淡出 -->
@@ -473,14 +473,41 @@
               <button class="ghost" type="button" id="closePrintSetupBtn">关闭</button>
             </div>
             <div class="print-setup-body">
-              <div class="print-mode-grid">
-                <button class="print-mode-card active" type="button" data-print-mode="default">
+              <div class="print-mode-grid print-style-grid">
+                <button class="print-mode-card print-style-card active" type="button" data-print-style="default" aria-pressed="true">
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-landscape ps-grid4"><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span></span>
+                  </span>
                   <strong>默认打印</strong>
-                  <span>5寸照片 · A4横版 · 每页4张 · 题名/编号/日期在照片下方 · 紧凑页边距</span>
+                  <span class="print-style-desc">A4 横版 · 每页4张（2×2）· 5寸照片 · 紧凑页边距</span>
                 </button>
-                <button class="print-mode-card" type="button" data-print-mode="custom">
+                <button class="print-mode-card print-style-card" type="button" data-print-style="portrait2" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-portrait ps-stack2"><span class="ps-slot"></span><span class="ps-slot"></span></span>
+                  </span>
+                  <strong>竖版 · 上下双图</strong>
+                  <span class="print-style-desc">A4 竖版 · 每页2张 · 横版照片 · 上半一张、下半一张</span>
+                </button>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="landscape2" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-landscape ps-pair2"><span class="ps-slot"></span><span class="ps-slot"></span></span>
+                  </span>
+                  <strong>横版 · 左右双图</strong>
+                  <span class="print-style-desc">A4 横版 · 每页2张 · 左右并排 · 5寸照片</span>
+                </button>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="single" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span>
+                  </span>
+                  <strong>横版 · 大图单张</strong>
+                  <span class="print-style-desc">A4 横版 · 每页1张 · 大幅展示</span>
+                </button>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="custom" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-portrait ps-custom"></span>
+                  </span>
                   <strong>用户自定义</strong>
-                  <span>可调整照片尺寸、每页数量、文字标签位置、字号、页边距、间距和裁切方式。</span>
+                  <span class="print-style-desc">可调整照片尺寸、每页数量、文字标签位置、字号、页边距、间距和裁切方式。</span>
                 </button>
               </div>
               <div id="printCustomPanel" class="print-custom-panel">
@@ -764,7 +791,7 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260809-2.52.js"></script>
+  <script defer src="/assets/app-A20260812-2.55.js"></script>
   <script defer src="/assets/feishu-panel.js"></script>
 </body>
 </html>

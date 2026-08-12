@@ -3046,13 +3046,27 @@ def add_share_points(target, note=""):
 
 
 def print_layout_from_request():
-    layout = str(request.args.get("layout") or read_engineering_settings().get("print_layout") or "landscape").strip().lower()
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    default_layout = (
+        style_defaults["print_layout"]
+        if style_defaults
+        else read_engineering_settings().get("print_layout", "landscape")
+    )
+    layout = str(request.args.get("layout") or default_layout).strip().lower()
     return "portrait" if layout == "portrait" else "landscape"
 
 
 def print_page_size_from_request():
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    default_size = (
+        style_defaults["print_page_size"]
+        if style_defaults
+        else read_engineering_settings().get("print_page_size", 4)
+    )
     try:
-        value = int(request.args.get("page_size") or read_engineering_settings().get("print_page_size") or 4)
+        value = int(request.args.get("page_size") or default_size)
     except (TypeError, ValueError):
         value = 4
     return value if 1 <= value <= 12 else 4
@@ -3065,8 +3079,88 @@ PRINT_PHOTO_PRESETS_CM = {
 }
 
 
+PRINT_STYLE_DEFAULTS = {
+    "default": {
+        "print_layout": "landscape",
+        "print_page_size": 4,
+        "print_photo_preset": "5inch",
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 4.0,
+        "print_margin_right_mm": 4.0,
+        "print_margin_bottom_mm": 4.0,
+        "print_margin_left_mm": 4.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "portrait2": {
+        "print_layout": "portrait",
+        "print_page_size": 2,
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 18.5,
+        "print_photo_height_cm": 12.3,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 12.0,
+        "print_margin_right_mm": 12.0,
+        "print_margin_bottom_mm": 12.0,
+        "print_margin_left_mm": 12.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 4.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "landscape2": {
+        "print_layout": "landscape",
+        "print_page_size": 2,
+        "print_photo_preset": "5inch",
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 12.0,
+        "print_margin_right_mm": 12.0,
+        "print_margin_bottom_mm": 12.0,
+        "print_margin_left_mm": 12.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "single": {
+        "print_layout": "landscape",
+        "print_page_size": 1,
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 26.0,
+        "print_photo_height_cm": 17.2,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 10.0,
+        "print_margin_right_mm": 10.0,
+        "print_margin_bottom_mm": 10.0,
+        "print_margin_left_mm": 10.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+}
+
+
 def print_settings_from_request():
     settings = read_engineering_settings()
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    if style_defaults:
+        settings.update(style_defaults)
     preset = str(request.args.get("photo_preset") or settings.get("print_photo_preset") or "5inch")
     if preset not in {*PRINT_PHOTO_PRESETS_CM, "custom"}:
         preset = "5inch"
@@ -3347,6 +3441,9 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
             row_y = 0.0
             x = 0.0
             row_h = 0.0
+        # 每页 1 张时横向居中，避免大图单张版式偏左
+        if page_size == 1:
+            x = max(0.0, (page_w - block_w) / 2)
         item = dict(photo)
         item["_left"] = round(x, 1)
         item["_top"] = round(row_y, 1)

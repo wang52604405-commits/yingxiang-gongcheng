@@ -2957,13 +2957,14 @@
       overflow-y: auto;
       overflow-x: hidden;
     }
-    .print-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .print-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
     .print-mode-card {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 7px;
       min-width: 0;
-      min-height: 118px;
-      padding: 14px;
+      min-height: 158px;
+      padding: 12px;
       border: 1px solid var(--line);
       border-radius: 10px;
       background: #fbfdff;
@@ -2971,14 +2972,15 @@
       color: var(--text);
       white-space: normal;
       overflow: hidden;
+      transition: transform 160ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out, box-shadow 160ms ease-out;
     }
     .print-mode-card:hover {
       color: var(--text);
       background: #f4f8fb;
       border-color: #a9c7d9;
       box-shadow: 0 6px 16px rgba(15, 50, 75, .08);
-      transform: none;
     }
+    .print-mode-card:active { transform: scale(0.97); }
     .print-mode-card.active {
       border-color: #7cc9a0;
       background: #e8f6ee;
@@ -2989,13 +2991,75 @@
       background: #e1f3e9;
       border-color: #60b98a;
     }
-    .print-mode-card strong { font-size: 16px; }
-    .print-mode-card span {
+    .print-mode-card strong { font-size: 15px; }
+    .print-mode-card .print-style-desc {
       min-width: 0;
       color: #51677f;
-      font-size: 13px;
-      line-height: 1.5;
+      font-size: 12.5px;
+      line-height: 1.45;
       overflow-wrap: anywhere;
+    }
+    .print-style-schematic {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      height: 92px;
+      border: 1px solid #dfe7f0;
+      border-radius: 8px;
+      background: #eef3f8;
+    }
+    .ps-paper {
+      position: relative;
+      display: grid;
+      gap: 5px;
+      padding: 7px;
+      background: #fff;
+      border: 1px solid #c3d0df;
+      border-radius: 3px;
+      box-shadow: 0 2px 6px rgba(15, 50, 75, .10);
+    }
+    .ps-landscape { width: 104px; height: 72px; }
+    .ps-portrait { width: 72px; height: 104px; }
+    .ps-grid4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    .ps-stack2 { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .ps-pair2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+    .ps-pair2 .ps-slot { align-self: start; height: 31px; }
+    .ps-single { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .ps-single .ps-slot { align-self: center; height: 38px; }
+    .ps-slot {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      border: 1px solid #c3d2e2;
+      border-radius: 2px;
+      background: linear-gradient(145deg, #f2f6fa 0%, #dde8f2 100%);
+    }
+    .ps-slot::after {
+      content: "";
+      width: 58%;
+      height: 72%;
+      background: #ffffff;
+      opacity: .92;
+      clip-path: polygon(0 100%, 30% 52%, 46% 76%, 64% 36%, 100% 100%);
+    }
+    .ps-custom { border-style: dashed; border-color: #9fb4c9; background: #fbfdff; }
+    .ps-custom::after {
+      content: "+";
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7d93ab;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 400;
+    }
+    @media (max-width: 900px) {
+      .print-style-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     .print-custom-panel {
       display: none;
