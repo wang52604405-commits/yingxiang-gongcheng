@@ -2356,10 +2356,34 @@ class AlbumManager:
         if header_index is None:
             return []
         headers = [self._cell_text(value).replace(" ", "") for value in rows[header_index]]
+        data_start_index = header_index + 1
         unit_col = next((i for i, value in enumerate(headers) if "单位工程" in value), None)
         part_col = next((i for i, value in enumerate(headers) if "分部工程" in value), None)
         item_name_col = next((i for i, value in enumerate(headers) if "单元工程名称" in value), None)
         item_code_col = next((i for i, value in enumerate(headers) if "单元工程编号" in value or "单元工程编码" in value), None)
+        # 两层合并表头：上一行是“子单位工程/分部工程/单元工程”，
+        # 下一行才是“名称/编码”。例如湔江堰灌区项目划分表。
+        if item_name_col is None or item_code_col is None:
+            if header_index + 1 < len(rows):
+                subheaders = [self._cell_text(value).replace(" ", "") for value in rows[header_index + 1]]
+                combined_headers = []
+                current_group = ""
+                for index, header in enumerate(headers):
+                    if header:
+                        current_group = header
+                    subheader = subheaders[index] if index < len(subheaders) else ""
+                    combined_headers.append(f"{current_group}{subheader}" if current_group and subheader else header)
+                candidate_unit_col = next((i for i, value in enumerate(combined_headers) if "单位工程名称" in value), None)
+                candidate_part_col = next((i for i, value in enumerate(combined_headers) if "分部工程名称" in value), None)
+                candidate_item_name_col = next((i for i, value in enumerate(combined_headers) if "单元工程名称" in value), None)
+                candidate_item_code_col = next((i for i, value in enumerate(combined_headers) if "单元工程编号" in value or "单元工程编码" in value), None)
+                if None not in {candidate_unit_col, candidate_part_col, candidate_item_name_col, candidate_item_code_col}:
+                    headers = combined_headers
+                    unit_col = candidate_unit_col
+                    part_col = candidate_part_col
+                    item_name_col = candidate_item_name_col
+                    item_code_col = candidate_item_code_col
+                    data_start_index = header_index + 2
         if None in {unit_col, part_col, item_name_col, item_code_col}:
             return []
 
@@ -2376,7 +2400,8 @@ class AlbumManager:
         carry_unit = ""
         carry_part = ""
         records = []
-        code_re = re.compile(r"[A-Za-z]+\d+(?:-\d+)+")
+        # 同时支持 A-1-1、A1-1-1 与 01-01-01 等工程划分编码。
+        code_re = re.compile(r"(?:[A-Za-z]+\d*|\d+)(?:-[A-Za-z]*\d+)+")
 
         def split_name_code(value):
             text = self._cell_text(value)
@@ -2386,7 +2411,7 @@ class AlbumManager:
             name = (text[:match.start()] + text[match.end():]).strip(" \r\n-、，")
             return name, match.group(0)
 
-        for raw_row in rows[header_index + 1:]:
+        for raw_row in rows[data_start_index:]:
             values = [self._cell_text(value) for value in raw_row]
             if len(values) <= max(unit_col, part_col, item_name_col, item_code_col):
                 continue
