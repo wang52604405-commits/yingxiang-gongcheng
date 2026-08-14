@@ -24,7 +24,6 @@ import licensing
 import cloud_client
 import tamper_guard
 import watermark_ocr
-import feishu_client
 
 try:
     from openpyxl import load_workbook
@@ -591,48 +590,6 @@ def _auto_renumber_piles_all():
         pass
 
 
-def _auto_sync_feishu_all():
-    """启动后自动全量同步已有照片到飞书台账（后台，去重，失败静默）。"""
-    try:
-        cfg = feishu_client.load_config()
-        if not feishu_client.is_configured(cfg):
-            return
-        existing = set()
-        try:
-            res = feishu_client.list_records(page_size=1000, cfg=cfg)
-            if res.get("ok"):
-                for row in res.get("rows") or []:
-                    pid = str(row.get("照片编号") or "").strip()
-                    if pid:
-                        existing.add(pid)
-        except Exception:
-            pass
-        for project in manager.list_projects(include_other=False):
-            code = str(project.get("project_code") or "")
-            if not code:
-                continue
-            try:
-                data = manager.get_project(code)
-            except Exception:
-                continue
-            for photo in data.get("photos", []):
-                pid = str(photo.get("id") or "").strip()
-                if not pid or pid in existing:
-                    continue
-                try:
-                    r = feishu_client.upsert_photo_record(
-                        manager._feishu_fields(code, photo),
-                        manager._photos_dir(code) / str(photo.get("filename") or ""),
-                        cfg,
-                    )
-                    if r.get("ok"):
-                        existing.add(pid)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-
 def run_lan_server():
     host = runtime_host()
     port = runtime_port()
@@ -652,8 +609,6 @@ def run_lan_server():
     threading.Timer(3.0, sync_cloud_preview_async).start()
     # 启动后自动把灌注桩单元按桩号连体+时间重排(三根一体)，不阻塞
     threading.Timer(6.0, _auto_renumber_piles_all).start()
-    # 启动后自动全量同步已有照片到飞书台账（后台，不阻塞）
-    threading.Timer(8.0, _auto_sync_feishu_all).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
@@ -1896,52 +1851,9 @@ class AlbumManager:
             }
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
-            self._sync_photo_to_feishu(project_code, item)
             added.append(self._photo_item(data, item))
         self._ensure_pile_sorted(project_code, data)
         return added
-
-    def _feishu_fields(self, project_code, item):
-        """把照片转成飞书台账字段（含单位/分部/单元层级）。"""
-        project = self.get_project(project_code) or {}
-        photo_date = str(item.get("photo_date") or "").strip()
-        date_ms = ""
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
-            try:
-                date_ms = int(datetime.strptime(photo_date, fmt).timestamp() * 1000)
-                break
-            except ValueError:
-                continue
-        hierarchy = self.project_hierarchy(project)
-        return {
-            "项目编码": str(project_code or ""),
-            "单位工程": str(hierarchy.get("unit_project_name") or ""),
-            "分部工程": str(hierarchy.get("part_name") or ""),
-            "单元工程": str(project.get("project_name") or project_code or ""),
-            "照片编号": str(item.get("id") or ""),
-            "题名": str(item.get("title") or ""),
-            "拍摄时间": date_ms,
-            "拍摄者": str(item.get("photographer") or ""),
-            "照片说明": str(item.get("description") or ""),
-            "缩略图链接": "",
-        }
-
-    def _sync_photo_to_feishu(self, project_code, item):
-        """上传或修改照片后，将同一条飞书记录和照片附件一起更新。"""
-        try:
-            cfg = feishu_client.load_config()
-            if not feishu_client.is_configured(cfg):
-                return
-            fields = self._feishu_fields(project_code, item)
-            photo_path = self._photos_dir(project_code) / str(item.get("filename") or "")
-            def worker():
-                try:
-                    feishu_client.upsert_photo_record(fields, photo_path, cfg)
-                except Exception:
-                    pass
-            threading.Thread(target=worker, daemon=True).start()
-        except Exception:
-            pass
 
     def copy_construction_to_supervision(self, project_code, process_name="", process_code=""):
         """把施工照片复制一份为监理影像，并按监理编号规则重新编号（JY...）。"""
@@ -2060,7 +1972,6 @@ class AlbumManager:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
                     self._write_metadata(data["project_code"], data)
                     self._ensure_pile_sorted(project_code, data)
-                    self._sync_photo_to_feishu(project_code, photo)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
 
@@ -3885,96 +3796,6 @@ def _build_cloud_sync_payload(max_thumbs=None):
             "thumbs": thumbs,
         })
     return projects_payload
-
-
-@app.route("/api/feishu/status")
-def feishu_status():
-    cfg = feishu_client.load_config()
-    return jsonify({
-        "ok": True,
-        "enabled": bool(cfg.get("enabled")),
-        "configured": feishu_client.is_configured(cfg),
-        "has_app_credentials": bool(cfg.get("app_id") and cfg.get("app_secret")),
-        "app_token": cfg.get("app_token", ""),
-        "table_id": cfg.get("table_id", ""),
-        "share_url": cfg.get("share_url", ""),
-    })
-
-
-@app.route("/api/feishu/config", methods=["POST"])
-def feishu_config():
-    data = request.get_json(silent=True) or {}
-    cfg = feishu_client.load_config()
-    for key in ("enabled", "app_id", "app_secret", "app_token", "table_id"):
-        if key in data:
-            cfg[key] = data[key]
-    cfg["enabled"] = bool(cfg.get("enabled"))
-    feishu_client.save_config(cfg)
-    return jsonify({"ok": True, "configured": feishu_client.is_configured(cfg)})
-
-
-@app.route("/api/feishu/records")
-def feishu_records():
-    return jsonify(feishu_client.list_records())
-
-
-@app.route("/api/feishu/test", methods=["POST"])
-def feishu_test():
-    cfg = feishu_client.load_config()
-    token = feishu_client.get_token(cfg)
-    if not token:
-        return jsonify({"ok": False, "error": "token 获取失败，请检查 App ID/Secret"})
-    r = feishu_client._request("GET", "/bitable/v1/apps/%s/tables" % cfg.get("app_token", ""), token=token)
-    if r.get("code") == 0:
-        return jsonify({"ok": True, "message": "飞书连接正常"})
-    return jsonify({"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))})
-
-
-@app.route("/api/feishu/sync-all", methods=["POST"])
-def feishu_sync_all():
-    """全量同步：把已有照片(含单位/分部/单元/题名/日期等)全部写入飞书台账，按照片编号去重。"""
-    user, error = login_required_json()
-    if error:
-        return error
-    cfg = feishu_client.load_config()
-    if not feishu_client.is_configured(cfg):
-        return jsonify({"ok": False, "error": "飞书未配置或未启用"})
-    try:
-        # 遍历所有项目照片。upsert 会更新已有行，因此旧照片也会补上附件和最新信息。
-        synced = 0
-        updated = 0
-        failed = 0
-        for project in manager.list_projects(include_other=False):
-            code = str(project.get("project_code") or "")
-            if not code:
-                continue
-            try:
-                data = manager.get_project(code)
-            except Exception:
-                continue
-            for photo in data.get("photos", []):
-                pid = str(photo.get("id") or "").strip()
-                if not pid:
-                    continue
-                try:
-                    fields = manager._feishu_fields(code, photo)
-                    r = feishu_client.upsert_photo_record(
-                        fields,
-                        manager._photos_dir(code) / str(photo.get("filename") or ""),
-                        cfg,
-                    )
-                    if r.get("ok"):
-                        if r.get("updated"):
-                            updated += 1
-                        else:
-                            synced += 1
-                    else:
-                        failed += 1
-                except Exception:
-                    failed += 1
-        return jsonify({"ok": True, "synced": synced, "updated": updated, "failed": failed})
-    except Exception as exc:
-        return json_error(str(exc), 500)
 
 
 def sync_cloud_preview_async():
