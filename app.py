@@ -620,7 +620,11 @@ def _auto_sync_feishu_all():
                 if not pid or pid in existing:
                     continue
                 try:
-                    r = feishu_client.add_record(manager._feishu_fields(code, photo), cfg)
+                    r = feishu_client.upsert_photo_record(
+                        manager._feishu_fields(code, photo),
+                        manager._photos_dir(code) / str(photo.get("filename") or ""),
+                        cfg,
+                    )
                     if r.get("ok"):
                         existing.add(pid)
                 except Exception:
@@ -1923,15 +1927,16 @@ class AlbumManager:
         }
 
     def _sync_photo_to_feishu(self, project_code, item):
-        """上传照片后自动把编号/信息写入飞书台账（后台线程，失败静默）。"""
+        """上传或修改照片后，将同一条飞书记录和照片附件一起更新。"""
         try:
             cfg = feishu_client.load_config()
             if not feishu_client.is_configured(cfg):
                 return
             fields = self._feishu_fields(project_code, item)
+            photo_path = self._photos_dir(project_code) / str(item.get("filename") or "")
             def worker():
                 try:
-                    feishu_client.add_record(fields, cfg)
+                    feishu_client.upsert_photo_record(fields, photo_path, cfg)
                 except Exception:
                     pass
             threading.Thread(target=worker, daemon=True).start()
@@ -2055,6 +2060,7 @@ class AlbumManager:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
                     self._write_metadata(data["project_code"], data)
                     self._ensure_pile_sorted(project_code, data)
+                    self._sync_photo_to_feishu(project_code, photo)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
 
@@ -3863,6 +3869,7 @@ def feishu_status():
         "ok": True,
         "enabled": bool(cfg.get("enabled")),
         "configured": feishu_client.is_configured(cfg),
+        "has_app_credentials": bool(cfg.get("app_id") and cfg.get("app_secret")),
         "app_token": cfg.get("app_token", ""),
         "table_id": cfg.get("table_id", ""),
         "share_url": cfg.get("share_url", ""),
@@ -3908,20 +3915,9 @@ def feishu_sync_all():
     if not feishu_client.is_configured(cfg):
         return jsonify({"ok": False, "error": "飞书未配置或未启用"})
     try:
-        # 已同步的照片编号（去重）
-        existing = set()
-        try:
-            res = feishu_client.list_records(page_size=1000, cfg=cfg)
-            if res.get("ok"):
-                for row in res.get("rows") or []:
-                    pid = str(row.get("照片编号") or "").strip()
-                    if pid:
-                        existing.add(pid)
-        except Exception:
-            pass
-        # 遍历所有项目照片
+        # 遍历所有项目照片。upsert 会更新已有行，因此旧照片也会补上附件和最新信息。
         synced = 0
-        skipped = 0
+        updated = 0
         failed = 0
         for project in manager.list_projects(include_other=False):
             code = str(project.get("project_code") or "")
@@ -3935,20 +3931,23 @@ def feishu_sync_all():
                 pid = str(photo.get("id") or "").strip()
                 if not pid:
                     continue
-                if pid in existing:
-                    skipped += 1
-                    continue
                 try:
                     fields = manager._feishu_fields(code, photo)
-                    r = feishu_client.add_record(fields, cfg)
+                    r = feishu_client.upsert_photo_record(
+                        fields,
+                        manager._photos_dir(code) / str(photo.get("filename") or ""),
+                        cfg,
+                    )
                     if r.get("ok"):
-                        synced += 1
-                        existing.add(pid)
+                        if r.get("updated"):
+                            updated += 1
+                        else:
+                            synced += 1
                     else:
                         failed += 1
                 except Exception:
                     failed += 1
-        return jsonify({"ok": True, "synced": synced, "skipped": skipped, "failed": failed})
+        return jsonify({"ok": True, "synced": synced, "updated": updated, "failed": failed})
     except Exception as exc:
         return json_error(str(exc), 500)
 

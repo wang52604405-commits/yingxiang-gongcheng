@@ -121,8 +121,10 @@
     var cfgWrap = el("div", { class: "fp-config" });
     cfgWrap.style.display = "none";
     var enChk = el("input", { type: "checkbox" });
-    var tokenInput = el("input", { type: "text", placeholder: "多维表格 app_token（自动填充，一般无需改）" });
-    var tableInput = el("input", { type: "text", placeholder: "table_id（自动填充，一般无需改）" });
+    var appIdInput = el("input", { type: "text", placeholder: "本客户飞书应用的 App ID" });
+    var appSecretInput = el("input", { type: "password", placeholder: "本客户飞书应用的 App Secret（仅保存在本机）" });
+    var tokenInput = el("input", { type: "text", placeholder: "请输入本客户自己的多维表格 app_token" });
+    var tableInput = el("input", { type: "text", placeholder: "请输入该表内“照片台账”数据表的 table_id" });
     var statusEl = el("span", { class: "fp-status" }, "加载中…");
     var shareUrl = "";
     var shareBtn = el("button", { class: "fp-btn ghost", type: "button" }, "远程查看（手机可开）");
@@ -132,6 +134,12 @@
     cfgWrap.appendChild(el("span", null, "启用同步"));
     cfgWrap.appendChild(enChk);
     cfgWrap.appendChild(statusEl);
+    cfgWrap.appendChild(el("span", null, "App ID"));
+    cfgWrap.appendChild(appIdInput);
+    cfgWrap.appendChild(el("span"));
+    cfgWrap.appendChild(el("span", null, "App Secret"));
+    cfgWrap.appendChild(appSecretInput);
+    cfgWrap.appendChild(el("span"));
     cfgWrap.appendChild(el("span", null, "app_token"));
     cfgWrap.appendChild(tokenInput);
     cfgWrap.appendChild(el("span"));
@@ -142,7 +150,7 @@
     var tipRow = el("div");
     tipRow.appendChild(shareBtn);
     tipRow.appendChild(el("span", { class: "fp-tip" },
-      "  照片上传后自动同步到本客户台账；在外地时点“远程查看”，手机打开飞书链接即可看到本表。"));
+      "  为保护客户资料，必须绑定本客户独立的飞书多维表后才会启用同步；不要填写其他项目的表格信息。"));
     body.appendChild(cfgWrap);
     body.appendChild(tipRow);
 
@@ -156,7 +164,7 @@
         syncBtn.textContent = "全量同步";
         syncBtn.disabled = false;
         if (r && r.ok) {
-          showToast("同步完成：新增 " + (r.synced || 0) + " 条，已存在 " + (r.skipped || 0) + " 条，失败 " + (r.failed || 0) + " 条");
+          showToast("同步完成：新增 " + (r.synced || 0) + " 条，更新 " + (r.updated || 0) + " 条，失败 " + (r.failed || 0) + " 条");
           refreshRecords();
         } else {
           showToast((r && r.error) || "同步失败", true);
@@ -193,6 +201,8 @@
     function refreshStatus() {
       api("/api/feishu/status").then(function (s) {
         enChk.checked = !!s.enabled;
+        appIdInput.placeholder = s.has_app_credentials ? "已在本机保存；留空表示不更改" : "本客户飞书应用的 App ID";
+        appSecretInput.placeholder = s.has_app_credentials ? "已在本机保存；留空表示不更改" : "本客户飞书应用的 App Secret（仅保存在本机）";
         tokenInput.value = s.app_token || "";
         tableInput.value = s.table_id || "";
         statusEl.className = "fp-status " + (s.configured ? "ok" : "bad");
@@ -299,7 +309,9 @@
         body: JSON.stringify({
           enabled: enChk.checked,
           app_token: tokenInput.value,
-          table_id: tableInput.value
+          table_id: tableInput.value,
+          ...(appIdInput.value.trim() ? { app_id: appIdInput.value.trim() } : {}),
+          ...(appSecretInput.value.trim() ? { app_secret: appSecretInput.value.trim() } : {})
         })
       }).then(function (r) {
         statusEl.className = "fp-status " + (r.configured ? "ok" : "bad");
