@@ -2497,23 +2497,35 @@ const $ = (selector) => document.querySelector(selector);
       const processList = isProcessProject() ? selectedProcesses() : [];
       const groups = [{ name: "", code: "" }, ...processList.map((name) => ({ name, code: processCodeForName(name) }))];
       host.className = `photo-side photo-sections ${processList.length ? "is-process-layout" : ""}`;
+      if (processList.length) {
+        const all = categoryPhotos("construction").concat(categoryPhotos("supervision"));
+        const unitN = all.filter((p) => !String(p.process_name || "").trim()).length;
+        const procN = all.length - unitN;
+        const total = (unitN + procN) || 1;
+        // 上下高度按“单元照片 / 工序照片”数量自动分配（施工/监理两栏宽度保持均分）
+        host.style.gridTemplateRows = `${Math.max(1, Math.round((unitN / total) * 100))}fr ${Math.max(1, Math.round((procN / total) * 100))}fr`;
+      } else {
+        host.style.gridTemplateRows = "";
+      }
       host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
         const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
         const photos = categoryPhotos(key).filter(processMatches);
-        const titlePrefix = group.name ? `${group.code ? group.code + " " : ""}${group.name} · ` : "";
         const sectionKey = photoSectionKey(key, group.name);
         const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
         const useConstructionBtn = key === "supervision"
           ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">复制施工照片</button>`
           : "";
         const isUnitLevel = !groupName;
+        const levelLabel = isUnitLevel ? "单元照片" : `工序：${group.name}`;
+        const catLabel = key === "supervision" ? "监理单元影像" : "施工单元影像";
+        const titleText = `${catLabel}（${levelLabel}）`;
         const collapseBtn = isUnitLevel ? "" : `<button type="button" data-toggle-collapse="${escapeHtml(sectionKey)}">收起</button>`;
         return `
           <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
             <div class="photo-section-head">
-              <h3 class="photo-section-title">${escapeHtml(titlePrefix)}${key === "supervision" ? "监理单元影像" : "施工单元影像"}</h3>
+              <h3 class="photo-section-title${isUnitLevel ? "" : " process-title"}"${isUnitLevel ? "" : ` data-toggle-collapse-title="${escapeHtml(sectionKey)}"`}>${escapeHtml(titleText)}</h3>
               <div class="photo-section-actions">
                 ${collapseBtn}
                 <button type="button" data-toggle-select-photos="${escapeHtml(sectionKey)}">${isSelectMode ? "取消" : "多选"}</button>
@@ -2555,6 +2567,15 @@ const $ = (selector) => document.querySelector(selector);
           if (!section) return;
           const collapsed = section.classList.toggle("is-collapsed");
           button.textContent = collapsed ? "展开" : "收起";
+        });
+      });
+      host.querySelectorAll("[data-toggle-collapse-title]").forEach((titleEl) => {
+        titleEl.addEventListener("click", () => {
+          const section = titleEl.closest(".photo-section");
+          if (!section) return;
+          const collapsed = section.classList.toggle("is-collapsed");
+          const btn = section.querySelector("[data-toggle-collapse]");
+          if (btn) btn.textContent = collapsed ? "展开" : "收起";
         });
       });
       host.querySelectorAll("button[data-use-construction]").forEach((button) => {

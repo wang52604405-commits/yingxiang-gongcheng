@@ -1426,6 +1426,8 @@
     .photo-section.is-collapsed { height: auto; max-height: none; }
     .photo-section.is-collapsed .photos,
     .photo-section.is-collapsed .photo-upload-form { display: none; }
+    .photo-sections.is-process-layout { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+    .photo-sections.is-process-layout .photo-section { height: auto; max-height: none; }
     .photo-section-head {
       display: flex;
       justify-content: space-between;
