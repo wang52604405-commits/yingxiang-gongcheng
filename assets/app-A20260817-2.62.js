@@ -2497,16 +2497,6 @@ const $ = (selector) => document.querySelector(selector);
       const processList = isProcessProject() ? selectedProcesses() : [];
       const groups = [{ name: "", code: "" }, ...processList.map((name) => ({ name, code: processCodeForName(name) }))];
       host.className = `photo-side photo-sections ${processList.length ? "is-process-layout" : ""}`;
-      if (processList.length) {
-        const all = categoryPhotos("construction").concat(categoryPhotos("supervision"));
-        const unitN = all.filter((p) => !String(p.process_name || "").trim()).length;
-        const procN = all.length - unitN;
-        const total = (unitN + procN) || 1;
-        // 上下高度按“单元照片 / 工序照片”数量自动分配（施工/监理两栏宽度保持均分）
-        host.style.gridTemplateRows = `${Math.max(1, Math.round((unitN / total) * 100))}fr ${Math.max(1, Math.round((procN / total) * 100))}fr`;
-      } else {
-        host.style.gridTemplateRows = "";
-      }
       host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
