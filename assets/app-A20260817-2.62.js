@@ -2442,7 +2442,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function photosForSection(key, groupName) {
-      const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
+      const processMatches = (photo) => {
+        const pn = String(photo.process_name || "").trim();
+        return groupName ? pn === groupName : pn === "";
+      };
       return categoryPhotos(key).filter(processMatches);
     }
 
@@ -2500,7 +2503,10 @@ const $ = (selector) => document.querySelector(selector);
       host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
-        const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
+        const processMatches = (photo) => {
+          const pn = String(photo.process_name || "").trim();
+          return groupName ? pn === groupName : pn === "";
+        };
         const photos = categoryPhotos(key).filter(processMatches);
         const sectionKey = photoSectionKey(key, group.name);
         const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
