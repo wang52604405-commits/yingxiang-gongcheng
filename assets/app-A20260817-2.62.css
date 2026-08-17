@@ -1413,7 +1413,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
-      padding: 8px;
+      padding: 8px 8px 18px;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto;
       align-content: start;
@@ -1590,7 +1590,7 @@
       overflow-x: hidden;
       overscroll-behavior: contain;
       scrollbar-gutter: stable;
-      padding-right: 4px;
+      padding: 0 4px 14px 0;
       -webkit-overflow-scrolling: touch;
     }
     .photo {

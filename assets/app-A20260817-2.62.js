@@ -594,16 +594,20 @@ const $ = (selector) => document.querySelector(selector);
     function renderBatchProject(project) {
       const h = getHierarchy(project);
       const code = projectCode(project);
+      const hasProcess = Array.isArray(project.processes) && project.processes.length > 0;
       const unitOn = state.batchSelectedUnits.has(code);
-      const procOn = state.batchSelectedProcesses.has(code);
+      const procOn = hasProcess && state.batchSelectedProcesses.has(code);
       const activeClass = unitOn || procOn ? " active" : "";
+      const procBtn = hasProcess
+        ? `<button type="button" class="batch-level${procOn ? " active" : ""}" data-batch-process="${escapeHtml(code)}">工序</button>`
+        : "";
       return `
         <div class="picker-project batch-project${activeClass}" data-batch-code="${escapeHtml(code)}">
           <strong>${escapeHtml(h.unitName || projectName(project))}</strong>
           <span>${escapeHtml(h.unitCode || code)}</span>
           <div class="batch-level-buttons">
             <button type="button" class="batch-level${unitOn ? " active" : ""}" data-batch-unit="${escapeHtml(code)}">单元</button>
-            <button type="button" class="batch-level${procOn ? " active" : ""}" data-batch-process="${escapeHtml(code)}">工序</button>
+            ${procBtn}
           </div>
         </div>
       `;

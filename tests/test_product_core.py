@@ -23,7 +23,10 @@ class DesktopUpdateCommandTest(unittest.TestCase):
         command = build_update_command(installer, install_dir)
 
         self.assertEqual(command[0], str(installer.resolve()))
-        self.assertIn('/DIR="' + str(install_dir.resolve()) + '"', command)
+        # 引号由 subprocess 自动添加：参数内嵌引号会被 Inno 当成路径的一部分，
+        # 导致“文件夹名称不能包含下列任何字符”更新失败（v2.62 修复后契约）。
+        self.assertIn("/DIR=" + str(install_dir.resolve()), command)
+        self.assertFalse(any('"/DIR=' in arg for arg in command), "参数内不应内嵌引号")
         self.assertIn("/CLOSEAPPLICATIONS", command)
 
 

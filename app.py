@@ -6195,7 +6195,9 @@ def print_album_category_batch(category):
             codes = sorted(set(unit_codes) | set(process_codes))
         if not codes:
             return "请选择要打印的单元工程", 400
-        project_groups = []
+        # 单元照片与工序照片分别成册：各册内部按单元顺序排，页码各自连续
+        unit_book = {"level": "单元照片", "pages": []}
+        process_book = {"level": "工序照片", "pages": []}
         for code in codes[:300]:
             project = manager.get_project(code)
             project_photos = [
@@ -6208,25 +6210,21 @@ def print_album_category_batch(category):
             unit_photos, process_photos = split_photos_by_level(project, enriched)
             want_unit = not has_level_selection or code in unit_codes
             want_process = not has_level_selection or code in process_codes
+            name = project.get("project_name") or project.get("name") or code
             if want_unit and unit_photos:
-                project_groups.append({
-                    "project_code": project.get("project_code") or code,
-                    "project_name": project.get("project_name") or project.get("name") or "",
-                    "level": "单元照片",
-                    "photos": unit_photos,
-                    "pages": layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
-                })
+                for page in layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings):
+                    unit_book["pages"].append({"unit_name": name, "items": page})
             if want_process and process_photos:
-                project_groups.append({
-                    "project_code": project.get("project_code") or code,
-                    "project_name": project.get("project_name") or project.get("name") or "",
-                    "level": "工序照片",
-                    "photos": process_photos,
-                    "pages": layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
-                })
+                for page in layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings):
+                    process_book["pages"].append({"unit_name": name, "items": page})
+        project_groups = []
+        if unit_book["pages"]:
+            project_groups.append(unit_book)
+        if process_book["pages"]:
+            project_groups.append(process_book)
         project = {
-            "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 个单元",
-            "project_name": "、".join((item.get("project_name") or item.get("project_code") or "") for item in project_groups[:3])
+            "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 册",
+            "project_name": "、".join((item.get("level") or "全部影像") for item in project_groups[:3])
                 + (" 等" if len(project_groups) > 3 else ""),
         }
         return render_template(

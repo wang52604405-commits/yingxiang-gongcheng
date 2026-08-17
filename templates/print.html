@@ -26,6 +26,7 @@
 {% set content_height = paper_height - margin_top - margin_bottom %}
 {% set title_height = 7.5 if show_page_title else 0 %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
+{% set has_books = has_project_groups and (project_groups|selectattr("level")|list|length > 0) %}
 {% set style_labels = {"default": "默认 2×2", "portrait2": "竖版 · 上下双图", "landscape2": "横版 · 左右双图", "single": "横版 · 大图单张"} %}
 {% set print_style = request.args.get("style", "") %}
 <head>
@@ -201,7 +202,7 @@
 <body class="{{ layout }}">
   <div class="toolbar">
     {% if has_project_groups %}
-    <strong>{{ label }}：共 {{ project_groups|length }} 个单元</strong>
+    <strong>{{ label }}：共 {{ project_groups|length }} {{ "册" if has_books else "个单元" }}</strong>
     {% else %}
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
@@ -217,13 +218,15 @@
       {% set g_first = loop.first %}
       {% if g_pages %}
         {% for page in g_pages %}
+        {% set page_items = page.get("items") if page is mapping and page.get("items") else page %}
+        {% set page_unit = page.unit_name or group.project_name or group.name or "" %}
         <section class="page{% if loop.first and not g_first %} group-start{% endif %}">
           {% if show_page_title %}<div class="title">
-            <h1>{{ group.project_name or group.name or "" }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
+            <h1>{{ page_unit }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
             <div class="meta">第 {{ loop.index }} 页 / 共 {{ g_pages|length }} 页</div>
           </div>{% endif %}
           <div class="layout-fixed">
-            {% for item in page %}
+            {% for item in page_items %}
             <div class="photo-item caption-{{ item._caption_position }}" style="left: {{ item._left }}mm; top: {{ item._top }}mm; width: {{ item._w }}mm; height: {{ item._block_h }}mm; --photo-w: {{ item._photo_w }}mm; --photo-h: {{ item._h }}mm; --caption-w: {{ item._caption_w }}mm; --caption-h: {{ item._caption_h }}mm;">
               <div class="photo-frame">
                 <img class="pr-{{ item._rotate or 0 }}" src="{{ item.url }}" alt="">
