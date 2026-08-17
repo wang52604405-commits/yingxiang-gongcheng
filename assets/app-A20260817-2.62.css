@@ -1426,6 +1426,8 @@
     .photo-section.is-collapsed { height: auto; max-height: none; }
     .photo-section.is-collapsed .photos,
     .photo-section.is-collapsed .photo-upload-form { display: none; }
+    .photo-section.is-empty { height: auto; max-height: none; }
+    .photo-section.is-empty .photos { max-height: 120px; }
     .photo-section-head {
       display: flex;
       justify-content: space-between;

@@ -2517,9 +2517,10 @@ const $ = (selector) => document.querySelector(selector);
         const levelLabel = isUnitLevel ? "单元照片" : `工序：${group.name}`;
         const catLabel = key === "supervision" ? "监理单元影像" : "施工单元影像";
         const titleText = `${catLabel}（${levelLabel}）`;
+        const isEmpty = photos.length === 0;
         const collapseBtn = isUnitLevel ? "" : `<button type="button" data-toggle-collapse="${escapeHtml(sectionKey)}">收起</button>`;
         return `
-          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
+          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}${isEmpty ? " is-empty" : ""}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
             <div class="photo-section-head">
               <h3 class="photo-section-title${isUnitLevel ? "" : " process-title"}"${isUnitLevel ? "" : ` data-toggle-collapse-title="${escapeHtml(sectionKey)}"`}>${escapeHtml(titleText)}</h3>
               <div class="photo-section-actions">
