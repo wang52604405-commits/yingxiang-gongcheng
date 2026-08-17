@@ -1544,7 +1544,7 @@ class AlbumManager:
         process_code = str(photo.get("process_code") or "").strip() or (
             self._process_code(data, process_name) if process_name else ""
         )
-        if processes and not is_pile_unit(data):
+        if processes:
             # 两级新编号：单元级 SYDY/JYDY，工序级 SYGX/JYGX（每工序独立从 001 开始）
             settings = read_engineering_settings()
             rules = settings.get("numbering_rules") or read_numbering_rules()
@@ -3397,6 +3397,18 @@ def enrich_print_photos(project, photos, print_settings=None):
             str(p.get("upload_time") or ""),
         ))
     return sorted(result, key=lambda p: (p.get("_process_order", 9999), p.get("process_name", ""), manager._id_number(p.get("id")), p.get("upload_time", "")))
+
+
+def split_photos_by_level(project, photos):
+    """把照片按两级分类拆分：单元照片（process_name 空）与工序照片（非空）。"""
+    unit_photos = []
+    process_photos = []
+    for photo in photos:
+        if str(photo.get("process_name") or "").strip():
+            process_photos.append(photo)
+        else:
+            unit_photos.append(photo)
+    return unit_photos, process_photos
 
 
 PHOTO_5IN_LANDSCAPE = (127.0, 89.0)
@@ -5865,8 +5877,6 @@ def api_add_process(project_code):
     try:
         with manager._project_write_lock(project_code):
             data = manager.get_project(project_code)
-            if is_pile_unit(data):
-                return json_error("灌注桩单元不支持添加工序", 400)
             processes = data.get("processes") or []
             if name in processes:
                 return json_error(f"工序「{name}」已存在", 400)
@@ -6175,6 +6185,14 @@ def print_album_category_batch(category):
         print_settings = print_settings_from_request()
         photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
         photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
+        raw_units = request.args.get("units", "")
+        raw_processes = request.args.get("processes", "")
+        unit_codes = {c.strip() for c in raw_units.split(",") if c.strip()}
+        process_codes = {c.strip() for c in raw_processes.split(",") if c.strip()}
+        has_level_selection = bool(raw_units or raw_processes)
+        if not codes:
+            # 兼容新参数：单元编码从 units/processes 汇总
+            codes = sorted(set(unit_codes) | set(process_codes))
         if not codes:
             return "请选择要打印的单元工程", 400
         project_groups = []
@@ -6187,12 +6205,25 @@ def print_album_category_batch(category):
             if not project_photos:
                 continue
             enriched = enrich_print_photos(project, project_photos, print_settings)
-            project_groups.append({
-                "project_code": project.get("project_code") or code,
-                "project_name": project.get("project_name") or project.get("name") or "",
-                "photos": enriched,
-                "pages": layout_fixed_photo_pages(enriched, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
-            })
+            unit_photos, process_photos = split_photos_by_level(project, enriched)
+            want_unit = not has_level_selection or code in unit_codes
+            want_process = not has_level_selection or code in process_codes
+            if want_unit and unit_photos:
+                project_groups.append({
+                    "project_code": project.get("project_code") or code,
+                    "project_name": project.get("project_name") or project.get("name") or "",
+                    "level": "单元照片",
+                    "photos": unit_photos,
+                    "pages": layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
+                })
+            if want_process and process_photos:
+                project_groups.append({
+                    "project_code": project.get("project_code") or code,
+                    "project_name": project.get("project_name") or project.get("name") or "",
+                    "level": "工序照片",
+                    "photos": process_photos,
+                    "pages": layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
+                })
         project = {
             "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 个单元",
             "project_name": "、".join((item.get("project_name") or item.get("project_code") or "") for item in project_groups[:3])
@@ -6235,11 +6266,32 @@ def print_album_category(category, project_code):
         if selected_ids:
             photos = [photo for photo in photos if str(photo.get("id") or "") in selected_ids]
         photos = enrich_print_photos(project, photos, print_settings)
-        project_groups = [{
-            "project_code": project.get("project_code") or project_code,
-            "project_name": project.get("project_name") or project.get("name") or "",
-            "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
-        }]
+        unit_photos, process_photos = split_photos_by_level(project, photos)
+        project_groups = []
+        if process_photos:
+            if unit_photos:
+                project_groups.append({
+                    "project_code": project.get("project_code") or project_code,
+                    "project_name": project.get("project_name") or project.get("name") or "",
+                    "level": "单元照片",
+                    "photos": unit_photos,
+                    "pages": layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
+                })
+            project_groups.append({
+                "project_code": project.get("project_code") or project_code,
+                "project_name": project.get("project_name") or project.get("name") or "",
+                "level": "工序照片",
+                "photos": process_photos,
+                "pages": layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
+            })
+        else:
+            project_groups.append({
+                "project_code": project.get("project_code") or project_code,
+                "project_name": project.get("project_name") or project.get("name") or "",
+                "level": "",
+                "photos": photos,
+                "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
+            })
         return render_template(
             "print.html",
             project=project,

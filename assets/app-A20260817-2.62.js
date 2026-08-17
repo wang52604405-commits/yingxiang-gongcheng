@@ -37,7 +37,8 @@ const $ = (selector) => document.querySelector(selector);
       printPageSize: 4,
       printStyle: "default",
       pendingPrintUrl: "",
-      batchSelectedCodes: new Set(),
+      batchSelectedUnits: new Set(),
+      batchSelectedProcesses: new Set(),
       batchVisibleCodes: [],
       photoPreviewScale: 1,
       photoPreviewFitScale: 1,
@@ -569,7 +570,8 @@ const $ = (selector) => document.querySelector(selector);
     async function openBatchPrint(category, mode = "print") {
       state.batchPrintCategory = normalizePhotoCategory(category);
       state.batchPrintMode = mode === "pdf" ? "pdf" : "print";
-      state.batchSelectedCodes = new Set();
+      state.batchSelectedUnits = new Set();
+      state.batchSelectedProcesses = new Set();
       state.batchVisibleCodes = [];
       $("#batchPrintTitle").textContent = `${batchLabel(state.batchPrintCategory)}${state.batchPrintMode === "pdf" ? "批量导出PDF" : "批量打印"}`;
       $("#batchPrintSearch").value = "";
@@ -592,13 +594,18 @@ const $ = (selector) => document.querySelector(selector);
     function renderBatchProject(project) {
       const h = getHierarchy(project);
       const code = projectCode(project);
-      const activeClass = state.batchSelectedCodes.has(code) ? " active" : "";
+      const unitOn = state.batchSelectedUnits.has(code);
+      const procOn = state.batchSelectedProcesses.has(code);
+      const activeClass = unitOn || procOn ? " active" : "";
       return `
-        <button class="picker-project batch-project${activeClass}" type="button" data-batch-code="${escapeHtml(code)}">
+        <div class="picker-project batch-project${activeClass}" data-batch-code="${escapeHtml(code)}">
           <strong>${escapeHtml(h.unitName || projectName(project))}</strong>
           <span>${escapeHtml(h.unitCode || code)}</span>
-          <span class="batch-check">${activeClass ? "✓" : "+"}</span>
-        </button>
+          <div class="batch-level-buttons">
+            <button type="button" class="batch-level${unitOn ? " active" : ""}" data-batch-unit="${escapeHtml(code)}">单元</button>
+            <button type="button" class="batch-level${procOn ? " active" : ""}" data-batch-process="${escapeHtml(code)}">工序</button>
+          </div>
+        </div>
       `;
     }
 
@@ -610,7 +617,7 @@ const $ = (selector) => document.querySelector(selector);
 
     function nodeAllSelected(node) {
       const codes = nodeDescendantCodes(node);
-      return codes.length > 0 && codes.every((code) => state.batchSelectedCodes.has(code));
+      return codes.length > 0 && codes.every((code) => state.batchSelectedUnits.has(code) && state.batchSelectedProcesses.has(code));
     }
 
     function renderBatchTreeNode(node) {
@@ -653,10 +660,17 @@ const $ = (selector) => document.querySelector(selector);
           renderBatchPrintPicker();
         });
       });
-      body.querySelectorAll("[data-batch-code]").forEach((button) => {
+      body.querySelectorAll("[data-batch-unit]").forEach((button) => {
         button.addEventListener("click", () => {
-          const code = button.dataset.batchCode;
-          state.batchSelectedCodes.has(code) ? state.batchSelectedCodes.delete(code) : state.batchSelectedCodes.add(code);
+          const code = button.dataset.batchUnit;
+          state.batchSelectedUnits.has(code) ? state.batchSelectedUnits.delete(code) : state.batchSelectedUnits.add(code);
+          renderBatchPrintPicker();
+        });
+      });
+      body.querySelectorAll("[data-batch-process]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const code = button.dataset.batchProcess;
+          state.batchSelectedProcesses.has(code) ? state.batchSelectedProcesses.delete(code) : state.batchSelectedProcesses.add(code);
           renderBatchPrintPicker();
         });
       });
@@ -665,12 +679,14 @@ const $ = (selector) => document.querySelector(selector);
           const node = findNode(state.treeRoot, button.dataset.batchSelectNode);
           const codes = nodeDescendantCodes(node);
           if (!codes.length) return;
-          const allSelected = codes.every((code) => state.batchSelectedCodes.has(code));
+          const allSelected = codes.every((code) => state.batchSelectedUnits.has(code) && state.batchSelectedProcesses.has(code));
           codes.forEach((code) => {
             if (allSelected) {
-              state.batchSelectedCodes.delete(code);
+              state.batchSelectedUnits.delete(code);
+              state.batchSelectedProcesses.delete(code);
             } else {
-              state.batchSelectedCodes.add(code);
+              state.batchSelectedUnits.add(code);
+              state.batchSelectedProcesses.add(code);
             }
           });
           renderBatchPrintPicker();
@@ -679,8 +695,9 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function updateBatchPrintCount() {
-      $("#batchPrintCount").textContent = `已选 ${state.batchSelectedCodes.size} 个`;
-      $("#batchPrintSubmitBtn").textContent = `${state.batchPrintMode === "pdf" ? "导出PDF" : "打印"}已选 ${state.batchSelectedCodes.size} 个`;
+      const codes = new Set([...state.batchSelectedUnits, ...state.batchSelectedProcesses]);
+      $("#batchPrintCount").textContent = `已选 ${codes.size} 个单元`;
+      $("#batchPrintSubmitBtn").textContent = `${state.batchPrintMode === "pdf" ? "导出PDF" : "打印"}已选 ${codes.size} 个单元`;
     }
 
     function renderBatchPrintPicker() {
@@ -714,17 +731,25 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function selectVisibleBatchProjects() {
-      state.batchVisibleCodes.forEach((code) => state.batchSelectedCodes.add(code));
+      state.batchVisibleCodes.forEach((code) => {
+        state.batchSelectedUnits.add(code);
+        state.batchSelectedProcesses.add(code);
+      });
       renderBatchPrintPicker();
     }
 
     function submitBatchPrint() {
-      const codes = Array.from(state.batchSelectedCodes);
-      if (!codes.length) {
+      const units = Array.from(state.batchSelectedUnits);
+      const processes = Array.from(state.batchSelectedProcesses);
+      if (!units.length && !processes.length) {
         showNotice(`请先选择要${state.batchPrintMode === "pdf" ? "导出PDF" : "批量打印"}的单元工程。`, true);
         return;
       }
-      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?codes=${encodeURIComponent(codes.join(","))}&mode=${encodeURIComponent(state.batchPrintMode)}`;
+      const params = new URLSearchParams();
+      if (units.length) params.set("units", units.join(","));
+      if (processes.length) params.set("processes", processes.join(","));
+      params.set("mode", state.batchPrintMode);
+      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?${params.toString()}`;
       closeBatchPrint();
       openPrintSetup(url);
     }
@@ -2362,7 +2387,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#unitSub").textContent = projectCode(project);
       renderPhotos();
       const procBar = $("#processManageBar");
-      if (procBar) procBar.style.display = String(projectName(project) || "").includes("灌注桩") ? "none" : "flex";
+      if (procBar) procBar.style.display = "flex";
     }
 
     async function addProcess() {
@@ -3920,7 +3945,8 @@ const $ = (selector) => document.querySelector(selector);
     $("#batchPrintSearch").addEventListener("input", renderBatchPrintPicker);
     $("#batchSelectVisibleBtn").addEventListener("click", selectVisibleBatchProjects);
     $("#batchClearBtn").addEventListener("click", () => {
-      state.batchSelectedCodes.clear();
+      state.batchSelectedUnits.clear();
+      state.batchSelectedProcesses.clear();
       renderBatchPrintPicker();
     });
     $("#batchPrintSubmitBtn").addEventListener("click", submitBatchPrint);

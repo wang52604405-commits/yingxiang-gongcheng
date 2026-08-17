@@ -2927,6 +2927,26 @@
       border-color: #7fb5e8;
       box-shadow: inset 0 0 0 2px rgba(15, 138, 122, .15);
     }
+    .batch-level-buttons {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .batch-level {
+      flex: 1;
+      border: 1px solid #cfd9e6;
+      background: #fff;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .batch-level.active {
+      background: #1f6feb;
+      border-color: #1f6feb;
+      color: #fff;
+    }
     .batch-check {
       position: absolute;
       right: 8px;

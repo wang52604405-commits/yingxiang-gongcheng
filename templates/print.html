@@ -77,6 +77,7 @@
       position: relative;
     }
     .page:last-of-type { page-break-after: auto; break-after: auto; }
+    .page.group-start { page-break-before: always; break-before: page; }
     .page { width: {{ content_width }}mm; height: {{ content_height }}mm; }
     .title {
       display: flex;
@@ -213,11 +214,12 @@
   {% if has_project_groups %}
     {% for group in project_groups %}
       {% set g_pages = group.pages or [] %}
+      {% set g_first = loop.first %}
       {% if g_pages %}
         {% for page in g_pages %}
-        <section class="page">
+        <section class="page{% if loop.first and not g_first %} group-start{% endif %}">
           {% if show_page_title %}<div class="title">
-            <h1>{{ group.project_name or group.name or "" }}</h1>
+            <h1>{{ group.project_name or group.name or "" }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
             <div class="meta">第 {{ loop.index }} 页 / 共 {{ g_pages|length }} 页</div>
           </div>{% endif %}
           <div class="layout-fixed">
