@@ -35,7 +35,7 @@ const $ = (selector) => document.querySelector(selector);
       batchPrintCategory: "construction",
       batchPrintMode: "print",
       printPageSize: 4,
-      printSetupMode: "default",
+      printStyle: "default",
       pendingPrintUrl: "",
       batchSelectedCodes: new Set(),
       batchVisibleCodes: [],
@@ -4156,12 +4156,81 @@ const $ = (selector) => document.querySelector(selector);
       requireSelected(() => { window.location.href = `/api/export/${encodeURIComponent(state.selectedCode)}/zip`; });
     }
 
-    function setPrintSetupMode(mode) {
-      state.printSetupMode = mode === "custom" ? "custom" : "default";
-      document.querySelectorAll("[data-print-mode]").forEach((button) => {
-        button.classList.toggle("active", button.dataset.printMode === state.printSetupMode);
+    const PRINT_STYLES = {
+      default: {
+        style: "default",
+        layout: "landscape", page_size: "4", photo_preset: "5inch",
+        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
+        margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4",
+        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
+        show_page_title: "1", caption_fields: "title,id,photo_date"
+      },
+      portrait2: {
+        style: "portrait2",
+        layout: "portrait", page_size: "2", photo_preset: "custom",
+        photo_width_cm: "18.5", photo_height_cm: "12.3",
+        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
+        margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12",
+        horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "cover",
+        show_page_title: "1", caption_fields: "title,id,photo_date"
+      },
+      landscape2: {
+        style: "landscape2",
+        layout: "landscape", page_size: "2", photo_preset: "5inch",
+        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
+        margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12",
+        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
+        show_page_title: "1", caption_fields: "title,id,photo_date"
+      },
+      single: {
+        style: "single",
+        layout: "landscape", page_size: "1", photo_preset: "custom",
+        photo_width_cm: "26.0", photo_height_cm: "17.2",
+        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
+        margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10",
+        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
+        show_page_title: "1", caption_fields: "title,id,photo_date"
+      },
+      custom: null
+    };
+
+    function selectPrintStyle(style) {
+      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "default";
+      document.querySelectorAll("[data-print-style]").forEach((button) => {
+        const active = button.dataset.printStyle === state.printStyle;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
       });
-      $("#printCustomPanel").classList.toggle("open", state.printSetupMode === "custom");
+      const isCustom = state.printStyle === "custom";
+      $("#printCustomPanel").classList.toggle("open", isCustom);
+      if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+    }
+
+    function applyPrintStyleToPanel(style) {
+      const params = PRINT_STYLES[style];
+      if (!params) return;
+      const map = {
+        layout: "printSetupLayout",
+        page_size: "printSetupPageSize",
+        photo_preset: "printSetupPreset",
+        photo_width_cm: "printSetupPhotoWidth",
+        photo_height_cm: "printSetupPhotoHeight",
+        caption_position: "printSetupCaptionPosition",
+        caption_size_mm: "printSetupCaptionSize",
+        caption_font_size: "printSetupCaptionFont",
+        margin_top_mm: "printSetupMarginTop",
+        margin_right_mm: "printSetupMarginRight",
+        margin_bottom_mm: "printSetupMarginBottom",
+        margin_left_mm: "printSetupMarginLeft",
+        horizontal_gap_mm: "printSetupHorizontalGap",
+        vertical_gap_mm: "printSetupVerticalGap",
+        image_fit: "printSetupImageFit",
+        show_page_title: "printSetupShowPageTitle"
+      };
+      Object.entries(map).forEach(([key, id]) => {
+        if (params[key] !== undefined) $(`#${id}`).value = String(params[key]);
+      });
+      syncPrintSetupPreset();
     }
 
     function syncPrintSetupPreset() {
@@ -4202,7 +4271,7 @@ const $ = (selector) => document.querySelector(selector);
     function openPrintSetup(url) {
       state.pendingPrintUrl = url;
       loadPrintSetupValues();
-      setPrintSetupMode("default");
+      selectPrintStyle("default");
       $("#printSetupModal").classList.add("open");
       $("#printSetupModal").setAttribute("aria-hidden", "false");
     }
@@ -4214,14 +4283,8 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function printSetupParams() {
-      if (state.printSetupMode === "default") {
-        return new URLSearchParams({
-          layout: "landscape", page_size: "4", photo_preset: "5inch",
-          caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
-          margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4",
-          horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
-          show_page_title: "1", caption_fields: "title,id,photo_date"
-        });
+      if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) {
+        return new URLSearchParams(PRINT_STYLES[state.printStyle]);
       }
       const pageSize = Math.max(1, Math.min(12, Number($("#printSetupPageSize").value || 4)));
       const fields = Array.from(document.querySelectorAll("[data-print-caption-field]:checked")).map((input) => input.value);
@@ -4264,7 +4327,7 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
-    document.querySelectorAll("[data-print-mode]").forEach((button) => button.addEventListener("click", () => setPrintSetupMode(button.dataset.printMode)));
+    document.querySelectorAll("[data-print-style]").forEach((button) => button.addEventListener("click", () => selectPrintStyle(button.dataset.printStyle)));
     $("#printSetupPreset").addEventListener("change", syncPrintSetupPreset);
     $("#printSetupCaptionPosition").addEventListener("change", () => {
       const side = ["left", "right"].includes($("#printSetupCaptionPosition").value);

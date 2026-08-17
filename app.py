@@ -24,7 +24,6 @@ import licensing
 import cloud_client
 import tamper_guard
 import watermark_ocr
-import feishu_client
 
 try:
     from openpyxl import load_workbook
@@ -592,44 +591,6 @@ def _auto_renumber_piles_all():
         pass
 
 
-def _auto_sync_feishu_all():
-    """启动后自动全量同步已有照片到飞书台账（后台，去重，失败静默）。"""
-    try:
-        cfg = feishu_client.load_config()
-        if not feishu_client.is_configured(cfg):
-            return
-        existing = set()
-        try:
-            res = feishu_client.list_records(page_size=1000, cfg=cfg)
-            if res.get("ok"):
-                for row in res.get("rows") or []:
-                    pid = str(row.get("照片编号") or "").strip()
-                    if pid:
-                        existing.add(pid)
-        except Exception:
-            pass
-        for project in manager.list_projects(include_other=False):
-            code = str(project.get("project_code") or "")
-            if not code:
-                continue
-            try:
-                data = manager.get_project(code)
-            except Exception:
-                continue
-            for photo in data.get("photos", []):
-                pid = str(photo.get("id") or "").strip()
-                if not pid or pid in existing:
-                    continue
-                try:
-                    r = feishu_client.add_record(manager._feishu_fields(code, photo), cfg)
-                    if r.get("ok"):
-                        existing.add(pid)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-
 def run_lan_server():
     host = runtime_host()
     port = runtime_port()
@@ -649,8 +610,6 @@ def run_lan_server():
     threading.Timer(3.0, sync_cloud_preview_async).start()
     # 启动后自动把灌注桩单元按桩号连体+时间重排(三根一体)，不阻塞
     threading.Timer(6.0, _auto_renumber_piles_all).start()
-    # 启动后自动全量同步已有照片到飞书台账（后台，不阻塞）
-    threading.Timer(8.0, _auto_sync_feishu_all).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
 
 
@@ -1965,51 +1924,9 @@ class AlbumManager:
             }
             data["photos"].append(item)
             self._write_metadata(data["project_code"], data)
-            self._sync_photo_to_feishu(project_code, item)
             added.append(self._photo_item(data, item))
         self._renumber_after_change(project_code, data)
         return added
-
-    def _feishu_fields(self, project_code, item):
-        """把照片转成飞书台账字段（含单位/分部/单元层级）。"""
-        project = self.get_project(project_code) or {}
-        photo_date = str(item.get("photo_date") or "").strip()
-        date_ms = ""
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d"):
-            try:
-                date_ms = int(datetime.strptime(photo_date, fmt).timestamp() * 1000)
-                break
-            except ValueError:
-                continue
-        hierarchy = self.project_hierarchy(project)
-        return {
-            "项目编码": str(project_code or ""),
-            "单位工程": str(hierarchy.get("unit_project_name") or ""),
-            "分部工程": str(hierarchy.get("part_name") or ""),
-            "单元工程": str(project.get("project_name") or project_code or ""),
-            "照片编号": str(item.get("id") or ""),
-            "题名": str(item.get("title") or ""),
-            "拍摄时间": date_ms,
-            "拍摄者": str(item.get("photographer") or ""),
-            "照片说明": str(item.get("description") or ""),
-            "缩略图链接": "",
-        }
-
-    def _sync_photo_to_feishu(self, project_code, item):
-        """上传照片后自动把编号/信息写入飞书台账（后台线程，失败静默）。"""
-        try:
-            cfg = feishu_client.load_config()
-            if not feishu_client.is_configured(cfg):
-                return
-            fields = self._feishu_fields(project_code, item)
-            def worker():
-                try:
-                    feishu_client.add_record(fields, cfg)
-                except Exception:
-                    pass
-            threading.Thread(target=worker, daemon=True).start()
-        except Exception:
-            pass
 
     def copy_construction_to_supervision(self, project_code, process_name="", process_code=""):
         """把施工照片复制一份为监理影像，并按监理编号规则重新编号（JY...）。"""
@@ -2437,10 +2354,34 @@ class AlbumManager:
         if header_index is None:
             return []
         headers = [self._cell_text(value).replace(" ", "") for value in rows[header_index]]
+        data_start_index = header_index + 1
         unit_col = next((i for i, value in enumerate(headers) if "单位工程" in value), None)
         part_col = next((i for i, value in enumerate(headers) if "分部工程" in value), None)
         item_name_col = next((i for i, value in enumerate(headers) if "单元工程名称" in value), None)
         item_code_col = next((i for i, value in enumerate(headers) if "单元工程编号" in value or "单元工程编码" in value), None)
+        # 两层合并表头：上一行是“子单位工程/分部工程/单元工程”，
+        # 下一行才是“名称/编码”。例如湔江堰灌区项目划分表。
+        if item_name_col is None or item_code_col is None:
+            if header_index + 1 < len(rows):
+                subheaders = [self._cell_text(value).replace(" ", "") for value in rows[header_index + 1]]
+                combined_headers = []
+                current_group = ""
+                for index, header in enumerate(headers):
+                    if header:
+                        current_group = header
+                    subheader = subheaders[index] if index < len(subheaders) else ""
+                    combined_headers.append(f"{current_group}{subheader}" if current_group and subheader else header)
+                candidate_unit_col = next((i for i, value in enumerate(combined_headers) if "单位工程名称" in value), None)
+                candidate_part_col = next((i for i, value in enumerate(combined_headers) if "分部工程名称" in value), None)
+                candidate_item_name_col = next((i for i, value in enumerate(combined_headers) if "单元工程名称" in value), None)
+                candidate_item_code_col = next((i for i, value in enumerate(combined_headers) if "单元工程编号" in value or "单元工程编码" in value), None)
+                if None not in {candidate_unit_col, candidate_part_col, candidate_item_name_col, candidate_item_code_col}:
+                    headers = combined_headers
+                    unit_col = candidate_unit_col
+                    part_col = candidate_part_col
+                    item_name_col = candidate_item_name_col
+                    item_code_col = candidate_item_code_col
+                    data_start_index = header_index + 2
         if None in {unit_col, part_col, item_name_col, item_code_col}:
             return []
 
@@ -2457,7 +2398,8 @@ class AlbumManager:
         carry_unit = ""
         carry_part = ""
         records = []
-        code_re = re.compile(r"[A-Za-z]+\d+(?:-\d+)+")
+        # 同时支持 A-1-1、A1-1-1 与 01-01-01 等工程划分编码。
+        code_re = re.compile(r"(?:[A-Za-z]+\d*|\d+)(?:-[A-Za-z]*\d+)+")
 
         def split_name_code(value):
             text = self._cell_text(value)
@@ -2467,7 +2409,7 @@ class AlbumManager:
             name = (text[:match.start()] + text[match.end():]).strip(" \r\n-、，")
             return name, match.group(0)
 
-        for raw_row in rows[header_index + 1:]:
+        for raw_row in rows[data_start_index:]:
             values = [self._cell_text(value) for value in raw_row]
             if len(values) <= max(unit_col, part_col, item_name_col, item_code_col):
                 continue
@@ -3133,13 +3075,27 @@ def add_share_points(target, note=""):
 
 
 def print_layout_from_request():
-    layout = str(request.args.get("layout") or read_engineering_settings().get("print_layout") or "landscape").strip().lower()
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    default_layout = (
+        style_defaults["print_layout"]
+        if style_defaults
+        else read_engineering_settings().get("print_layout", "landscape")
+    )
+    layout = str(request.args.get("layout") or default_layout).strip().lower()
     return "portrait" if layout == "portrait" else "landscape"
 
 
 def print_page_size_from_request():
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    default_size = (
+        style_defaults["print_page_size"]
+        if style_defaults
+        else read_engineering_settings().get("print_page_size", 4)
+    )
     try:
-        value = int(request.args.get("page_size") or read_engineering_settings().get("print_page_size") or 4)
+        value = int(request.args.get("page_size") or default_size)
     except (TypeError, ValueError):
         value = 4
     return value if 1 <= value <= 12 else 4
@@ -3152,8 +3108,88 @@ PRINT_PHOTO_PRESETS_CM = {
 }
 
 
+PRINT_STYLE_DEFAULTS = {
+    "default": {
+        "print_layout": "landscape",
+        "print_page_size": 4,
+        "print_photo_preset": "5inch",
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 4.0,
+        "print_margin_right_mm": 4.0,
+        "print_margin_bottom_mm": 4.0,
+        "print_margin_left_mm": 4.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "portrait2": {
+        "print_layout": "portrait",
+        "print_page_size": 2,
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 18.5,
+        "print_photo_height_cm": 12.3,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 12.0,
+        "print_margin_right_mm": 12.0,
+        "print_margin_bottom_mm": 12.0,
+        "print_margin_left_mm": 12.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 4.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "landscape2": {
+        "print_layout": "landscape",
+        "print_page_size": 2,
+        "print_photo_preset": "5inch",
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 12.0,
+        "print_margin_right_mm": 12.0,
+        "print_margin_bottom_mm": 12.0,
+        "print_margin_left_mm": 12.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+    "single": {
+        "print_layout": "landscape",
+        "print_page_size": 1,
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 26.0,
+        "print_photo_height_cm": 17.2,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.0,
+        "print_caption_font_size": 7.2,
+        "print_margin_top_mm": 10.0,
+        "print_margin_right_mm": 10.0,
+        "print_margin_bottom_mm": 10.0,
+        "print_margin_left_mm": 10.0,
+        "print_horizontal_gap_mm": 2.0,
+        "print_vertical_gap_mm": 2.0,
+        "print_image_fit": "cover",
+        "print_show_page_title": True,
+        "print_caption_fields": ["title", "id", "photo_date"],
+    },
+}
+
+
 def print_settings_from_request():
     settings = read_engineering_settings()
+    style = str(request.args.get("style") or "").strip().lower()
+    style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    if style_defaults:
+        settings.update(style_defaults)
     preset = str(request.args.get("photo_preset") or settings.get("print_photo_preset") or "5inch")
     if preset not in {*PRINT_PHOTO_PRESETS_CM, "custom"}:
         preset = "5inch"
@@ -3442,6 +3478,9 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
             row_y = 0.0
             x = 0.0
             row_h = 0.0
+        # 每页 1 张时横向居中，避免大图单张版式偏左
+        if page_size == 1:
+            x = max(0.0, (page_w - block_w) / 2)
         item = dict(photo)
         item["_left"] = round(x, 1)
         item["_top"] = round(row_y, 1)
@@ -3852,103 +3891,6 @@ def _build_cloud_sync_payload(max_thumbs=None):
             "thumbs": thumbs,
         })
     return projects_payload
-
-
-@app.route("/api/feishu/status")
-def feishu_status():
-    cfg = feishu_client.load_config()
-    return jsonify({
-        "ok": True,
-        "enabled": bool(cfg.get("enabled")),
-        "configured": feishu_client.is_configured(cfg),
-        "app_token": cfg.get("app_token", ""),
-        "table_id": cfg.get("table_id", ""),
-        "share_url": cfg.get("share_url", ""),
-    })
-
-
-@app.route("/api/feishu/config", methods=["POST"])
-def feishu_config():
-    data = request.get_json(silent=True) or {}
-    cfg = feishu_client.load_config()
-    for key in ("enabled", "app_id", "app_secret", "app_token", "table_id"):
-        if key in data:
-            cfg[key] = data[key]
-    cfg["enabled"] = bool(cfg.get("enabled"))
-    feishu_client.save_config(cfg)
-    return jsonify({"ok": True, "configured": feishu_client.is_configured(cfg)})
-
-
-@app.route("/api/feishu/records")
-def feishu_records():
-    return jsonify(feishu_client.list_records())
-
-
-@app.route("/api/feishu/test", methods=["POST"])
-def feishu_test():
-    cfg = feishu_client.load_config()
-    token = feishu_client.get_token(cfg)
-    if not token:
-        return jsonify({"ok": False, "error": "token 获取失败，请检查 App ID/Secret"})
-    r = feishu_client._request("GET", "/bitable/v1/apps/%s/tables" % cfg.get("app_token", ""), token=token)
-    if r.get("code") == 0:
-        return jsonify({"ok": True, "message": "飞书连接正常"})
-    return jsonify({"ok": False, "error": "%s: %s" % (r.get("code"), r.get("msg"))})
-
-
-@app.route("/api/feishu/sync-all", methods=["POST"])
-def feishu_sync_all():
-    """全量同步：把已有照片(含单位/分部/单元/题名/日期等)全部写入飞书台账，按照片编号去重。"""
-    user, error = login_required_json()
-    if error:
-        return error
-    cfg = feishu_client.load_config()
-    if not feishu_client.is_configured(cfg):
-        return jsonify({"ok": False, "error": "飞书未配置或未启用"})
-    try:
-        # 已同步的照片编号（去重）
-        existing = set()
-        try:
-            res = feishu_client.list_records(page_size=1000, cfg=cfg)
-            if res.get("ok"):
-                for row in res.get("rows") or []:
-                    pid = str(row.get("照片编号") or "").strip()
-                    if pid:
-                        existing.add(pid)
-        except Exception:
-            pass
-        # 遍历所有项目照片
-        synced = 0
-        skipped = 0
-        failed = 0
-        for project in manager.list_projects(include_other=False):
-            code = str(project.get("project_code") or "")
-            if not code:
-                continue
-            try:
-                data = manager.get_project(code)
-            except Exception:
-                continue
-            for photo in data.get("photos", []):
-                pid = str(photo.get("id") or "").strip()
-                if not pid:
-                    continue
-                if pid in existing:
-                    skipped += 1
-                    continue
-                try:
-                    fields = manager._feishu_fields(code, photo)
-                    r = feishu_client.add_record(fields, cfg)
-                    if r.get("ok"):
-                        synced += 1
-                        existing.add(pid)
-                    else:
-                        failed += 1
-                except Exception:
-                    failed += 1
-        return jsonify({"ok": True, "synced": synced, "skipped": skipped, "failed": failed})
-    except Exception as exc:
-        return json_error(str(exc), 500)
 
 
 def sync_cloud_preview_async():

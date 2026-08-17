@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260810-2.54"
+APP_VERSION = "A20260812-2.56"
 APP_REG_KEY = r"Software\工程影像管理平台"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\工程影像管理平台"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"

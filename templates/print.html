@@ -26,6 +26,8 @@
 {% set content_height = paper_height - margin_top - margin_bottom %}
 {% set title_height = 7.5 if show_page_title else 0 %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
+{% set style_labels = {"default": "默认 2×2", "portrait2": "竖版 · 上下双图", "landscape2": "横版 · 左右双图", "single": "横版 · 大图单张"} %}
+{% set print_style = request.args.get("style", "") %}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -203,7 +205,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张 · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}。系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张 · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}。系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
