@@ -580,6 +580,7 @@ def _auto_renumber_piles_all():
                 continue
             try:
                 with manager._project_write_lock(code):
+                    manager._repair_renumber_leftovers(code)
                     data = manager.get_project(code)
                     if not is_pile_unit(data):
                         continue
@@ -1236,16 +1237,16 @@ class AlbumManager:
         data.setdefault("keywords", "")
         data.setdefault("source_fields", {})
         data.setdefault("photos", [])
-        # 产品统一按单元管理，不再划分或保存“工序”。旧数据读取时同步清空。
-        data["division_type"] = "unit"
-        data["processes"] = []
-        if isinstance(data.get("source_fields"), dict):
-            data["source_fields"]["划分类型"] = "不划分工序单元"
-            data["source_fields"]["工序名称列表"] = ""
+        # 两级照片分类：单元级（process_name 空）+ 工序级（process_name 非空）
+        data.setdefault("division_type", "unit")
+        data.setdefault("processes", [])
+        if not isinstance(data.get("processes"), list):
+            data["processes"] = []
+        data["processes"] = [str(p).strip() for p in data["processes"] if str(p).strip()]
         for photo in data.get("photos", []):
             if isinstance(photo, dict):
-                photo["process_name"] = ""
-                photo["process_code"] = ""
+                photo.setdefault("process_name", "")
+                photo.setdefault("process_code", "")
         return data
 
     def _write_metadata(self, project_code, data):
@@ -1466,8 +1467,10 @@ class AlbumManager:
         orientation = str(orientation or "landscape").strip()
         return orientation if orientation in PHOTO_ORIENTATIONS else "landscape"
 
-    def _photo_filename(self, category, archive_id, ext):
+    def _photo_filename(self, category, archive_id, ext, scope_code=""):
         ext = ".jpg" if ext == ".jpeg" else ext
+        if scope_code:
+            return f"{category}-{scope_code}-{safe_project_code(archive_id)}{ext}"
         return f"{category}-{safe_project_code(archive_id)}{ext}"
 
     def _id_number(self, photo_id):
@@ -1485,7 +1488,9 @@ class AlbumManager:
         used = set()
         candidate_photo = {"process_name": process_name, "process_code": process_code}
         target_scope = self._sequence_scope(meta, candidate_photo, category)
-        scope_process_code = str(process_code or "").strip()
+        scope_process_code = str(process_code or "").strip() or (
+            self._process_code(meta, process_name) if process_name else ""
+        )
         for photo in meta.get("photos", []):
             photo_category = self._normalize_category(photo.get("category"))
             if photo_category == category and self._sequence_scope(meta, photo, category) == target_scope:
@@ -1497,7 +1502,11 @@ class AlbumManager:
                     continue
                 stem = file_path.stem
                 if stem.startswith(f"{category}-"):
-                    if target_scope[1] and scope_process_code and scope_process_code not in stem:
+                    if target_scope[1]:
+                        if scope_process_code and scope_process_code not in stem:
+                            continue
+                    elif re.search(r"-GY\d+-", stem):
+                        # 单元级作用域：跳过工序级文件（文件名含 -GYxxx-）
                         continue
                     used.add(self._id_number(stem.rsplit("-", 1)[-1]))
                 elif category == "construction" and stem.isdigit():
@@ -1516,8 +1525,8 @@ class AlbumManager:
         item.setdefault("photo_date", "")
         item.setdefault("photographer", "")
         item.setdefault("description", "")
-        item["process_name"] = ""
-        item["process_code"] = ""
+        item.setdefault("process_name", "")
+        item.setdefault("process_code", "")
         item.setdefault("uploaded_by", "")
         item["rotation"] = normalize_photo_rotation(item.get("rotation"))
         orientation = self._normalize_orientation(item.get("orientation"))
@@ -1557,19 +1566,37 @@ class AlbumManager:
             index = processes.index(process_name) + 1
         except ValueError:
             index = 1
-        settings = read_engineering_settings()
-        prefix = str(settings.get("process_prefix") or "").strip()
-        if not prefix:
-            return ""
-        digits = int(settings.get("process_digits") or 3)
-        return f"{prefix}{index:0{digits}d}"
+        return f"GY{index:03d}"
 
     def _sequence_scope(self, data, photo, category):
         category = self._normalize_category(category)
-        return (category, "")
+        photo = photo or {}
+        process_name = str(photo.get("process_name") or "").strip()
+        process_code = str(photo.get("process_code") or "").strip()
+        if not process_code and process_name:
+            process_code = self._process_code(data, process_name)
+        return (category, process_code)
 
     def _archive_id_for_photo(self, data, photo, category, sequence):
         category = self._normalize_category(category)
+        photo = photo or {}
+        processes = data.get("processes") or []
+        process_name = str(photo.get("process_name") or "").strip()
+        process_code = str(photo.get("process_code") or "").strip() or (
+            self._process_code(data, process_name) if process_name else ""
+        )
+        if processes and not is_pile_unit(data):
+            # 两级新编号：单元级 SYDY/JYDY，工序级 SYGX/JYGX（每工序独立从 001 开始）
+            settings = read_engineering_settings()
+            rules = settings.get("numbering_rules") or read_numbering_rules()
+            rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
+            try:
+                digits = max(1, min(8, int(rule.get("digits", 3))))
+            except (TypeError, ValueError):
+                digits = 3
+            seq = f"{int(sequence):0{digits}d}"
+            cat = "JY" if category == "supervision" else "SY"
+            return f"{cat}{'GX' if process_code else 'DY'}{seq}"
         settings = read_engineering_settings()
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
@@ -1601,9 +1628,38 @@ class AlbumManager:
             seq=f"{int(sequence):0{digits}d}",
         )
 
+    def _repair_renumber_leftovers(self, project_code):
+        """把上次重新编号中断遗留的 .renumber-* 临时文件恢复为记录引用的正式名。
+
+        只做文件改名与缩略图补生成，不改动 metadata.json、编号和顺序，
+        保证记录与文件始终一致，避免照片“记录在、文件找不到”。
+        """
+        photos_dir = self._photos_dir(project_code)
+        if not photos_dir.is_dir():
+            return 0
+        restored = 0
+        for temp_path in sorted(photos_dir.glob(".renumber-*")):
+            m = re.match(r"^\.renumber-\d+-(.+)$", temp_path.name)
+            if not m:
+                continue
+            target_name = m.group(1)
+            target_path = photos_dir / target_name
+            if target_path.exists():
+                # 目标已存在：记录与实际文件已对齐，残留临时文件不动，避免覆盖
+                continue
+            try:
+                temp_path.rename(target_path)
+            except OSError:
+                continue
+            self._ensure_thumbnail(project_code, target_name)
+            restored += 1
+        return restored
+
     def _renumber_category(self, project_code, data, category):
         category = self._normalize_category(category)
         photos_dir = self._photos_dir(project_code)
+        # 先修复历史中断残留，避免在残留临时文件基础上继续改名
+        self._repair_renumber_leftovers(project_code)
         matching = [
             photo for photo in data.get("photos", [])
             if self._normalize_category(photo.get("category")) == category
@@ -1621,7 +1677,10 @@ class AlbumManager:
             if photo.get("process_name") and not photo.get("process_code"):
                 photo["process_code"] = self._process_code(data, photo.get("process_name"))
             new_id = self._archive_id_for_photo(data, photo, category, index)
-            new_filename = self._photo_filename(category, new_id, ext)
+            scope_code = str(photo.get("process_code") or "").strip() or (
+                self._process_code(data, photo.get("process_name")) if photo.get("process_name") else ""
+            )
+            new_filename = self._photo_filename(category, new_id, ext, scope_code)
             if new_filename == old_filename and str(photo.get("id") or "") == new_id:
                 # 顺序未变，无需重命名（刷新自动归位时避免无谓的文件搬移）
                 continue
@@ -1629,9 +1688,9 @@ class AlbumManager:
             temp_path = photos_dir / f".renumber-{index}-{new_filename}"
             if old_path.exists():
                 old_path.rename(temp_path)
-                staged.append((photo, temp_path, photos_dir / new_filename, new_id, new_filename))
+                staged.append((photo, old_filename, temp_path, photos_dir / new_filename, new_id, new_filename))
             else:
-                staged.append((photo, None, photos_dir / new_filename, new_id, new_filename))
+                staged.append((photo, old_filename, None, photos_dir / new_filename, new_id, new_filename))
             # 清掉旧缩略图；目标缩略图如有残留也删掉，避免显示成旧照片
             if old_thumb.exists():
                 try:
@@ -1644,22 +1703,34 @@ class AlbumManager:
                 except OSError:
                     pass
 
-        for photo, temp_path, new_path, new_id, new_filename in staged:
+        for photo, old_filename, temp_path, new_path, new_id, new_filename in staged:
             old_backup_name = str(photo.get("original_backup") or "")
-            if temp_path and temp_path.exists():
-                if new_path.exists():
-                    new_path.unlink()
-                temp_path.rename(new_path)
-            if old_backup_name:
-                old_backup = self._original_path(project_code, old_backup_name)
-                new_backup = self._original_path(project_code, new_filename)
-                if old_backup.exists() and old_backup != new_backup:
-                    new_backup.parent.mkdir(parents=True, exist_ok=True)
-                    if new_backup.exists():
-                        new_backup.unlink()
-                    old_backup.rename(new_backup)
-                photo["original_backup"] = new_filename
-            self._ensure_thumbnail(project_code, new_filename)
+            try:
+                if temp_path and temp_path.exists():
+                    if new_path.exists():
+                        new_path.unlink()
+                    temp_path.rename(new_path)
+                if old_backup_name:
+                    old_backup = self._original_path(project_code, old_backup_name)
+                    new_backup = self._original_path(project_code, new_filename)
+                    if old_backup.exists() and old_backup != new_backup:
+                        new_backup.parent.mkdir(parents=True, exist_ok=True)
+                        if new_backup.exists():
+                            new_backup.unlink()
+                        old_backup.rename(new_backup)
+                    photo["original_backup"] = new_filename
+                self._ensure_thumbnail(project_code, new_filename)
+            except OSError:
+                # 中断保护：把临时文件恢复回记录引用的旧名，保证记录与文件一致，
+                # 不遗留 .renumber-* 临时文件，也不影响已成功完成的其它照片。
+                if temp_path and temp_path.exists() and old_filename:
+                    old_path = photos_dir / old_filename
+                    try:
+                        if not old_path.exists():
+                            temp_path.rename(old_path)
+                    except OSError:
+                        pass
+                continue
             photo["id"] = new_id
             photo["category"] = category
             photo["category_label"] = PHOTO_CATEGORY_LABELS[category]
@@ -1841,8 +1912,10 @@ class AlbumManager:
         data = self.get_project(project_code)
         category = self._normalize_category(category)
         orientation = self._normalize_orientation(orientation)
-        process_name = ""
-        process_code = ""
+        process_name = str(process_name or "").strip()
+        process_code = str(process_code or "").strip() or (
+            self._process_code(data, process_name) if process_name else ""
+        )
         photos_dir = self._photos_dir(project_code)
         photos_dir.mkdir(parents=True, exist_ok=True)
         added = []
@@ -1854,11 +1927,11 @@ class AlbumManager:
                 raise ValueError(f"只支持 JPG/PNG 图片：{original_name}")
 
             photo_id = self._next_id(data["project_code"], category, process_name, process_code)
-            filename = self._photo_filename(category, photo_id, ext)
+            filename = self._photo_filename(category, photo_id, ext, process_code)
             target = photos_dir / filename
             while target.exists():
                 photo_id = self._next_id(data["project_code"], category, process_name, process_code)
-                filename = self._photo_filename(category, photo_id, ext)
+                filename = self._photo_filename(category, photo_id, ext, process_code)
                 target = photos_dir / filename
 
             compression = self._save_optimized_upload(file_storage, target)
@@ -1875,8 +1948,8 @@ class AlbumManager:
                 "photo_date": str(meta.get("photo_date") or photo_date or "").strip(),
                 "photographer": str(photographer or "").strip(),
                 "description": str(description or "").strip(),
-                "process_name": "",
-                "process_code": "",
+                "process_name": process_name,
+                "process_code": process_code,
                 "uploaded_by": str(uploaded_by or "").strip(),
                 "orientation": orientation,
                 "orientation_label": PHOTO_ORIENTATION_LABELS[orientation],
@@ -1894,7 +1967,7 @@ class AlbumManager:
             self._write_metadata(data["project_code"], data)
             self._sync_photo_to_feishu(project_code, item)
             added.append(self._photo_item(data, item))
-        self._ensure_pile_sorted(project_code, data)
+        self._renumber_after_change(project_code, data)
         return added
 
     def _feishu_fields(self, project_code, item):
@@ -1945,8 +2018,6 @@ class AlbumManager:
 
     def _copy_to_supervision_locked(self, project_code, process_name="", process_code=""):
         data = self.get_project(project_code)
-        process_name = ""
-        process_code = ""
         photos_dir = self._photos_dir(project_code)
         photos_dir.mkdir(parents=True, exist_ok=True)
         source_photos = [
@@ -1980,10 +2051,10 @@ class AlbumManager:
             if not src_path.exists():
                 continue
             ext = Path(src_path.name).suffix.lower() or ".jpg"
-            photo_process_name = ""
-            photo_process_code = ""
+            photo_process_name = str(photo.get("process_name") or "").strip()
+            photo_process_code = str(photo.get("process_code") or "").strip()
             photo_id = self._next_id(data["project_code"], "supervision", photo_process_name, photo_process_code)
-            filename = self._photo_filename("supervision", photo_id, ext)
+            filename = self._photo_filename("supervision", photo_id, ext, photo_process_code)
             target = photos_dir / filename
             while target.exists():
                 photo_id = self._next_id(data["project_code"], "supervision", photo_process_name, photo_process_code)
@@ -2026,7 +2097,7 @@ class AlbumManager:
         if not added:
             raise ValueError("施工照片文件不存在，无法复制")
         self._write_metadata(data["project_code"], data)
-        self._ensure_pile_sorted(project_code, data)
+        self._renumber_after_change(project_code, data)
         return added
 
     def update_photo(self, project_code, photo_id, **updates):
@@ -2045,8 +2116,10 @@ class AlbumManager:
                         photo["photographer"] = str(updates.get("photographer") or "").strip()
                     if "description" in updates:
                         photo["description"] = str(updates.get("description") or "").strip()
-                    photo["process_name"] = ""
-                    photo["process_code"] = ""
+                    if "process_name" in updates:
+                        new_process_name = str(updates.get("process_name") or "").strip()
+                        photo["process_name"] = new_process_name
+                        photo["process_code"] = self._process_code(data, new_process_name) if new_process_name else ""
                     if "orientation" in updates:
                         orientation = self._normalize_orientation(updates.get("orientation"))
                         photo["orientation"] = orientation
@@ -2054,7 +2127,7 @@ class AlbumManager:
                     if "rotation" in updates:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
                     self._write_metadata(data["project_code"], data)
-                    self._ensure_pile_sorted(project_code, data)
+                    self._renumber_after_change(project_code, data)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
 
@@ -2181,6 +2254,20 @@ class AlbumManager:
             self._auto_sort_piles_locked(project_code, data)
             return True
         return False
+
+    def _renumber_after_change(self, project_code, data):
+        """照片增/删/复制后，按当前顺序自动重新编号（编号=顺序），无需手动点击。
+
+        灌注桩单元保持按日期自动排序并编号；其它单元按当前展示顺序编号。
+        须在已持有写锁时调用。
+        """
+        if is_pile_unit(data):
+            self._auto_sort_piles_locked(project_code, data)
+        else:
+            for category in PHOTO_CATEGORIES:
+                self._renumber_category(project_code, data, category)
+            self._write_metadata(data["project_code"], data)
+            self.invalidate_projects_cache()
 
     def classify(self, prompt):
         text = str(prompt or "").strip().lower()
@@ -3128,6 +3215,10 @@ def photo_detail_rows(project, photo, print_settings=None):
         if not label:
             continue
         value = str(field.get("value") or "").strip() if key == "custom" else str(source.get(key) or "").strip()
+        if key == "photo_date":
+            # 时刻只用于排序，打印时只显示日期
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
+            value = m.group(1) if m else value
         if not value:
             continue
         rows.append({"label": label, "value": value, "source": key})
@@ -3156,6 +3247,10 @@ def photo_detail_rows(project, photo, print_settings=None):
             filtered.append(row)
             continue
         value = str(source.get(key) or "").strip()
+        if key == "photo_date":
+            # 时刻只用于排序，打印时只显示日期
+            m = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
+            value = m.group(1) if m else value
         if value:
             filtered.append({"label": source_labels.get(key, key), "value": value, "source": key})
     return filtered
@@ -4714,7 +4809,7 @@ def api_cloud_download_update():
 
 @app.route("/api/cloud/apply-update", methods=["POST"])
 def api_cloud_apply_update():
-    """下载最新安装包并静默安装（本机服务有权限）。安装完成后需重启软件。"""
+    """下载最新安装包并静默安装（本机服务有权限）。安装完成后自动启动新版本。"""
     if not getattr(sys, "frozen", False):
         return jsonify({"ok": False, "error": "仅安装版支持自动更新"}), 400
     try:
@@ -4722,25 +4817,59 @@ def api_cloud_apply_update():
         url = result.get("download_url") or ""
         if not url or not result.get("has_update"):
             return jsonify({"ok": False, "error": "当前已是最新版本"}), 400
+        expected_sha256 = str(result.get("sha256") or "").lower()
+        expected_size = int(result.get("size") or 0)
         import urllib.request
         install_dir = Path(sys.executable).resolve().parent
         installer = install_dir / "album-update-installer.exe"
-        # 下载安装包
+        if installer.exists():
+            try:
+                installer.unlink()
+            except OSError:
+                pass
+        # 下载安装包（含完整性校验，避免装到损坏/不完整文件）
         req = urllib.request.Request(url, headers={"User-Agent": "album-updater/1.0"})
-        with urllib.request.urlopen(req, timeout=180) as resp, open(installer, "wb") as out:
+        digest = hashlib.sha256()
+        with urllib.request.urlopen(req, timeout=300) as resp, open(installer, "wb") as out:
             while True:
                 chunk = resp.read(64 * 1024)
                 if not chunk:
                     break
                 out.write(chunk)
-        if not installer.exists() or installer.stat().st_size == 0:
-            return jsonify({"ok": False, "error": "安装包下载失败"}), 500
-        # 静默安装（Inno Setup），安装后自动覆盖服务并重启
-        subprocess.Popen(
-            [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", f"/DIR={install_dir}"],
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        return jsonify({"ok": True, "message": "安装包已下载并开始安装，安装完成后请重启软件"})
+                digest.update(chunk)
+        size = installer.stat().st_size if installer.exists() else 0
+        if size == 0:
+            return jsonify({"ok": False, "error": "安装包下载失败（文件为空），请重试"}), 500
+        if expected_size and size != expected_size:
+            return jsonify({"ok": False, "error": f"安装包大小校验失败（应为 {expected_size}，实际 {size}），请重试"}), 500
+        if expected_sha256 and digest.hexdigest().lower() != expected_sha256:
+            return jsonify({"ok": False, "error": "安装包完整性校验失败，请重新下载"}), 500
+
+        # 先返回响应，再由后台延迟启动安装（安装器会关闭本服务进程，不能阻塞等待）
+        def _launch_install():
+            try:
+                cmd = [
+                    str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                    "/CLOSEAPPLICATIONS", f"/DIR={install_dir}",
+                ]
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                code = proc.wait(timeout=600)
+                if code != 0:
+                    cloud_client.report_error(
+                        "update_install",
+                        f"安装程序退出码 {code}，安装目录 {install_dir}",
+                    )
+            except Exception as exc:
+                try:
+                    cloud_client.report_error("update_install", str(exc))
+                except Exception:
+                    pass
+
+        threading.Timer(2.0, _launch_install).start()
+        return jsonify({"ok": True, "message": "安装包已校验并开始安装，完成后将自动启动新版本；若长时间未自动启动，请打开安装目录手动运行安装程序"})
     except Exception as exc:
         return json_error(str(exc), 500)
 
@@ -5781,6 +5910,56 @@ def api_photos(project_code):
         return json_error(str(exc), 404)
 
 
+@app.route("/api/photos/<path:project_code>/processes", methods=["POST"])
+def api_add_process(project_code):
+    """给单元添加工序：添加后该单元切换为两级编号（单元级 SYDY/JYDY，工序级 SYGX/JYGX）。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or request.form
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return json_error("工序名称不能为空", 400)
+    try:
+        with manager._project_write_lock(project_code):
+            data = manager.get_project(project_code)
+            if is_pile_unit(data):
+                return json_error("灌注桩单元不支持添加工序", 400)
+            processes = data.get("processes") or []
+            if name in processes:
+                return json_error(f"工序「{name}」已存在", 400)
+            processes.append(name)
+            data["processes"] = processes
+            manager._renumber_after_change(project_code, data)
+        return jsonify({"ok": True, "processes": data["processes"], "photos": manager.get_photos(project_code)})
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
+@app.route("/api/photos/<path:project_code>/processes/<path:process_name>", methods=["DELETE"])
+def api_delete_process(project_code, process_name):
+    """删除单元下的工序（仅允许删除没有照片的空工序）。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    try:
+        with manager._project_write_lock(project_code):
+            data = manager.get_project(project_code)
+            processes = data.get("processes") or []
+            name = str(process_name or "").strip()
+            if name not in processes:
+                return json_error("工序不存在", 404)
+            for photo in data.get("photos", []):
+                if str(photo.get("process_name") or "").strip() == name:
+                    return json_error(f"工序「{name}」下还有照片，请先移走再删除", 400)
+            processes.remove(name)
+            data["processes"] = processes
+            manager._renumber_after_change(project_code, data)
+        return jsonify({"ok": True, "processes": data["processes"], "photos": manager.get_photos(project_code)})
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
 @app.route("/api/photos/<path:project_code>/<photo_id>", methods=["PATCH"])
 def api_update_photo(project_code, photo_id):
     user, error = login_required_json()
@@ -6295,7 +6474,7 @@ def delete_photo(project_code, photo_id):
                     kept.append(photo)
             data["photos"] = kept
             manager._write_metadata(project_code, data)
-            manager._ensure_pile_sorted(project_code, data)
+            manager._renumber_after_change(project_code, data)
         return jsonify({"ok": True, "deleted": deleted, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc))

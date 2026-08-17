@@ -1423,6 +1423,9 @@
     }
     .photo-section:nth-child(1) { border-left: 4px solid #16a34a; }
     .photo-section:nth-child(2) { border-left: 4px solid #0891b2; }
+    .photo-section.is-collapsed { height: auto; max-height: none; }
+    .photo-section.is-collapsed .photos,
+    .photo-section.is-collapsed .photo-upload-form { display: none; }
     .photo-section-head {
       display: flex;
       justify-content: space-between;

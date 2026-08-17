@@ -38,10 +38,35 @@ def step1_pyinstaller():
     return code == 0
 
 
+def step0_assets():
+    """重新压缩前端 JS/CSS 为 .gz，保证服务端 gzip 通道与源文件一致（避免旧 gz 被客户端一年缓存）。"""
+    import gzip as _gzip
+    targets = sorted((USE / "assets").glob("*.js")) + sorted((USE / "assets").glob("*.css"))
+    for name in targets:
+        with _gzip.open(USE / "assets" / f"{name.name}.gz", "wb", compresslevel=6) as g:
+            g.write(name.read_bytes())
+    print(f"  [OK] 已重新压缩 {len(targets)} 个前端资源（.gz）")
+    return True
+
+
 def step2_manifest():
     print("\n[2/5] Rebuild tamper guard manifest ...")
     code = run([sys.executable, "tamper_guard.py", "build", str(DIST_DIR), "--key", str(PRIVATE_KEY)], cwd=USE)
-    return code == 0
+    if code != 0:
+        return False
+    # 防呆：签名后立即用内置公钥自校验，密钥不匹配时中止发布，
+    # 避免再次出现“装上了却因防篡改校验失败无法启动”的问题。
+    try:
+        import tamper_guard
+        ok, problems = tamper_guard.verify_installation(DIST_DIR, force=True)
+        if not ok:
+            print(f"  [FAIL] 防篡改清单自校验未通过：{problems}")
+            return False
+        print("  [OK] 防篡改清单自校验通过（密钥与内置公钥匹配）")
+    except Exception as exc:
+        print(f"  [FAIL] 防篡改自校验异常：{exc}")
+        return False
+    return True
 
 
 def step3_inno():
@@ -73,7 +98,7 @@ def main() -> int:
     if not ISCC.exists():
         print(f"[ERR] Inno Setup 未安装: {ISCC}")
         return 1
-    steps = [step1_pyinstaller, step2_manifest, step3_inno, step4_verify_no_key, step5_delivery]
+    steps = [step0_assets, step1_pyinstaller, step2_manifest, step3_inno, step4_verify_no_key, step5_delivery]
     for step in steps:
         if not step():
             print(f"\n[BUILD FAILED] 步骤失败: {step.__name__}")

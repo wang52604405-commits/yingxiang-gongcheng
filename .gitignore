@@ -51,3 +51,8 @@ venv/
 服务器访问-工程影像管理平台/
 # Codex local isolation and test data
 .codex-tmp/
+
+# 独立子仓库与备份文件（不进本项目仓库）
+memory-hub/
+*.bak-*
+*.bak

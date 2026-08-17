@@ -83,20 +83,20 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function selectedProcesses() {
-      return [];
+      const proj = state.selectedProject || {};
+      return Array.isArray(proj.processes) ? proj.processes : [];
     }
 
     function isProcessProject() {
-      return false;
+      const proj = state.selectedProject || {};
+      return Array.isArray(proj.processes) && proj.processes.length > 0;
     }
 
     function processCodeForName(name) {
       const settings = state.engineeringSettings || {};
-      const prefix = String(settings.process_prefix || "").trim();
-      if (!prefix) return "";
       const index = Math.max(1, selectedProcesses().indexOf(name) + 1);
       const digits = Math.max(1, Math.min(8, Number(settings.process_digits || 3)));
-      return `${prefix}${String(index).padStart(digits, "0")}`;
+      return `GY${String(index).padStart(digits, "0")}`;
     }
 
     function displayPhotoDate(photo) {
@@ -2361,6 +2361,29 @@ const $ = (selector) => document.querySelector(selector);
       $("#unitTitle").textContent = projectName(project);
       $("#unitSub").textContent = projectCode(project);
       renderPhotos();
+      const procBar = $("#processManageBar");
+      if (procBar) procBar.style.display = String(projectName(project) || "").includes("灌注桩") ? "none" : "flex";
+    }
+
+    async function addProcess() {
+      if (!state.selectedCode) return;
+      const name = ($("#newProcessName")?.value || "").trim();
+      if (!name) {
+        showNotice("请输入工序名称", true);
+        return;
+      }
+      if (!(await ensureAuthenticated("添加工序"))) return;
+      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/processes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (state.selectedProject) state.selectedProject.processes = data.processes || [];
+      state.photos = data.photos || [];
+      if ($("#newProcessName")) $("#newProcessName").value = "";
+      renderPhotos();
+      await refreshAll();
+      showNotice(`工序「${name}」已添加，照片编号已按两级规则更新。`);
     }
 
     // 列表缩略图占位：缩略图未生成时显示灰色占位，绝不回退加载原图
@@ -2446,10 +2469,9 @@ const $ = (selector) => document.querySelector(selector);
       const categories = isOtherUnit
         ? photoCategories.filter((c) => c.key !== "supervision")
         : photoCategories;
-      const groups = isProcessProject()
-        ? selectedProcesses().map((name) => ({ name, code: processCodeForName(name) }))
-        : [{ name: "", code: "" }];
-      host.className = `photo-side photo-sections ${groups.length > 1 ? "is-process-layout" : ""}`;
+      const processList = isProcessProject() ? selectedProcesses() : [];
+      const groups = [{ name: "", code: "" }, ...processList.map((name) => ({ name, code: processCodeForName(name) }))];
+      host.className = `photo-side photo-sections ${processList.length ? "is-process-layout" : ""}`;
       host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
@@ -2461,11 +2483,14 @@ const $ = (selector) => document.querySelector(selector);
         const useConstructionBtn = key === "supervision"
           ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">复制施工照片</button>`
           : "";
+        const isUnitLevel = !groupName;
+        const collapseBtn = isUnitLevel ? "" : `<button type="button" data-toggle-collapse="${escapeHtml(sectionKey)}">收起</button>`;
         return `
-          <section class="photo-section" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
+          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
             <div class="photo-section-head">
               <h3 class="photo-section-title">${escapeHtml(titlePrefix)}${key === "supervision" ? "监理单元影像" : "施工单元影像"}</h3>
               <div class="photo-section-actions">
+                ${collapseBtn}
                 <button type="button" data-toggle-select-photos="${escapeHtml(sectionKey)}">${isSelectMode ? "取消" : "多选"}</button>
                 <button class="secondary" type="button" data-delete-selected-photos="${escapeHtml(sectionKey)}">删除</button>
                 ${useConstructionBtn}
@@ -2499,8 +2524,13 @@ const $ = (selector) => document.querySelector(selector);
           if (form) form.style.display = form.style.display === "none" ? "grid" : "none";
         });
       });
-      host.querySelectorAll("button[data-renumber-photos]").forEach((button) => {
-        button.addEventListener("click", () => renumberPhotos().catch((error) => showNotice(error.message, true)));
+      host.querySelectorAll("button[data-toggle-collapse]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const section = button.closest(".photo-section");
+          if (!section) return;
+          const collapsed = section.classList.toggle("is-collapsed");
+          button.textContent = collapsed ? "展开" : "收起";
+        });
       });
       host.querySelectorAll("button[data-use-construction]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -3042,6 +3072,12 @@ const $ = (selector) => document.querySelector(selector);
       $("#photoEditPhotographerInput").value = photo.photographer || "";
       $("#photoEditRotationInput").value = String(Number(photo.rotation || 0) || 0);
       $("#photoEditDescriptionInput").value = photo.description || "";
+      const processSelect = $("#photoEditProcessInput");
+      if (processSelect) {
+        const processes = isProcessProject() ? selectedProcesses() : [];
+        processSelect.innerHTML = `<option value="">单元照片</option>` + processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+        processSelect.value = photo.process_name || "";
+      }
       $("#photoEditSub").textContent = `${photo.id || ""} · ${batchLabel(category)}`;
       $("#viewOriginalPhotoBtn").disabled = !photo.original_backup;
       $("#restoreOriginalPhotoBtn").disabled = !photo.original_backup;
@@ -3087,8 +3123,8 @@ const $ = (selector) => document.querySelector(selector);
       const photoDate = $("#photoEditDateInput").value.trim();
       const photographer = $("#photoEditPhotographerInput").value.trim();
       const currentPhoto = state.photos.find((item) => normalizePhotoCategory(item.category) === state.editingPhoto.category && String(item.id || "") === state.editingPhoto.photoId);
-      const processName = currentPhoto?.process_name || "";
-      const processCode = currentPhoto?.process_code || "";
+      const processName = $("#photoEditProcessInput") ? $("#photoEditProcessInput").value : (currentPhoto?.process_name || "");
+      const processCode = "";
       const orientation = normalizePhotoOrientation("landscape");
       const rotation = Number($("#photoEditRotationInput").value || 0);
       const description = $("#photoEditDescriptionInput").value.trim();
@@ -3224,7 +3260,7 @@ const $ = (selector) => document.querySelector(selector);
       state.photos = data.photos || [];
       renderPhotos();
       await refreshAll();
-      showNotice("照片已删除。如需整理编号，请点击重新编号。");
+      showNotice("照片已删除，编号已自动更新。");
     }
 
     async function reorderPhoto(category, photoId, direction) {
@@ -3329,31 +3365,6 @@ const $ = (selector) => document.querySelector(selector);
           });
         });
       });
-    }
-
-    async function renumberPhotos() {
-      if (!state.selectedCode) {
-        showNotice("请先选择单元工程。", true);
-        return;
-      }
-      if (!(await ensureAuthenticated("重新编号"))) return;
-      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/renumber`, { method: "POST" });
-      state.photos = data.photos || [];
-      state.selectedPrintPhotos = {};
-      renderPhotos();
-      showNotice("已按当前照片顺序重新编号。");
-    }
-
-    async function renumberAllPhotos() {
-      if (!(await ensureAuthenticated("整体编号重排"))) return;
-      if (!window.confirm("将对当前工程全部单元的照片整体重排：灌注桩单元会先按桩号连体（钻孔→钢筋笼→混凝土）并按施工完成时间排序，再统一重新编号。确定继续吗？")) return;
-      try {
-        const data = await apiJson("/api/renumber-all", { method: "POST" });
-        await refreshAll();
-        showNotice(`整体重排完成：共处理 ${data.renumbered || 0} 张照片（${data.project_count || 0} 个单元），灌注桩单元已按桩号连体+施工时间排序。`);
-      } catch (error) {
-        showNotice(error.message, true);
-      }
     }
 
     // 首屏冷启动加载动画：进度条跟随真实加载阶段推进；加载再快也保证至少显示 1.6 秒走完，页面数据全部显示才消失
@@ -4270,11 +4281,17 @@ const $ = (selector) => document.querySelector(selector);
     $("#printSupervisionBtn").addEventListener("click", () => openUnitPrint("supervision"));
     $("#menuPrintConstructionBtn").addEventListener("click", () => openBatchPrint("construction", "print"));
     $("#menuPrintSupervisionBtn").addEventListener("click", () => openBatchPrint("supervision", "print"));
-    $("#renumberAllBtn").addEventListener("click", renumberAllPhotos);
     $("#exportZipBtn").addEventListener("click", exportSelectedZip);
     $("#deleteUnitBtn").addEventListener("click", () => deleteUnit().catch((error) => showNotice(error.message, true)));
     $("#exportPhotoStatsBtn").addEventListener("click", () => { window.location.href = "/api/export/photo-statistics.xlsx"; });
     $("#exportUnitStatsBtn").addEventListener("click", () => requireSelected(() => { window.location.href = `/api/export/photo-statistics.xlsx?codes=${encodeURIComponent(state.selectedCode)}`; }));
+    $("#addProcessBtn").addEventListener("click", () => addProcess().catch((error) => showNotice(error.message, true)));
+    $("#newProcessName").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addProcess().catch((error) => showNotice(error.message, true));
+      }
+    });
     $("#settingsProjectInfoBtn").addEventListener("click", openProjectInfoModal);
     $("#settingsExportCsvBtn").addEventListener("click", exportSelectedCsv);
     $("#settingsExportJsonBtn").addEventListener("click", exportSelectedJson);

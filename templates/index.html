@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260809-2.52.css">
+  <link rel="stylesheet" href="/assets/app-A20260817-2.62.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：只首次进入时显示，数据加载完自动淡出 -->
@@ -79,7 +79,6 @@
             <button type="button" id="menuPrintConstructionBtn">施工打印</button>
             <button type="button" id="menuPrintSupervisionBtn">监理打印</button>
             <button type="button" id="exportPhotoStatsBtn">导出统计表</button>
-            <button type="button" id="renumberAllBtn">整体编号重排</button>
           </div>
         </div>
         <div class="support-wrap">
@@ -330,6 +329,11 @@
           </div>
 
           <section class="panel">
+            <div id="processManageBar" style="display:none; align-items:center; gap:8px; margin-bottom:10px;">
+              <span>工序分类：</span>
+              <input id="newProcessName" type="text" placeholder="输入工序名称，如：混凝土" style="flex:1; min-width:160px;">
+              <button type="button" id="addProcessBtn">添加工序</button>
+            </div>
             <div class="unit-combined">
               <section id="photoSectionsHost" class="photo-side photo-sections">
                 <section class="photo-section">
@@ -552,6 +556,7 @@
               <label>题名<input id="photoEditTitleInput" type="text"></label>
               <label>日期<input id="photoEditDateInput" type="date" required></label>
               <label>摄影者<input id="photoEditPhotographerInput" type="text"></label>
+              <label>工序<select id="photoEditProcessInput"><option value="">单元照片</option></select></label>
               <label>打印旋转<select id="photoEditRotationInput" class="orientation-select"><option value="0">不旋转</option><option value="90">左转90°</option><option value="180">旋转180°</option><option value="270">右转90°</option></select></label>
               <label>文字说明<textarea id="photoEditDescriptionInput"></textarea></label>
               <div class="photo-storage-actions">
@@ -764,7 +769,7 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260809-2.52.js"></script>
+  <script defer src="/assets/app-A20260817-2.62.js"></script>
   <script defer src="/assets/feishu-panel.js"></script>
 </body>
 </html>

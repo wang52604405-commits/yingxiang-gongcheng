@@ -21,7 +21,7 @@ import tamper_guard
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260810-2.54"
+APP_VERSION = "A20260817-2.62"
 UPDATE_URL = "http://47.95.221.66/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -218,9 +218,10 @@ def build_update_command(target, install_dir):
     ]
     directory = Path(install_dir).expanduser()
     if directory.is_absolute():
-        # Keep the quotes as part of the argument. This is the syntax Inno
-        # Setup expects when the path contains spaces.
-        command.append(f'/DIR="{directory.resolve()}"')
+        # 不能自己加引号：subprocess 传参时引号会被 Inno 当成路径的一部分，
+        # 导致“文件夹名称不能包含下列任何字符”直接失败。
+        # 含空格时由 subprocess 自动加外层引号即可。
+        command.append(f"/DIR={directory.resolve()}")
     return command
 
 
