@@ -2386,15 +2386,12 @@ const $ = (selector) => document.querySelector(selector);
       $("#unitTitle").textContent = projectName(project);
       $("#unitSub").textContent = projectCode(project);
       renderPhotos();
-      const procBar = $("#processManageBar");
-      if (procBar) procBar.style.display = "flex";
     }
 
     async function addProcess() {
       if (!state.selectedCode) return;
-      const name = ($("#newProcessName")?.value || "").trim();
+      const name = (window.prompt("请输入工序名称（如：混凝土）") || "").trim();
       if (!name) {
-        showNotice("请输入工序名称", true);
         return;
       }
       if (!(await ensureAuthenticated("添加工序"))) return;
@@ -2405,7 +2402,6 @@ const $ = (selector) => document.querySelector(selector);
       });
       if (state.selectedProject) state.selectedProject.processes = data.processes || [];
       state.photos = data.photos || [];
-      if ($("#newProcessName")) $("#newProcessName").value = "";
       renderPhotos();
       await refreshAll();
       showNotice(`工序「${name}」已添加，照片编号已按两级规则更新。`);
@@ -4342,12 +4338,6 @@ const $ = (selector) => document.querySelector(selector);
     $("#exportPhotoStatsBtn").addEventListener("click", () => { window.location.href = "/api/export/photo-statistics.xlsx"; });
     $("#exportUnitStatsBtn").addEventListener("click", () => requireSelected(() => { window.location.href = `/api/export/photo-statistics.xlsx?codes=${encodeURIComponent(state.selectedCode)}`; }));
     $("#addProcessBtn").addEventListener("click", () => addProcess().catch((error) => showNotice(error.message, true)));
-    $("#newProcessName").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        addProcess().catch((error) => showNotice(error.message, true));
-      }
-    });
     $("#settingsProjectInfoBtn").addEventListener("click", openProjectInfoModal);
     $("#settingsExportCsvBtn").addEventListener("click", exportSelectedCsv);
     $("#settingsExportJsonBtn").addEventListener("click", exportSelectedJson);
