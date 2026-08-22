@@ -101,7 +101,7 @@
   <div id="projectsBox" class="wrap" style="display:none">
     <div class="card">
       <div id="whoami" class="muted"></div>
-      <div class="price-line" id="priceLine">月度会员 15 元 / 终身会员 169 元（内测会员价）；云端仅提供可辨认缩略图，不上传原图。</div>
+      <div class="price-line" id="priceLine">月度会员 39 元 / 终身会员 399 元（原价）；云端仅提供可辨认缩略图，不上传原图。</div>
     </div>
     <div class="grid" id="projectGrid"></div>
   </div>
@@ -159,7 +159,7 @@
       const data = await api("/api/product-config");
       if (!data.ok) return;
       const pricing = data.product?.pricing || {};
-      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 15} 元 / 终身会员 ${pricing.lifetime_price || 169} 元（${pricing.price_label || "内测会员价"}）；云端仅提供可辨认缩略图，不上传原图。`;
+      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 39} 元 / 终身会员 ${pricing.lifetime_price || 399} 元（${pricing.price_label || "原价"}）；云端仅提供可辨认缩略图，不上传原图。`;
     }
 
     async function checkAuth() {

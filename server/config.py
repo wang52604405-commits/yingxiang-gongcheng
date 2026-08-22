@@ -59,9 +59,9 @@ OFFLINE_GRACE_DAYS = 7      # 客户端离线缓冲天数（客户端侧实现�
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
     "pricing": {
-        "monthly_price": 15,
-        "lifetime_price": 169,
-        "price_label": "内测会员价",
+        "monthly_price": 39,
+        "lifetime_price": 399,
+        "price_label": "原价",
     },
     "free": {
         "photo_limit": 300,

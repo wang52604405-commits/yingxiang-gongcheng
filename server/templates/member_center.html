@@ -151,9 +151,9 @@
       </div>
 
       <div class="plan hot">
-        <div class="flag" id="priceFlag">内测会员价</div>
+        <div class="flag" id="priceFlag">原价</div>
         <div class="pname">月度会员</div>
-        <div class="price"><b id="monthlyPrice">15</b><small>元 / 月</small></div>
+        <div class="price"><b id="monthlyPrice">39</b><small>元 / 月</small></div>
         <div class="desc">无限使用，按月付费灵活</div>
         <ul>
           <li>无限上传照片</li>
@@ -167,7 +167,7 @@
 
       <div class="plan">
         <div class="pname">终身会员</div>
-        <div class="price"><b id="lifetimePrice">169</b><small>元 / 一次买断</small></div>
+        <div class="price"><b id="lifetimePrice">399</b><small>元 / 一次买断</small></div>
         <div class="desc">一次付费，永久使用</div>
         <ul>
           <li>无限上传照片</li>
@@ -188,9 +188,9 @@
         <div style="width:180px;min-height:180px;display:grid;place-items:center;padding:18px;text-align:center;border-radius:8px;border:1px dashed var(--line);color:var(--muted);font-size:13px;line-height:1.7;">内测付款码由管理员单独提供<br>正式收款入口暂未开放</div>
         <div style="flex:1;min-width:220px;">
           <div style="margin:6px 0;padding:10px;background:rgba(47,129,247,.08);border-radius:8px;">
-            <strong>月度会员 <span id="monthlyPayPrice">15</span> 元</strong>/月<br>
-            <strong>终身会员 <span id="lifetimePayPrice">169</span> 元</strong><br>
-            <span style="color:var(--gold);font-size:12px">内测会员价，正式定价以后续公告为准</span>
+            <strong>月度会员 <span id="monthlyPayPrice">39</span> 元</strong>/月<br>
+            <strong>终身会员 <span id="lifetimePayPrice">399</span> 元</strong><br>
+            <span style="color:var(--gold);font-size:12px">原价，正式定价以后续公告为准</span>
           </div>
           <div style="font-size:13px;color:var(--muted);line-height:1.8;">
             付款备注请写你的账号，方便核对。<br>
@@ -331,12 +331,12 @@
       const pricing = productConfig.pricing || {};
       const free = productConfig.free || {};
       const cloud = productConfig.cloud_preview || {};
-      const monthly = Number(pricing.monthly_price || 15);
-      const lifetime = Number(pricing.lifetime_price || 169);
+      const monthly = Number(pricing.monthly_price || 39);
+      const lifetime = Number(pricing.lifetime_price || 399);
       ["#monthlyPrice", "#monthlyPayPrice"].forEach((id) => { if ($(id)) $(id).textContent = monthly; });
       ["#lifetimePrice", "#lifetimePayPrice"].forEach((id) => { if ($(id)) $(id).textContent = lifetime; });
       if ($("#freeLimitText")) $("#freeLimitText").textContent = Number(free.photo_limit || 300);
-      if ($("#priceFlag")) $("#priceFlag").textContent = pricing.price_label || "内测会员价";
+      if ($("#priceFlag")) $("#priceFlag").textContent = pricing.price_label || "原价";
       if ($("#freeCloudFeature") && cloud.beta_free_access) {
         $("#freeCloudFeature").classList.remove("no");
         $("#freeCloudFeature").textContent = "内测期开放远程云预览";

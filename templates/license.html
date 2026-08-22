@@ -184,9 +184,9 @@
       </div>
 
       <div class="plan hot">
-        <div class="flag" id="priceFlag">内测会员价</div>
+        <div class="flag" id="priceFlag">原价</div>
         <div class="pname">月度会员</div>
-        <div class="price"><b id="monthlyPrice">15</b><small>元 / 月</small></div>
+        <div class="price"><b id="monthlyPrice">39</b><small>元 / 月</small></div>
         <div class="desc">无限使用，按月付费灵活</div>
         <ul>
           <li>无限上传照片</li>
@@ -200,7 +200,7 @@
 
       <div class="plan">
         <div class="pname">终身会员</div>
-        <div class="price"><b id="lifetimePrice">169</b><small>元 / 一次买断</small></div>
+        <div class="price"><b id="lifetimePrice">399</b><small>元 / 一次买断</small></div>
         <div class="desc">一次付费，永久使用</div>
         <ul>
           <li>无限上传照片</li>
@@ -331,10 +331,10 @@
       const data = await apiJson("/api/cloud/product-config");
       productConfig = data.product || {};
       const pricing = productConfig.pricing || {}, free = productConfig.free || {};
-      $("#monthlyPrice").textContent = pricing.monthly_price || 15;
-      $("#lifetimePrice").textContent = pricing.lifetime_price || 169;
+      $("#monthlyPrice").textContent = pricing.monthly_price || 39;
+      $("#lifetimePrice").textContent = pricing.lifetime_price || 399;
       $("#freeLimitText").textContent = free.photo_limit || 300;
-      $("#priceFlag").textContent = pricing.price_label || "内测会员价";
+      $("#priceFlag").textContent = pricing.price_label || "原价";
     }
 
     function showNotice(message, isError = false) {
@@ -529,10 +529,10 @@
 
     // ---- 开通会员按钮（引导联系管理员）----
     $("#monthlyBtn").addEventListener("click", () => {
-      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通月度会员（${productConfig.pricing?.monthly_price || 15} 元/月，内测会员价）。`, false);
+      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通月度会员（${productConfig.pricing?.monthly_price || 39} 元/月，原价）。`, false);
     });
     $("#lifetimeBtn").addEventListener("click", () => {
-      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通终身会员（${productConfig.pricing?.lifetime_price || 169} 元一次买断，内测会员价）。`, false);
+      showNotice(`请截图本页面（含机器 ID），联系管理员 / 作者开通终身会员（${productConfig.pricing?.lifetime_price || 399} 元一次买断，原价）。`, false);
     });
     $("#freeCurrentBtn").disabled = true;
 

@@ -402,9 +402,9 @@
       const data = await api("/api/product-config");
       const product = data.product || {};
       const pricing = product.pricing || {}, free = product.free || {}, invite = product.invite || {}, cloud = product.cloud_preview || {}, logging = product.logging || {};
-      $("#cfgMonthly").value = pricing.monthly_price || 15;
-      $("#cfgLifetime").value = pricing.lifetime_price || 169;
-      $("#cfgPriceLabel").value = pricing.price_label || "内测会员价";
+      $("#cfgMonthly").value = pricing.monthly_price || 39;
+      $("#cfgLifetime").value = pricing.lifetime_price || 399;
+      $("#cfgPriceLabel").value = pricing.price_label || "原价";
       $("#cfgFreeLimit").value = free.photo_limit || 300;
       $("#cfgInviteMilestone").value = invite.milestone || 10;
       $("#cfgInviteDays").value = invite.reward_days || 30;

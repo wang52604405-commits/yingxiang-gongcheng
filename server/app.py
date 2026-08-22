@@ -118,9 +118,9 @@ def _normalized_product_config(value=None) -> dict:
     """合并默认值并把后台可编辑数值限制在安全范围内。"""
     product = _deep_merge(config.DEFAULT_PRODUCT_CONFIG, value or {})
     pricing = product["pricing"]
-    pricing["monthly_price"] = max(1, min(9999, int(pricing.get("monthly_price") or 15)))
-    pricing["lifetime_price"] = max(1, min(99999, int(pricing.get("lifetime_price") or 169)))
-    pricing["price_label"] = str(pricing.get("price_label") or "内测会员价")[:40]
+    pricing["monthly_price"] = max(1, min(9999, int(pricing.get("monthly_price") or 39)))
+    pricing["lifetime_price"] = max(1, min(99999, int(pricing.get("lifetime_price") or 399)))
+    pricing["price_label"] = str(pricing.get("price_label") or "原价")[:40]
     free = product["free"]
     free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
     # 免费版 300 张为完整可用额度，不叠加产品水印。

@@ -26,11 +26,11 @@ PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
 DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260817-2.63"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260822-2.64"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
-    "pricing": {"monthly_price": 15, "lifetime_price": 169, "price_label": "内测会员价"},
+    "pricing": {"monthly_price": 39, "lifetime_price": 399, "price_label": "原价"},
     "free": {"photo_limit": 300, "watermark_enabled": False, "upload_expiry_enabled": False},
     "invite": {"enabled": True, "milestone": 10, "reward_days": 30},
     "cloud_preview": {
