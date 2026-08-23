@@ -37,7 +37,8 @@ const $ = (selector) => document.querySelector(selector);
       printPageSize: 4,
       printStyle: "default",
       pendingPrintUrl: "",
-      batchSelectedCodes: new Set(),
+      batchSelectedUnits: new Set(),
+      batchSelectedProcesses: new Set(),
       batchVisibleCodes: [],
       photoPreviewScale: 1,
       photoPreviewFitScale: 1,
@@ -569,7 +570,8 @@ const $ = (selector) => document.querySelector(selector);
     async function openBatchPrint(category, mode = "print") {
       state.batchPrintCategory = normalizePhotoCategory(category);
       state.batchPrintMode = mode === "pdf" ? "pdf" : "print";
-      state.batchSelectedCodes = new Set();
+      state.batchSelectedUnits = new Set();
+      state.batchSelectedProcesses = new Set();
       state.batchVisibleCodes = [];
       $("#batchPrintTitle").textContent = `${batchLabel(state.batchPrintCategory)}${state.batchPrintMode === "pdf" ? "批量导出PDF" : "批量打印"}`;
       $("#batchPrintSearch").value = "";
@@ -592,13 +594,22 @@ const $ = (selector) => document.querySelector(selector);
     function renderBatchProject(project) {
       const h = getHierarchy(project);
       const code = projectCode(project);
-      const activeClass = state.batchSelectedCodes.has(code) ? " active" : "";
+      const hasProcess = Array.isArray(project.processes) && project.processes.length > 0;
+      const unitOn = state.batchSelectedUnits.has(code);
+      const procOn = hasProcess && state.batchSelectedProcesses.has(code);
+      const activeClass = unitOn || procOn ? " active" : "";
+      const procBtn = hasProcess
+        ? `<button type="button" class="batch-level${procOn ? " active" : ""}" data-batch-process="${escapeHtml(code)}">工序</button>`
+        : "";
       return `
-        <button class="picker-project batch-project${activeClass}" type="button" data-batch-code="${escapeHtml(code)}">
+        <div class="picker-project batch-project${activeClass}" data-batch-code="${escapeHtml(code)}">
           <strong>${escapeHtml(h.unitName || projectName(project))}</strong>
           <span>${escapeHtml(h.unitCode || code)}</span>
-          <span class="batch-check">${activeClass ? "✓" : "+"}</span>
-        </button>
+          <div class="batch-level-buttons">
+            <button type="button" class="batch-level${unitOn ? " active" : ""}" data-batch-unit="${escapeHtml(code)}">单元</button>
+            ${procBtn}
+          </div>
+        </div>
       `;
     }
 
@@ -610,7 +621,7 @@ const $ = (selector) => document.querySelector(selector);
 
     function nodeAllSelected(node) {
       const codes = nodeDescendantCodes(node);
-      return codes.length > 0 && codes.every((code) => state.batchSelectedCodes.has(code));
+      return codes.length > 0 && codes.every((code) => state.batchSelectedUnits.has(code) && state.batchSelectedProcesses.has(code));
     }
 
     function renderBatchTreeNode(node) {
@@ -653,10 +664,17 @@ const $ = (selector) => document.querySelector(selector);
           renderBatchPrintPicker();
         });
       });
-      body.querySelectorAll("[data-batch-code]").forEach((button) => {
+      body.querySelectorAll("[data-batch-unit]").forEach((button) => {
         button.addEventListener("click", () => {
-          const code = button.dataset.batchCode;
-          state.batchSelectedCodes.has(code) ? state.batchSelectedCodes.delete(code) : state.batchSelectedCodes.add(code);
+          const code = button.dataset.batchUnit;
+          state.batchSelectedUnits.has(code) ? state.batchSelectedUnits.delete(code) : state.batchSelectedUnits.add(code);
+          renderBatchPrintPicker();
+        });
+      });
+      body.querySelectorAll("[data-batch-process]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const code = button.dataset.batchProcess;
+          state.batchSelectedProcesses.has(code) ? state.batchSelectedProcesses.delete(code) : state.batchSelectedProcesses.add(code);
           renderBatchPrintPicker();
         });
       });
@@ -665,12 +683,14 @@ const $ = (selector) => document.querySelector(selector);
           const node = findNode(state.treeRoot, button.dataset.batchSelectNode);
           const codes = nodeDescendantCodes(node);
           if (!codes.length) return;
-          const allSelected = codes.every((code) => state.batchSelectedCodes.has(code));
+          const allSelected = codes.every((code) => state.batchSelectedUnits.has(code) && state.batchSelectedProcesses.has(code));
           codes.forEach((code) => {
             if (allSelected) {
-              state.batchSelectedCodes.delete(code);
+              state.batchSelectedUnits.delete(code);
+              state.batchSelectedProcesses.delete(code);
             } else {
-              state.batchSelectedCodes.add(code);
+              state.batchSelectedUnits.add(code);
+              state.batchSelectedProcesses.add(code);
             }
           });
           renderBatchPrintPicker();
@@ -679,8 +699,9 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function updateBatchPrintCount() {
-      $("#batchPrintCount").textContent = `已选 ${state.batchSelectedCodes.size} 个`;
-      $("#batchPrintSubmitBtn").textContent = `${state.batchPrintMode === "pdf" ? "导出PDF" : "打印"}已选 ${state.batchSelectedCodes.size} 个`;
+      const codes = new Set([...state.batchSelectedUnits, ...state.batchSelectedProcesses]);
+      $("#batchPrintCount").textContent = `已选 ${codes.size} 个单元`;
+      $("#batchPrintSubmitBtn").textContent = `${state.batchPrintMode === "pdf" ? "导出PDF" : "打印"}已选 ${codes.size} 个单元`;
     }
 
     function renderBatchPrintPicker() {
@@ -714,17 +735,25 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function selectVisibleBatchProjects() {
-      state.batchVisibleCodes.forEach((code) => state.batchSelectedCodes.add(code));
+      state.batchVisibleCodes.forEach((code) => {
+        state.batchSelectedUnits.add(code);
+        state.batchSelectedProcesses.add(code);
+      });
       renderBatchPrintPicker();
     }
 
     function submitBatchPrint() {
-      const codes = Array.from(state.batchSelectedCodes);
-      if (!codes.length) {
+      const units = Array.from(state.batchSelectedUnits);
+      const processes = Array.from(state.batchSelectedProcesses);
+      if (!units.length && !processes.length) {
         showNotice(`请先选择要${state.batchPrintMode === "pdf" ? "导出PDF" : "批量打印"}的单元工程。`, true);
         return;
       }
-      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?codes=${encodeURIComponent(codes.join(","))}&mode=${encodeURIComponent(state.batchPrintMode)}`;
+      const params = new URLSearchParams();
+      if (units.length) params.set("units", units.join(","));
+      if (processes.length) params.set("processes", processes.join(","));
+      params.set("mode", state.batchPrintMode);
+      const url = `/print/${encodeURIComponent(state.batchPrintCategory)}/batch?${params.toString()}`;
       closeBatchPrint();
       openPrintSetup(url);
     }
@@ -1441,6 +1470,8 @@ const $ = (selector) => document.querySelector(selector);
       passwordInput.value = "";
       renderAuth();
       showNotice("已进入软件");
+      // 登录成功后重新加载工作台数据并显示加载进度
+      await loadBootstrap().catch((error) => showNotice(error.message, true));
     }
 
     function norm(text) {
@@ -2361,15 +2392,12 @@ const $ = (selector) => document.querySelector(selector);
       $("#unitTitle").textContent = projectName(project);
       $("#unitSub").textContent = projectCode(project);
       renderPhotos();
-      const procBar = $("#processManageBar");
-      if (procBar) procBar.style.display = String(projectName(project) || "").includes("灌注桩") ? "none" : "flex";
     }
 
     async function addProcess() {
       if (!state.selectedCode) return;
-      const name = ($("#newProcessName")?.value || "").trim();
+      const name = (window.prompt("请输入工序名称（如：混凝土）") || "").trim();
       if (!name) {
-        showNotice("请输入工序名称", true);
         return;
       }
       if (!(await ensureAuthenticated("添加工序"))) return;
@@ -2380,7 +2408,6 @@ const $ = (selector) => document.querySelector(selector);
       });
       if (state.selectedProject) state.selectedProject.processes = data.processes || [];
       state.photos = data.photos || [];
-      if ($("#newProcessName")) $("#newProcessName").value = "";
       renderPhotos();
       await refreshAll();
       showNotice(`工序「${name}」已添加，照片编号已按两级规则更新。`);
@@ -2417,7 +2444,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function photosForSection(key, groupName) {
-      const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
+      const processMatches = (photo) => {
+        const pn = String(photo.process_name || "").trim();
+        return groupName ? pn === groupName : pn === "";
+      };
       return categoryPhotos(key).filter(processMatches);
     }
 
@@ -2475,20 +2505,26 @@ const $ = (selector) => document.querySelector(selector);
       host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
         const sectionId = `${key}_${groupIndex}`;
         const groupName = String(group.name || "").trim();
-        const processMatches = (photo) => !groupName || String(photo.process_name || "").trim() === groupName;
+        const processMatches = (photo) => {
+          const pn = String(photo.process_name || "").trim();
+          return groupName ? pn === groupName : pn === "";
+        };
         const photos = categoryPhotos(key).filter(processMatches);
-        const titlePrefix = group.name ? `${group.code ? group.code + " " : ""}${group.name} · ` : "";
         const sectionKey = photoSectionKey(key, group.name);
         const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
         const useConstructionBtn = key === "supervision"
           ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">复制施工照片</button>`
           : "";
         const isUnitLevel = !groupName;
+        const levelLabel = isUnitLevel ? "单元照片" : `工序：${group.name}`;
+        const catLabel = key === "supervision" ? "监理单元影像" : "施工单元影像";
+        const titleText = `${catLabel}（${levelLabel}）`;
+        const isEmpty = photos.length === 0;
         const collapseBtn = isUnitLevel ? "" : `<button type="button" data-toggle-collapse="${escapeHtml(sectionKey)}">收起</button>`;
         return `
-          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
+          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}${isEmpty ? " is-empty" : ""}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
             <div class="photo-section-head">
-              <h3 class="photo-section-title">${escapeHtml(titlePrefix)}${key === "supervision" ? "监理单元影像" : "施工单元影像"}</h3>
+              <h3 class="photo-section-title${isUnitLevel ? "" : " process-title"}"${isUnitLevel ? "" : ` data-toggle-collapse-title="${escapeHtml(sectionKey)}"`}>${escapeHtml(titleText)}</h3>
               <div class="photo-section-actions">
                 ${collapseBtn}
                 <button type="button" data-toggle-select-photos="${escapeHtml(sectionKey)}">${isSelectMode ? "取消" : "多选"}</button>
@@ -2530,6 +2566,15 @@ const $ = (selector) => document.querySelector(selector);
           if (!section) return;
           const collapsed = section.classList.toggle("is-collapsed");
           button.textContent = collapsed ? "展开" : "收起";
+        });
+      });
+      host.querySelectorAll("[data-toggle-collapse-title]").forEach((titleEl) => {
+        titleEl.addEventListener("click", () => {
+          const section = titleEl.closest(".photo-section");
+          if (!section) return;
+          const collapsed = section.classList.toggle("is-collapsed");
+          const btn = section.querySelector("[data-toggle-collapse]");
+          if (btn) btn.textContent = collapsed ? "展开" : "收起";
         });
       });
       host.querySelectorAll("button[data-use-construction]").forEach((button) => {
@@ -3370,6 +3415,14 @@ const $ = (selector) => document.querySelector(selector);
     // 首屏冷启动加载动画：进度条跟随真实加载阶段推进；加载再快也保证至少显示 1.6 秒走完，页面数据全部显示才消失
     const BOOT_MIN_MS = 1200;
     let bootStartedAt = 0;
+    function bootShow() {
+      const loader = $("#bootLoader");
+      if (loader) loader.classList.remove("boot-loader-hidden");
+    }
+    function bootHide() {
+      const loader = $("#bootLoader");
+      if (loader) loader.classList.add("boot-loader-hidden");
+    }
     function bootStart() {
       bootStartedAt = Date.now();
     }
@@ -3397,17 +3450,18 @@ const $ = (selector) => document.querySelector(selector);
     async function loadBootstrap(options = {}) {
       const skipOtherImages = Boolean(options.skipOtherImages);
       bootStart();
-      bootProgress(8);
       const data = await apiJson("/api/bootstrap");
-      bootProgress(42);
       state.auth.user = data.user || null;
       renderAuth();
       if (!state.auth.user) {
-        // 未登录：回填上次记住的账号和密码，方便再次登录
+        // 未登录：登录页不显示加载遮罩，直接回填账号后保持隐藏
+        bootHide();
         restoreLoginCredentials();
-        bootDone();
         return;
       }
+      // 已登录：进入工作台才显示加载进度
+      bootShow();
+      bootProgress(8);
       state.revision = Number(data.revision || 0);
       if (data.app_version && $("#appVersionBadge")) $("#appVersionBadge").textContent = "v" + data.app_version.replace(/^A\d{8}-/, "");
       state.projectInfo = data.project_info || {};
@@ -3920,7 +3974,8 @@ const $ = (selector) => document.querySelector(selector);
     $("#batchPrintSearch").addEventListener("input", renderBatchPrintPicker);
     $("#batchSelectVisibleBtn").addEventListener("click", selectVisibleBatchProjects);
     $("#batchClearBtn").addEventListener("click", () => {
-      state.batchSelectedCodes.clear();
+      state.batchSelectedUnits.clear();
+      state.batchSelectedProcesses.clear();
       renderBatchPrintPicker();
     });
     $("#batchPrintSubmitBtn").addEventListener("click", submitBatchPrint);
@@ -4157,40 +4212,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
-      default: {
-        style: "default",
-        layout: "landscape", page_size: "4", photo_preset: "5inch",
-        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
-        margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4",
-        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
-        show_page_title: "1", caption_fields: "title,id,photo_date"
-      },
-      portrait2: {
-        style: "portrait2",
-        layout: "portrait", page_size: "2", photo_preset: "custom",
-        photo_width_cm: "18.5", photo_height_cm: "12.3",
-        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
-        margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12",
-        horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "cover",
-        show_page_title: "1", caption_fields: "title,id,photo_date"
-      },
-      landscape2: {
-        style: "landscape2",
-        layout: "landscape", page_size: "2", photo_preset: "5inch",
-        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
-        margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12",
-        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
-        show_page_title: "1", caption_fields: "title,id,photo_date"
-      },
-      single: {
-        style: "single",
-        layout: "landscape", page_size: "1", photo_preset: "custom",
-        photo_width_cm: "26.0", photo_height_cm: "17.2",
-        caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2",
-        margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10",
-        horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover",
-        show_page_title: "1", caption_fields: "title,id,photo_date"
-      },
+      default: { style: "default", layout: "landscape", page_size: "4", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
+      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
+      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
+      single: { style: "single", layout: "landscape", page_size: "1", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
       custom: null
     };
 
@@ -4209,27 +4234,8 @@ const $ = (selector) => document.querySelector(selector);
     function applyPrintStyleToPanel(style) {
       const params = PRINT_STYLES[style];
       if (!params) return;
-      const map = {
-        layout: "printSetupLayout",
-        page_size: "printSetupPageSize",
-        photo_preset: "printSetupPreset",
-        photo_width_cm: "printSetupPhotoWidth",
-        photo_height_cm: "printSetupPhotoHeight",
-        caption_position: "printSetupCaptionPosition",
-        caption_size_mm: "printSetupCaptionSize",
-        caption_font_size: "printSetupCaptionFont",
-        margin_top_mm: "printSetupMarginTop",
-        margin_right_mm: "printSetupMarginRight",
-        margin_bottom_mm: "printSetupMarginBottom",
-        margin_left_mm: "printSetupMarginLeft",
-        horizontal_gap_mm: "printSetupHorizontalGap",
-        vertical_gap_mm: "printSetupVerticalGap",
-        image_fit: "printSetupImageFit",
-        show_page_title: "printSetupShowPageTitle"
-      };
-      Object.entries(map).forEach(([key, id]) => {
-        if (params[key] !== undefined) $(`#${id}`).value = String(params[key]);
-      });
+      const map = { layout: "printSetupLayout", page_size: "printSetupPageSize", photo_preset: "printSetupPreset", photo_width_cm: "printSetupPhotoWidth", photo_height_cm: "printSetupPhotoHeight", caption_position: "printSetupCaptionPosition", caption_size_mm: "printSetupCaptionSize", caption_font_size: "printSetupCaptionFont", margin_top_mm: "printSetupMarginTop", margin_right_mm: "printSetupMarginRight", margin_bottom_mm: "printSetupMarginBottom", margin_left_mm: "printSetupMarginLeft", horizontal_gap_mm: "printSetupHorizontalGap", vertical_gap_mm: "printSetupVerticalGap", image_fit: "printSetupImageFit", show_page_title: "printSetupShowPageTitle" };
+      Object.entries(map).forEach(([key, id]) => { if (params[key] !== undefined) $(`#${id}`).value = String(params[key]); });
       syncPrintSetupPreset();
     }
 
@@ -4283,9 +4289,7 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function printSetupParams() {
-      if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) {
-        return new URLSearchParams(PRINT_STYLES[state.printStyle]);
-      }
+      if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) return new URLSearchParams(PRINT_STYLES[state.printStyle]);
       const pageSize = Math.max(1, Math.min(12, Number($("#printSetupPageSize").value || 4)));
       const fields = Array.from(document.querySelectorAll("[data-print-caption-field]:checked")).map((input) => input.value);
       return new URLSearchParams({
@@ -4349,12 +4353,6 @@ const $ = (selector) => document.querySelector(selector);
     $("#exportPhotoStatsBtn").addEventListener("click", () => { window.location.href = "/api/export/photo-statistics.xlsx"; });
     $("#exportUnitStatsBtn").addEventListener("click", () => requireSelected(() => { window.location.href = `/api/export/photo-statistics.xlsx?codes=${encodeURIComponent(state.selectedCode)}`; }));
     $("#addProcessBtn").addEventListener("click", () => addProcess().catch((error) => showNotice(error.message, true)));
-    $("#newProcessName").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        addProcess().catch((error) => showNotice(error.message, true));
-      }
-    });
     $("#settingsProjectInfoBtn").addEventListener("click", openProjectInfoModal);
     $("#settingsExportCsvBtn").addEventListener("click", exportSelectedCsv);
     $("#settingsExportJsonBtn").addEventListener("click", exportSelectedJson);

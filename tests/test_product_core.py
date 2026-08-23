@@ -61,7 +61,7 @@ class ServerProductContractTest(unittest.TestCase):
         self.assertEqual(product["free"]["photo_limit"], 300)
         self.assertFalse(product["free"]["upload_expiry_enabled"])
         self.assertFalse(product["free"]["watermark_enabled"])
-        self.assertEqual(product["pricing"]["price_label"], "内测会员价")
+        self.assertEqual(product["pricing"]["price_label"], "原价")
         self.assertEqual(product["logging"]["retention_days"], 90)
         self.assertEqual(product["logging"]["max_records"], 5000)
 

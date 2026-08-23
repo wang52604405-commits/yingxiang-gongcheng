@@ -49,6 +49,22 @@ def step0_assets():
     return True
 
 
+def step_verify(use_network=True):
+    """发布先决条件：本地五处版本一致 + 前端指纹齐全；线上可达时强校验服务器版本。
+
+    use_network=False 时跳过服务器对比（离线构建也要保证本地契约一致）。
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("verify_release", USE / "verify_release.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if use_network:
+        return mod.main() == 0
+    # 离线：仅校验本地契约，不读服务器 version.json
+    mod.UPDATE_URL = "http://127.0.0.1:1/update/version.json"  # 强制不可达 -> 降级
+    return mod.main() == 0
+
+
 def step2_manifest():
     print("\n[2/5] Rebuild tamper guard manifest ...")
     code = run([sys.executable, "tamper_guard.py", "build", str(DIST_DIR), "--key", str(PRIVATE_KEY)], cwd=USE)
@@ -98,7 +114,7 @@ def main() -> int:
     if not ISCC.exists():
         print(f"[ERR] Inno Setup 未安装: {ISCC}")
         return 1
-    steps = [step0_assets, step1_pyinstaller, step2_manifest, step3_inno, step4_verify_no_key, step5_delivery]
+    steps = [step_verify, step0_assets, step1_pyinstaller, step2_manifest, step3_inno, step4_verify_no_key, step5_delivery]
     for step in steps:
         if not step():
             print(f"\n[BUILD FAILED] 步骤失败: {step.__name__}")

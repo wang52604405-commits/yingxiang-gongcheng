@@ -4,8 +4,8 @@
 [Setup]
 AppId={{8E7C6C39-8E2F-4B4E-9B1A-9F8D3C4E5A6B}
 AppName=工程影像管理平台
-AppVersion=A20260817-2.63
-AppVerName=工程影像管理平台 A20260817-2.63
+AppVersion=A20260822-2.64
+AppVerName=工程影像管理平台 A20260822-2.64
 AppPublisher=工程影像管理平台
 DefaultDirName={localappdata}\工程影像管理平台
 DefaultGroupName=工程影像管理平台
@@ -45,7 +45,7 @@ Name: "{autodesktop}\工程影像管理平台"; Filename: "{app}\工程影像管
 [Registry]
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "DataDir"; ValueData: "{code:GetDataDir}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260817-2.63"
+Root: HKCU; Subkey: "Software\工程影像管理平台"; ValueType: string; ValueName: "Version"; ValueData: "A20260822-2.64"
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "工程影像管理平台"; ValueData: """{app}\工程影像管理平台.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
@@ -72,9 +72,29 @@ begin
     Result := ExpandConstant('{localappdata}\工程影像管理平台\data');
 end;
 
+{ 释放应用独占端口：杀掉监听 5088 的本应用进程(打包版 album_server.exe / 开发版 python.exe)。
+  CloseApplications 对无窗口后台服务(album_server.exe 用 CREATE_NO_WINDOW 启动)不可靠，
+  这里在安装/更新前主动确定性地释放端口，否则更新会因端口占用覆盖失败。 }
+procedure ReleaseServerPort;
+var
+  PS: String;
+begin
+  PS := 'Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -and $_ -ne $PID } | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }';
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PS + '"', '', SW_HIDE, ewWaitUntilTerminated, Result);
+  { 兜底：结束本应用的打包版服务进程（不误杀其它 python）。 }
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM album_server.exe /T /F 2>nul', '', SW_HIDE, ewNoWait, Result);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     ForceDirectories(GetDataDir(''));
+end;
+
+{ 在安装(更新)开始前释放端口，避免 Inno 检测到文件被占用而中止/失败。 }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  ReleaseServerPort;
+  Result := '';
 end;
 

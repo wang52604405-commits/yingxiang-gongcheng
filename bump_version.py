@@ -21,7 +21,11 @@ USE = Path(__file__).resolve().parent
 
 DESKTOP = USE / "desktop_launcher.py"
 CLOUD = USE / "cloud_client.py"
+INSTALLER = USE / "installer_win10.py"
 ISS = USE / "安装脚本.iss"
+ASSETS = USE / "assets"
+INDEX_HTML = USE / "templates" / "index.html"
+ASSET_RE = re.compile(r"app-(A\d{8}-\d+\.\d+)\.(css|js)")
 
 SSH_KEY = Path(os.environ.get(
     "ALBUM_SSH_KEY",
@@ -80,6 +84,40 @@ def _replace_version(text: str, pattern: str, new_ver: str, label: str) -> str:
     return replaced
 
 
+def _sync_asset_fingerprint(new_ver: str) -> None:
+    """unify 前端资源文件名与 index.html 引用到 new_ver，保证缓存指纹随版本漂移。
+
+    assets 目录内可能有多个历史指纹文件，统一只保留当前 new_ver 一份，
+    并把 index.html 引用改到新指纹，避免旧指纹被浏览器长期缓存而加载旧代码。
+    """
+    keep = f"app-{new_ver}"
+    # 1) 把当前可用的源码 .js/.css 重命名到 new_ver（若已是即跳过）
+    for ext in (".js", ".css"):
+        src = next((f for f in ASSETS.glob(f"app-A*.{ext}") if ASSET_RE.search(f.name)), None)
+        if src and ASSET_RE.search(src.name).group(1) != new_ver:
+            src.rename(ASSETS / f"{keep}{ext}")
+        body = ASSETS / f"{keep}{ext}"
+        if body.is_file():
+            gz = ASSETS / f"{body.name}.gz"
+            if not gz.exists():
+                import gzip as _gz
+                with _gz.open(gz, "wb", compresslevel=6) as g:
+                    g.write(body.read_bytes())
+    # 2) 删除所有其它旧指纹文件（.js/.css/.gz），只保留 current
+    for f in (
+        list(ASSETS.glob("app-A*.js"))
+        + list(ASSETS.glob("app-A*.js.gz"))
+        + list(ASSETS.glob("app-A*.css"))
+        + list(ASSETS.glob("app-A*.css.gz"))
+    ):
+        m = ASSET_RE.search(f.name)
+        if m and m.group(1) != new_ver:
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                continue
+
+
 def write_version(new_ver: str) -> None:
     # desktop_launcher.py: 整行替换 APP_VERSION = "A..."
     dt = DESKTOP.read_text(encoding="utf-8")
@@ -95,6 +133,13 @@ def write_version(new_ver: str) -> None:
                          f'APP_VERSION = "{new_ver}"', CLOUD.name),
         encoding="utf-8")
 
+    # installer_win10.py: 整行替换 APP_VERSION = "A..."
+    ins = INSTALLER.read_text(encoding="utf-8")
+    INSTALLER.write_text(
+        _replace_version(ins, r'APP_VERSION = "A\d{8}-\d+\.\d+"',
+                         f'APP_VERSION = "{new_ver}"', INSTALLER.name),
+        encoding="utf-8")
+
     # 安装脚本.iss: 三处（AppVersion / AppVerName / 注册表 Version）
     iss = ISS.read_text(encoding="utf-8")
     iss = _replace_version(iss, r'AppVersion=A\d{8}-\d+\.\d+',
@@ -104,6 +149,12 @@ def write_version(new_ver: str) -> None:
     iss = _replace_version(iss, r'ValueName: "Version"; ValueData: "A\d{8}-\d+\.\d+"',
                            f'ValueName: "Version"; ValueData: "{new_ver}"', ISS.name)
     ISS.write_text(iss, encoding="utf-8")
+
+    # 前端 assets 指纹 + index.html 引用
+    _sync_asset_fingerprint(new_ver)
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    html = re.sub(ASSET_RE, lambda m: f"app-{new_ver}." + m.group(2), html)
+    INDEX_HTML.write_text(html, encoding="utf-8")
 
 
 def main() -> int:
