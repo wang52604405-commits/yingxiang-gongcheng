@@ -4510,6 +4510,8 @@ const $ = (selector) => document.querySelector(selector);
         if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
       }
 
+      function closeQuietly() { dismiss(); }
+
       function finish() {
         try { localStorage.setItem(KEY, "1"); } catch (e) {}
         dismiss();
@@ -4521,6 +4523,180 @@ const $ = (selector) => document.querySelector(selector);
 
       window.addEventListener("resize", () => show(idx));
 
+      // 若用户未走完引导就登录成功，自动关闭登录页引导（不写入"已引导"，避免抢占工作台首开提示）
+      if (window.MutationObserver) {
+        new MutationObserver(() => {
+          if (document.body.classList.contains("is-authed")) closeQuietly();
+        }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+      }
+
       // 延时显示，等登录页布局稳定
       setTimeout(function(){ show(0); }, 900);
+    })();
+
+    // ============ 首开引导：工作台整体界面操作流程 ============
+    (function initWorkspaceGuide() {
+      const KEY = "album-guide-workspace-done";
+      if (localStorage.getItem(KEY)) return;
+
+      // 工作台引导需等已登录(body.is-authed)且界面渲染完成后再触发。
+      // loadBootstrap 是异步的，这里监听 body class 变化，一旦出现 is-authed 即启动。
+      function waitAuthed(tries) {
+        if (document.body.classList.contains("is-authed")) { start(); return; }
+        if (tries <= 0) return;
+        setTimeout(() => waitAuthed(tries - 1), 300);
+      }
+
+      function start() {
+        // 再等一帧让工作台各区域完成渲染、布局稳定
+        setTimeout(() => show(0), 600);
+      }
+
+      const steps = [
+        {
+          target: "#topConstructionBtn",
+          title: "施工影像 / 其它影像",
+          desc: "顶部这里可以切换查看【施工影像】或【其它影像】。",
+          placement: "bottom"
+        },
+        {
+          target: "#actionsMenuBtn",
+          title: "操作菜单",
+          desc: "点这里的【操作】，可以上传照片、导入文件夹、批量打印等。",
+          placement: "bottom"
+        },
+        {
+          target: "#refreshBtn",
+          title: "刷新",
+          desc: "数据有变化时点这里刷新，能看到最新内容。",
+          placement: "bottom"
+        },
+        {
+          target: "#tree",
+          title: "工程目录",
+          desc: "左边是工程目录树，点击某个工程就能查看它的照片和详情。",
+          placement: "right"
+        },
+        {
+          target: "#constructionOverviewBtn",
+          title: "总览统计",
+          desc: "中间这里是统计概览，点一下可快速进入对应内容。",
+          placement: "right"
+        }
+      ];
+
+      let idx = 0;
+      const overlay = document.createElement("div");
+      overlay.className = "guide-overlay active";
+      overlay.setAttribute("aria-hidden", "true");
+      const spot = document.createElement("div");
+      spot.className = "guide-spot";
+      const pop = document.createElement("div");
+      pop.className = "guide-pop";
+      pop.setAttribute("role", "dialog");
+      pop.innerHTML = `
+        <span class="gp-title"></span>
+        <span class="gp-desc"></span>
+        <div class="gp-btns">
+          <span class="gp-step"></span>
+          <button type="button" class="gp-prev" style="display:none">上一步</button>
+          <button type="button" class="gp-skip">跳过</button>
+          <button type="button" class="gp-next">下一步</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      document.body.appendChild(spot);
+      document.body.appendChild(pop);
+
+      const $title = pop.querySelector(".gp-title");
+      const $desc = pop.querySelector(".gp-desc");
+      const $step = pop.querySelector(".gp-step");
+      const $prev = pop.querySelector(".gp-prev");
+      const $skip = pop.querySelector(".gp-skip");
+      const $next = pop.querySelector(".gp-next");
+
+      function targetEl(stage) { return document.querySelector(stage.target); }
+
+      function nextTop(pageTop) {
+        let top = pageTop;
+        top = Math.max(8, Math.min(top, window.innerHeight - 180));
+        return top;
+      }
+
+      function clampPos(el) {
+        el.style.left = Math.max(8, Math.min(parseFloat(el.style.left) || 0, window.innerWidth - el.offsetWidth - 8)) + "px";
+        el.style.top = Math.max(8, Math.min(parseFloat(el.style.top) || 0, window.innerHeight - el.offsetHeight - 8)) + "px";
+      }
+
+      function render() {
+        const stage = steps[idx];
+        const el = targetEl(stage);
+        if (!el) { finish(); return; }
+        pop.style.opacity = "0";
+        const rect = el.getBoundingClientRect();
+        if (stage.placement === "top") {
+          pop.style.left = (rect.left + rect.width / 2 - 170) + "px";
+          pop.style.top = nextTop(rect.top - 156) + "px";
+        } else if (stage.placement === "right") {
+          pop.style.left = Math.min(rect.right + 18, window.innerWidth - 348) + "px";
+          pop.style.top = Math.max(8, rect.top + rect.height / 2 - 60) + "px";
+        } else {
+          pop.style.left = (rect.left + rect.width / 2 - 170) + "px";
+          pop.style.top = nextTop(rect.bottom + 16) + "px";
+        }
+        clampPos(pop);
+        $title.textContent = stage.title;
+        $desc.textContent = stage.desc;
+        $step.textContent = `${idx + 1} / ${steps.length}`;
+        $prev.style.display = idx === 0 ? "none" : "";
+        $next.textContent = idx === steps.length - 1 ? "完成" : "下一步";
+        pop.style.opacity = "1";
+      }
+
+      function resizeSpot(el) {
+        if (!el) { spot.style.display = "none"; return; }
+        const rect = el.getBoundingClientRect();
+        spot.style.display = "block";
+        spot.style.left = (rect.left - 8) + "px";
+        spot.style.top = (rect.top - 8) + "px";
+        spot.style.width = (rect.width + 16) + "px";
+        spot.style.height = (rect.height + 16) + "px";
+      }
+
+      function show(i) {
+        const stage = steps[i];
+        const el = targetEl(stage);
+        resizeSpot(el);
+        render();
+      }
+
+      function next() {
+        idx += 1;
+        if (idx >= steps.length) { finish(); return; }
+        show(idx);
+      }
+
+      function prev() {
+        if (idx === 0) return;
+        idx -= 1;
+        show(idx);
+      }
+
+      function dismiss() {
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        if (spot && spot.parentNode) spot.parentNode.removeChild(spot);
+        if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+      }
+
+      function finish() {
+        try { localStorage.setItem(KEY, "1"); } catch (e) {}
+        dismiss();
+      }
+
+      $next.addEventListener("click", next);
+      $prev.addEventListener("click", prev);
+      $skip.addEventListener("click", finish);
+      window.addEventListener("resize", () => show(idx));
+
+      // 等已登录进入工作台后再触发（最长等 20 次 * 300ms = 6s）
+      waitAuthed(20);
     })();
