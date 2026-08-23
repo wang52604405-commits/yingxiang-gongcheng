@@ -4367,3 +4367,160 @@ const $ = (selector) => document.querySelector(selector);
         loadProject(startupUnitCode, "detail").catch((error) => showNotice(error.message, true));
       }
     }).catch((error) => showNotice(error.message, true));
+
+    // ============ 首开引导：登录页新手提示（自包含，不侵入主逻辑） ============
+    (function initFirstUseGuide() {
+      const KEY = "album-guide-login-done";
+      const host = $("#guideHost");
+      // 仅在登录页（未登录）且首开时触发
+      if (!host || document.body.classList.contains("is-authed")) return;
+      if (localStorage.getItem(KEY)) return;
+      if (!window.requestAnimationFrame) return;
+
+      const steps = [
+        {
+          target: "#gateUsername",
+          title: "第一步：填写账号",
+          desc: "请输入您的手机号 / QQ 号 / 邮箱作为登录账号。",
+          placement: "bottom"
+        },
+        {
+          target: "#gatePassword",
+          title: "第二步：输入密码",
+          desc: "请输入密码，密码是注册时自己设置的那一个。",
+          placement: "bottom"
+        },
+        {
+          target: "#gateRegisterBtn",
+          title: "第三步：新用户先注册",
+          desc: "第一次使用请先点【注册】创建账号，再回来登录。",
+          placement: "top"
+        },
+        {
+          target: "#gateLoginBtn",
+          title: "第四步：登录进入",
+          desc: "注册完成后点【登录】，就能进入工程工作台了。",
+          placement: "top"
+        }
+      ];
+
+      let idx = 0;
+      const overlay = document.createElement("div");
+      overlay.className = "guide-overlay active";
+      overlay.setAttribute("aria-hidden", "true");
+      const spot = document.createElement("div");
+      spot.className = "guide-spot";
+      const pop = document.createElement("div");
+      pop.className = "guide-pop";
+      pop.setAttribute("role", "dialog");
+      pop.innerHTML = `
+        <span class="gp-title"></span>
+        <span class="gp-desc"></span>
+        <div class="gp-btns">
+          <span class="gp-step"></span>
+          <button type="button" class="gp-prev" style="display:none">上一步</button>
+          <button type="button" class="gp-skip">跳过</button>
+          <button type="button" class="gp-next">下一步</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      document.body.appendChild(spot);
+      document.body.appendChild(pop);
+
+      const $title = pop.querySelector(".gp-title");
+      const $desc = pop.querySelector(".gp-desc");
+      const $step = pop.querySelector(".gp-step");
+      const $prev = pop.querySelector(".gp-prev");
+      const $skip = pop.querySelector(".gp-skip");
+      const $next = pop.querySelector(".gp-next");
+
+      function targetEl(stage) {
+        return document.querySelector(stage.target);
+      }
+
+      function positionElem(el, rect) {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        let left = rect.left + rect.width / 2 - el.offsetWidth / 2;
+        let top = rect.top + rect.height / 2 - el.offsetHeight / 2;
+        left = Math.max(8, Math.min(left, vw - el.offsetWidth - 8));
+        top = Math.max(8, Math.min(top, vh - el.offsetHeight - 8));
+        el.style.left = left + "px";
+        el.style.top = top + "px";
+      }
+
+      function nextTop(pageTop) {
+        let top = pageTop;
+        top = Math.max(8, Math.min(top, window.innerHeight - 180));
+        return top;
+      }
+
+      function render() {
+        const stage = steps[idx];
+        const el = targetEl(stage);
+        if (!el) { finish(); return; }
+        pop.style.opacity = "0";
+        const rect = el.getBoundingClientRect();
+        if (stage.placement === "top") {
+          pop.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - 170, window.innerWidth - 348)) + "px";
+          pop.style.top = nextTop(rect.top - 156) + "px";
+        } else {
+          pop.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - 170, window.innerWidth - 348)) + "px";
+          pop.style.top = nextTop(rect.bottom + 16) + "px";
+        }
+        $title.textContent = stage.title;
+        $desc.textContent = stage.desc;
+        $step.textContent = `${idx + 1} / ${steps.length}`;
+        $prev.style.display = idx === 0 ? "none" : "";
+        $next.textContent = idx === steps.length - 1 ? "完成" : "下一步";
+        pop.style.opacity = "1";
+      }
+
+      function resizeSpot(el) {
+        if (!el) { spot.style.display = "none"; return; }
+        const rect = el.getBoundingClientRect();
+        spot.style.display = "block";
+        spot.style.left = (rect.left - 8) + "px";
+        spot.style.top = (rect.top - 8) + "px";
+        spot.style.width = (rect.width + 16) + "px";
+        spot.style.height = (rect.height + 16) + "px";
+      }
+
+      function show(idx2) {
+        const stage = steps[idx2];
+        const el = targetEl(stage);
+        resizeSpot(el);
+        render();
+      }
+
+      function next() {
+        idx += 1;
+        if (idx >= steps.length) { finish(); return; }
+        show(idx);
+      }
+
+      function prev() {
+        if (idx === 0) return;
+        idx -= 1;
+        show(idx);
+      }
+
+      function dismiss() {
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        if (spot && spot.parentNode) spot.parentNode.removeChild(spot);
+        if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+      }
+
+      function finish() {
+        try { localStorage.setItem(KEY, "1"); } catch (e) {}
+        dismiss();
+      }
+
+      $next.addEventListener("click", next);
+      $prev.addEventListener("click", prev);
+      $skip.addEventListener("click", finish);
+
+      window.addEventListener("resize", () => show(idx));
+
+      // 延时显示，等登录页布局稳定
+      setTimeout(function(){ show(0); }, 900);
+    })();

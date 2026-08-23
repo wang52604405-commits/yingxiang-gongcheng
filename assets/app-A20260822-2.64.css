@@ -7078,3 +7078,72 @@
       background: #eef6fb !important;
       border-color: #9fc5e2 !important;
     }
+
+    /* ==== 首开引导（新手提示）==== */
+    .guide-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20000;
+      background: rgba(12, 24, 38, 0.18);
+      transition: background 160ms ease;
+    }
+    .guide-overlay.active { background: rgba(12, 24, 38, 0.38); }
+    .guide-spot {
+      position: fixed;
+      z-index: 20002;
+      border: 3px solid #13b8ad;
+      border-radius: 14px;
+      box-shadow: 0 0 0 4px rgba(19, 184, 173, 0.22), 0 16px 42px rgba(12, 40, 58, 0.28);
+      pointer-events: none;
+      transition: all 220ms var(--ease-out);
+    }
+    .guide-pop {
+      position: fixed;
+      z-index: 20003;
+      max-width: 340px;
+      padding: 14px 16px 15px;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 20px 52px rgba(12, 40, 58, 0.22);
+      transition: all 220ms var(--ease-out);
+    }
+    .guide-pop .gp-title {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      font-weight: 800;
+      color: #172033;
+    }
+    .guide-pop .gp-desc {
+      display: block;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #51617a;
+    }
+    .guide-pop .gp-btns {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .guide-pop .gp-btns .gp-step {
+      margin-right: auto;
+      font-size: 12px;
+      color: #8b98aa;
+    }
+    .guide-pop button {
+      padding: 7px 16px;
+      border: 1px solid rgba(15,138,122,.3);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #fff;
+      color: #0f8a7a;
+    }
+    .guide-pop button.gp-next {
+      background: linear-gradient(180deg, #0f8a7a, #13b8ad);
+      color: #fff;
+      border: 0;
+    }
+    .guide-pop button:hover { opacity: .92; }
