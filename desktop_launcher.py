@@ -242,11 +242,11 @@ def build_update_command(target, install_dir):
 
 
 def open_local_browser(url, port_open=True):
-    """用系统浏览器打开软件界面（app 模式独立窗口，无地址栏）。"""
+    """用系统浏览器以完整浏览器界面打开软件（有地址栏/标签页，同局域网直接访问）。"""
     exe = browser_exe()
     if exe:
         subprocess.Popen(
-            [str(exe), f"--app={url}", "--new-window"],
+            [str(exe), "--new-window", url],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

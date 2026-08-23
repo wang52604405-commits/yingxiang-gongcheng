@@ -78,11 +78,12 @@ end;
 procedure ReleaseServerPort;
 var
   PS: String;
+  ExitCode: Integer;
 begin
   PS := 'Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess } | Where-Object { $_ -and $_ -ne $PID } | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }';
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PS + '"', '', SW_HIDE, ewWaitUntilTerminated, Result);
+  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -Command "' + PS + '"', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   { 兜底：结束本应用的打包版服务进程（不误杀其它 python）。 }
-  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM album_server.exe /T /F 2>nul', '', SW_HIDE, ewNoWait, Result);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM album_server.exe /T /F 2>nul', '', SW_HIDE, ewNoWait, ExitCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -93,8 +94,30 @@ end;
 
 { 在安装(更新)开始前释放端口，避免 Inno 检测到文件被占用而中止/失败。 }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  OldDir: String;
+  OldUnins: String;
+  UninsCode: Integer;
 begin
+  { 先释放版本改动用端口，避免更新失败。 }
   ReleaseServerPort;
+
+  { 大版本升级：先静默卸载旧版，再装新版，确保不残留旧启动器/旧依赖文件。
+    数据目录(DataDir)位于程序目录之外，自始至终独立，Inno 卸载不会删除，用户数据安全保留。
+    只有当旧版确实存在(注册表 InstallDir 指向的 unins000.exe 可执行)时才卸载。 }
+  if RegQueryStringValue(HKCU, 'Software\工程影像管理平台', 'InstallDir', OldDir) and
+     (OldDir <> '') and (OldDir <> ExpandConstant('{app}')) then
+  begin
+    OldUnins := OldDir + '\unins000.exe';
+    if FileExists(OldUnins) then
+    begin
+      { 从旧目录直接运行卸载程序，静默且不删数据。注意不能运行当前程序目录下的卸载器。 }
+      ShellExec('open', OldUnins, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS', OldDir, SW_HIDE, ewWaitUntilTerminated, UninsCode);
+      { 等待卸载完成后安装程序继续；卸载器会自行删除旧目录(含旧 exe)，不影响位于临时/当前目录的新安装器。 }
+      Sleep(2000);
+    end;
+  end;
+
   Result := '';
 end;
 
