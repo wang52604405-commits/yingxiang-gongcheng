@@ -70,13 +70,13 @@ onLoad((query) => {
 </script>
 
 <template>
-  <view class="page-shell no-tabs destination-page">
+  <view class="page-shell no-tabs destination-page" :class="{ 'has-process-sheet': scope === 'engineering' && selectedNode }">
     <PageHeader :title="scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" :subtitle="scope === 'engineering' ? '先选工程部位，再按需选择工序' : '与电脑端其它影像目录保持一致'" />
     <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="输入工程部位名称或编码" placeholder-class="input-placeholder" /></view>
 
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取工程目录</text></view>
-    <view v-else-if="selectable.length" class="node-list">
-      <button v-for="node in selectable" :key="node.code" class="node-card card pressable" :class="{ active: selectedNode?.code === node.code }" @tap="chooseNode(node)">
+    <view v-else-if="selectable.length" class="node-list card">
+      <button v-for="node in selectable" :key="node.code" class="node-card pressable" :class="{ active: selectedNode?.code === node.code }" @tap="chooseNode(node)">
         <view class="node-copy"><text class="node-name">{{ node.name }}</text><text class="node-path">{{ node.pathLabel || '工程根目录' }}</text><text class="node-code">{{ node.code }}</text></view>
         <text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
       </button>
@@ -98,13 +98,15 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.destination-page { padding-bottom: calc(220rpx + var(--safe-bottom)); }
+.destination-page { padding-bottom: calc(40rpx + var(--safe-bottom)); }
+.destination-page.has-process-sheet { padding-bottom: calc(250rpx + var(--safe-bottom)); }
 .search-box { display: grid; grid-template-columns: 48rpx 1fr; align-items: center; gap: 8rpx; height: 86rpx; margin-bottom: 22rpx; padding: 0 22rpx; border: 1rpx solid var(--line); border-radius: 22rpx; background: var(--surface); }
 .search-icon { color: var(--primary-strong); font-size: 31rpx; }
 .search-box input { width: 100%; color: var(--text); font-size: 26rpx; }
-.node-list { display: grid; gap: 14rpx; }
-.node-card { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 20rpx 22rpx; text-align: left; }
-.node-card.active { border-color: var(--primary); background: var(--primary-soft); }
+.node-list { display: grid; gap: 0; overflow: hidden; }
+.node-card { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 22rpx 24rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
+.node-card:last-child { border-bottom: 0; }
+.node-card.active { background: var(--primary-soft); }
 .node-copy { min-width: 0; }
 .node-name { display: block; color: var(--text); font-size: 27rpx; font-weight: 600; }
 .node-path { display: block; overflow: hidden; margin-top: 7rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
@@ -112,9 +114,9 @@ onLoad((query) => {
 .node-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 40rpx; height: 48rpx; margin-left: 16rpx; color: var(--primary-strong); font-size: 35rpx; line-height: 1; text-align: center; }
 .process-sheet { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; padding: 12rpx 28rpx calc(26rpx + env(safe-area-inset-bottom)); border-radius: 34rpx 34rpx 0 0; background: var(--surface); box-shadow: 0 -18rpx 60rpx rgba(0, 0, 0, 0.35); transform: translateY(0); transition: transform 220ms var(--ease-out), opacity 180ms var(--ease-out); }
 .sheet-handle { width: 74rpx; height: 8rpx; margin: 0 auto 20rpx; border-radius: 999rpx; background: var(--line); }
-.process-title { display: block; color: var(--text); font-size: 29rpx; font-weight: 700; }
+.process-title { display: block; overflow: hidden; color: var(--text); font-size: 29rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .process-copy { display: block; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; }
 .process-scroll { width: 100%; margin-top: 18rpx; white-space: nowrap; }
 .process-row { display: flex; gap: 12rpx; padding-right: 28rpx; }
-.process-chip { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 66rpx; padding: 0 22rpx; border: 1rpx solid var(--line); border-radius: 19rpx; color: var(--text); background: var(--surface-2); font-size: 23rpx; line-height: 1.25; text-align: center; }
+.process-chip { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 40px; padding: 0 24rpx; border: 1rpx solid var(--line); border-radius: 19rpx; color: var(--text); background: var(--surface-2); font-size: 23rpx; line-height: 1.25; text-align: center; }
 </style>

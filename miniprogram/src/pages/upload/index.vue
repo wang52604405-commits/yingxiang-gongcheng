@@ -160,29 +160,36 @@ onShow(() => {
       <button v-else class="empty-media pressable" :disabled="choosing" @tap="reselectMedia"><view class="empty-media-icon"><UiIcon :name="source === 'camera' ? 'camera' : 'gallery'" :size="25" /></view><text>{{ choosing ? '正在打开…' : '点击选择本次工程影像' }}</text></button>
     </view>
 
-    <text class="field-label">影像范围</text>
-    <view class="segment"><button class="segment-button pressable" :class="{ active: scope === 'engineering' }" @tap="changeScope('engineering')">工程影像</button><button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button></view>
-    <template v-if="scope === 'engineering'">
-      <text class="field-label">照片类别</text>
-      <view class="segment"><button class="segment-button pressable" :class="{ active: category === 'construction' }" @tap="changeCategory('construction')">施工影像</button><button class="segment-button pressable" :class="{ active: category === 'supervision' }" @tap="changeCategory('supervision')">监理影像</button></view>
-    </template>
+    <view class="capture-settings card">
+      <view class="settings-group">
+        <text class="field-label">影像范围</text>
+        <view class="segment"><button class="segment-button pressable" :class="{ active: scope === 'engineering' }" @tap="changeScope('engineering')">工程影像</button><button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button></view>
+      </view>
+      <view v-if="scope === 'engineering'" class="settings-group">
+        <text class="field-label">照片类别</text>
+        <view class="segment"><button class="segment-button pressable" :class="{ active: category === 'construction' }" @tap="changeCategory('construction')">施工影像</button><button class="segment-button pressable" :class="{ active: category === 'supervision' }" @tap="changeCategory('supervision')">监理影像</button></view>
+      </view>
 
-    <view v-if="requirement" class="requirement-context">
-      <view class="requirement-context-head"><text>本次按专业清单采集</text><text>{{ requirement.template_code }}</text></view>
-      <text class="requirement-context-title">{{ requirement.photo_requirement_name }}</text>
-      <text class="requirement-context-note">{{ requirement.timing || '对应工序施工时' }} · {{ requirement.shot_types || '按现场实际拍摄' }}<template v-if="requirement.min_photo_count"> · 至少 {{ requirement.min_photo_count }} 张</template></text>
-    </view>
+      <view v-if="requirement" class="requirement-context">
+        <view class="requirement-context-head"><text>本次按专业清单采集</text><text>{{ requirement.template_code }}</text></view>
+        <text class="requirement-context-title">{{ requirement.photo_requirement_name }}</text>
+        <text class="requirement-context-note">{{ requirement.timing || '对应工序施工时' }} · {{ requirement.shot_types || '按现场实际拍摄' }}<template v-if="requirement.min_photo_count"> · 至少 {{ requirement.min_photo_count }} 张</template></text>
+      </view>
 
-    <text class="field-label">归档方式</text>
-    <view class="mode-grid">
-      <button class="mode-card pressable" :class="{ active: mode === 'direct' }" @tap="changeMode('direct')"><view class="mode-icon"><UiIcon name="folder" :size="19" /></view><view><text class="mode-title">指定工程部位</text><text class="mode-copy">最稳妥，现场直接归档</text></view></button>
-      <button class="mode-card pressable" :class="{ active: mode === 'auto' }" @tap="changeMode('auto')"><view class="mode-icon"><UiIcon name="search" :size="19" /></view><view><text class="mode-title">自动匹配</text><text class="mode-copy">上传识别后再人工确认</text></view></button>
+      <view class="settings-group">
+        <text class="field-label">归档方式</text>
+        <view class="segment mode-segment">
+          <button class="segment-button pressable" :class="{ active: mode === 'direct' }" @tap="changeMode('direct')">指定部位</button>
+          <button class="segment-button pressable" :class="{ active: mode === 'auto' }" @tap="changeMode('auto')">自动匹配</button>
+        </view>
+        <text class="mode-helper">{{ mode === 'direct' ? '现场直接选择归档位置，结果最稳妥。' : '上传识别后再人工看一眼，避免归错位置。' }}</text>
+      </view>
+      <button class="destination-card pressable" :class="{ automatic: mode === 'auto' }" @tap="mode === 'direct' && chooseDestination()">
+        <view class="destination-copy"><text class="destination-label">{{ mode === 'auto' ? '归档位置' : '工程部位 / 工序' }}</text><text class="destination-title">{{ destinationLabel }}</text><text v-if="mode === 'direct' && destination?.scope === scope" class="destination-code">{{ destination.assignment.unit_code || destination.assignment.other_node_code }}<template v-if="destination.assignment.process_name"> · {{ destination.assignment.process_name }}</template></text></view>
+        <view v-if="mode === 'direct'" class="path-arrow"><UiIcon name="chevron" :size="18" /></view><text v-else class="status-chip">识别后确认</text>
+      </button>
+      <view v-if="scope === 'other'" class="notice other-note"><text class="notice-dot" /><text>其它影像进入桌面端独立目录，不与施工、监理影像混放。</text></view>
     </view>
-    <button class="destination-card pressable" :class="{ automatic: mode === 'auto' }" @tap="mode === 'direct' && chooseDestination()">
-      <view class="destination-copy"><text class="destination-label">{{ mode === 'auto' ? '归档位置' : '工程部位 / 工序' }}</text><text class="destination-title">{{ destinationLabel }}</text><text v-if="mode === 'direct' && destination?.scope === scope" class="destination-code">{{ destination.assignment.unit_code || destination.assignment.other_node_code }}<template v-if="destination.assignment.process_name"> · {{ destination.assignment.process_name }}</template></text></view>
-      <view v-if="mode === 'direct'" class="path-arrow"><UiIcon name="chevron" :size="18" /></view><text v-else class="status-chip">识别后确认</text>
-    </button>
-    <view v-if="scope === 'other'" class="notice other-note"><text class="notice-dot" /><text>其它影像进入桌面端独立目录，不与施工、监理影像混放。</text></view>
     <view class="queue-status"><view class="queue-copy"><text>本机待同步空间</text><text>{{ formatBytes(queueRuntime.queueBytes.value) }} / 160MB</text></view><view class="usage-track"><view class="usage-fill" :style="{ transform: `scaleX(${queueRuntime.queueUsagePercent.value / 100})` }" /></view><text class="queue-note">现场无网也可先采集，网络恢复后自动续传。相册单次最多 {{ albumLimit }} 张。</text></view>
     <button class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button>
     <LoadingOverlay :visible="queueRuntime.state.preparing || choosing" :message="queueRuntime.state.preparing ? (queueRuntime.state.prepareProgress.message || '正在安全保存原图') : `正在打开${sourceLabel}`" :progress="progressText" />
@@ -191,23 +198,21 @@ onShow(() => {
 
 <style scoped>
 .capture-page { padding-bottom: calc(54rpx + var(--safe-bottom)); }
-.media-card { margin-top: 28rpx; padding: 20rpx; }
+.media-card { margin-top: 24rpx; padding: 24rpx; }
 .media-head { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
-.media-eyebrow { display: block; color: var(--muted); font-size: 21rpx; }
+.media-eyebrow { display: block; color: var(--muted); font-size: 22rpx; }
 .media-title { display: block; margin-top: 5rpx; color: var(--text); font-size: 28rpx; font-weight: 700; }
-.reselect-button { display: inline-flex; align-items: center; justify-content: center; min-height: 56rpx; padding: 0 18rpx; border: 1rpx solid var(--line); border-radius: 16rpx; color: var(--primary-strong); background: var(--surface-2); font-size: 21rpx; line-height: 1.25; text-align: center; }
+.reselect-button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 20rpx; border: 1rpx solid var(--line); border-radius: 16rpx; color: var(--primary-strong); background: var(--surface-2); font-size: 22rpx; line-height: 1.25; text-align: center; }
 .preview-scroll { width: 100%; margin-top: 18rpx; white-space: nowrap; }
 .preview-row { display: inline-flex; gap: 10rpx; padding-right: 20rpx; }
 .preview-image { flex: 0 0 auto; width: 146rpx; height: 126rpx; border-radius: 18rpx; background: var(--surface-2); }
 .empty-media { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12rpx; width: 100%; min-height: 180rpx; margin-top: 18rpx; border: 1rpx dashed var(--line); border-radius: 20rpx; color: var(--muted); background: var(--surface-2); font-size: 22rpx; }
 .empty-media-icon { display: grid; place-items: center; width: 66rpx; height: 66rpx; border-radius: 20rpx; color: var(--primary-strong); background: var(--primary-soft); }
-.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16rpx; }
-.mode-card { display: grid; grid-template-columns: 62rpx 1fr; align-items: center; width: 100%; min-width: 0; min-height: 108rpx; gap: 12rpx; padding: 16rpx; border: 1rpx solid var(--line); border-radius: 22rpx; text-align: left; background: var(--surface); }
-.mode-card.active { border-color: var(--primary); background: var(--primary-soft); }
-.mode-icon { display: grid; place-items: center; width: 58rpx; height: 58rpx; border-radius: 17rpx; color: var(--primary-strong); background: var(--primary-soft); }
-.mode-title { display: block; color: var(--text); font-size: 24rpx; font-weight: 600; }
-.mode-copy { display: block; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; line-height: 1.35; }
-.destination-card { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 18rpx; padding: 22rpx 24rpx; border: 1rpx solid var(--line); border-radius: 23rpx; text-align: left; background: var(--surface); }
+.capture-settings { margin-top: 24rpx; padding: 22rpx; }
+.capture-settings > .settings-group:not(:first-child) { margin-top: 24rpx; padding-top: 24rpx; border-top: 1rpx solid var(--line); }
+.capture-settings .field-label { margin: 0 0 12rpx; }
+.mode-helper { display: block; margin-top: 10rpx; color: var(--muted); font-size: 22rpx; line-height: 1.45; }
+.destination-card { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 16rpx; padding: 19rpx 20rpx; border: 1rpx solid var(--line); border-radius: 18rpx; text-align: left; background: var(--surface-2); }
 .destination-card.automatic { background: var(--primary-soft); }
 .destination-copy { min-width: 0; }
 .destination-label { display: block; color: var(--muted); font-size: 21rpx; }
@@ -219,10 +224,10 @@ onShow(() => {
 .queue-copy { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 21rpx; }
 .usage-track { height: 8rpx; margin-top: 10rpx; overflow: hidden; border-radius: 999rpx; background: var(--surface-2); }
 .usage-fill { width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: var(--primary-strong); transition: transform 180ms var(--ease-out); }
-.queue-note { display: block; margin-top: 10rpx; color: var(--muted); font-size: 21rpx; line-height: 1.5; }
+.queue-note { display: block; margin-top: 10rpx; color: var(--muted); font-size: 22rpx; line-height: 1.5; }
 .submit-button { margin-top: 26rpx; }
-.requirement-context { margin-top: 18rpx; padding: 20rpx 22rpx; border: 1rpx solid rgba(38, 181, 167, 0.35); border-radius: 22rpx; background: var(--primary-soft); }
-.requirement-context-head { display: flex; justify-content: space-between; gap: 16rpx; color: var(--primary-strong); font-size: 21rpx; }
+.requirement-context { margin-top: 22rpx; padding: 18rpx 20rpx; border: 1rpx solid rgba(38, 181, 167, 0.35); border-radius: 18rpx; background: var(--primary-soft); }
+.requirement-context-head { display: flex; justify-content: space-between; gap: 16rpx; color: var(--primary-strong); font-size: 22rpx; }
 .requirement-context-title { display: block; margin-top: 8rpx; color: var(--text); font-size: 26rpx; font-weight: 700; }
-.requirement-context-note { display: block; margin-top: 7rpx; color: var(--muted); font-size: 21rpx; line-height: 1.5; }
+.requirement-context-note { display: block; margin-top: 7rpx; color: var(--muted); font-size: 22rpx; line-height: 1.5; }
 </style>

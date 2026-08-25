@@ -91,11 +91,10 @@ onShow(applyManualSelection)
         <image v-if="photo.preview_path" class="review-thumb" :src="photo.preview_path" mode="aspectFill" />
         <view v-else class="review-thumb preview-waiting">预览处理中</view>
         <view class="review-copy">
-          <input v-model="photo.title" class="review-title" placeholder="照片题名" />
+          <view class="review-head"><input v-model="photo.title" class="review-title" placeholder="照片题名" /><text v-if="photo.match_candidates?.[0]" class="confidence" :class="{ high: photo.match_candidates[0].confidence >= 0.85 }">{{ Math.round(photo.match_candidates[0].confidence * 100) }}%</text></view>
           <text class="review-location">{{ selections[photo.photo_uuid]?.unit_name || selections[photo.photo_uuid]?.other_node_name || '等待识别结果' }}<template v-if="selections[photo.photo_uuid]?.process_name"> · {{ selections[photo.photo_uuid].process_name }}</template></text>
           <text class="review-code">{{ selections[photo.photo_uuid]?.unit_code || selections[photo.photo_uuid]?.other_node_code || photo.status }}</text>
         </view>
-        <text v-if="photo.match_candidates?.[0]" class="confidence" :class="{ high: photo.match_candidates[0].confidence >= 0.85 }">{{ Math.round(photo.match_candidates[0].confidence * 100) }}%</text>
       </view>
     </view>
 
@@ -109,17 +108,19 @@ onShow(applyManualSelection)
 
 <style scoped>
 .confirm-page { padding-bottom: calc(48rpx + var(--safe-bottom)); }
-.processing-note { margin-bottom: 22rpx; }
+.processing-note { margin-bottom: 0; }
 .notice-title { display: block; margin-bottom: 5rpx; color: var(--text); font-weight: 600; }
-.review-list { display: grid; gap: 16rpx; margin: 22rpx 0; }
-.review-card { display: grid; grid-template-columns: 126rpx 1fr auto; align-items: center; gap: 16rpx; padding: 14rpx; }
-.review-thumb { width: 126rpx; height: 108rpx; border-radius: 19rpx; background: var(--surface-2); }
+.review-list { display: grid; gap: 18rpx; margin: 0 0 24rpx; }
+.notice + .review-list { margin-top: 24rpx; }
+.review-card { display: grid; grid-template-columns: 112rpx minmax(0, 1fr); align-items: start; gap: 16rpx; padding: 18rpx; }
+.review-thumb { width: 112rpx; height: 104rpx; border-radius: 18rpx; background: var(--surface-2); }
 .preview-waiting { display: grid; place-items: center; color: var(--muted); font-size: 20rpx; }
 .review-copy { min-width: 0; }
-.review-title { width: 100%; height: 44rpx; color: var(--text); font-size: 26rpx; font-weight: 600; }
-.review-location { display: block; overflow: hidden; margin-top: 7rpx; color: var(--muted); font-size: 21rpx; text-overflow: ellipsis; white-space: nowrap; }
-.review-code { display: block; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; }
-.confidence { align-self: start; padding: 8rpx 12rpx; border-radius: 999rpx; color: var(--warning); background: rgba(241, 179, 75, 0.13); font-size: 20rpx; }
+.review-head { display: flex; align-items: center; min-width: 0; gap: 12rpx; }
+.review-title { flex: 1; min-width: 0; height: 44rpx; color: var(--text); font-size: 26rpx; font-weight: 600; }
+.review-location { display: block; overflow: hidden; margin-top: 8rpx; color: var(--muted); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
+.review-code { display: block; margin-top: 6rpx; color: var(--primary-strong); font-size: 22rpx; }
+.confidence { flex: 0 0 auto; padding: 8rpx 12rpx; border-radius: 999rpx; color: var(--warning); background: rgba(241, 179, 75, 0.13); font-size: 21rpx; }
 .confidence.high { color: var(--primary-strong); background: var(--primary-soft); }
 .manual-button { margin: 24rpx 0 16rpx; }
 .refresh-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 70rpx; margin-top: 16rpx; color: var(--primary-strong); font-size: 24rpx; line-height: 1.25; text-align: center; }

@@ -4,7 +4,6 @@ import { onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import H5TabBar from '@/components/H5TabBar.vue'
 import UiIcon from '@/components/UiIcon.vue'
-import { API_MODE, API_BASE_URL } from '@/config/env'
 import { sessionState, signOut } from '@/services/auth'
 import { queueRuntime } from '@/services/queue-runtime'
 import { syncTabBar } from '@/services/navigation'
@@ -43,13 +42,12 @@ onShow(() => {
 
     <view class="identity-card">
       <view class="avatar">{{ initial }}</view>
-      <view><text class="identity-name">{{ displayName }}</text><text class="identity-role">桌面端账号：{{ sessionState.account?.username }} · 微信已绑定</text></view>
+      <view class="identity-copy"><text class="identity-name">{{ displayName }}</text><text class="identity-role">桌面端账号：{{ sessionState.account?.username }} · 微信已绑定</text></view>
     </view>
 
+    <view v-if="!queueRuntime.state.online" class="notice offline-notice"><text class="notice-dot" /><text>当前离线，未中转原图仍安全保存在本机，联网后会继续上传。</text></view>
+
     <view class="settings card">
-      <button class="setting-row pressable" @tap="uniApi.showToast({ title: queueRuntime.state.online ? '当前网络可用' : '当前网络离线', icon: 'none' })">
-        <view class="setting-icon"><UiIcon name="server" :size="18" /></view><view><text class="setting-title">服务器</text><text class="setting-copy">{{ API_MODE === 'mock' ? '体验数据模式' : API_BASE_URL }}</text></view><text class="setting-value">{{ queueRuntime.state.online ? '网络可用' : '离线' }}</text>
-      </button>
       <button class="setting-row pressable" @tap="uniApi.switchTab({ url: '/pages/queue/index' })">
         <view class="setting-icon"><UiIcon name="storage" :size="18" /></view><view><text class="setting-title">本机影像</text><text class="setting-copy">待中转原图 + 长期保留的 100KB 预览</text></view><text class="setting-value">{{ formatBytes(queueRuntime.queueBytes.value) }}</text>
       </button>
@@ -70,18 +68,20 @@ onShow(() => {
 </template>
 
 <style scoped>
-.identity-card { display: flex; align-items: center; gap: 22rpx; margin-top: 34rpx; padding: 28rpx; border-radius: 30rpx; color: #fff; background: linear-gradient(135deg, var(--top), var(--primary)); }
-.avatar { display: grid; place-items: center; width: 92rpx; height: 92rpx; border-radius: 27rpx; background: rgba(255, 255, 255, 0.14); font-size: 38rpx; font-weight: 600; }
+.identity-card { display: flex; align-items: center; gap: 22rpx; margin-top: 28rpx; padding: 26rpx; border-radius: 26rpx; color: #fff; background: linear-gradient(135deg, var(--top), var(--primary)); }
+.avatar { display: grid; flex: 0 0 auto; place-items: center; width: 88rpx; height: 88rpx; border-radius: 25rpx; background: rgba(255, 255, 255, 0.14); font-size: 36rpx; font-weight: 600; }
+.identity-copy { min-width: 0; }
 .identity-name { display: block; font-size: 31rpx; font-weight: 700; }
-.identity-role { display: block; margin-top: 7rpx; font-size: 22rpx; opacity: 0.74; }
-.settings { overflow: hidden; margin-top: 26rpx; }
-.setting-row { display: grid; grid-template-columns: 52rpx 1fr auto; align-items: center; gap: 16rpx; width: 100%; min-height: 104rpx; padding: 16rpx 22rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
+.identity-role { display: block; margin-top: 7rpx; font-size: 22rpx; line-height: 1.45; opacity: 0.78; overflow-wrap: anywhere; }
+.offline-notice { margin-top: 24rpx; }
+.settings { overflow: hidden; margin-top: 24rpx; }
+.setting-row { display: grid; grid-template-columns: 52rpx minmax(0, 1fr) auto; align-items: center; gap: 16rpx; width: 100%; min-height: 104rpx; padding: 18rpx 20rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
 .setting-row:last-child { border-bottom: 0; }
 .setting-icon { display: grid; place-items: center; width: 50rpx; height: 50rpx; border-radius: 15rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 27rpx; }
 .setting-title { display: block; color: var(--text); font-size: 26rpx; font-weight: 600; }
-.setting-copy { display: block; overflow: hidden; max-width: 390rpx; margin-top: 5rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
-.setting-value { color: var(--muted); font-size: 21rpx; }
+.setting-copy { display: block; overflow: hidden; margin-top: 5rpx; color: var(--muted); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
+.setting-value { max-width: 140rpx; overflow: hidden; color: var(--muted); text-align: right; font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
 .setting-arrow { display: grid; place-items: center; width: 34rpx; height: 48rpx; color: var(--muted); }
-.signout { margin-top: 34rpx; color: var(--danger); }
-.version { display: block; margin-top: 24rpx; color: var(--muted); text-align: center; font-size: 20rpx; }
+.signout { margin-top: 28rpx; color: var(--danger); }
+.version { display: block; margin-top: 18rpx; color: var(--muted); text-align: center; font-size: 21rpx; }
 </style>

@@ -26,7 +26,7 @@ async function submit() {
 
 <template>
   <view class="page-shell no-tabs bind-page">
-    <PageHeader title="登录桌面端账号" subtitle="无需注册小程序账号" :back="false" />
+    <PageHeader title="工程影像" subtitle="连接桌面端账号" :back="false" />
     <view class="brand-mark">影</view>
     <text class="bind-title">登录桌面端账号</text>
     <text class="bind-copy">输入你在桌面端使用的账号和密码即可拉取该账号下的工程项目。一个桌面端账号最多绑定一个微信账号，绑定后无需重复输入。</text>
@@ -43,9 +43,10 @@ async function submit() {
 
 <style scoped>
 .bind-page { padding-top: 0; }
-.brand-mark { display: grid; place-items: center; width: 108rpx; height: 108rpx; margin: 22rpx auto 26rpx; border-radius: 33rpx; color: #041a1a; background: var(--primary-strong); box-shadow: 0 18rpx 38rpx rgba(45, 185, 170, 0.25); font-size: 45rpx; font-weight: 800; }
+.brand-mark { display: grid; place-items: center; width: 96rpx; height: 96rpx; margin: 0 auto 24rpx; border-radius: 29rpx; color: #041a1a; background: var(--primary-strong); box-shadow: 0 16rpx 34rpx rgba(45, 185, 170, 0.22); font-size: 41rpx; font-weight: 800; }
 .bind-title { display: block; text-align: center; font-size: 40rpx; font-weight: 700; }
-.bind-copy { display: block; max-width: 560rpx; margin: 13rpx auto 38rpx; color: var(--muted); text-align: center; font-size: 24rpx; line-height: 1.6; }
+.bind-copy { display: block; max-width: 560rpx; margin: 12rpx auto 26rpx; color: var(--muted); text-align: center; font-size: 24rpx; line-height: 1.6; }
+.bind-copy + .field-label { margin-top: 0; }
 .submit { margin-top: 34rpx; }
 .privacy-note { margin-top: 28rpx; }
 </style>

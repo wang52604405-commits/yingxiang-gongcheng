@@ -90,7 +90,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
   <view class="page-shell home-page">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="openProject" />
     <view class="project-context">
-      <view class="project-tags"><text class="industry-tag">{{ industryLabel }}</text><text class="type-tag">{{ typeLabel }}</text></view>
+      <text class="context-kicker">{{ industryLabel }} · {{ typeLabel }}</text>
       <text class="context-title">现场影像工作台</text>
       <text class="context-copy">项目、专业规则和影像归档位置均与桌面端保持一致。</text>
     </view>
@@ -125,27 +125,27 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
 
 <style scoped>
 .home-page { padding-bottom: calc(158rpx + var(--safe-bottom)); }
-.project-context { margin-top: 4rpx; }
-.project-tags { display: flex; flex-wrap: wrap; gap: 10rpx; margin-bottom: 12rpx; }
-.industry-tag, .type-tag { display: inline-flex; align-items: center; justify-content: center; min-height: 42rpx; padding: 0 14rpx; border-radius: 999rpx; font-size: 21rpx; line-height: 1.2; }
-.industry-tag { color: var(--primary-strong); background: var(--primary-soft); }
-.type-tag { color: var(--muted); background: var(--surface); border: 1rpx solid var(--line); }
-.context-title { display: block; color: var(--text); font-size: 42rpx; font-weight: 700; line-height: 1.2; }
+.project-context { margin-top: 0; }
+.context-kicker { display: block; margin-bottom: 9rpx; color: var(--primary-strong); font-size: 22rpx; font-weight: 500; letter-spacing: 1rpx; }
+.context-title { display: block; color: var(--text); font-size: 40rpx; font-weight: 700; line-height: 1.25; }
 .context-copy { display: block; margin-top: 8rpx; color: var(--muted); font-size: 24rpx; line-height: 1.55; }
-.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12rpx; margin-top: 26rpx; }
-.summary-card { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-width: 0; min-height: 112rpx; margin: 0; padding: 18rpx 16rpx; border: 1rpx solid var(--line); border-radius: 22rpx; text-align: center; background: var(--surface); }
+.summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: var(--space-xl); overflow: hidden; border: 1rpx solid var(--line); border-radius: 22rpx; background: var(--surface); }
+.summary-card { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-width: 0; min-height: 106rpx; margin: 0; padding: 16rpx 12rpx; border-right: 1rpx solid var(--line); text-align: center; background: transparent; }
+.summary-card:last-child { border-right: 0; }
 .summary-number { color: var(--text); font-size: 34rpx; font-weight: 700; line-height: 1.15; }
 .summary-number.warning { color: var(--warning); }
-.summary-label { margin-top: 6rpx; color: var(--muted); font-size: 21rpx; line-height: 1.2; }
-.quick-grid { display: grid; gap: 14rpx; margin-top: 20rpx; }
-.quick-button { display: grid; grid-template-columns: 58rpx 1fr 28rpx; align-items: center; width: 100%; min-width: 0; gap: 14rpx; min-height: 96rpx; margin: 0; padding: 14rpx 18rpx; border: 1rpx solid var(--line); border-radius: 22rpx; text-align: left; background: var(--surface); }
+.summary-label { margin-top: 6rpx; color: var(--muted); font-size: 22rpx; line-height: 1.2; }
+.quick-grid { display: grid; gap: 0; margin-top: var(--space-lg); overflow: hidden; border: 1rpx solid var(--line); border-radius: 22rpx; background: var(--surface); }
+.quick-button { display: grid; grid-template-columns: 58rpx 1fr 28rpx; align-items: center; width: 100%; min-width: 0; gap: 14rpx; min-height: 98rpx; margin: 0; padding: 16rpx 18rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
+.quick-button:last-child { border-bottom: 0; }
 .quick-icon { display: grid; place-items: center; width: 54rpx; height: 54rpx; border-radius: 17rpx; color: var(--primary-strong); background: var(--primary-soft); }
 .quick-copy { min-width: 0; }
 .quick-title { display: block; color: var(--text); font-size: 25rpx; font-weight: 600; line-height: 1.25; }
-.quick-note { display: block; overflow: hidden; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.quick-note { display: block; overflow: hidden; margin-top: 5rpx; color: var(--muted); font-size: 22rpx; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
 .quick-arrow { display: grid; place-items: center; width: 28rpx; height: 44rpx; color: var(--muted); }
-.recent-list { display: grid; gap: 16rpx; }
-.recent-item { display: grid; grid-template-columns: 108rpx 1fr auto; align-items: center; gap: 18rpx; width: 100%; min-height: 112rpx; padding: 12rpx 16rpx; border: 1rpx solid var(--line); border-radius: 22rpx; text-align: left; background: var(--surface); }
+.recent-list { display: grid; gap: 0; overflow: hidden; border: 1rpx solid var(--line); border-radius: 22rpx; background: var(--surface); }
+.recent-item { display: grid; grid-template-columns: 108rpx 1fr auto; align-items: center; gap: 18rpx; width: 100%; min-height: 112rpx; padding: 12rpx 16rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
+.recent-item:last-child { border-bottom: 0; }
 .recent-thumb { width: 108rpx; height: 86rpx; overflow: hidden; border-radius: 17rpx; background: #9fcfd8; }
 view.recent-thumb { display: flex; align-items: flex-end; padding: 8rpx; color: #09262a; background: linear-gradient(155deg, #9cd7e3 0 38%, #d6c69e 39% 60%, #668876 61%); font-size: 20rpx; font-weight: 700; }
 view.recent-thumb.scene-1 { background: linear-gradient(105deg, #86ccde 0 44%, #b5b9b4 45% 67%, #517c6d 68%); }
@@ -155,5 +155,5 @@ view.recent-thumb.scene-2 { background: linear-gradient(160deg, #9bdbe8 0 34%, #
 .recent-meta { display: block; overflow: hidden; margin-top: 8rpx; color: var(--muted); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
 .recent-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4rpx; color: var(--primary-strong); font-size: 20rpx; }
 .cloud-symbol { font-size: 29rpx; }
-.empty-state.compact { min-height: 300rpx; }
+.empty-state.compact { min-height: 280rpx; }
 </style>

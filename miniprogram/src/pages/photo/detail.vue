@@ -69,12 +69,12 @@ onLoad((query) => {
 .photo-preview { display: grid; place-items: center; width: 100%; height: 510rpx; overflow: hidden; border-radius: 28rpx; background: #071215; }
 .photo-preview image { width: 100%; height: 100%; }
 .preview-placeholder { color: var(--muted); font-size: 24rpx; }
-.detail-card { overflow: hidden; margin-top: 22rpx; padding: 0 22rpx; }
-.detail-row { display: grid; grid-template-columns: 150rpx 1fr; gap: 18rpx; padding: 23rpx 0; border-bottom: 1rpx solid var(--line); font-size: 24rpx; line-height: 1.5; }
+.detail-card { overflow: hidden; margin-top: 24rpx; padding: 0 22rpx; }
+.detail-row { display: grid; grid-template-columns: 150rpx 1fr; gap: 18rpx; padding: 24rpx 0; border-bottom: 1rpx solid var(--line); font-size: 24rpx; line-height: 1.5; }
 .detail-row:last-child { border-bottom: 0; }
 .detail-row > text:first-child { color: var(--muted); }
 .detail-row > text:last-child { color: var(--text); text-align: right; word-break: break-all; }
 .detail-row .status-value { color: var(--primary-strong); }
-.detail-row .uuid { font-size: 19rpx; }
+.detail-row .uuid { font-size: 21rpx; }
 .read-only-note { display: block; margin: 24rpx 12rpx 0; color: var(--muted); text-align: center; font-size: 21rpx; line-height: 1.55; }
 </style>

@@ -41,7 +41,7 @@ onShow(() => {
       <text class="queue-count">{{ photos.length }} 项</text>
     </view>
 
-    <view class="network-card" :class="{ offline: !queueRuntime.state.online }">
+    <view v-if="!queueRuntime.state.online || queueRuntime.state.running" class="network-card" :class="{ offline: !queueRuntime.state.online }">
       <view class="network-symbol" />
       <view><text class="network-title">{{ queueRuntime.state.online ? queueRuntime.state.running ? '正在中转原图' : '当前网络正常' : '当前离线' }}</text><text class="network-copy">{{ queueRuntime.state.online ? '回到小程序或网络恢复时自动续传；退出微信后不会后台上传。' : '可以继续拍照，未中转原图会安全留在本机。' }}</text></view>
     </view>
@@ -56,16 +56,15 @@ onShow(() => {
         <image v-if="photo.preview_path" class="queue-thumb" :src="photo.preview_path" mode="aspectFill" />
         <view v-else class="queue-thumb preview-waiting">预览</view>
         <view class="queue-copy">
-          <text class="queue-title">{{ photo.title }}</text>
+          <view class="queue-top"><text class="queue-title">{{ photo.title }}</text><text class="status-chip" :class="{ warning: photo.status === 'needs_review', danger: photo.status === 'failed' }">{{ STATUS_LABELS[photo.status] }}</text></view>
           <text class="queue-meta">{{ photo.draft.assignment?.unit_name || photo.draft.assignment?.other_node_name || '等待自动匹配' }}</text>
           <text class="queue-storage">{{ storageLabel(photo) }}</text>
           <view v-if="photo.status === 'uploading'" class="progress-track"><view class="progress-fill" :style="{ transform: `scaleX(${photo.progress / 100})` }" /></view>
           <text v-if="photo.error" class="error-copy">{{ photo.error }}</text>
-        </view>
-        <view class="queue-actions">
-          <text class="status-chip" :class="{ warning: photo.status === 'needs_review', danger: photo.status === 'failed' }">{{ STATUS_LABELS[photo.status] }}</text>
-          <button v-if="photo.status === 'failed' && photo.retryable !== false" class="mini-action pressable" @tap="queueRuntime.retry(photo.photo_uuid)">重试</button>
-          <button v-if="photo.status === 'needs_review'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">确认</button>
+          <view v-if="(photo.status === 'failed' && photo.retryable !== false) || photo.status === 'needs_review'" class="queue-actions">
+            <button v-if="photo.status === 'failed' && photo.retryable !== false" class="mini-action pressable" @tap="queueRuntime.retry(photo.photo_uuid)">重试</button>
+            <button v-if="photo.status === 'needs_review'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">确认</button>
+          </view>
         </view>
       </view>
     </view>
@@ -88,21 +87,22 @@ onShow(() => {
 .network-symbol { width: 17rpx; height: 17rpx; margin: 8rpx 0 0 5rpx; border: 3rpx solid rgba(45, 185, 170, 0.24); border-radius: 50%; background: var(--success); }
 .network-card.offline .network-symbol { background: var(--warning); border-color: rgba(241, 179, 75, 0.24); }
 .network-title { display: block; color: var(--text); font-size: 25rpx; font-weight: 600; }
-.network-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; line-height: 1.5; }
+.network-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 22rpx; line-height: 1.5; }
 .retry-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; padding: 16rpx 20rpx; border-radius: 18rpx; color: var(--danger); background: rgba(255, 107, 102, 0.1); font-size: 23rpx; }
-.retry-bar button { display: inline-flex; align-items: center; justify-content: center; min-height: 52rpx; padding: 0 17rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 22rpx; line-height: 1.25; text-align: center; }
-.queue-list { display: grid; gap: 16rpx; margin-top: 24rpx; }
-.queue-card { display: grid; grid-template-columns: 112rpx 1fr auto; align-items: center; gap: 18rpx; padding: 14rpx; }
-.queue-thumb { width: 112rpx; height: 94rpx; border-radius: 18rpx; background: var(--surface-2); }
+.retry-bar button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 20rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 23rpx; line-height: 1.25; text-align: center; }
+.queue-list { display: grid; gap: 18rpx; margin-top: 24rpx; }
+.queue-card { display: grid; grid-template-columns: 104rpx minmax(0, 1fr); align-items: start; gap: 16rpx; padding: 18rpx; }
+.queue-thumb { width: 104rpx; height: 96rpx; border-radius: 17rpx; background: var(--surface-2); }
 .preview-waiting { display: grid; place-items: center; color: var(--muted); font-size: 20rpx; }
 .queue-copy { min-width: 0; }
-.queue-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.queue-meta { display: block; overflow: hidden; margin-top: 7rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
-.queue-storage { display: block; overflow: hidden; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
+.queue-top { display: flex; align-items: flex-start; justify-content: space-between; min-width: 0; gap: 12rpx; }
+.queue-title { display: block; flex: 1; min-width: 0; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.queue-meta { display: block; overflow: hidden; margin-top: 8rpx; color: var(--muted); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
+.queue-storage { display: block; overflow: hidden; margin-top: 6rpx; color: var(--primary-strong); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
 .progress-track { height: 7rpx; margin-top: 14rpx; overflow: hidden; border-radius: 999rpx; background: var(--surface-2); }
 .progress-fill { width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: var(--primary-strong); transition: transform 160ms var(--ease-out); }
-.error-copy { display: block; margin-top: 7rpx; color: var(--danger); font-size: 20rpx; }
-.queue-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10rpx; }
-.mini-action { display: inline-flex; align-items: center; justify-content: center; min-height: 48rpx; padding: 0 16rpx; border-radius: 14rpx; color: #fff; background: var(--danger); font-size: 21rpx; line-height: 1.25; text-align: center; }
+.error-copy { display: block; margin-top: 7rpx; color: var(--danger); font-size: 22rpx; }
+.queue-actions { display: flex; justify-content: flex-end; gap: 10rpx; margin-top: 14rpx; }
+.mini-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 22rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 23rpx; line-height: 1.25; text-align: center; }
 .mini-action.confirm { color: #041a1a; background: var(--primary-strong); }
 </style>

@@ -27,7 +27,7 @@ const headerStyle: Record<string, string> = {
   <view class="app-header-spacer" :style="spacerStyle">
     <view class="app-header" :style="headerStyle">
       <view class="navigation-row">
-        <view class="brand-block">
+        <button class="brand-block pressable" @tap="$emit('selectProject')">
           <view class="eyebrow-line">
             <text class="eyebrow">工程影像</text>
             <view v-if="props.online === false" class="offline-state">
@@ -35,18 +35,18 @@ const headerStyle: Record<string, string> = {
               <text>离线</text>
             </view>
           </view>
-          <button class="project-button pressable" @tap="$emit('selectProject')">
+          <view class="project-line">
             <text class="project-name">{{ projectName }}</text>
             <view class="chevron" aria-hidden="true" />
-          </button>
-        </view>
+          </view>
+        </button>
       </view>
     </view>
   </view>
 </template>
 
 <style scoped>
-.app-header-spacer { width: 100%; }
+.app-header-spacer { width: 100%; margin-bottom: var(--space-lg); }
 .app-header {
   position: fixed;
   z-index: 20;
@@ -59,12 +59,12 @@ const headerStyle: Record<string, string> = {
   box-shadow: 0 1rpx 0 rgba(255, 255, 255, 0.06);
 }
 .navigation-row { display: flex; align-items: center; height: var(--nav-row-height); padding-right: var(--menu-right-clearance); }
-.brand-block { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 5rpx; }
+.brand-block { display: flex; flex: 1; flex-direction: column; align-items: stretch; justify-content: center; align-self: stretch; min-width: 0; gap: 5rpx; margin: 0; padding: 0; color: inherit; text-align: left; background: transparent; }
 .eyebrow-line { display: flex; align-items: center; min-width: 0; gap: 12rpx; }
-.eyebrow { display: block; font-size: 21rpx; line-height: 1.15; opacity: 0.78; }
-.project-button { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 36rpx; padding: 0; color: inherit; text-align: left; background: transparent; }
-.project-name { overflow: hidden; font-size: 27rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.eyebrow { display: block; font-size: 22rpx; line-height: 1.15; opacity: 0.78; }
+.project-line { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 36rpx; }
+.project-name { display: block; flex: 1; min-width: 0; overflow: hidden; font-size: 27rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .chevron { flex: 0 0 auto; width: 13rpx; height: 13rpx; margin: -6rpx 0 0 13rpx; border-right: 2rpx solid currentColor; border-bottom: 2rpx solid currentColor; transform: rotate(45deg); }
-.offline-state { display: flex; align-items: center; gap: 7rpx; color: #ffd28b; font-size: 19rpx; white-space: nowrap; }
+.offline-state { display: flex; align-items: center; gap: 7rpx; color: #ffd28b; font-size: 21rpx; white-space: nowrap; }
 .offline-dot { width: 11rpx; height: 11rpx; border-radius: 50%; background: #f1b34b; box-shadow: 0 0 0 5rpx rgba(241, 179, 75, 0.13); }
 </style>

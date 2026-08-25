@@ -103,23 +103,24 @@ onLoad(load)
 
 <style scoped>
 .requirements-page { padding-bottom: calc(40rpx + var(--safe-bottom)); }
-.summary-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12rpx; margin:18rpx 0 20rpx; }
-.summary-card { display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-width:0; gap:4rpx; padding:18rpx 8rpx; border:1rpx solid var(--line); border-radius:20rpx; background:var(--surface); color:var(--muted); font-size:21rpx; text-align:center; }
+.summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; margin:0 0 var(--space-lg); overflow:hidden; border:1rpx solid var(--line); border-radius:22rpx; background:var(--surface); }
+.summary-card { display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-width:0; min-height:94rpx; gap:4rpx; padding:14rpx 6rpx; border-right:1rpx solid var(--line); background:transparent; color:var(--muted); font-size:22rpx; text-align:center; }
+.summary-card:last-child { border-right:0; }
 .summary-number { color:var(--text); font-size:30rpx; font-weight:700; }
-.search-input { height:82rpx; padding:0 22rpx; border:1rpx solid var(--line); border-radius:20rpx; background:var(--surface); color:var(--text); font-size:24rpx; }
+.search-input { height:88rpx; padding:0 22rpx; border:1rpx solid var(--line); border-radius:20rpx; background:var(--surface); color:var(--text); font-size:25rpx; }
 .filter-scroll { margin:18rpx 0; white-space:nowrap; }
 .filter-row { display:flex; gap:12rpx; }
-.filter-chip { display:inline-flex; align-items:center; justify-content:center; min-height:58rpx; padding:10rpx 22rpx; border:1rpx solid var(--line); border-radius:999rpx; background:var(--surface); color:var(--muted); font-size:21rpx; line-height:1.25; text-align:center; }
+.filter-chip { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8rpx 24rpx; border:1rpx solid var(--line); border-radius:999rpx; background:var(--surface); color:var(--muted); font-size:22rpx; line-height:1.25; text-align:center; }
 .filter-chip.active { border-color:var(--primary); background:var(--primary-soft); color:var(--primary-strong); }
-.requirement-list { display:grid; gap:14rpx; }
-.requirement-card { display:block; width:100%; padding:20rpx; text-align:left; }
-.requirement-head { display:flex; align-items:center; justify-content:space-between; }
-.requirement-tag { padding:5rpx 12rpx; border-radius:999rpx; background:var(--primary-soft); color:var(--primary-strong); font-size:20rpx; }
+.requirement-list { display:grid; gap:18rpx; }
+.requirement-card { display:block; width:100%; padding:24rpx; text-align:left; }
+.requirement-head { display:flex; align-items:center; justify-content:space-between; min-width:0; gap:16rpx; }
+.requirement-tag { flex:0 0 auto; padding:5rpx 12rpx; border-radius:999rpx; background:var(--primary-soft); color:var(--primary-strong); font-size:22rpx; }
 .requirement-tag.required { background:rgba(255,95,95,.14); color:#ff7777; }
 .requirement-tag.conditional { background:rgba(255,181,71,.14); color:#f0ad4e; }
-.requirement-code { color:var(--muted); font-size:20rpx; }
+.requirement-code { max-width:60%; overflow:hidden; color:var(--muted); font-size:22rpx; text-overflow:ellipsis; white-space:nowrap; }
 .requirement-title { display:block; margin-top:13rpx; color:var(--text); font-size:27rpx; font-weight:700; }
-.requirement-path { display:block; margin-top:8rpx; color:var(--muted); font-size:20rpx; line-height:1.5; }
-.requirement-meta { display:flex; flex-wrap:wrap; gap:12rpx; margin-top:12rpx; color:var(--primary-strong); font-size:21rpx; }
-.condition { display:block; margin-top:10rpx; color:var(--muted); font-size:21rpx; line-height:1.5; }
+.requirement-path { display:block; margin-top:8rpx; color:var(--muted); font-size:22rpx; line-height:1.5; }
+.requirement-meta { display:flex; flex-wrap:wrap; gap:12rpx; margin-top:12rpx; color:var(--primary-strong); font-size:22rpx; }
+.condition { display:block; margin-top:10rpx; color:var(--muted); font-size:22rpx; line-height:1.5; }
 </style>

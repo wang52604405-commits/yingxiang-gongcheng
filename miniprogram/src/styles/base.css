@@ -14,6 +14,12 @@ page {
   --danger: #ff6b66;
   --success: #37c58e;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --space-xs: 8rpx;
+  --space-sm: 12rpx;
+  --space-md: 16rpx;
+  --space-lg: 24rpx;
+  --space-xl: 32rpx;
+  --space-2xl: 40rpx;
   --safe-top: env(safe-area-inset-top);
   --safe-bottom: env(safe-area-inset-bottom);
   color: var(--text);
@@ -91,11 +97,11 @@ uni-button::after {
 
 .page-title {
   display: block;
-  margin: 4rpx 0 6rpx;
+  margin: 0 0 6rpx;
   color: var(--text);
-  font-size: 44rpx;
+  font-size: 40rpx;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .page-subtitle {
@@ -109,12 +115,12 @@ uni-button::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 42rpx 0 18rpx;
+  margin: var(--space-2xl) 0 var(--space-md);
 }
 
 .section-title {
   color: var(--text);
-  font-size: 29rpx;
+  font-size: 28rpx;
   font-weight: 600;
 }
 
@@ -122,7 +128,7 @@ uni-button::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 52rpx;
+  min-height: 40px;
   padding: 0 4rpx;
   color: var(--primary-strong);
   background: transparent;
@@ -131,7 +137,7 @@ uni-button::after {
 
 .card {
   border: 1rpx solid var(--line);
-  border-radius: 26rpx;
+  border-radius: 22rpx;
   background: var(--surface);
 }
 
@@ -140,7 +146,7 @@ uni-button::after {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6rpx;
   padding: 6rpx;
-  border-radius: 22rpx;
+  border-radius: 20rpx;
   background: #081316;
 }
 
@@ -150,10 +156,10 @@ uni-button::after {
   justify-content: center;
   width: 100%;
   min-width: 0;
-  min-height: 70rpx;
+  min-height: 40px;
   margin: 0;
   padding: 0 16rpx;
-  border-radius: 17rpx;
+  border-radius: 15rpx;
   color: var(--muted);
   background: transparent;
   font-size: 25rpx;
@@ -167,7 +173,7 @@ uni-button::after {
 
 .field-label {
   display: block;
-  margin: 28rpx 0 12rpx;
+  margin: var(--space-lg) 0 var(--space-sm);
   color: var(--muted);
   font-size: 24rpx;
 }
@@ -244,7 +250,7 @@ uni-button::after {
   border-radius: 999rpx;
   color: var(--primary-strong);
   background: var(--primary-soft);
-  font-size: 21rpx;
+  font-size: 22rpx;
   white-space: nowrap;
 }
 
@@ -263,7 +269,7 @@ uni-button::after {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 420rpx;
+  min-height: 380rpx;
   color: var(--muted);
   text-align: center;
 }
