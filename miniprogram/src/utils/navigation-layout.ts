@@ -46,7 +46,7 @@ export function resolveNavigationLayout(
     statusBarHeight,
     navigationBarHeight,
     menuRightClearance,
-    appHeaderHeight: Math.round(statusBarHeight + navigationBarHeight + 38),
+    appHeaderHeight: Math.round(statusBarHeight + navigationBarHeight),
     pageHeaderHeight: Math.round(statusBarHeight + navigationBarHeight),
   }
 }

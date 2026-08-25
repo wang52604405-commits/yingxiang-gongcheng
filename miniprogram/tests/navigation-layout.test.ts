@@ -12,7 +12,7 @@ describe('navigation layout', () => {
     expect(layout.navigationBarHeight).toBe(44)
     expect(layout.menuRightClearance).toBe(108)
     expect(layout.pageHeaderHeight).toBe(91)
-    expect(layout.appHeaderHeight).toBe(129)
+    expect(layout.appHeaderHeight).toBe(91)
   })
 
   it('keeps Android navigation compact while clearing the capsule', () => {
@@ -23,7 +23,7 @@ describe('navigation layout', () => {
 
     expect(layout.navigationBarHeight).toBe(40)
     expect(layout.menuRightClearance).toBe(102)
-    expect(layout.appHeaderHeight).toBe(102)
+    expect(layout.appHeaderHeight).toBe(64)
   })
 
   it('falls back safely when a platform has no WeChat capsule', () => {
@@ -32,6 +32,6 @@ describe('navigation layout', () => {
     expect(layout.navigationBarHeight).toBe(44)
     expect(layout.menuRightClearance).toBe(10)
     expect(layout.pageHeaderHeight).toBe(44)
-    expect(layout.appHeaderHeight).toBe(82)
+    expect(layout.appHeaderHeight).toBe(44)
   })
 })
