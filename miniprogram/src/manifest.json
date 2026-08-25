@@ -1,0 +1,25 @@
+{
+  "name": "工程影像",
+  "appid": "__UNI__ENGINEERING_IMAGE_V1",
+  "description": "水利工程现场影像采集、归档与查看",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "",
+    "libVersion": "2.25.0",
+    "setting": {
+      "urlCheck": true,
+      "es6": true,
+      "postcss": true,
+      "minified": true,
+      "__usePrivacyCheck__": true
+    },
+    "usingComponents": true,
+    "permission": {
+      "scope.camera": {
+        "desc": "用于拍摄现场工程影像"
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ import socket
 import sys
 import threading
 import traceback
+import uuid
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,8 +23,10 @@ from werkzeug.utils import secure_filename
 
 import licensing
 import cloud_client
+import mobile_sync
 import tamper_guard
 import watermark_ocr
+from server import mobile_recognition
 
 try:
     from openpyxl import load_workbook
@@ -608,6 +611,10 @@ def run_lan_server():
     print("Keep this window open while other computers use the system.")
     # 启动后稍候同步一次云预览（缩略图+编号），不阻塞主服务
     threading.Timer(3.0, sync_cloud_preview_async).start()
+    # 启动后立即拉取手机影像，随后每 30 秒静默重试。
+    # Flask debug reloader 只在实际服务子进程启动，避免两个同步线程。
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        ensure_desktop_mobile_sync_started()
     # 启动后自动把灌注桩单元按桩号连体+时间重排(三根一体)，不阻塞
     threading.Timer(6.0, _auto_renumber_piles_all).start()
     app.run(host=host, port=port, debug=debug, threaded=True)
@@ -1418,6 +1425,101 @@ class AlbumManager:
             target.write_bytes(raw)
             return {"original_bytes": len(raw), "stored_bytes": len(raw), "optimized": False}
 
+    def _save_exact_mobile_original(self, file_storage, target):
+        """把服务器中转的手机原图原字节落盘，不压缩、不改编码。"""
+        file_storage.stream.seek(0)
+        raw = file_storage.stream.read()
+        file_storage.stream.seek(0)
+        if not raw:
+            raise ValueError("手机原图为空")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(target.suffix + ".mobile.tmp")
+        try:
+            temporary.write_bytes(raw)
+            os.replace(temporary, target)
+        except Exception:
+            # 磁盘满、杀毒软件占用或原子替换失败时，不留下会被误认
+            # 为已归档照片的半成品。服务器回执因此不会发生。
+            temporary.unlink(missing_ok=True)
+            raise
+        return {
+            "original_bytes": len(raw),
+            "stored_bytes": len(raw),
+            "optimized": False,
+            "original_backup": "",
+        }
+
+    def repair_mobile_original(self, project_code, photo_uuid, raw, details, original_name=""):
+        """按永久 UUID 原子修复缺失/损坏的手机原图，成功后更新元数据。"""
+        raw = bytes(raw or b"")
+        expected_sha = str((details or {}).get("sha256") or "").strip().lower()
+        expected_size = int((details or {}).get("size_bytes") or len(raw))
+        if not raw or len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != expected_sha:
+            raise ValueError("待修复手机原图完整性校验失败")
+        with self._project_write_lock(project_code):
+            data = self._read_metadata(project_code)
+            photo = next(
+                (
+                    item for item in data.get("photos", [])
+                    if str(item.get("photo_uuid") or "").strip() == str(photo_uuid or "").strip()
+                ),
+                None,
+            )
+            if not photo:
+                raise ValueError("找不到待修复的手机影像 UUID")
+            filename = Path(str(photo.get("filename") or "")).name
+            if not filename:
+                raise ValueError("待修复手机影像缺少本地文件名")
+            target = self._photos_dir(project_code) / filename
+            if target.is_symlink():
+                raise ValueError("拒绝修复符号链接影像文件")
+            expected_extension = str((details or {}).get("extension") or "").lower()
+            target_extension = target.suffix.lower()
+            extension_matches = (
+                expected_extension == target_extension
+                or expected_extension == ".jpg" and target_extension == ".jpeg"
+            )
+            if not extension_matches:
+                raise ValueError("服务器原图格式与本地影像扩展名不一致，已保留服务器原图")
+
+            backup_name = ""
+            if target.exists():
+                backup_dir = self._project_dir(project_code) / "_mobile_sync_backups"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                backup = backup_dir / f"corrupt-before-repair-{photo_uuid}-{stamp}{target.suffix.lower()}"
+                shutil.copy2(target, backup)
+                backup_name = backup.name
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_suffix(target.suffix + ".mobile-repair.tmp")
+            try:
+                temporary.write_bytes(raw)
+                os.replace(temporary, target)
+            except Exception:
+                temporary.unlink(missing_ok=True)
+                raise
+            if target.stat().st_size != expected_size or hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha:
+                raise ValueError("手机原图修复落盘后校验失败，未发送服务器回执")
+
+            photo.update({
+                "mobile_original_received": True,
+                "mobile_original_name": str(original_name or photo.get("mobile_original_name") or filename),
+                "mobile_original_size_bytes": expected_size,
+                "mobile_repair_backup": backup_name,
+                "sha256": expected_sha,
+                "stored_bytes": expected_size,
+                "original_bytes": expected_size,
+                "optimized": False,
+                "pixel_width": int((details or {}).get("width") or photo.get("pixel_width") or 0),
+                "pixel_height": int((details or {}).get("height") or photo.get("pixel_height") or 0),
+            })
+            thumb = target.parent / self._thumb_filename(filename)
+            thumb.unlink(missing_ok=True)
+            self._ensure_thumbnail(project_code, filename)
+            self._write_metadata(project_code, data)
+            return self._photo_item(data, photo)
+
     def _normalize_category(self, category):
         category = str(category or "construction").strip()
         return category if category in PHOTO_CATEGORIES else "construction"
@@ -1828,6 +1930,11 @@ class AlbumManager:
             target = self._photos_dir(project_code) / Path(str(photo.get("filename") or "")).name
             if not target.exists():
                 raise ValueError("照片文件不存在")
+            if photo.get("mobile_original_received"):
+                # 手机原图是电脑端正式档案。无论后台任务还是用户手动触发
+                # 优化，都只补缩略图，不重编码正式文件。
+                self._ensure_thumbnail(project_code, target.name)
+                return self._photo_item(data, photo)
             raw = target.read_bytes()
             result = self._save_optimized_upload(FileStorage(stream=io.BytesIO(raw), filename=target.name), target)
             photo["original_bytes"] = int(result.get("original_bytes") or len(raw))
@@ -1884,6 +1991,7 @@ class AlbumManager:
             ext = Path(original_name).suffix.lower()
             if ext not in IMAGE_EXTENSIONS:
                 raise ValueError(f"只支持 JPG/PNG 图片：{original_name}")
+            meta = (per_file_meta or {}).get(original_name, {}) or {}
 
             photo_id = self._next_id(data["project_code"], category, process_name, process_code)
             filename = self._photo_filename(category, photo_id, ext, process_code)
@@ -1893,14 +2001,19 @@ class AlbumManager:
                 filename = self._photo_filename(category, photo_id, ext, process_code)
                 target = photos_dir / filename
 
-            compression = self._save_optimized_upload(file_storage, target)
+            preserve_mobile_original = bool(meta.get("preserve_mobile_original"))
+            compression = (
+                self._save_exact_mobile_original(file_storage, target)
+                if preserve_mobile_original
+                else self._save_optimized_upload(file_storage, target)
+            )
             self._ensure_thumbnail(project_code, filename)
             detected = detect_photo_orientation(target)
             if detected:
                 orientation = self._normalize_orientation(detected)
-            meta = (per_file_meta or {}).get(original_name, {}) or {}
             item = {
                 "id": photo_id,
+                "photo_uuid": str(meta.get("photo_uuid") or uuid.uuid4()),
                 "category": category,
                 "category_label": PHOTO_CATEGORY_LABELS.get(category, category),
                 "title": str(meta.get("title") or title or "").strip(),
@@ -1921,9 +2034,28 @@ class AlbumManager:
                 "stored_bytes": int(compression.get("stored_bytes") or 0),
                 "optimized": bool(compression.get("optimized")),
                 "original_backup": str(compression.get("original_backup") or ""),
+                "mobile_compressed_200k": bool(meta.get("mobile_compressed_200k")),
+                "mobile_original_received": bool(meta.get("mobile_original_received")),
+                "mobile_original_name": str(meta.get("source_original_name") or original_name).strip(),
+                "mobile_original_size_bytes": int(
+                    compression.get("stored_bytes") or meta.get("original_size_bytes") or 0
+                ) if meta.get("mobile_original_received") else 0,
+                "client_captured_at": str(meta.get("client_captured_at") or "").strip(),
+                "sha256": str(meta.get("sha256") or "").strip().lower(),
+                "pixel_width": int(meta.get("pixel_width") or compression.get("pixel_width") or 0),
+                "pixel_height": int(meta.get("pixel_height") or compression.get("pixel_height") or 0),
             }
             data["photos"].append(item)
-            self._write_metadata(data["project_code"], data)
+            try:
+                self._write_metadata(data["project_code"], data)
+            except Exception:
+                # 只有文件与 metadata 都持久化成功才能向服务器回执。
+                # metadata 写入失败时清理本次原图及缩略图，留待下周期重试。
+                if preserve_mobile_original:
+                    target.unlink(missing_ok=True)
+                    (photos_dir / self._thumb_filename(filename)).unlink(missing_ok=True)
+                    data["photos"].pop()
+                raise
             added.append(self._photo_item(data, item))
         self._renumber_after_change(project_code, data)
         return added
@@ -1989,6 +2121,7 @@ class AlbumManager:
             orientation = self._normalize_orientation(detected or photo.get("orientation"))
             item = {
                 "id": photo_id,
+                "photo_uuid": str(uuid.uuid4()),
                 "category": "supervision",
                 "category_label": PHOTO_CATEGORY_LABELS["supervision"],
                 "title": str(photo.get("title") or "").strip(),
@@ -2925,6 +3058,10 @@ def _photo_optimization_worker():
             try:
                 data = manager.get_project(code)
                 for photo in data.get("photos", []):
+                    if photo.get("mobile_original_received"):
+                        # 手机原图以原字节作为电脑端正式归档，不参与旧的
+                        # 300KB 日常使用图后台优化。
+                        continue
                     target = manager._photos_dir(code) / Path(str(photo.get("filename") or "")).name
                     backup_name = str(photo.get("original_backup") or "")
                     backup_exists = bool(backup_name and manager._original_path(code, backup_name).exists())
@@ -3683,7 +3820,7 @@ def _enrich_watermark_metadata(files, shared_title, shared_date, enabled, form_t
 
 
 def normalize_match_text(value):
-    return re.sub(r"[\s\-_.()（）【】\[\]{}?？]+", "", str(value or "").lower())
+    return mobile_recognition.normalize_match_text(value)
 
 
 def project_match_candidates(project):
@@ -3797,7 +3934,7 @@ CLOUD_SYNC_THUMB_CAP = 240
 
 
 def _cloud_thumbnail_bytes(project_code, filename, limits):
-    """生成可辨认的云预览图并按原图时间戳缓存，不上传原图。"""
+    """为电脑端既有照片生成云预览并按时间戳缓存，不上传电脑原图。"""
     original = manager._photos_dir(project_code) / Path(str(filename)).name
     if not original.exists():
         return b""
@@ -4100,116 +4237,38 @@ def match_folder_to_project(folder_name):
 
 def _match_signal_score(signal, candidate, source_kind, field_kind):
     """单条信号与项目字段的匹配分。层级字段只辅助，单元编码/名称才可高置信自动建议。"""
-    signal_key = normalize_match_text(signal)
-    candidate_key = normalize_match_text(candidate)
-    if not signal_key or not candidate_key or len(candidate_key) < 2:
-        return 0
-    exact = signal_key == candidate_key
-    contained = candidate_key in signal_key or (len(signal_key) >= 4 and signal_key in candidate_key)
-    if not exact and not contained:
-        return 0
-    unit_weights = {
-        "area": (980, 860),
-        "folder": (920, 780),
-        "filename": (880, 740),
-        "project": (620, 500),
-        "content": (360, 260),
-    }
-    hierarchy_weights = {
-        "area": (430, 330),
-        "folder": (380, 290),
-        "filename": (320, 240),
-        "project": (260, 190),
-        "content": (120, 80),
-    }
-    weights = unit_weights if field_kind == "unit" else hierarchy_weights
-    exact_score, contains_score = weights.get(source_kind, (0, 0))
-    return exact_score if exact else contains_score + min(60, len(candidate_key) * 3)
+    return mobile_recognition.match_signal_score(signal, candidate, source_kind, field_kind)
 
 
 def match_photo_to_projects(filename="", relative_path="", ocr_fields=None, limit=5):
     """多重规则匹配：施工区域 > 文件夹 > 文件名 > OCR工程名 > 施工内容关键词。"""
-    ocr_fields = ocr_fields or {}
-    folder = str(Path(str(relative_path or "").replace("\\", "/")).parent).replace("\\", "/")
-    if folder in {"", "."}:
-        folder = ""
-    signals = [
-        ("area", "施工区域", ocr_fields.get("construction_area", "")),
-        ("folder", "文件夹", folder),
-        ("filename", "文件名", Path(filename or "").stem),
-        ("project", "水印工程名", ocr_fields.get("project_name", "")),
-        ("content", "施工内容", ocr_fields.get("construction_content") or ocr_fields.get("title", "")),
+    shared = mobile_recognition.match_photo(
+        filename=filename,
+        relative_path=relative_path,
+        ocr_fields=ocr_fields or {},
+        candidates=manager.list_projects(),
+        limit=limit,
+    )
+    alternatives = [
+        {
+            "project_code": item.get("project_code", ""),
+            "display_project_code": item.get("display_project_code", ""),
+            "project_name": item.get("project_name", ""),
+            "unit_name": item.get("unit_name", ""),
+            "part_name": item.get("part_name", ""),
+            "score": item.get("score", 0),
+            "reasons": item.get("reasons", []),
+        }
+        for item in shared.get("alternatives", [])
     ]
-    ranked = []
-    for project in manager.list_projects():
-        fields = project.get("source_fields") or {}
-        unit_values = [
-            project.get("project_code", ""), project.get("display_project_code", ""),
-            project.get("project_name", ""), fields.get("单元工程编码", ""), fields.get("单元工程名称", ""),
-        ]
-        hierarchy_values = [
-            fields.get("分部工程编码", ""), fields.get("分部工程名称", ""),
-            fields.get("单位工程编码", ""), fields.get("单位工程名称", ""),
-            fields.get("合同工程名称", ""), project.get("keywords", ""),
-        ]
-        score = 0
-        reasons = []
-        for source_kind, source_label, signal in signals:
-            best_signal_score = 0
-            best_value = ""
-            best_field_kind = ""
-            for candidate in unit_values:
-                candidate_score = _match_signal_score(signal, candidate, source_kind, "unit")
-                if candidate_score > best_signal_score:
-                    best_signal_score, best_value, best_field_kind = candidate_score, candidate, "unit"
-            for candidate in hierarchy_values:
-                candidate_score = _match_signal_score(signal, candidate, source_kind, "hierarchy")
-                if candidate_score > best_signal_score:
-                    best_signal_score, best_value, best_field_kind = candidate_score, candidate, "hierarchy"
-            if best_signal_score:
-                score += best_signal_score
-                field_label = "单元" if best_field_kind == "unit" else "上级划分"
-                reasons.append(f"{source_label}匹配{field_label}“{best_value}”")
-        if score:
-            ranked.append({
-                "project": project,
-                "score": score,
-                "reasons": reasons,
-            })
-    ranked.sort(key=lambda item: (item["score"], len(item["reasons"])), reverse=True)
-    top = ranked[0] if ranked else None
-    second_score = ranked[1]["score"] if len(ranked) > 1 else 0
-    top_score = top["score"] if top else 0
-    gap = top_score - second_score
-    ambiguous = bool(top and second_score and gap < max(80, int(top_score * 0.12)))
-    if top_score >= 850 and not ambiguous:
-        confidence, confidence_label = "high", "高"
-    elif top_score >= 560 and not ambiguous:
-        confidence, confidence_label = "medium", "中"
-    else:
-        confidence, confidence_label = "low", "低"
-    alternatives = []
-    for item in ranked[:max(1, int(limit or 5))]:
-        project = item["project"]
-        source_fields = project.get("source_fields") or {}
-        alternatives.append({
-            "project_code": project.get("project_code", ""),
-            "display_project_code": project.get("display_project_code") or source_fields.get("单元工程编码") or project.get("project_code", ""),
-            "project_name": project.get("project_name", ""),
-            "unit_name": source_fields.get("单位工程名称", ""),
-            "part_name": source_fields.get("分部工程名称", ""),
-            "score": item["score"],
-            "reasons": item["reasons"],
-        })
-    selected = top["project"] if top else {}
     return {
-        "project_code": selected.get("project_code", ""),
-        "project_name": selected.get("project_name", ""),
-        "confidence": confidence,
-        "confidence_label": confidence_label,
-        "ambiguous": ambiguous,
-        "score": top_score,
-        "reasons": top.get("reasons", []) if top else ["未找到可匹配的项目划分"],
+        "project_code": shared.get("project_code", ""),
+        "project_name": shared.get("project_name", ""),
+        "confidence": shared.get("confidence", "low"),
+        "confidence_label": shared.get("confidence_label", "低"),
+        "ambiguous": bool(shared.get("ambiguous")),
+        "score": int(shared.get("score") or 0),
+        "reasons": shared.get("reasons", []) or ["未找到可匹配的项目划分"],
         "alternatives": alternatives,
     }
 
@@ -4832,6 +4891,81 @@ def api_cloud_apply_update():
 def api_cloud_logout():
     session.pop("username", None)
     return jsonify(cloud_client.logout())
+
+
+_desktop_mobile_sync_service = None
+_desktop_mobile_sync_service_lock = threading.Lock()
+
+
+def desktop_mobile_sync_service():
+    """取得本进程唯一的手机影像同步器。"""
+    global _desktop_mobile_sync_service
+    with _desktop_mobile_sync_service_lock:
+        if _desktop_mobile_sync_service is None:
+            _desktop_mobile_sync_service = mobile_sync.DesktopMobileSync(
+                manager=manager,
+                cloud=cloud_client,
+                engineering_project_reader=current_engineering_project,
+                other_images_reader=read_other_images,
+                state_path=DATA_DIR / "mobile_sync_state.json",
+                cache_dir=DATA_DIR / "mobile_sync_cache",
+                interval_seconds=30,
+                machine_id_reader=licensing.machine_id,
+            )
+        return _desktop_mobile_sync_service
+
+
+def ensure_desktop_mobile_sync_started():
+    """启动同步线程；重复调用仍只会有一个实例。"""
+    return desktop_mobile_sync_service().start()
+
+
+def update_current_engineering_project_display_name(
+    new_name=mobile_sync.TARGET_PROJECT_DISPLAY_NAME,
+    expected_current_name="",
+    dry_run=False,
+):
+    """显式更新当前工程显示名；不会在导入、启动或测试时自动改数据。"""
+    return mobile_sync.update_engineering_project_display_name(
+        ENGINEERING_PROJECTS_PATH,
+        PROJECT_INFO_PATH,
+        new_name=new_name,
+        project_id=active_engineering_project_id(),
+        expected_current_name=expected_current_name,
+        dry_run=bool(dry_run),
+    )
+
+
+@app.route("/api/mobile-sync/status", methods=["GET"])
+def api_mobile_sync_status():
+    _user, error = login_required_json()
+    if error:
+        return error
+    return jsonify(desktop_mobile_sync_service().status())
+
+
+@app.route("/api/mobile-sync/run", methods=["POST"])
+def api_mobile_sync_run():
+    _user, error = login_required_json()
+    if error:
+        return error
+    return jsonify(desktop_mobile_sync_service().run_once())
+
+
+@app.route("/api/mobile-sync/backfill/pause", methods=["POST"])
+def api_mobile_sync_backfill_pause():
+    _user, error = login_required_json()
+    if error:
+        return error
+    return jsonify(desktop_mobile_sync_service().pause_backfill())
+
+
+@app.route("/api/mobile-sync/backfill/resume", methods=["POST"])
+def api_mobile_sync_backfill_resume():
+    _user, error = login_required_json()
+    if error:
+        return error
+    return jsonify(desktop_mobile_sync_service().resume_backfill())
 
 
 @app.route("/api/cloud/sync", methods=["POST"])

@@ -41,6 +41,11 @@ __pycache__/
 .venv/
 venv/
 
+# Node / uni-app 本地依赖与缓存（锁文件保留，用于可重复构建）
+node_modules/
+.vite/
+.hbuilderx/
+
 # 工具与 IDE 状态
 .claude/
 .reasonix/

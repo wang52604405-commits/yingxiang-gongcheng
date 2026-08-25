@@ -1,0 +1,51 @@
+[Unit]
+Description=工程影像管理平台 移动端隔离测试服务
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=album-auth-staging
+Group=album-auth-staging
+WorkingDirectory=/opt/album-auth-staging
+Environment="ALBUM_SERVER_HOST=127.0.0.1"
+Environment="ALBUM_SERVER_PORT=18080"
+Environment="ALBUM_SERVER_ENVIRONMENT=staging"
+Environment="ALBUM_SERVER_INSTANCE_ID=album-auth-staging"
+Environment="ALBUM_MOBILE_STORAGE_BACKEND=local"
+EnvironmentFile=/etc/album-auth-staging/server.env
+EnvironmentFile=-/etc/album-auth-staging/mobile.env
+ExecStartPre=/usr/bin/bash /opt/album-auth-staging/server/deploy/deploy-staging.sh --runtime-check
+# EnvironmentFile 的值会覆盖 Environment=。关键路径因此在 /usr/bin/env
+# 命令行最后固定，mobile.env 无法把 staging 重定向到正式数据库、私钥或对象目录。
+ExecStart=/usr/bin/env ALBUM_SERVER_HOST=127.0.0.1 ALBUM_SERVER_PORT=18080 ALBUM_SERVER_ENVIRONMENT=staging ALBUM_SERVER_INSTANCE_ID=album-auth-staging ALBUM_SERVER_DATA=/var/lib/album-auth-staging ALBUM_SERVER_DB=/var/lib/album-auth-staging/staging.db ALBUM_SERVER_PRIVATE_KEY=/etc/album-auth-staging/private_key.pem ALBUM_MOBILE_STORAGE_DIR=/var/lib/album-auth-staging/mobile_objects ALBUM_MOBILE_CHUNK_DIR=/var/lib/album-auth-staging/mobile_chunks /opt/album-auth-staging/venv/bin/gunicorn --no-control-socket --worker-class gthread -w 1 --threads 4 --timeout 300 -b 127.0.0.1:18080 "server.app:create_app()"
+Restart=always
+RestartSec=3
+UMask=0027
+
+# staging 使用独立 Unix 身份，并把正式代码、配置、数据库从进程视图中隐藏。
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+InaccessiblePaths=-/opt/album-auth -/etc/album-auth -/var/lib/album-auth
+ReadOnlyPaths=/opt/album-auth-staging /etc/album-auth-staging
+ReadWritePaths=/var/lib/album-auth-staging
+
+[Install]
+WantedBy=multi-user.target

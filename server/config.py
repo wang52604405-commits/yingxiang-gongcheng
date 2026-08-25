@@ -50,6 +50,90 @@ def _load_or_create_secret_key() -> str:
 SECRET_KEY = _load_or_create_secret_key()
 TOKEN_MAX_AGE = 30 * 24 * 3600  # 令牌有效期 30 天
 
+# 非敏感的运行实例标识，仅用来让自动化验收在任何写入前确认
+# 它连接的确实是隔离 staging。正式环境默认值故意与 staging
+# systemd unit 里的硬编码值不同。
+SERVER_ENVIRONMENT = os.environ.get("ALBUM_SERVER_ENVIRONMENT", "production").strip().lower()
+SERVER_INSTANCE_ID = os.environ.get("ALBUM_SERVER_INSTANCE_ID", "album-auth-production").strip()
+if SERVER_ENVIRONMENT not in {"production", "staging", "development", "test"}:
+    raise RuntimeError("ALBUM_SERVER_ENVIRONMENT 不在允许的环境标识中")
+if not SERVER_INSTANCE_ID or len(SERVER_INSTANCE_ID) > 128 or not all(
+    character.isalnum() or character in {"-", "_", "."}
+    for character in SERVER_INSTANCE_ID
+):
+    raise RuntimeError("ALBUM_SERVER_INSTANCE_ID 必须是非敏感的安全实例名")
+
+# 微信小程序登录。AppSecret 只允许通过环境变量注入；代码和数据库均不保存
+# 临时 code 或明文密码。测试环境必须显式开启 mock，生产默认关闭。
+WECHAT_APP_ID = os.environ.get("ALBUM_WECHAT_APP_ID", "").strip()
+WECHAT_APP_SECRET = os.environ.get("ALBUM_WECHAT_APP_SECRET", "").strip()
+WECHAT_BIND_TICKET_MAX_AGE = int(
+    os.environ.get("ALBUM_WECHAT_BIND_TICKET_MAX_AGE", "600")
+)
+WECHAT_MOCK_ENABLED = os.environ.get("ALBUM_WECHAT_MOCK_ENABLED", "0").strip() == "1"
+
+# 移动端对象存储。手机上传的是待电脑归档的原字节 JPEG/PNG；云端另生成
+# 永久 JPEG 预览。原图只作短期中转，绝不通过移动端图库返回。
+MOBILE_MAX_ORIGINAL_BYTES = 50 * 1024 * 1024
+MOBILE_MAX_REQUEST_BYTES = MOBILE_MAX_ORIGINAL_BYTES + 1024 * 1024
+MOBILE_UPLOAD_SPOOL_BYTES = 4 * 1024 * 1024
+MOBILE_DIRECT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+MOBILE_CHUNK_BYTES = 4 * 1024 * 1024
+MOBILE_CHUNK_TTL_SECONDS = max(
+    3600, min(7 * 24 * 3600, int(os.environ.get("ALBUM_MOBILE_CHUNK_TTL_SECONDS", "86400")))
+)
+MOBILE_CHUNK_MAX_ACTIVE_PER_ACCOUNT = max(
+    1, min(32, int(os.environ.get("ALBUM_MOBILE_CHUNK_MAX_ACTIVE_PER_ACCOUNT", "8")))
+)
+MOBILE_CHUNK_MAX_ACTIVE_GLOBAL = max(
+    8, min(512, int(os.environ.get("ALBUM_MOBILE_CHUNK_MAX_ACTIVE_GLOBAL", "64")))
+)
+MOBILE_CHUNK_MAX_RESERVED_PER_ACCOUNT = max(
+    MOBILE_MAX_ORIGINAL_BYTES,
+    int(os.environ.get("ALBUM_MOBILE_CHUNK_MAX_RESERVED_PER_ACCOUNT", str(200 * 1024 * 1024))),
+)
+MOBILE_CHUNK_MAX_RESERVED_GLOBAL = max(
+    MOBILE_CHUNK_MAX_RESERVED_PER_ACCOUNT,
+    int(os.environ.get("ALBUM_MOBILE_CHUNK_MAX_RESERVED_GLOBAL", str(2 * 1024 * 1024 * 1024))),
+)
+MOBILE_ANALYSIS_STALE_SECONDS = max(
+    60,
+    min(
+        3600,
+        int(os.environ.get("ALBUM_MOBILE_ANALYSIS_STALE_SECONDS", "300")),
+    ),
+)
+MOBILE_MAX_ORIGINAL_PIXELS = max(
+    1_000_000,
+    min(80_000_000, int(os.environ.get("ALBUM_MOBILE_MAX_ORIGINAL_PIXELS", "60000000"))),
+)
+MOBILE_MAX_ORIGINAL_EDGE = max(
+    1920,
+    min(20_000, int(os.environ.get("ALBUM_MOBILE_MAX_ORIGINAL_EDGE", "12000"))),
+)
+MOBILE_PREVIEW_MAX_BYTES = 102400
+MOBILE_PREVIEW_MAX_EDGE = 1920
+# 兼容共享识别模块及旧调用点；该值现在只代表永久云预览，而非手机原图。
+MOBILE_MAX_IMAGE_BYTES = MOBILE_PREVIEW_MAX_BYTES
+MOBILE_MAX_IMAGE_EDGE = MOBILE_PREVIEW_MAX_EDGE
+MOBILE_STORAGE_BACKEND = os.environ.get(
+    "ALBUM_MOBILE_STORAGE_BACKEND", "local"
+).strip().lower()
+MOBILE_STORAGE_DIR = Path(
+    os.environ.get("ALBUM_MOBILE_STORAGE_DIR", DATA_DIR / "mobile_objects")
+)
+MOBILE_CHUNK_DIR = Path(
+    os.environ.get("ALBUM_MOBILE_CHUNK_DIR", DATA_DIR / "mobile_chunks")
+)
+MOBILE_DOWNLOAD_URL_TTL = max(
+    60, min(3600, int(os.environ.get("ALBUM_MOBILE_DOWNLOAD_URL_TTL", "600")))
+)
+OSS_REGION = os.environ.get("ALBUM_OSS_REGION", "cn-beijing").strip()
+OSS_BUCKET = os.environ.get("ALBUM_OSS_BUCKET", "").strip()
+OSS_PREVIEW_BUCKET = os.environ.get("ALBUM_OSS_PREVIEW_BUCKET", OSS_BUCKET).strip()
+OSS_ORIGINAL_BUCKET = os.environ.get("ALBUM_OSS_ORIGINAL_BUCKET", "").strip()
+OSS_ENDPOINT = os.environ.get("ALBUM_OSS_ENDPOINT", "").strip()
+
 APP_CODE = "HDYX"
 DEFAULT_MACHINE_LIMIT = 3   # 每账号默认可绑定电脑数
 OFFLINE_GRACE_DAYS = 7      # 客户端离线缓冲天数（客户端侧实现）

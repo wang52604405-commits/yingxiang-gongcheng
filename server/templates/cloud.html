@@ -67,7 +67,7 @@
   <!-- 登录 / 注册 -->
   <div id="loginBox" class="card">
     <h2 style="margin-top:0">云预览登录</h2>
-    <p class="muted">在外面（公网）登录后可查看自己项目的可辨认缩略图和编号。<br>平台只同步缩略图，不上传工程原图；完整编辑请回到局域网内使用。</p>
+    <p class="muted">在外面（公网）登录后可查看自己项目的可辨认缩略图和编号。<br>电脑端既有照片仍只同步缩略图；手机原图仅短期中转到绑定电脑，电脑确认归档后服务器删除原图，云端长期只保留不超过 100KB 的预览。</p>
     <input id="user" placeholder="账号（手机号 / QQ / 邮箱）" autocomplete="username">
     <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
     <button class="btn" id="loginBtn" style="width:100%">登录</button>
@@ -101,7 +101,7 @@
   <div id="projectsBox" class="wrap" style="display:none">
     <div class="card">
       <div id="whoami" class="muted"></div>
-      <div class="price-line" id="priceLine">月度会员 39 元 / 终身会员 399 元（原价）；云端仅提供可辨认缩略图，不上传原图。</div>
+      <div class="price-line" id="priceLine">月度会员 39 元 / 终身会员 399 元（原价）；云端长期只保留不超过 100KB 的预览，手机原图仅作短期中转。</div>
     </div>
     <div class="grid" id="projectGrid"></div>
   </div>
@@ -159,7 +159,7 @@
       const data = await api("/api/product-config");
       if (!data.ok) return;
       const pricing = data.product?.pricing || {};
-      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 39} 元 / 终身会员 ${pricing.lifetime_price || 399} 元（${pricing.price_label || "原价"}）；云端仅提供可辨认缩略图，不上传原图。`;
+      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 39} 元 / 终身会员 ${pricing.lifetime_price || 399} 元（${pricing.price_label || "原价"}）；云端长期只保留不超过 100KB 的预览，手机原图仅作短期中转。`;
     }
 
     async function checkAuth() {

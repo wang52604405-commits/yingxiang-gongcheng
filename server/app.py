@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import config, db
@@ -305,8 +306,17 @@ def _error(message: str, code: int = 400):
     return jsonify({"ok": False, "error": message}), code
 
 
-def _token_for(user_id: int) -> str:
-    return serializer.dumps({"uid": user_id}, salt="album-auth")
+def _token_for(user_id: int, scope: str = "desktop", machine_id: str = "") -> str:
+    """签发带客户端作用域的账号令牌。
+
+    旧版令牌只有 uid，解析时按 legacy 桌面端兼容；新版微信令牌
+    显式标记 mobile，不能访问电脑原图接口。
+    """
+    payload = {"uid": user_id, "scope": str(scope or "desktop")}
+    normalized_machine_id = str(machine_id or "").strip().upper()
+    if normalized_machine_id:
+        payload["machine_id"] = normalized_machine_id
+    return serializer.dumps(payload, salt="album-auth")
 
 
 def _user_from_token(token: str):
@@ -323,7 +333,12 @@ def _user_from_token(token: str):
         row = conn.execute(
             "SELECT * FROM accounts WHERE id = ?", (data.get("uid"),)
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        user = dict(row)
+        user["_token_scope"] = str(data.get("scope") or "legacy")
+        user["_token_machine_id"] = str(data.get("machine_id") or "").strip().upper()
+        return user
     finally:
         conn.close()
 
@@ -339,7 +354,11 @@ def _require_user():
 
 def _require_admin():
     user = _require_user()
-    if not user or user["role"] != "admin":
+    if (
+        not user
+        or user["role"] != "admin"
+        or user.get("_token_scope") not in {"legacy", "desktop"}
+    ):
         return None
     return user
 
@@ -594,7 +613,11 @@ def _valid_thumbnail_b64(value: str, max_length: int) -> bool:
 
 def create_app():
     app = Flask(__name__)
+    # gunicorn 仅监听 127.0.0.1，唯一上游是单层本机 nginx；因此只信任一跳
+    # X-Forwarded-*，让按 IP 限流看到真实客户端而不是所有人共用 127.0.0.1。
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config["SECRET_KEY"] = config.SECRET_KEY
+    app.config["MAX_CONTENT_LENGTH"] = config.MOBILE_MAX_REQUEST_BYTES
     app.json.ensure_ascii = False
 
     db.init_db()
@@ -625,6 +648,45 @@ def create_app():
         app.logger.exception("未处理的服务器异常")
         return _error("服务器内部错误，错误编号已反馈到后台", 500)
 
+    @app.before_request
+    def restrict_desktop_sync_token_scope():
+        """机器限定令牌只是桌面同步能力，不是第二个全权账号令牌。"""
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        if not token:
+            return None
+        try:
+            claims = serializer.loads(
+                token, max_age=config.TOKEN_MAX_AGE, salt="album-auth"
+            )
+        except (BadSignature, SignatureExpired):
+            return None
+        if claims.get("scope") == "desktop_sync" and not request.path.startswith(
+            "/api/desktop/v1/"
+        ):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "code": "desktop_sync_scope_forbidden",
+                        "error": "电脑同步令牌仅能访问 /api/desktop/v1",
+                    }
+                ),
+                403,
+            )
+        if claims.get("scope") == "mobile" and request.path.startswith("/api/cloud/"):
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "code": "mobile_scope_forbidden",
+                        "error": "微信端令牌无权访问旧版云预览接口",
+                    }
+                ),
+                403,
+            )
+        return None
+
     @app.get("/")
     def index():
         return render_template("member_center.html")
@@ -645,6 +707,17 @@ def create_app():
     def product_config():
         """客户端公共产品策略；不包含服务器密钥、支付或管理员配置。"""
         return jsonify({"ok": True, "product": _product_config(), "server_time": _now()})
+
+    @app.get("/api/instance")
+    def instance_sentinel():
+        """公开的非敏感实例哨兵；隔离 E2E 必须先校验它再发写请求。"""
+        return jsonify(
+            {
+                "ok": True,
+                "environment": config.SERVER_ENVIRONMENT,
+                "instance_id": config.SERVER_INSTANCE_ID,
+            }
+        )
 
     @app.post("/api/client-errors")
     def client_errors():
@@ -954,6 +1027,8 @@ def create_app():
         user = _require_user()
         if not user:
             return _error("未登录或登录已过期", 401)
+        if user.get("_token_scope") not in {"legacy", "desktop"}:
+            return _error("当前令牌不能激活电脑", 403)
         data = request.get_json(silent=True) or {}
         machine_id = str(data.get("machine_id") or "").strip().upper()
         if not machine_id:
@@ -995,6 +1070,9 @@ def create_app():
                 {
                     "ok": True,
                     "license_code": code,
+                    "desktop_sync_token": _token_for(
+                        user["id"], scope="desktop_sync", machine_id=machine_id
+                    ),
                     "is_member": is_member,
                     "license": _license_status_for(user, machine_id),
                 }
@@ -1220,6 +1298,8 @@ def create_app():
         user = _require_user()
         if not user:
             return _error("未登录或登录已过期", 401)
+        if user.get("_token_scope") == "desktop_sync":
+            return _error("电脑同步令牌仅能访问 /api/desktop/v1", 403)
         data = request.get_json(silent=True) or {}
         projects = data.get("projects") if isinstance(data.get("projects"), list) else []
         cloud_cfg = _product_config().get("cloud_preview", {})
@@ -1367,6 +1447,8 @@ def create_app():
         user = _require_user()
         if not user:
             return _error("未登录或登录已过期", 401)
+        if user.get("_token_scope") == "desktop_sync":
+            return _error("电脑同步令牌仅能访问 /api/desktop/v1", 403)
         data = request.get_json(silent=True) or {}
         project_id = int(data.get("project_id") or 0)
         conn = db.connect()
@@ -1386,6 +1468,12 @@ def create_app():
             return jsonify({"ok": True})
         finally:
             conn.close()
+
+    # 移动端与桌面同步使用独立蓝图，只复用现有账号令牌。新表、新路由均为
+    # additive，不改变旧版桌面客户端依赖的任何接口。
+    from .mobile_api import register_mobile_api
+
+    register_mobile_api(app, _require_user, _token_for, _now, _rate_limited)
 
     return app
 

@@ -121,6 +121,221 @@ CREATE INDEX IF NOT EXISTS idx_error_logs_fingerprint
 ON client_error_logs(fingerprint, created_at DESC);
 """
 
+
+# 移动端 V1 采用纯增量表。表名与旧 cloud_projects/cloud_thumbs 分开，避免
+# 改写既有云预览数据；所有业务唯一键都包含 account_id，保证租户隔离。
+MOBILE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS wechat_bindings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    app_id        TEXT NOT NULL,
+    openid        TEXT NOT NULL,
+    unionid       TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    last_login_at TEXT NOT NULL,
+    UNIQUE (app_id, openid),
+    UNIQUE (account_id, app_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_engineering_projects (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    project_id    TEXT NOT NULL,
+    project_code  TEXT NOT NULL DEFAULT '',
+    project_name  TEXT NOT NULL DEFAULT '',
+    snapshot_id   TEXT NOT NULL DEFAULT '',
+    revision      INTEGER NOT NULL DEFAULT 0,
+    desktop_machine_id TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE (account_id, project_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_units (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    project_id    TEXT NOT NULL,
+    scope         TEXT NOT NULL DEFAULT 'engineering',
+    node_code     TEXT NOT NULL,
+    parent_code   TEXT NOT NULL DEFAULT '',
+    node_type     TEXT NOT NULL,
+    name          TEXT NOT NULL DEFAULT '',
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    active        INTEGER NOT NULL DEFAULT 1,
+    updated_at    TEXT NOT NULL,
+    UNIQUE (account_id, project_id, scope, node_code),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS mobile_batches (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL,
+    client_batch_id TEXT NOT NULL,
+    project_id      TEXT NOT NULL,
+    scope           TEXT NOT NULL,
+    category        TEXT NOT NULL DEFAULT '',
+    mode            TEXT NOT NULL,
+    assignment_json TEXT NOT NULL DEFAULT '{}',
+    target_machine_id TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'local_ready',
+    error_code      TEXT NOT NULL DEFAULT '',
+    error_message   TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    committed_at    TEXT NOT NULL DEFAULT '',
+    UNIQUE (account_id, client_batch_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_photos (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id           INTEGER NOT NULL,
+    batch_id             INTEGER,
+    photo_uuid           TEXT NOT NULL,
+    project_id           TEXT NOT NULL,
+    source               TEXT NOT NULL DEFAULT 'mobile',
+    scope                TEXT NOT NULL,
+    category             TEXT NOT NULL DEFAULT '',
+    assignment_json      TEXT NOT NULL DEFAULT '{}',
+    title                TEXT NOT NULL DEFAULT '',
+    photo_date           TEXT NOT NULL DEFAULT '',
+    client_captured_at   TEXT NOT NULL DEFAULT '',
+    orientation          INTEGER NOT NULL DEFAULT 1,
+    width                INTEGER NOT NULL DEFAULT 0,
+    height               INTEGER NOT NULL DEFAULT 0,
+    original_filename    TEXT NOT NULL DEFAULT '',
+    sha256               TEXT NOT NULL,
+    size_bytes           INTEGER NOT NULL,
+    mime_type            TEXT NOT NULL DEFAULT 'image/jpeg',
+    storage_key          TEXT NOT NULL,
+    original_sha256      TEXT NOT NULL DEFAULT '',
+    original_size_bytes  INTEGER NOT NULL DEFAULT 0,
+    original_mime_type   TEXT NOT NULL DEFAULT '',
+    original_storage_key TEXT NOT NULL DEFAULT '',
+    preview_sha256       TEXT NOT NULL DEFAULT '',
+    preview_size_bytes   INTEGER NOT NULL DEFAULT 0,
+    preview_width        INTEGER NOT NULL DEFAULT 0,
+    preview_height       INTEGER NOT NULL DEFAULT 0,
+    preview_quality      INTEGER NOT NULL DEFAULT 0,
+    preview_storage_key  TEXT NOT NULL DEFAULT '',
+    target_machine_id    TEXT NOT NULL DEFAULT '',
+    original_cleanup_status TEXT NOT NULL DEFAULT '',
+    original_cleanup_error  TEXT NOT NULL DEFAULT '',
+    original_deleted_at     TEXT NOT NULL DEFAULT '',
+    status               TEXT NOT NULL DEFAULT 'server_saved',
+    match_json           TEXT NOT NULL DEFAULT '{}',
+    error_code           TEXT NOT NULL DEFAULT '',
+    error_message        TEXT NOT NULL DEFAULT '',
+    local_project_code   TEXT NOT NULL DEFAULT '',
+    local_photo_id       TEXT NOT NULL DEFAULT '',
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT NOT NULL,
+    desktop_imported_at  TEXT NOT NULL DEFAULT '',
+    UNIQUE (account_id, photo_uuid),
+    UNIQUE (storage_key),
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (batch_id) REFERENCES mobile_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS mobile_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL,
+    batch_id    INTEGER,
+    photo_uuid  TEXT NOT NULL DEFAULT '',
+    job_type    TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    error_code  TEXT NOT NULL DEFAULT '',
+    error_text  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (batch_id) REFERENCES mobile_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS desktop_sync_cursors (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id       INTEGER NOT NULL,
+    client_id        TEXT NOT NULL DEFAULT 'default',
+    inbox_cursor     INTEGER NOT NULL DEFAULT 0,
+    snapshot_id      TEXT NOT NULL DEFAULT '',
+    snapshot_revision INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL,
+    UNIQUE (account_id, client_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS mobile_upload_sessions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id        INTEGER NOT NULL,
+    batch_id          INTEGER NOT NULL,
+    photo_uuid        TEXT NOT NULL,
+    project_id        TEXT NOT NULL,
+    target_machine_id TEXT NOT NULL,
+    original_sha256   TEXT NOT NULL,
+    total_size_bytes  INTEGER NOT NULL,
+    chunk_size_bytes  INTEGER NOT NULL,
+    total_chunks      INTEGER NOT NULL,
+    original_filename TEXT NOT NULL DEFAULT '',
+    metadata_json     TEXT NOT NULL DEFAULT '{}',
+    status            TEXT NOT NULL DEFAULT 'active',
+    error_code        TEXT NOT NULL DEFAULT '',
+    error_message     TEXT NOT NULL DEFAULT '',
+    cleanup_status    TEXT NOT NULL DEFAULT '',
+    cleanup_error     TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    expires_at        TEXT NOT NULL,
+    completed_at      TEXT NOT NULL DEFAULT '',
+    UNIQUE (account_id, photo_uuid),
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (batch_id) REFERENCES mobile_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS mobile_upload_chunks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (session_id, chunk_index),
+    FOREIGN KEY (session_id) REFERENCES mobile_upload_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_projects_account
+ON cloud_engineering_projects(account_id, active, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_units_tree
+ON cloud_units(account_id, project_id, scope, active, sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_batches_account
+ON mobile_batches(account_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_photos_gallery
+ON cloud_photos(account_id, project_id, scope, category, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_photos_inbox
+ON cloud_photos(account_id, status, id);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_jobs_account
+ON mobile_jobs(account_id, status, id);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_jobs_recovery
+ON mobile_jobs(job_type, status, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_upload_sessions_quota
+ON mobile_upload_sessions(account_id, status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_upload_chunks_session
+ON mobile_upload_chunks(session_id, chunk_index);
+"""
+
 # 老库升级：accounts 表缺少的新列，启动时补上
 ACCOUNTS_EXTRA_COLUMNS = {
     "invite_code": "TEXT",
@@ -134,6 +349,35 @@ INVITES_EXTRA_COLUMNS = {
     "qualified_at": "TEXT DEFAULT ''",
     "device_hash": "TEXT DEFAULT ''",
     "ip_hash": "TEXT DEFAULT ''",
+}
+
+MOBILE_EXTRA_COLUMNS = {
+    "cloud_engineering_projects": {
+        "desktop_machine_id": "TEXT NOT NULL DEFAULT ''",
+    },
+    "mobile_batches": {
+        "target_machine_id": "TEXT NOT NULL DEFAULT ''",
+    },
+    "cloud_photos": {
+        "original_sha256": "TEXT NOT NULL DEFAULT ''",
+        "original_size_bytes": "INTEGER NOT NULL DEFAULT 0",
+        "original_mime_type": "TEXT NOT NULL DEFAULT ''",
+        "original_storage_key": "TEXT NOT NULL DEFAULT ''",
+        "preview_sha256": "TEXT NOT NULL DEFAULT ''",
+        "preview_size_bytes": "INTEGER NOT NULL DEFAULT 0",
+        "preview_width": "INTEGER NOT NULL DEFAULT 0",
+        "preview_height": "INTEGER NOT NULL DEFAULT 0",
+        "preview_quality": "INTEGER NOT NULL DEFAULT 0",
+        "preview_storage_key": "TEXT NOT NULL DEFAULT ''",
+        "target_machine_id": "TEXT NOT NULL DEFAULT ''",
+        "original_cleanup_status": "TEXT NOT NULL DEFAULT ''",
+        "original_cleanup_error": "TEXT NOT NULL DEFAULT ''",
+        "original_deleted_at": "TEXT NOT NULL DEFAULT ''",
+    },
+    "mobile_upload_sessions": {
+        "cleanup_status": "TEXT NOT NULL DEFAULT ''",
+        "cleanup_error": "TEXT NOT NULL DEFAULT ''",
+    },
 }
 
 
@@ -162,6 +406,64 @@ def migrate() -> None:
         for name, decl in INVITES_EXTRA_COLUMNS.items():
             if name not in invite_cols:
                 conn.execute(f"ALTER TABLE invites ADD COLUMN {name} {decl}")
+        for table, additions in MOBILE_EXTRA_COLUMNS.items():
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            if not table_exists:
+                continue
+            table_columns = {
+                row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")')
+            }
+            for name, decl in additions.items():
+                if name not in table_columns:
+                    conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {decl}')
+
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'mobile_upload_sessions'"
+        ).fetchone():
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mobile_upload_sessions_cleanup "
+                "ON mobile_upload_sessions(cleanup_status, id)"
+            )
+
+        # v1 旧行中的 sha/size/storage_key 本来就是云端小图。迁移后把它们标为
+        # preview；移动来源旧行使用 legacy_shared，电脑回执时绝不能删除这唯一副本。
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cloud_photos'"
+        ).fetchone():
+            conn.execute(
+                "UPDATE cloud_photos SET preview_sha256 = sha256 "
+                "WHERE preview_sha256 = ''"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET preview_size_bytes = size_bytes "
+                "WHERE preview_size_bytes = 0"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET preview_storage_key = storage_key "
+                "WHERE preview_storage_key = ''"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET preview_width = width, preview_height = height "
+                "WHERE preview_width = 0 OR preview_height = 0"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET original_sha256 = sha256, "
+                "original_size_bytes = size_bytes, original_mime_type = mime_type, "
+                "original_storage_key = storage_key, original_cleanup_status = 'legacy_shared' "
+                "WHERE source = 'mobile' AND original_sha256 = ''"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET original_cleanup_status = 'not_applicable' "
+                "WHERE source = 'desktop' AND original_cleanup_status = ''"
+            )
+            conn.execute("DROP INDEX IF EXISTS idx_cloud_photos_inbox")
+            conn.execute(
+                "CREATE INDEX idx_cloud_photos_inbox ON cloud_photos "
+                "(account_id, target_machine_id, status, id)"
+            )
         conn.commit()
     finally:
         conn.close()
@@ -181,6 +483,7 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        conn.executescript(MOBILE_SCHEMA)
         conn.commit()
     finally:
         conn.close()

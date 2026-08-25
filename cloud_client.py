@@ -10,9 +10,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import urllib.error
@@ -167,6 +169,9 @@ def _dpapi_unprotect(value: str) -> str:
 def _write_cloud_account(account: dict) -> None:
     stored = dict(account or {})
     token = str(stored.pop("token", "") or "")
+    desktop_sync_token = str(stored.pop("desktop_sync_token", "") or "")
+    stored.pop("token_protected", None)
+    stored.pop("desktop_sync_token_protected", None)
     protected = _dpapi_protect(token)
     if protected:
         stored["token_protected"] = protected
@@ -175,6 +180,14 @@ def _write_cloud_account(account: dict) -> None:
         # 非 Windows 开发环境兜底；正式 Windows 客户端始终走 DPAPI。
         stored["token"] = token
         stored["token_storage"] = "portable_fallback"
+    sync_protected = _dpapi_protect(desktop_sync_token)
+    if sync_protected:
+        stored["desktop_sync_token_protected"] = sync_protected
+        stored["desktop_sync_token_storage"] = "windows_dpapi"
+    else:
+        # desktop_sync_token 具有本机桌面同步权限，绝不以明文回退。
+        # DPAPI 暂不可用时下次可用普通账号令牌重新 /api/activate 获取。
+        stored.pop("desktop_sync_token_storage", None)
     _write_json(cloud_account_path(), stored)
 
 
@@ -184,10 +197,21 @@ def _read_cloud_account() -> dict:
         return {}
     account = dict(stored)
     protected = str(account.pop("token_protected", "") or "")
+    sync_protected = str(account.pop("desktop_sync_token_protected", "") or "")
+    legacy_sync_token = str(account.pop("desktop_sync_token", "") or "")
     if protected:
         account["token"] = _dpapi_unprotect(protected)
+    if sync_protected:
+        account["desktop_sync_token"] = _dpapi_unprotect(sync_protected)
+    elif legacy_sync_token:
+        account["desktop_sync_token"] = legacy_sync_token
     # 自动把旧版明文令牌迁移到 DPAPI，不影响现有登录状态。
     if account.get("token") and os.name == "nt" and stored.get("token"):
+        try:
+            _write_cloud_account(account)
+        except OSError:
+            pass
+    elif account.get("desktop_sync_token") and os.name == "nt" and stored.get("desktop_sync_token"):
         try:
             _write_cloud_account(account)
         except OSError:
@@ -409,6 +433,7 @@ def login(username: str, password: str):
     account = {
         "username": username,
         "token": token,
+        "desktop_sync_token": str(activated.get("desktop_sync_token") or ""),
         "server": base,
         "activated_at": int(time.time()),
         "is_member": is_member,
@@ -450,6 +475,9 @@ def sync():
             licensing.write_installed_license(code)
         account["activated_at"] = int(time.time())
         account["is_member"] = bool(result.get("is_member")) or bool((result.get("license") or {}).get("has_license"))
+        refreshed_sync_token = str(result.get("desktop_sync_token") or "")
+        if refreshed_sync_token:
+            account["desktop_sync_token"] = refreshed_sync_token
         _write_cloud_account(account)
         return {"ok": True, "synced": True}
     if "ok" in result:
@@ -640,4 +668,329 @@ def _get_json_auth(url: str, token: str = ""):
             return {"ok": False, "error": f"服务器错误（{exc.code}）"}
     except Exception as exc:
         return {"ok": False, "error": f"无法连接授权服务器：{exc}"}
+
+
+# ---------------------------------------------------------------------------
+# 移动端 / 桌面端影像同步 API v1
+
+_DESKTOP_SYNC_TOKEN_REFRESH_LOCK = threading.Lock()
+
+
+def _refresh_desktop_sync_token() -> str:
+    """用普通账号令牌续激活，取得绑定当前机器的桌面同步令牌。"""
+    if not _DESKTOP_SYNC_TOKEN_REFRESH_LOCK.acquire(blocking=False):
+        return ""
+    try:
+        current = _read_cloud_account()
+        existing = str(current.get("desktop_sync_token") or "")
+        if existing:
+            return existing
+        # sync() 只把普通账号令牌发给既有 /api/activate，不会把它混入
+        # desktop/v1；成功响应会经 DPAPI 保存 desktop_sync_token。
+        sync()
+        refreshed = _read_cloud_account()
+        return str(refreshed.get("desktop_sync_token") or "")
+    finally:
+        _DESKTOP_SYNC_TOKEN_REFRESH_LOCK.release()
+
+def _cloud_auth_context():
+    """返回桌面同步的服务器地址与令牌。
+
+    优先使用由 /api/activate 下发、绑定当前机器且限制 desktop_sync
+    scope 的 DPAPI 密文令牌；普通账号令牌只允许调用 /api/activate
+    刷新专用令牌，绝不回退用于 desktop/v1。
+    同步状态和日志都不保存任何令牌。
+    """
+    account = _read_cloud_account()
+    if not account:
+        return None, None, {"ok": False, "logged_in": False, "error": "未登录云账号"}
+    base = str(account.get("server") or server_url()).rstrip("/")
+    account_token = str(account.get("token") or "")
+    sync_token = str(account.get("desktop_sync_token") or "")
+    if not sync_token and account_token:
+        sync_token = _refresh_desktop_sync_token()
+    if not sync_token:
+        return None, None, {
+            "ok": False,
+            "logged_in": True,
+            "code": "desktop_sync_token_required",
+            "error": "本机桌面同步凭证尚未刷新，请联网后重试激活",
+            "retryable": True,
+        }
+    # 普通账号/微信令牌绝不进入 desktop/v1 或相对原图下载请求。
+    return base, sync_token, None
+
+
+def desktop_sync_identity() -> str:
+    """返回不含令牌的同步账号标识，用于隔离本地游标。"""
+    account = _read_cloud_account()
+    if not account:
+        return ""
+    identity = "|".join([
+        str(account.get("server") or server_url()).rstrip("/"),
+        str(account.get("username") or "").strip().lower(),
+    ])
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def _cloud_api_json(path: str, method: str = "GET", payload=None, query=None, timeout: int = 20):
+    base, token, error = _cloud_auth_context()
+    if error:
+        return error
+    query_text = urllib.parse.urlencode(query or {}, doseq=True)
+    url = f"{base}{path}"
+    if query_text:
+        url += ("&" if "?" in url else "?") + query_text
+    body = None
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            if isinstance(result, dict):
+                result.setdefault("http_status", int(getattr(resp, "status", 200) or 200))
+                return result
+            return {"ok": False, "error": "服务器返回数据格式不正确"}
+    except urllib.error.HTTPError as exc:
+        try:
+            result = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            result = {"ok": False, "error": f"服务器错误（{exc.code}）"}
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": f"服务器错误（{exc.code}）"}
+        result.setdefault("ok", False)
+        result.setdefault("http_status", exc.code)
+        result.setdefault("retryable", exc.code >= 500 or exc.code == 429)
+        return result
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"无法连接影像同步服务器：{exc}",
+            "network_error": True,
+            "retryable": True,
+        }
+
+
+def desktop_project_snapshot(snapshot: dict) -> dict:
+    """事务式上传当前工程的完整层级快照。"""
+    return _cloud_api_json(
+        "/api/desktop/v1/project-snapshot",
+        method="POST",
+        payload=snapshot,
+        timeout=30,
+    )
+
+
+def desktop_inbox(cursor: str = "", limit: int = 50, desktop_machine_id: str = "") -> dict:
+    """拉取尚未导入本机的手机影像。"""
+    return _cloud_api_json(
+        "/api/desktop/v1/inbox",
+        query={
+            "cursor": str(cursor or ""),
+            "limit": max(1, min(100, int(limit or 50))),
+            "desktop_machine_id": str(desktop_machine_id or ""),
+        },
+        timeout=30,
+    )
+
+
+def desktop_ack_photo(
+    photo_uuid: str,
+    local_project_code: str,
+    local_photo_id: str,
+    desktop_machine_id: str = "",
+) -> dict:
+    """回执本机已完成归档；服务器端以 photo_uuid 幂等处理。"""
+    quoted = urllib.parse.quote(str(photo_uuid or ""), safe="")
+    return _cloud_api_json(
+        f"/api/desktop/v1/photos/{quoted}/ack",
+        method="POST",
+        payload={
+            "local_project_code": str(local_project_code or ""),
+            "local_photo_id": str(local_photo_id or ""),
+            "desktop_machine_id": str(desktop_machine_id or ""),
+        },
+    )
+
+
+def _mobile_download_host_allowlist(base_host: str = "") -> set:
+    """签名下载地址只允许当前 API 主机、阿里云 OSS 或显式白名单。"""
+    configured = _read_json(cloud_config_path()) or {}
+    values = configured.get("mobile_download_hosts") or []
+    if isinstance(values, str):
+        values = values.split(",")
+    env_values = str(os.environ.get("ALBUM_MOBILE_DOWNLOAD_HOSTS") or "").split(",")
+    hosts = {
+        str(value or "").strip().lower().rstrip(".")
+        for value in list(values if isinstance(values, list) else []) + env_values
+        if str(value or "").strip()
+    }
+    if base_host:
+        hosts.add(str(base_host).strip().lower().rstrip("."))
+    return hosts
+
+
+def _safe_mobile_download_request(raw_url: str, base: str, token: str):
+    """构造不会向第三方泄露 Bearer 的下载请求。"""
+    raw_url = str(raw_url or "").strip()
+    if not raw_url:
+        raise ValueError("影像下载地址为空")
+    base_parts = urllib.parse.urlsplit(str(base or "").rstrip("/") + "/")
+    if base_parts.scheme not in {"http", "https"} or not base_parts.hostname:
+        raise ValueError("影像同步服务器地址无效")
+    parts = urllib.parse.urlsplit(raw_url)
+    headers = {}
+    if not parts.scheme and not parts.netloc:
+        # 相对路径必须结果与 API 完全同源，只有这种请求才携带账号令牌。
+        url = urllib.parse.urljoin(str(base).rstrip("/") + "/", raw_url)
+        target = urllib.parse.urlsplit(url)
+        base_port = base_parts.port or (443 if base_parts.scheme == "https" else 80)
+        target_port = target.port or (443 if target.scheme == "https" else 80)
+        if (
+            target.scheme != base_parts.scheme
+            or (target.hostname or "").lower() != (base_parts.hostname or "").lower()
+            or target_port != base_port
+        ):
+            raise ValueError("相对影像地址超出当前服务器同源范围")
+        headers["Authorization"] = f"Bearer {token}"
+        return urllib.request.Request(url, method="GET", headers=headers)
+
+    # ``//host/path`` 会绕过普通相对路径判断，明确拒绝。
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError("签名影像地址必须使用 HTTPS")
+    hostname = parts.hostname.lower().rstrip(".")
+    allowlist = _mobile_download_host_allowlist(base_parts.hostname or "")
+    is_aliyun_oss = hostname == "aliyuncs.com" or hostname.endswith(".aliyuncs.com")
+    if hostname not in allowlist and not is_aliyun_oss:
+        raise ValueError("签名影像地址不在受信任主机白名单")
+    # 签名 URL 自带短时效凭证，绝不附加桌面账号 Bearer。
+    return urllib.request.Request(raw_url, method="GET")
+
+
+class _NoDownloadRedirect(urllib.request.HTTPRedirectHandler):
+    """下载不自动跟随重定向，避免令牌或签名参数跨主机泄露。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # pragma: no cover - urllib callback
+        return None
+
+
+def _desktop_download_bytes_with_context(
+    download_url: str,
+    base: str,
+    token: str,
+    max_bytes: int = 50 * 1024 * 1024,
+    timeout: int = 30,
+) -> dict:
+    """使用显式同步上下文安全下载原图。
+
+    只有解析后与 ``base`` 完全同源的相对地址才携带 Bearer；
+    绝对 HTTPS 签名地址不携带 Bearer，且所有重定向均拒绝。该入口
+    也供隔离 staging E2E 复用，避免测试适配器重新实现一套
+    可能泄漏令牌的下载逻辑。
+    """
+    try:
+        req = _safe_mobile_download_request(download_url, base, token)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "retryable": False}
+    try:
+        opener = urllib.request.build_opener(_NoDownloadRedirect())
+        with opener.open(req, timeout=timeout) as resp:
+            content_length = int(resp.headers.get("Content-Length") or 0)
+            if content_length > max_bytes:
+                return {"ok": False, "error": "手机原图超过当前下载上限", "retryable": False}
+            data = resp.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            return {"ok": False, "error": "手机原图超过当前下载上限", "retryable": False}
+        return {"ok": True, "data": data}
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "error": f"影像下载失败（{exc.code}）",
+            "http_status": exc.code,
+            "retryable": exc.code >= 500 or exc.code in {403, 429},
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"影像下载失败：{exc}",
+            "network_error": True,
+            "retryable": True,
+        }
+
+
+def desktop_download_bytes(download_url: str, max_bytes: int = 50 * 1024 * 1024) -> dict:
+    """下载短期中转的手机原图，超过服务器/客户端上限立即拒绝。"""
+    base, token, error = _cloud_auth_context()
+    if error:
+        return error
+    return _desktop_download_bytes_with_context(download_url, base, token, max_bytes)
+
+
+def desktop_backfill_photo(file_path, metadata: dict) -> dict:
+    """上传现有电脑照片的 100KB JPEG 预览，不读写本地原图。"""
+    base, token, error = _cloud_auth_context()
+    if error:
+        return error
+    path = Path(file_path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return {"ok": False, "error": f"无法读取查看副本：{exc}", "retryable": False}
+    if not raw or len(raw) > 102400:
+        return {"ok": False, "error": "云端预览必须为 1~102400 字节", "retryable": False}
+
+    boundary = "----AlbumDesktopSync" + secrets.token_hex(16)
+    chunks = []
+    for key, value in (metadata or {}).items():
+        if value is None:
+            continue
+        chunks.extend([
+            f"--{boundary}\r\n".encode("ascii"),
+            f'Content-Disposition: form-data; name="{str(key)}"\r\n\r\n'.encode("utf-8"),
+            str(value).encode("utf-8"),
+            b"\r\n",
+        ])
+    chunks.extend([
+        f"--{boundary}\r\n".encode("ascii"),
+        b'Content-Disposition: form-data; name="file"; filename="preview.jpg"\r\n',
+        b"Content-Type: image/jpeg\r\n\r\n",
+        raw,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode("ascii"),
+    ])
+    req = urllib.request.Request(
+        f"{base}/api/desktop/v1/backfill-photo",
+        data=b"".join(chunks),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            return result if isinstance(result, dict) else {"ok": False, "error": "服务器返回数据格式不正确"}
+    except urllib.error.HTTPError as exc:
+        try:
+            result = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            result = {"ok": False, "error": f"服务器错误（{exc.code}）"}
+        if not isinstance(result, dict):
+            result = {"ok": False, "error": f"服务器错误（{exc.code}）"}
+        result.setdefault("ok", False)
+        result.setdefault("http_status", exc.code)
+        result.setdefault("retryable", exc.code >= 500 or exc.code == 429)
+        return result
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"查看副本上传失败：{exc}",
+            "network_error": True,
+            "retryable": True,
+        }
 

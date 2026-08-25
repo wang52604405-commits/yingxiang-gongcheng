@@ -1,0 +1,65 @@
+{
+  "pages": [
+    {
+      "path": "pages/home/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/library/index",
+      "style": { "navigationStyle": "custom", "enablePullDownRefresh": true }
+    },
+    {
+      "path": "pages/upload/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/queue/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/auth/bind",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/project/select",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/destination/select",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/upload/confirm",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/photo/detail",
+      "style": { "navigationStyle": "custom" }
+    }
+  ],
+  "tabBar": {
+    "custom": true,
+    "color": "#82979a",
+    "selectedColor": "#42d7c2",
+    "backgroundColor": "#122024",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "工作台" },
+      { "pagePath": "pages/library/index", "text": "影像库" },
+      { "pagePath": "pages/upload/index", "text": "上传" },
+      { "pagePath": "pages/queue/index", "text": "待上传" },
+      { "pagePath": "pages/profile/index", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "工程影像",
+    "navigationBarBackgroundColor": "#0f444d",
+    "backgroundColor": "#0c181b",
+    "backgroundTextStyle": "light"
+  }
+}

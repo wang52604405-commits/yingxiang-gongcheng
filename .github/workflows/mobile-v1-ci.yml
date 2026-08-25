@@ -1,0 +1,80 @@
+name: 工程影像小程序 V1 验证
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app.py"
+      - "cloud_client.py"
+      - "mobile_sync.py"
+      - "requirements.txt"
+      - "server/**"
+      - "miniprogram/**"
+      - "tests/**"
+      - ".github/workflows/mobile-v1-ci.yml"
+  push:
+    branches:
+      - "codex/wechat-miniapp-v1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-v1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-contracts:
+    name: 服务器与电脑端回归
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
+      - name: 安装依赖
+        run: python -m pip install -r requirements.txt -r server/requirements.txt
+      - name: 运行全部 Python 测试
+        run: python -m unittest discover -s tests -v
+      - name: 编译检查
+        run: python -m compileall -q app.py cloud_client.py mobile_sync.py validate_mobile_migration.py tests/run_mobile_staging_e2e.py server
+      - name: 补丁空白检查
+        run: git diff --check HEAD
+
+  mini-program:
+    name: 小程序类型、测试与双端构建
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: miniprogram
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: miniprogram/package-lock.json
+      - name: 安装锁定依赖
+        run: npm ci
+      - name: TypeScript 检查
+        run: npm run typecheck
+      - name: 单元测试
+        run: npm test
+      - name: 构建微信小程序
+        run: npm run build:mp-weixin
+      - name: 验证微信原生 custom tabBar
+        shell: powershell
+        run: |
+          $root = Join-Path (Get-Location) "dist\build\mp-weixin\custom-tab-bar"
+          @("index.js", "index.json", "index.wxml", "index.wxss") | ForEach-Object {
+            $target = Join-Path $root $_
+            if (-not (Test-Path -LiteralPath $target)) { throw "缺少微信原生 custom tabBar 文件：$target" }
+          }
+      - name: 构建 H5 视觉验收版
+        run: npm run build:h5

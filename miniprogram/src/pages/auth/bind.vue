@@ -1,0 +1,51 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import PageHeader from '@/components/PageHeader.vue'
+import { bindExistingAccount } from '@/services/auth'
+
+const username = ref('')
+const password = ref('')
+const submitting = ref(false)
+
+async function submit() {
+  if (!username.value.trim() || !password.value) {
+    uni.showToast({ title: '请填写电脑端账号和密码', icon: 'none' })
+    return
+  }
+  submitting.value = true
+  try {
+    await bindExistingAccount(username.value.trim(), password.value)
+    uni.reLaunch({ url: '/pages/home/index' })
+  } catch (error) {
+    uni.showModal({ title: '绑定失败', content: error instanceof Error ? error.message : '请检查账号和密码', showCancel: false })
+  } finally {
+    submitting.value = false
+  }
+}
+</script>
+
+<template>
+  <view class="page-shell no-tabs bind-page">
+    <PageHeader title="首次绑定" subtitle="绑定已有工程影像账号" :back="false" />
+    <view class="brand-mark">影</view>
+    <text class="bind-title">连接电脑端账号</text>
+    <text class="bind-copy">首次使用只需绑定一次。微信登录不会保存您的明文密码。</text>
+
+    <text class="field-label">账号</text>
+    <input v-model="username" class="input" placeholder="请输入电脑端账号" placeholder-class="input-placeholder" />
+    <text class="field-label">密码</text>
+    <input v-model="password" class="input" password placeholder="请输入密码" placeholder-class="input-placeholder" confirm-type="done" @confirm="submit" />
+    <button class="primary-button pressable submit" :disabled="submitting" @tap="submit">{{ submitting ? '正在绑定…' : '绑定并进入小程序' }}</button>
+
+    <view class="notice privacy-note"><text class="notice-dot" /><text>照片只在您主动选择时处理。原图会安全中转；服务器确认保存后，本机只保留不超过 100KB 的预览。</text></view>
+  </view>
+</template>
+
+<style scoped>
+.bind-page { padding-top: calc(var(--safe-top) + 220rpx); }
+.brand-mark { display: grid; place-items: center; width: 108rpx; height: 108rpx; margin: 22rpx auto 26rpx; border-radius: 33rpx; color: #041a1a; background: var(--primary-strong); box-shadow: 0 18rpx 38rpx rgba(45, 185, 170, 0.25); font-size: 45rpx; font-weight: 800; }
+.bind-title { display: block; text-align: center; font-size: 40rpx; font-weight: 750; }
+.bind-copy { display: block; max-width: 560rpx; margin: 13rpx auto 38rpx; color: var(--muted); text-align: center; font-size: 24rpx; line-height: 1.6; }
+.submit { margin-top: 34rpx; }
+.privacy-note { margin-top: 28rpx; }
+</style>
