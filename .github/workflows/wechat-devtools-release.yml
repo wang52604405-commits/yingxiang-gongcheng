@@ -61,18 +61,16 @@ jobs:
         env:
           SOURCE_COMMIT: ${{ github.sha }}
           SOURCE_REF: ${{ github.ref_name }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           release_dir="$(mktemp -d)"
+          git fetch --depth=1 origin codex/wechat-mp-release
+          git worktree add --force -B codex/wechat-mp-release "${release_dir}" FETCH_HEAD
+          git -C "${release_dir}" rm -r --ignore-unmatch .
           cp -a miniprogram/dist/build/mp-weixin/. "${release_dir}/"
           printf 'source_commit=%s\nsource_ref=%s\n' "${SOURCE_COMMIT}" "${SOURCE_REF}" > "${release_dir}/SOURCE_COMMIT.txt"
-          cd "${release_dir}"
-          git init
-          git checkout --orphan codex/wechat-mp-release
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add --all
-          git commit -m "build: 微信开发者工具包 ${SOURCE_COMMIT:0:7}"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin HEAD:codex/wechat-mp-release
+          git -C "${release_dir}" config user.name "github-actions[bot]"
+          git -C "${release_dir}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "${release_dir}" add --all
+          git -C "${release_dir}" commit -m "build: 微信开发者工具包 ${SOURCE_COMMIT:0:7}"
+          git -C "${release_dir}" push origin HEAD:codex/wechat-mp-release
