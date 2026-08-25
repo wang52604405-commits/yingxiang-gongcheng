@@ -1,5 +1,5 @@
 param(
-  [string]$ProjectPath = 'D:\Desktop\工程影像微信发布版',
+  [string]$ProjectPath = 'D:\Desktop\engineering-image-wechat-release',
   [string]$Repository = 'https://github.com/wang52604405-commits/yingxiang-gongcheng.git',
   [string]$Branch = 'codex/wechat-mp-release'
 )
@@ -10,41 +10,53 @@ function Invoke-Git {
   param([string[]]$Arguments)
   & git @Arguments
   if ($LASTEXITCODE -ne 0) {
-    throw "Git 命令失败：git $($Arguments -join ' ')"
+    throw "Git command failed: git $($Arguments -join ' ')"
   }
 }
 
 function Find-WechatCli {
-  $candidates = @(
-    'C:\Program Files (x86)\Tencent\微信web开发者工具\cli.bat',
-    'C:\Program Files\Tencent\微信web开发者工具\cli.bat',
-    'C:\Program Files (x86)\Tencent\微信开发者工具\cli.bat',
-    'C:\Program Files\Tencent\微信开发者工具\cli.bat'
-  )
-  foreach ($candidate in $candidates) {
-    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+  foreach ($root in $roots) {
+    $tencent = Join-Path $root 'Tencent'
+    if (-not (Test-Path -LiteralPath $tencent)) { continue }
+    $candidate = Get-ChildItem -LiteralPath $tencent -Filter 'cli.bat' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($candidate) { return $candidate.FullName }
   }
-  throw '找不到微信开发者工具 cli.bat，请先安装开发者工具，或用 -ProjectPath 指定项目目录后手动打开。'
+  throw 'Wechat DevTools cli.bat was not found. Install WeChat DevTools first.'
+}
+
+function Start-WechatDevTools {
+  param([string]$CliPath)
+  $installRoot = Split-Path -Parent $CliPath
+  $candidate = Get-ChildItem -LiteralPath $installRoot -Filter '*.exe' -File | Where-Object { $_.Length -gt 100MB } | Select-Object -First 1
+  if (-not $candidate) { throw 'Wechat DevTools executable was not found.' }
+  Start-Process -FilePath $candidate.FullName -ArgumentList @($ProjectPath) | Out-Null
+}
+
+function Test-WechatCliProfile {
+  $profileRoots = Join-Path $env:LOCALAPPDATA '*\User Data'
+  $profile = Get-ChildItem -Path $profileRoots -Filter '.cli' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+  return [bool]$profile
 }
 
 if (-not (Test-Path -LiteralPath $ProjectPath)) {
-  Write-Host "首次准备微信发布目录：$ProjectPath"
+  Write-Host "Preparing release directory: $ProjectPath"
   git clone --branch $Branch --single-branch $Repository $ProjectPath
-  if ($LASTEXITCODE -ne 0) { throw '克隆微信发布分支失败。' }
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to clone the release branch.' }
 } elseif (-not (Test-Path -LiteralPath (Join-Path $ProjectPath '.git'))) {
-  throw "目录不是 Git 仓库：$ProjectPath；请不要在此目录手动初始化 master，请换一个空目录。"
+  throw "The target directory is not a Git repository: $ProjectPath"
 }
 
 $origin = (& git -C $ProjectPath remote get-url origin 2>$null)
 if (-not $origin) {
   Invoke-Git @('-C', $ProjectPath, 'remote', 'add', 'origin', $Repository)
 } elseif ($origin.TrimEnd('/') -ne $Repository.TrimEnd('/')) {
-  throw "该目录的 Git 远程地址不是工程影像仓库：$origin"
+  throw "The Git remote is not the Engineering Image repository: $origin"
 }
 
 $dirty = @(& git -C $ProjectPath status --porcelain)
 if ($dirty.Count -gt 0) {
-  throw "发布目录有未提交修改，为防止覆盖微信开发者工具里的改动，已停止同步：$ProjectPath"
+  throw "The release directory has uncommitted changes; sync stopped: $ProjectPath"
 }
 
 Invoke-Git @('-C', $ProjectPath, 'fetch', 'origin', $Branch)
@@ -57,8 +69,14 @@ if ($localBranch.Count -eq 0) {
 }
 
 $cli = Find-WechatCli
-Write-Host "已同步到 $Branch，正在打开微信开发者工具：$ProjectPath"
+Write-Host "Synced $Branch. Opening WeChat DevTools: $ProjectPath"
+if (-not (Test-WechatCliProfile)) {
+  Write-Host 'Starting WeChat DevTools to initialize its CLI profile.'
+  Start-WechatDevTools $cli
+  Start-Sleep -Seconds 5
+}
 & $cli -o $ProjectPath
 if ($LASTEXITCODE -ne 0) {
-  throw '微信开发者工具打开失败；可直接在工具中导入这个目录。'
+  Write-Warning 'WeChat DevTools CLI is not ready. Open DevTools -> Settings -> Security Settings -> Service Port, enable it once, then run this script again.'
+  exit 0
 }
