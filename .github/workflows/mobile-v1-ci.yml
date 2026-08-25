@@ -19,6 +19,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONUTF8: "1"
+
 concurrency:
   group: mobile-v1-${{ github.ref }}
   cancel-in-progress: true
@@ -29,8 +32,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
           cache: pip
@@ -54,8 +57,8 @@ jobs:
       run:
         working-directory: miniprogram
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: npm
@@ -69,12 +72,12 @@ jobs:
       - name: 构建微信小程序
         run: npm run build:mp-weixin
       - name: 验证微信原生 custom tabBar
-        shell: powershell
+        shell: pwsh
         run: |
           $root = Join-Path (Get-Location) "dist\build\mp-weixin\custom-tab-bar"
           @("index.js", "index.json", "index.wxml", "index.wxss") | ForEach-Object {
             $target = Join-Path $root $_
-            if (-not (Test-Path -LiteralPath $target)) { throw "缺少微信原生 custom tabBar 文件：$target" }
+            if (-not (Test-Path -LiteralPath $target)) { throw "Missing native WeChat custom tabBar file: $target" }
           }
       - name: 构建 H5 视觉验收版
         run: npm run build:h5

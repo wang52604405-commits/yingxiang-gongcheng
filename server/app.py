@@ -1518,7 +1518,10 @@ def _ensure_admin(username: str, password: str) -> None:
                 (username, generate_password_hash(password), "管理员"),
             )
             conn.commit()
-            print(f"[OK] 管理员账号已创建: {username}")
+            # Windows CI and legacy consoles may still default to cp1252. Keep
+            # startup logging ASCII-only so creating an admin can never abort
+            # an otherwise valid server boot because of console encoding.
+            print(f"[OK] Admin account created: {ascii(username)}")
     finally:
         conn.close()
 
