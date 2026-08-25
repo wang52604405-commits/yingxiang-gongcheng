@@ -37,7 +37,7 @@ jobs:
       - name: 检查微信 AppID 配置
         id: appid
         env:
-          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID || 'wx8ad581f01bf4b09f' }}
         run: |
           if [ -n "${WECHAT_APP_ID}" ]; then
             echo "configured=true" >> "${GITHUB_OUTPUT}"
@@ -53,7 +53,7 @@ jobs:
         if: steps.appid.outputs.configured == 'true'
         working-directory: miniprogram
         env:
-          VITE_WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          VITE_WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID || 'wx8ad581f01bf4b09f' }}
         run: npm run build:mp-weixin:release
 
       - name: 发布编译产物分支

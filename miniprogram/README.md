@@ -54,9 +54,9 @@ npm run build:mp-weixin
 
 在微信开发者工具中打开“版本管理”，配置本仓库的 GitHub 地址，选择 `codex/wechat-mp-release` 分支并执行“拉取”。后续源代码更新后，先在 GitHub Actions 等待发布分支完成，再在开发者工具中执行“拉取”。版本管理的 GitHub 拉取、提交和推送入口位于“版本管理”面板，具体认证名称随开发者工具版本可能略有不同。
 
-仓库 Secret 配置：GitHub 仓库 `Settings → Secrets and variables → Actions → New repository secret`，名称填写 `WECHAT_APP_ID`，值填写真实小程序 AppID。AppID 只写入编译产物的 `project.config.json`；AppSecret、服务器密钥和 OSS 凭据不进入 GitHub。
+发布流程默认使用当前小程序 AppID `wx8ad581f01bf4b09f`；如以后更换小程序，可在 GitHub Actions Secret 中设置 `WECHAT_APP_ID` 覆盖它。AppID 只写入编译产物的 `project.config.json`；AppSecret、服务器密钥和 OSS 凭据不进入 GitHub。
 
-没有配置 `WECHAT_APP_ID` 时，发布流程只提示并跳过发布分支，不影响源代码测试。开发者工具临时验收仍可手动执行 `npm run build:mp-weixin`，然后打开 `dist/build/mp-weixin`。
+本机可双击 `scripts/同步并打开微信开发者工具.cmd`，脚本会拉取最新 `codex/wechat-mp-release`、检查本地目录没有未提交改动，然后自动打开微信开发者工具。微信开发者工具本身不会在远程分支变化后自动拉取，因此这个脚本是本机同步入口；如需完全无人值守，可将它加入 Windows 任务计划程序。
 
 `build:mp-weixin` 完成后会自动确认：
 
