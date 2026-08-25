@@ -43,7 +43,8 @@ config.setting = {
 config.simulatorPluginLibVersion = config.simulatorPluginLibVersion || {}
 config.editorSetting = config.editorSetting || {}
 if (appId) config.appid = appId
-writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+// 微信开发者工具会以无尾随换行的格式保存该文件；保持一致，避免每次打开都产生伪改动。
+writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 writeFileSync(resolve('dist/build/mp-weixin/.gitignore'), 'project.private.config.json\n', 'utf8')
 
 await import('./assert-production-build.mjs')
