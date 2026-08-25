@@ -28,15 +28,12 @@ const headerStyle: Record<string, string> = {
     <view class="app-header" :style="headerStyle">
       <view class="navigation-row">
         <button class="brand-block pressable" @tap="$emit('selectProject')">
-          <view class="eyebrow-line">
-            <text class="eyebrow">工程影像</text>
+          <view class="project-line">
+            <text class="project-name">{{ projectName }}</text>
             <view v-if="props.online === false" class="offline-state">
               <text class="offline-dot" />
               <text>离线</text>
             </view>
-          </view>
-          <view class="project-line">
-            <text class="project-name">{{ projectName }}</text>
             <view class="chevron" aria-hidden="true" />
           </view>
         </button>
@@ -59,12 +56,10 @@ const headerStyle: Record<string, string> = {
   box-shadow: 0 1rpx 0 rgba(255, 255, 255, 0.06);
 }
 .navigation-row { display: flex; align-items: center; height: var(--nav-row-height); padding-right: var(--menu-right-clearance); }
-.brand-block { display: flex; flex: 1; flex-direction: column; align-items: stretch; justify-content: center; align-self: stretch; min-width: 0; gap: 5rpx; margin: 0; padding: 0; color: inherit; text-align: left; background: transparent; }
-.eyebrow-line { display: flex; align-items: center; min-width: 0; gap: 12rpx; }
-.eyebrow { display: block; font-size: 22rpx; line-height: 1.15; opacity: 0.78; }
+.brand-block { display: flex; flex: 1; align-items: stretch; justify-content: center; align-self: stretch; min-width: 0; margin: 0; padding: 0; color: inherit; text-align: left; background: transparent; }
 .project-line { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 36rpx; }
-.project-name { display: block; flex: 1; min-width: 0; overflow: hidden; font-size: 27rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.project-name { display: block; flex: 1; min-width: 0; overflow: hidden; font-size: 29rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .chevron { flex: 0 0 auto; width: 13rpx; height: 13rpx; margin: -6rpx 0 0 13rpx; border-right: 2rpx solid currentColor; border-bottom: 2rpx solid currentColor; transform: rotate(45deg); }
-.offline-state { display: flex; align-items: center; gap: 7rpx; color: #ffd28b; font-size: 21rpx; white-space: nowrap; }
+.offline-state { display: flex; flex: 0 0 auto; align-items: center; gap: 7rpx; margin-left: 14rpx; color: #ffd28b; font-size: 21rpx; white-space: nowrap; }
 .offline-dot { width: 11rpx; height: 11rpx; border-radius: 50%; background: #f1b34b; box-shadow: 0 0 0 5rpx rgba(241, 179, 75, 0.13); }
 </style>

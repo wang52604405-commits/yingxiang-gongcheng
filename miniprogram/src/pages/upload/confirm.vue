@@ -81,10 +81,9 @@ onShow(applyManualSelection)
 
 <template>
   <view class="page-shell no-tabs confirm-page">
-    <PageHeader title="确认自动匹配" :subtitle="photos.length ? `${photos.length} 张照片` : '读取上传批次'" />
+    <PageHeader title="确认归档位置" />
 
-    <view v-if="processing" class="notice processing-note"><text class="notice-dot" /><view><text class="notice-title">正在上传并识别</text><text>请保持小程序在前台。退出微信后不会继续后台上传，重新进入可续传。</text></view></view>
-    <view v-else-if="photos.some(photo => photo.status === 'needs_review')" class="notice"><text class="notice-dot" /><view><text class="notice-title">识别结果已返回</text><text>高置信结果也请在提交前看一眼，避免归错工程部位。</text></view></view>
+    <view v-if="processing" class="processing-bar"><view class="processing-status"><text class="notice-dot" /><text>上传识别中</text></view><button class="refresh-button pressable" @tap="refresh">刷新</button></view>
 
     <view v-if="photos.length" class="review-list">
       <view v-for="photo in photos" :key="photo.photo_uuid" class="review-card card">
@@ -92,15 +91,13 @@ onShow(applyManualSelection)
         <view v-else class="review-thumb preview-waiting">预览处理中</view>
         <view class="review-copy">
           <view class="review-head"><input v-model="photo.title" class="review-title" placeholder="照片题名" /><text v-if="photo.match_candidates?.[0]" class="confidence" :class="{ high: photo.match_candidates[0].confidence >= 0.85 }">{{ Math.round(photo.match_candidates[0].confidence * 100) }}%</text></view>
-          <text class="review-location">{{ selections[photo.photo_uuid]?.unit_name || selections[photo.photo_uuid]?.other_node_name || '等待识别结果' }}<template v-if="selections[photo.photo_uuid]?.process_name"> · {{ selections[photo.photo_uuid].process_name }}</template></text>
-          <text class="review-code">{{ selections[photo.photo_uuid]?.unit_code || selections[photo.photo_uuid]?.other_node_code || photo.status }}</text>
+          <text class="review-location">{{ selections[photo.photo_uuid]?.unit_name || selections[photo.photo_uuid]?.other_node_name || '识别中…' }}<template v-if="selections[photo.photo_uuid]?.process_name"> · {{ selections[photo.photo_uuid].process_name }}</template></text>
+          <text v-if="selections[photo.photo_uuid]?.unit_code || selections[photo.photo_uuid]?.other_node_code" class="review-code">{{ selections[photo.photo_uuid]?.unit_code || selections[photo.photo_uuid]?.other_node_code }}</text>
         </view>
       </view>
     </view>
 
-    <button v-if="photos.length" class="secondary-button pressable manual-button" @tap="chooseManual">人工选择归档位置</button>
-    <button class="primary-button pressable" :disabled="!readyToConfirm || submitting" @tap="confirm">{{ submitting ? '正在提交…' : '确认并交给电脑端归档' }}</button>
-    <button v-if="processing" class="refresh-button pressable" @tap="refresh">刷新识别状态</button>
+    <view v-if="photos.length" class="confirm-actions"><button class="secondary-button pressable" @tap="chooseManual">更改位置</button><button class="primary-button pressable" :disabled="!readyToConfirm || submitting" @tap="confirm">{{ submitting ? '提交中…' : '确认归档' }}</button></view>
 
     <LoadingOverlay :visible="submitting" message="正在保存归档信息" />
   </view>
@@ -108,10 +105,10 @@ onShow(applyManualSelection)
 
 <style scoped>
 .confirm-page { padding-bottom: calc(48rpx + var(--safe-bottom)); }
-.processing-note { margin-bottom: 0; }
-.notice-title { display: block; margin-bottom: 5rpx; color: var(--text); font-weight: 600; }
+.processing-bar { display:flex; align-items:center; justify-content:space-between; min-height:72rpx; margin-bottom:20rpx; padding:0 18rpx; border-radius:18rpx; color:var(--muted); background:var(--surface); font-size:23rpx; }
+.processing-status { display:flex; align-items:center; gap:16rpx; }
+.processing-status .notice-dot { margin-top:0; }
 .review-list { display: grid; gap: 18rpx; margin: 0 0 24rpx; }
-.notice + .review-list { margin-top: 24rpx; }
 .review-card { display: grid; grid-template-columns: 112rpx minmax(0, 1fr); align-items: start; gap: 16rpx; padding: 18rpx; }
 .review-thumb { width: 112rpx; height: 104rpx; border-radius: 18rpx; background: var(--surface-2); }
 .preview-waiting { display: grid; place-items: center; color: var(--muted); font-size: 20rpx; }
@@ -122,6 +119,7 @@ onShow(applyManualSelection)
 .review-code { display: block; margin-top: 6rpx; color: var(--primary-strong); font-size: 22rpx; }
 .confidence { flex: 0 0 auto; padding: 8rpx 12rpx; border-radius: 999rpx; color: var(--warning); background: rgba(241, 179, 75, 0.13); font-size: 21rpx; }
 .confidence.high { color: var(--primary-strong); background: var(--primary-soft); }
-.manual-button { margin: 24rpx 0 16rpx; }
-.refresh-button { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 70rpx; margin-top: 16rpx; color: var(--primary-strong); font-size: 24rpx; line-height: 1.25; text-align: center; }
+.confirm-actions { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:12rpx; margin-top:24rpx; }
+.confirm-actions .primary-button, .confirm-actions .secondary-button { min-height:84rpx; padding:14rpx 16rpx; font-size:26rpx; }
+.refresh-button { display:flex; align-items:center; justify-content:center; min-height:40px; padding:0 12rpx; color:var(--primary-strong); background:transparent; font-size:23rpx; }
 </style>

@@ -25,12 +25,12 @@ export function recoverInterruptedStatus(status: PhotoStatus): PhotoStatus {
 }
 
 export const STATUS_LABELS: Record<PhotoStatus, string> = {
-  local_ready: '原图待中转',
-  uploading: '原图上传中',
-  server_saved: '服务器已保存',
-  analyzing: '正在识别',
-  needs_review: '需要确认',
-  desktop_pending: '电脑待归档',
-  desktop_imported: '电脑已归档',
-  failed: '需要处理',
+  local_ready: '待上传',
+  uploading: '上传中',
+  server_saved: '已上传',
+  analyzing: '识别中',
+  needs_review: '待确认',
+  desktop_pending: '待归档',
+  desktop_imported: '已归档',
+  failed: '处理失败',
 }

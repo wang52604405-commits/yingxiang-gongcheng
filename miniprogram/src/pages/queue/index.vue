@@ -20,9 +20,9 @@ function openConfirm(clientBatchId: string) {
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
   if (photo.original_path) {
     const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览待恢复'
-    return `原图待中转 ${formatBytes(photo.original_size)}${preview}`
+    return `原图 ${formatBytes(photo.original_size)}${preview}`
   }
-  return `服务器已保存 · 本机预览 ${formatBytes(photo.preview_size)}`
+  return `预览 ${formatBytes(photo.preview_size)}`
 }
 
 onShow(() => {
@@ -37,13 +37,13 @@ onShow(() => {
   <view class="page-shell">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <view class="title-row">
-      <view><text class="page-title">待上传</text><text class="page-subtitle">断网时保存在手机，回到前台联网后继续。</text></view>
+      <text class="page-title">待上传</text>
       <text class="queue-count">{{ photos.length }} 项</text>
     </view>
 
-    <view v-if="!queueRuntime.state.online || queueRuntime.state.running" class="network-card" :class="{ offline: !queueRuntime.state.online }">
+    <view v-if="!queueRuntime.state.online" class="network-card offline">
       <view class="network-symbol" />
-      <view><text class="network-title">{{ queueRuntime.state.online ? queueRuntime.state.running ? '正在中转原图' : '当前网络正常' : '当前离线' }}</text><text class="network-copy">{{ queueRuntime.state.online ? '回到小程序或网络恢复时自动续传；退出微信后不会后台上传。' : '可以继续拍照，未中转原图会安全留在本机。' }}</text></view>
+      <text class="network-title">离线，原图已保存在本机</text>
     </view>
 
     <view v-if="queueRuntime.failedCount.value" class="retry-bar">
@@ -70,8 +70,7 @@ onShow(() => {
     </view>
     <view v-else class="empty-state">
       <view class="empty-symbol">✓</view>
-      <text class="empty-title">没有待处理影像</text>
-      <text class="empty-copy">已上传的照片会等待电脑端自动归档。</text>
+      <text class="empty-title">暂无待上传影像</text>
     </view>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="3" :badge="queueRuntime.pendingCount.value" />
@@ -82,12 +81,11 @@ onShow(() => {
 <style scoped>
 .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 20rpx; }
 .queue-count { flex: 0 0 auto; margin-top: 10rpx; padding: 10rpx 18rpx; border-radius: 999rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 22rpx; }
-.network-card { display: grid; grid-template-columns: 42rpx 1fr; gap: 14rpx; margin-top: 30rpx; padding: 22rpx; border: 1rpx solid var(--line); border-radius: 22rpx; background: var(--surface); }
+.network-card { display: grid; grid-template-columns: 42rpx 1fr; align-items: center; gap: 14rpx; margin-top: 24rpx; padding: 18rpx 22rpx; border: 1rpx solid var(--line); border-radius: 20rpx; background: var(--surface); }
 .network-card.offline { border-color: rgba(241, 179, 75, 0.45); }
 .network-symbol { width: 17rpx; height: 17rpx; margin: 8rpx 0 0 5rpx; border: 3rpx solid rgba(45, 185, 170, 0.24); border-radius: 50%; background: var(--success); }
 .network-card.offline .network-symbol { background: var(--warning); border-color: rgba(241, 179, 75, 0.24); }
 .network-title { display: block; color: var(--text); font-size: 25rpx; font-weight: 600; }
-.network-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 22rpx; line-height: 1.5; }
 .retry-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; padding: 16rpx 20rpx; border-radius: 18rpx; color: var(--danger); background: rgba(255, 107, 102, 0.1); font-size: 23rpx; }
 .retry-bar button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 20rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 23rpx; line-height: 1.25; text-align: center; }
 .queue-list { display: grid; gap: 18rpx; margin-top: 24rpx; }

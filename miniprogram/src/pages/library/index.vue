@@ -94,10 +94,7 @@ onReachBottom(() => { void loadPhotos(false) })
 <template>
   <view class="page-shell">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
-    <view class="title-row">
-      <text class="page-title">影像库</text>
-      <text class="page-subtitle">按电脑端的工程层级查看。</text>
-    </view>
+    <text class="page-title">影像库</text>
 
     <view class="library-controls card">
       <view class="segment library-segment">
@@ -105,11 +102,7 @@ onReachBottom(() => { void loadPhotos(false) })
         <button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button>
       </view>
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy">
-          <text class="path-label">当前归档位置</text>
-          <text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部工程部位' : '全部其它影像' }}</text>
-          <text class="path-code">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_code || selectedDestination.assignment.other_node_code : project.code }}</text>
-        </view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部工程部位' : '全部其它影像' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
       <view v-if="scope === 'engineering'" class="segment category-segment">
@@ -118,14 +111,9 @@ onReachBottom(() => { void loadPhotos(false) })
       </view>
     </view>
 
-    <view class="section-head unit-head">
-      <view>
-        <text class="section-title">{{ scope === 'engineering' ? '工程照片' : '其它照片' }}</text>
-        <text class="count-copy">共 {{ totalCount }} 张 · 已显示 {{ photos.length }} 张</text>
-      </view>
-    </view>
+    <view class="section-head unit-head"><text class="section-title">{{ scope === 'engineering' ? '工程照片' : '其它照片' }}</text><text class="count-copy">{{ totalCount }} 张</text></view>
 
-    <view v-if="loading && !photos.length" class="loading-inline"><view class="loading-spinner" /><text>正在读取影像</text></view>
+    <view v-if="loading && !photos.length" class="loading-inline"><view class="loading-spinner" /><text>加载中…</text></view>
     <view v-else-if="photos.length" class="gallery">
       <button v-for="(photo, index) in photos" :key="photo.photo_uuid" class="photo-tile pressable" @tap="uniApi.navigateTo({ url: `/pages/photo/detail?id=${photo.photo_uuid}` })">
         <image v-if="photo.thumb_url || photo.image_url" class="tile-image" :src="photo.thumb_url || photo.image_url" mode="aspectFill" lazy-load />
@@ -137,11 +125,9 @@ onReachBottom(() => { void loadPhotos(false) })
       </button>
     </view>
     <button v-if="photos.length && nextCursor" class="load-more pressable" :disabled="loadingMore" @tap="loadPhotos(false)">{{ loadingMore ? '正在加载…' : '继续加载更多' }}</button>
-    <text v-else-if="photos.length" class="all-loaded">已显示全部 {{ photos.length }} 张影像</text>
-    <view v-else class="empty-state">
+    <view v-if="!loading && !photos.length" class="empty-state">
       <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
       <text class="empty-title">这里还没有影像</text>
-      <text class="empty-copy">切换归档位置，或点击底部中间的“采集”添加现场照片。</text>
     </view>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="1" :badge="queueRuntime.pendingCount.value" />
@@ -150,14 +136,11 @@ onReachBottom(() => { void loadPhotos(false) })
 </template>
 
 <style scoped>
-.title-row { display: block; }
 .library-controls { margin-top: var(--space-lg); padding: 12rpx; }
 .library-segment { margin: 0; }
-.path-card { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 10rpx 0; padding: 18rpx 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
-.path-copy { min-width: 0; }
-.path-label { display: block; color: var(--muted); font-size: 22rpx; }
-.path-title { display: block; overflow: hidden; margin-top: 7rpx; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.path-code { display: block; margin-top: 5rpx; color: var(--primary-strong); font-size: 22rpx; }
+.path-card { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 88rpx; margin: 8rpx 0; padding: 0 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
+.path-copy { display: flex; align-items: center; min-width: 0; gap: 14rpx; color: var(--primary-strong); }
+.path-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; color: var(--muted); }
 .count-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 22rpx; }
 .category-segment { margin: 0; }
@@ -174,5 +157,4 @@ onReachBottom(() => { void loadPhotos(false) })
 .loading-inline { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360rpx; color: var(--muted); font-size: 24rpx; }
 .loading-inline .loading-spinner { width: 48rpx; height: 48rpx; margin-bottom: 18rpx; }
 .load-more { display: flex; align-items: center; justify-content: center; width: 260rpx; min-height: 40px; margin: 24rpx auto 0; padding: 0 24rpx; border: 1rpx solid var(--line); border-radius: 20rpx; color: var(--primary-strong); background: var(--surface); font-size: 23rpx; line-height: 1.25; text-align: center; }
-.all-loaded { display: block; padding: 26rpx 0 10rpx; color: var(--muted); text-align: center; font-size: 20rpx; }
 </style>

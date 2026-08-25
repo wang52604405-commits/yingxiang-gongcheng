@@ -40,25 +40,17 @@ async function load() {
 }
 
 function startCapture(item: PhotoRequirement) {
-  uni.showModal({
-    title: item.photo_requirement_name,
-    content: `拍摄时机：${item.timing || '对应工序施工时'}\n拍摄角度：${item.shot_types || '全景/中景/近景'}\n最少：${item.min_photo_count || 1} 张${item.before_concealment_required === '是' ? '\n注意：隐蔽前必须拍摄。' : ''}`,
-    confirmText: '采集影像',
-    success: ({ confirm }) => {
-      if (!confirm) return
-      void launchCapture({
-        scope: 'engineering',
-        category: 'construction',
-        mode: 'auto',
-        requirement: {
-          template_code: item.template_code,
-          photo_requirement_name: item.photo_requirement_name,
-          required_type: item.required_type,
-          min_photo_count: item.min_photo_count,
-          timing: item.timing,
-          shot_types: item.shot_types,
-        },
-      })
+  void launchCapture({
+    scope: 'engineering',
+    category: 'construction',
+    mode: 'auto',
+    requirement: {
+      template_code: item.template_code,
+      photo_requirement_name: item.photo_requirement_name,
+      required_type: item.required_type,
+      min_photo_count: item.min_photo_count,
+      timing: item.timing,
+      shot_types: item.shot_types,
     },
   })
 }
@@ -68,23 +60,17 @@ onLoad(load)
 
 <template>
   <view class="page-shell no-tabs requirements-page">
-    <PageHeader title="专业采集清单" :subtitle="`${project.industry || '工程'} · ${project.project_type || project.name}`" />
-    <view class="summary-grid">
-      <view class="summary-card"><text class="summary-number">{{ summary.total }}</text><text>全部</text></view>
-      <view class="summary-card"><text class="summary-number">{{ summary.required }}</text><text>必拍</text></view>
-      <view class="summary-card"><text class="summary-number">{{ summary.conditional }}</text><text>条件</text></view>
-      <view class="summary-card"><text class="summary-number">{{ summary.recommended }}</text><text>推荐</text></view>
-    </view>
-    <input v-model="keyword" class="search-input" placeholder="搜索阶段、分部、工序或照片要求" placeholder-class="input-placeholder" />
+    <PageHeader title="专业采集清单" />
     <scroll-view scroll-x class="filter-scroll">
       <view class="filter-row">
-        <button class="filter-chip" :class="{ active: filter === 'all' }" @tap="filter = 'all'">全部</button>
-        <button class="filter-chip required" :class="{ active: filter === 'required' }" @tap="filter = 'required'">必拍</button>
-        <button class="filter-chip conditional" :class="{ active: filter === 'conditional' }" @tap="filter = 'conditional'">条件必拍</button>
-        <button class="filter-chip" :class="{ active: filter === 'recommended' }" @tap="filter = 'recommended'">推荐</button>
+        <button class="filter-chip pressable" :class="{ active: filter === 'all' }" @tap="filter = 'all'">全部 {{ summary.total }}</button>
+        <button class="filter-chip pressable required" :class="{ active: filter === 'required' }" @tap="filter = 'required'">必拍 {{ summary.required }}</button>
+        <button class="filter-chip pressable conditional" :class="{ active: filter === 'conditional' }" @tap="filter = 'conditional'">条件 {{ summary.conditional }}</button>
+        <button class="filter-chip pressable" :class="{ active: filter === 'recommended' }" @tap="filter = 'recommended'">推荐 {{ summary.recommended }}</button>
       </view>
     </scroll-view>
-    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取专业模板</text></view>
+    <input v-model="keyword" class="search-input" placeholder="搜索清单" placeholder-class="input-placeholder" />
+    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="visible.length" class="requirement-list">
       <button v-for="item in visible" :key="item.template_code" class="requirement-card card pressable" @tap="startCapture(item)">
         <view class="requirement-head">
@@ -93,22 +79,18 @@ onLoad(load)
         </view>
         <text class="requirement-title">{{ item.photo_requirement_name }}</text>
         <text class="requirement-path">{{ [item.phase, item.division, item.subdivision, item.item, item.process].filter(Boolean).join(' / ') }}</text>
-        <view class="requirement-meta"><text>至少 {{ item.min_photo_count || 1 }} 张</text><text>{{ item.shot_types || '按现场实际' }}</text><text v-if="item.before_concealment_required === '是'">隐蔽前</text></view>
+        <view class="requirement-footer"><view class="requirement-meta"><text>至少 {{ item.min_photo_count || 1 }} 张</text><text>{{ item.shot_types || '按现场实际' }}</text><text v-if="item.before_concealment_required === '是'">隐蔽前</text></view><text class="capture-label">采集 ›</text></view>
         <text v-if="item.condition" class="condition">适用条件：{{ item.condition }}</text>
       </button>
     </view>
-    <view v-else class="empty-state"><text class="empty-title">当前项目暂无专业模板清单</text><text class="empty-copy">水利项目继续按桌面端现有项目划分拍摄；房建、市政、电力在桌面端选择专业和工程类型后会自动同步清单。</text></view>
+    <view v-else class="empty-state"><text class="empty-title">暂无采集清单</text><text class="empty-copy">可按工程部位直接采集</text></view>
   </view>
 </template>
 
 <style scoped>
 .requirements-page { padding-bottom: calc(40rpx + var(--safe-bottom)); }
-.summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; margin:0 0 var(--space-lg); overflow:hidden; border:1rpx solid var(--line); border-radius:22rpx; background:var(--surface); }
-.summary-card { display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; min-width:0; min-height:94rpx; gap:4rpx; padding:14rpx 6rpx; border-right:1rpx solid var(--line); background:transparent; color:var(--muted); font-size:22rpx; text-align:center; }
-.summary-card:last-child { border-right:0; }
-.summary-number { color:var(--text); font-size:30rpx; font-weight:700; }
-.search-input { height:88rpx; padding:0 22rpx; border:1rpx solid var(--line); border-radius:20rpx; background:var(--surface); color:var(--text); font-size:25rpx; }
-.filter-scroll { margin:18rpx 0; white-space:nowrap; }
+.search-input { height:88rpx; margin-bottom:20rpx; padding:0 22rpx; border:1rpx solid var(--line); border-radius:20rpx; background:var(--surface); color:var(--text); font-size:25rpx; }
+.filter-scroll { margin:0 0 16rpx; white-space:nowrap; }
 .filter-row { display:flex; gap:12rpx; }
 .filter-chip { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8rpx 24rpx; border:1rpx solid var(--line); border-radius:999rpx; background:var(--surface); color:var(--muted); font-size:22rpx; line-height:1.25; text-align:center; }
 .filter-chip.active { border-color:var(--primary); background:var(--primary-soft); color:var(--primary-strong); }
@@ -121,6 +103,8 @@ onLoad(load)
 .requirement-code { max-width:60%; overflow:hidden; color:var(--muted); font-size:22rpx; text-overflow:ellipsis; white-space:nowrap; }
 .requirement-title { display:block; margin-top:13rpx; color:var(--text); font-size:27rpx; font-weight:700; }
 .requirement-path { display:block; margin-top:8rpx; color:var(--muted); font-size:22rpx; line-height:1.5; }
-.requirement-meta { display:flex; flex-wrap:wrap; gap:12rpx; margin-top:12rpx; color:var(--primary-strong); font-size:22rpx; }
+.requirement-footer { display:flex; align-items:flex-end; justify-content:space-between; gap:16rpx; margin-top:12rpx; }
+.requirement-meta { display:flex; flex:1; flex-wrap:wrap; gap:12rpx; color:var(--primary-strong); font-size:22rpx; }
+.capture-label { flex:0 0 auto; color:var(--primary-strong); font-size:23rpx; font-weight:600; }
 .condition { display:block; margin-top:10rpx; color:var(--muted); font-size:22rpx; line-height:1.5; }
 </style>

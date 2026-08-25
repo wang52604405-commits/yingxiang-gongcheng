@@ -35,8 +35,8 @@ onLoad(load)
 
 <template>
   <view class="page-shell no-tabs">
-    <PageHeader title="选择工程" subtitle="服务器同步的工程项目" />
-    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取工程</text></view>
+    <PageHeader title="选择工程" />
+    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="projects.length" class="project-list card">
       <button v-for="project in projects" :key="project.id" class="project-card pressable" :class="{ active: current.id === project.id }" @tap="select(project)">
         <view class="project-symbol">{{ project.industry?.includes('房') ? '建' : project.industry?.includes('市政') ? '市' : project.industry?.includes('电') ? '电' : project.industry?.includes('水') ? '水' : '工' }}</view>
@@ -44,7 +44,7 @@ onLoad(load)
         <text class="check">{{ current.id === project.id ? '✓' : '›' }}</text>
       </button>
     </view>
-    <view v-else class="empty-state"><text class="empty-title">这个账号还没有工程</text><text class="empty-copy">请先在原电脑登录同一账号并同步工程，手机会自动拉取真实工程数据。</text></view>
+    <view v-else class="empty-state"><text class="empty-title">暂无工程</text><text class="empty-copy">请先在电脑端同步工程</text></view>
   </view>
 </template>
 
