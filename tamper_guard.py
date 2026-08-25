@@ -39,7 +39,7 @@ except Exception:  # pragma: no cover - 构建机/客户端都自带 cryptograph
 
 MANIFEST_NAME = "guard_manifest.dat"
 # 内置公钥（DER base64）的混淆存储：XOR(密钥 tg24) + base64，避免被一键搜索定位
-_PUB_X = "OSRdQzY2a3A/VWRDNR53dTYxU3IbC1RZWyZ1BzhQdU49EX9VREgGehpWRwEWK3FtQAV+YRNTRgYhUgYJ"
+_PUB_X = "RE0CMXJkGVEEZBM0Sy0QzMQIQRfqv/2B3nhXF75xySS6pZp+0AypzsnnqF4="
 _XOR_KEY = b"tg24"
 _MANIFEST_X = "ExJTRhA4X1UaDlRRBxMcUBUT"  # guard_manifest.dat 的混淆名
 
