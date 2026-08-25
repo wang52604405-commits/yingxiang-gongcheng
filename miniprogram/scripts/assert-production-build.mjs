@@ -29,6 +29,17 @@ const projectConfig = JSON.parse(readFileSync(join(output, 'project.config.json'
 if (!projectConfig.libVersion || Number(projectConfig.libVersion.split('.')[0]) < 2 || (projectConfig.libVersion.startsWith('2.') && Number(projectConfig.libVersion.split('.')[1]) < 25)) {
   throw new Error('微信基础库必须为 2.25.0 或更高，才能一次选择 20 张照片')
 }
+if (!Array.isArray(projectConfig.packOptions?.include)) {
+  throw new Error('微信项目配置缺少 packOptions.include，开发者工具会反复改写发布目录')
+}
+for (const key of ['compileWorklet', 'uglifyFileName', 'uploadWithSourceMap', 'minifyWXSS', 'minifyWXML']) {
+  if (!(key in (projectConfig.setting || {}))) {
+    throw new Error(`微信项目配置缺少 ${key}，开发者工具会反复改写发布目录`)
+  }
+}
+if (!existsSync(join(output, '.gitignore')) || !readFileSync(join(output, '.gitignore'), 'utf8').includes('project.private.config.json')) {
+  throw new Error('微信发布目录必须忽略 project.private.config.json，禁止提交本机私有设置')
+}
 if (process.env.REQUIRE_WECHAT_APP_ID === '1') {
   if (!projectConfig.appid || projectConfig.appid === 'touristappid') throw new Error('正式体验版缺少 VITE_WECHAT_APP_ID，禁止发布')
 }

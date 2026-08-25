@@ -15,7 +15,35 @@ const appId = String(process.env.VITE_WECHAT_APP_ID || '').trim()
 const configPath = resolve('dist/build/mp-weixin/project.config.json')
 const config = JSON.parse(readFileSync(configPath, 'utf8'))
 config.libVersion = config.libVersion || '2.25.0'
+config.packOptions = {
+  ignore: [],
+  include: [],
+  ...(config.packOptions || {}),
+}
+config.setting = {
+  ...(config.setting || {}),
+  compileWorklet: false,
+  uglifyFileName: false,
+  uploadWithSourceMap: true,
+  enhance: false,
+  packNpmManually: false,
+  packNpmRelationList: [],
+  minifyWXSS: true,
+  minifyWXML: true,
+  localPlugins: false,
+  disableUseStrict: false,
+  useCompilerPlugins: false,
+  condition: false,
+  babelSetting: {
+    ignore: [],
+    disablePlugins: [],
+    outputPath: '',
+  },
+}
+config.simulatorPluginLibVersion = config.simulatorPluginLibVersion || {}
+config.editorSetting = config.editorSetting || {}
 if (appId) config.appid = appId
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+writeFileSync(resolve('dist/build/mp-weixin/.gitignore'), 'project.private.config.json\n', 'utf8')
 
 await import('./assert-production-build.mjs')
