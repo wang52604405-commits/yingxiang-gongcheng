@@ -22,5 +22,12 @@ function activate(tab: typeof tabs[number]) {
   </view>
 </template>
 <style scoped>
-.h5-tabbar{position:fixed;z-index:60;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);height:calc(138rpx + env(safe-area-inset-bottom));padding:10rpx 10rpx calc(12rpx + env(safe-area-inset-bottom));border-top:1rpx solid var(--line);background:var(--surface)}.h5-tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5rpx;overflow:visible;padding:0;color:var(--muted);background:transparent;font-size:21rpx}.h5-tab.active{color:var(--primary-strong)}.h5-icon{position:relative;display:grid;place-items:center;width:42rpx;height:42rpx;line-height:1}.h5-tab.primary .h5-icon{display:grid;place-items:center;width:82rpx;height:82rpx;margin-top:-34rpx;border:7rpx solid var(--surface);border-radius:27rpx;color:#041a1a;background:var(--primary-strong)}.h5-tab.primary{color:var(--primary-strong)}.h5-badge{position:absolute;top:-8rpx;right:-14rpx;min-width:28rpx;padding:3rpx 7rpx;border-radius:999rpx;color:#241700;background:var(--warning);font-size:17rpx}
+.h5-tabbar { position: fixed; z-index: 60; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); height: calc(138rpx + env(safe-area-inset-bottom)); padding: 10rpx 10rpx calc(12rpx + env(safe-area-inset-bottom)); border-top: 1rpx solid var(--line); background: var(--surface); }
+.h5-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5rpx; width: 100%; min-width: 0; height: 100%; overflow: visible; padding: 0; color: var(--muted); background: transparent; font-size: 22rpx; font-weight: 500; line-height: 1.2; text-align: center; }
+.h5-tab.active { color: var(--primary-strong); }
+.h5-icon { position: relative; display: grid; place-items: center; width: 42rpx; height: 42rpx; line-height: 1; }
+.h5-tab.primary { height: calc(100% + 34rpx); margin-top: -34rpx; color: var(--primary-strong); }
+.h5-tab.primary .h5-icon { position: absolute; top: 0; left: 50%; display: grid; place-items: center; width: 82rpx; height: 82rpx; border: 7rpx solid var(--surface); border-radius: 27rpx; color: #041a1a; background: var(--primary-strong); transform: translateX(-50%); }
+.h5-tab.primary > text { position: absolute; top: 102rpx; left: 0; right: 0; text-align: center; }
+.h5-badge { position: absolute; top: -8rpx; right: -14rpx; display: grid; place-items: center; min-width: 28rpx; min-height: 28rpx; padding: 3rpx 7rpx; border-radius: 999rpx; color: #241700; background: var(--warning); font-size: 17rpx; font-weight: 700; line-height: 1; }
 </style>

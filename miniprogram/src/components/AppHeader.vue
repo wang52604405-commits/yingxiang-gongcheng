@@ -15,7 +15,7 @@ defineEmits<{
       <text class="eyebrow">工程影像</text>
       <button class="project-button pressable" @tap="$emit('selectProject')">
         <text class="project-name">{{ projectName }}</text>
-        <text class="chevron">⌄</text>
+        <view class="chevron" aria-hidden="true" />
       </button>
     </view>
     <view class="online-state" :class="{ offline: online === false }">
@@ -42,10 +42,10 @@ defineEmits<{
   box-shadow: 0 1rpx 0 rgba(255, 255, 255, 0.06);
 }
 .brand-block { min-width: 0; }
-.eyebrow { display: block; margin-bottom: 8rpx; font-size: 22rpx; opacity: 0.78; }
-.project-button { display: flex; align-items: center; max-width: 500rpx; padding: 0; color: inherit; text-align: left; background: transparent; }
-.project-name { overflow: hidden; font-size: 27rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.chevron { margin-left: 10rpx; font-size: 28rpx; }
+.eyebrow { display: block; margin-bottom: 8rpx; font-size: 22rpx; line-height: 1.2; opacity: 0.78; }
+.project-button { display: flex; align-items: center; justify-content: flex-start; min-height: 44rpx; max-width: 500rpx; padding: 0; color: inherit; text-align: left; background: transparent; }
+.project-name { overflow: hidden; font-size: 27rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.chevron { flex: 0 0 auto; width: 13rpx; height: 13rpx; margin: -6rpx 0 0 13rpx; border-right: 2rpx solid currentColor; border-bottom: 2rpx solid currentColor; transform: rotate(45deg); }
 .online-state { display: flex; align-items: center; gap: 8rpx; margin-bottom: 4rpx; font-size: 21rpx; white-space: nowrap; }
 .online-dot { width: 14rpx; height: 14rpx; border-radius: 50%; background: #4ee0b0; box-shadow: 0 0 0 6rpx rgba(78, 224, 176, 0.13); }
 .online-state.offline { color: #ffd28b; }

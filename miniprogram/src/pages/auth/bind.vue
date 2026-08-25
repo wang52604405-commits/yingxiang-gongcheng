@@ -44,7 +44,7 @@ async function submit() {
 <style scoped>
 .bind-page { padding-top: calc(var(--safe-top) + 220rpx); }
 .brand-mark { display: grid; place-items: center; width: 108rpx; height: 108rpx; margin: 22rpx auto 26rpx; border-radius: 33rpx; color: #041a1a; background: var(--primary-strong); box-shadow: 0 18rpx 38rpx rgba(45, 185, 170, 0.25); font-size: 45rpx; font-weight: 800; }
-.bind-title { display: block; text-align: center; font-size: 40rpx; font-weight: 750; }
+.bind-title { display: block; text-align: center; font-size: 40rpx; font-weight: 700; }
 .bind-copy { display: block; max-width: 560rpx; margin: 13rpx auto 38rpx; color: var(--muted); text-align: center; font-size: 24rpx; line-height: 1.6; }
 .submit { margin-top: 34rpx; }
 .privacy-note { margin-top: 28rpx; }

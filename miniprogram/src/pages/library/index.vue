@@ -118,7 +118,7 @@ onReachBottom(() => { void loadPhotos(false) })
         <text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部工程部位' : '全部其它影像' }}</text>
         <text class="path-code">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_code || selectedDestination.assignment.other_node_code : project.code }}</text>
       </view>
-      <text class="path-arrow">›</text>
+      <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
     </button>
 
     <view class="section-head unit-head">
@@ -165,25 +165,25 @@ onReachBottom(() => { void loadPhotos(false) })
 .path-card { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 20rpx; padding: 22rpx 24rpx; border: 1rpx solid var(--line); border-radius: 24rpx; text-align: left; background: var(--surface); }
 .path-copy { min-width: 0; }
 .path-label { display: block; color: var(--muted); font-size: 21rpx; }
-.path-title { display: block; overflow: hidden; margin-top: 7rpx; color: var(--text); font-size: 27rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.path-title { display: block; overflow: hidden; margin-top: 7rpx; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .path-code { display: block; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; }
-.path-arrow { color: var(--muted); font-size: 44rpx; }
+.path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; color: var(--muted); }
 .unit-head { margin-bottom: 18rpx; }
 .count-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; }
-.upload-small { min-height: 60rpx; padding: 0 20rpx; border-radius: 17rpx; color: #041a1a; background: var(--primary-strong); font-size: 23rpx; font-weight: 650; }
+.upload-small { display: inline-flex; align-items: center; justify-content: center; min-height: 60rpx; padding: 0 20rpx; border-radius: 17rpx; color: #041a1a; background: var(--primary-strong); font-size: 23rpx; font-weight: 600; line-height: 1.2; }
 .category-segment { margin-bottom: 20rpx; }
 .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10rpx; }
-.photo-tile { position: relative; aspect-ratio: 1 / 1.14; overflow: hidden; border-radius: 18rpx; background: var(--surface); }
+.photo-tile { position: relative; display: block; width: 100%; min-width: 0; aspect-ratio: 1 / 1.14; overflow: hidden; border-radius: 18rpx; background: var(--surface); }
 .tile-image, .tile-placeholder { width: 100%; height: 100%; }
-.tile-placeholder { display: flex; align-items: flex-start; padding: 12rpx; color: #09262a; background: linear-gradient(155deg, #9cd7e3 0 38%, #d6c69e 39% 60%, #668876 61%); font-size: 18rpx; font-weight: 700; }
+.tile-placeholder { display: flex; align-items: flex-start; padding: 12rpx; color: #09262a; background: linear-gradient(155deg, #9cd7e3 0 38%, #d6c69e 39% 60%, #668876 61%); font-size: 20rpx; font-weight: 700; }
 .tile-placeholder.tone-1 { background: linear-gradient(105deg, #86ccde 0 44%, #b5b9b4 45% 67%, #517c6d 68%); }
 .tile-placeholder.tone-2 { background: linear-gradient(160deg, #9bdbe8 0 34%, #c5b98d 35% 61%, #6e8f69 62%); }
 .tile-placeholder.tone-3 { background: linear-gradient(130deg, #a8dfe7 0 33%, #8d9d9b 34% 52%, #b79d70 53% 70%, #66866f 71%); }
 .tile-overlay { position: absolute; left: 0; right: 0; bottom: 0; display: grid; gap: 4rpx; padding: 34rpx 12rpx 11rpx; color: #fff; text-align: left; background: linear-gradient(transparent, rgba(4, 17, 20, 0.88)); }
-.tile-title { overflow: hidden; font-size: 21rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.tile-date { font-size: 18rpx; opacity: 0.76; }
+.tile-title { overflow: hidden; font-size: 21rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.tile-date { font-size: 20rpx; opacity: 0.76; }
 .loading-inline { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360rpx; color: var(--muted); font-size: 24rpx; }
 .loading-inline .loading-spinner { width: 48rpx; height: 48rpx; margin-bottom: 18rpx; }
-.load-more { display: block; min-width: 260rpx; min-height: 66rpx; margin: 24rpx auto 0; padding: 0 24rpx; border: 1rpx solid var(--line); border-radius: 20rpx; color: var(--primary-strong); background: var(--surface); font-size: 22rpx; }
+.load-more { display: flex; align-items: center; justify-content: center; width: 260rpx; min-height: 66rpx; margin: 24rpx auto 0; padding: 0 24rpx; border: 1rpx solid var(--line); border-radius: 20rpx; color: var(--primary-strong); background: var(--surface); font-size: 22rpx; line-height: 1.25; text-align: center; }
 .all-loaded { display: block; padding: 26rpx 0 10rpx; color: var(--muted); text-align: center; font-size: 20rpx; }
 </style>

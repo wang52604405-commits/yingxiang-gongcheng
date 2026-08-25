@@ -54,7 +54,7 @@ onShow(() => {
         <view class="setting-icon"><UiIcon name="storage" :size="18" /></view><view><text class="setting-title">本机影像</text><text class="setting-copy">待中转原图 + 长期保留的 100KB 预览</text></view><text class="setting-value">{{ formatBytes(queueRuntime.queueBytes.value) }}</text>
       </button>
       <button class="setting-row pressable" @tap="showPrivacy">
-        <view class="setting-icon"><UiIcon name="shield" :size="18" /></view><view><text class="setting-title">隐私与权限</text><text class="setting-copy">相机、相册与上传说明</text></view><text class="setting-arrow">›</text>
+        <view class="setting-icon"><UiIcon name="shield" :size="18" /></view><view><text class="setting-title">隐私与权限</text><text class="setting-copy">相机、相册与上传说明</text></view><view class="setting-arrow"><UiIcon name="chevron" :size="17" /></view>
       </button>
       <view class="setting-row static">
         <view class="setting-icon"><UiIcon name="upload" :size="18" /></view><view><text class="setting-title">上传方式</text><text class="setting-copy">仅前台或网络恢复后续传</text></view><text class="setting-value">并发 2</text>
@@ -71,17 +71,17 @@ onShow(() => {
 
 <style scoped>
 .identity-card { display: flex; align-items: center; gap: 22rpx; margin-top: 34rpx; padding: 28rpx; border-radius: 30rpx; color: #fff; background: linear-gradient(135deg, var(--top), var(--primary)); }
-.avatar { display: grid; place-items: center; width: 92rpx; height: 92rpx; border-radius: 27rpx; background: rgba(255, 255, 255, 0.14); font-size: 38rpx; font-weight: 650; }
+.avatar { display: grid; place-items: center; width: 92rpx; height: 92rpx; border-radius: 27rpx; background: rgba(255, 255, 255, 0.14); font-size: 38rpx; font-weight: 600; }
 .identity-name { display: block; font-size: 31rpx; font-weight: 700; }
 .identity-role { display: block; margin-top: 7rpx; font-size: 22rpx; opacity: 0.74; }
 .settings { overflow: hidden; margin-top: 26rpx; }
 .setting-row { display: grid; grid-template-columns: 52rpx 1fr auto; align-items: center; gap: 16rpx; width: 100%; min-height: 104rpx; padding: 16rpx 22rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
 .setting-row:last-child { border-bottom: 0; }
 .setting-icon { display: grid; place-items: center; width: 50rpx; height: 50rpx; border-radius: 15rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 27rpx; }
-.setting-title { display: block; color: var(--text); font-size: 26rpx; font-weight: 650; }
+.setting-title { display: block; color: var(--text); font-size: 26rpx; font-weight: 600; }
 .setting-copy { display: block; overflow: hidden; max-width: 390rpx; margin-top: 5rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
 .setting-value { color: var(--muted); font-size: 21rpx; }
-.setting-arrow { color: var(--muted); font-size: 42rpx; }
+.setting-arrow { display: grid; place-items: center; width: 34rpx; height: 48rpx; color: var(--muted); }
 .signout { margin-top: 34rpx; color: var(--danger); }
 .version { display: block; margin-top: 24rpx; color: var(--muted); text-align: center; font-size: 20rpx; }
 </style>

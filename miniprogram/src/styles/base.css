@@ -18,8 +18,10 @@ page {
   --safe-bottom: env(safe-area-inset-bottom);
   color: var(--text);
   background: var(--bg);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   font-size: 28rpx;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 view,
@@ -36,7 +38,9 @@ button {
   padding: 0;
   color: inherit;
   font: inherit;
-  line-height: inherit;
+  line-height: 1.25;
+  text-align: center;
+  vertical-align: middle;
   background: transparent;
   border: 0;
 }
@@ -46,9 +50,16 @@ uni-button {
   padding: 0;
   color: inherit;
   font: inherit;
-  line-height: inherit;
+  line-height: 1.25;
+  text-align: center;
+  vertical-align: middle;
   background: transparent;
   border: 0;
+}
+
+button.pressable,
+uni-button.pressable {
+  line-height: 1.25;
 }
 
 button::after {
@@ -104,11 +115,15 @@ uni-button::after {
 .section-title {
   color: var(--text);
   font-size: 29rpx;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .section-action {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52rpx;
+  padding: 0 4rpx;
   color: var(--primary-strong);
   background: transparent;
   font-size: 24rpx;
@@ -130,13 +145,19 @@ uni-button::after {
 }
 
 .segment-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
   min-height: 70rpx;
+  margin: 0;
   padding: 0 16rpx;
   border-radius: 17rpx;
   color: var(--muted);
   background: transparent;
   font-size: 25rpx;
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .segment-button.active {
@@ -172,7 +193,8 @@ uni-button::after {
   padding: 18rpx 24rpx;
   border-radius: 22rpx;
   font-size: 29rpx;
-  font-weight: 650;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .primary-button {
@@ -216,6 +238,7 @@ uni-button::after {
 .status-chip {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 42rpx;
   padding: 0 14rpx;
   border-radius: 999rpx;
@@ -260,7 +283,7 @@ uni-button::after {
 .empty-title {
   color: var(--text);
   font-size: 28rpx;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .empty-copy {
@@ -302,23 +325,6 @@ uni-button::after {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@media (prefers-color-scheme: light) {
-  :root,
-  page {
-    --bg: #f3f7f6;
-    --surface: #ffffff;
-    --surface-2: #e7f0ee;
-    --top: #0d4c54;
-    --primary: #169d8d;
-    --primary-strong: #087d70;
-    --primary-soft: rgba(8, 125, 112, 0.11);
-    --text: #102629;
-    --muted: #5f7477;
-    --line: #c7d6d4;
-  }
-  .segment { background: #dfe9e7; }
 }
 
 @media (prefers-reduced-motion: reduce) {

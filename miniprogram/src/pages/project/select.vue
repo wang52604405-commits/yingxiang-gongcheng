@@ -54,7 +54,7 @@ onLoad(load)
 .project-card.active { border-color: var(--primary); background: var(--primary-soft); }
 .project-symbol { display: grid; place-items: center; width: 78rpx; height: 78rpx; border-radius: 23rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 31rpx; font-weight: 700; }
 .project-copy { min-width: 0; }
-.project-name { display: block; color: var(--text); font-size: 28rpx; font-weight: 650; line-height: 1.45; }
+.project-name { display: block; color: var(--text); font-size: 28rpx; font-weight: 600; line-height: 1.45; }
 .project-meta { display: block; margin-top: 7rpx; color: var(--muted); font-size: 21rpx; }
-.check { color: var(--primary-strong); text-align: center; font-size: 34rpx; }
+.check { display: grid; place-items: center; width: 40rpx; height: 48rpx; color: var(--primary-strong); text-align: center; font-size: 34rpx; line-height: 1; }
 </style>

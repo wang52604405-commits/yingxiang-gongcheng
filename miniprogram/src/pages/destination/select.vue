@@ -106,15 +106,15 @@ onLoad((query) => {
 .node-card { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 20rpx 22rpx; text-align: left; }
 .node-card.active { border-color: var(--primary); background: var(--primary-soft); }
 .node-copy { min-width: 0; }
-.node-name { display: block; color: var(--text); font-size: 27rpx; font-weight: 650; }
+.node-name { display: block; color: var(--text); font-size: 27rpx; font-weight: 600; }
 .node-path { display: block; overflow: hidden; margin-top: 7rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
 .node-code { display: block; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; }
-.node-arrow { flex: 0 0 auto; margin-left: 16rpx; color: var(--primary-strong); font-size: 35rpx; }
+.node-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 40rpx; height: 48rpx; margin-left: 16rpx; color: var(--primary-strong); font-size: 35rpx; line-height: 1; text-align: center; }
 .process-sheet { position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; padding: 12rpx 28rpx calc(26rpx + env(safe-area-inset-bottom)); border-radius: 34rpx 34rpx 0 0; background: var(--surface); box-shadow: 0 -18rpx 60rpx rgba(0, 0, 0, 0.35); transform: translateY(0); transition: transform 220ms var(--ease-out), opacity 180ms var(--ease-out); }
 .sheet-handle { width: 74rpx; height: 8rpx; margin: 0 auto 20rpx; border-radius: 999rpx; background: var(--line); }
 .process-title { display: block; color: var(--text); font-size: 29rpx; font-weight: 700; }
 .process-copy { display: block; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; }
 .process-scroll { width: 100%; margin-top: 18rpx; white-space: nowrap; }
 .process-row { display: flex; gap: 12rpx; padding-right: 28rpx; }
-.process-chip { flex: 0 0 auto; min-height: 66rpx; padding: 0 22rpx; border: 1rpx solid var(--line); border-radius: 19rpx; color: var(--text); background: var(--surface-2); font-size: 23rpx; }
+.process-chip { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 66rpx; padding: 0 22rpx; border: 1rpx solid var(--line); border-radius: 19rpx; color: var(--text); background: var(--surface-2); font-size: 23rpx; line-height: 1.25; text-align: center; }
 </style>

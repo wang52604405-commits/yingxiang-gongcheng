@@ -20,12 +20,16 @@
   align-items: center;
   justify-content: center;
   gap: 4rpx;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   overflow: visible;
   margin: 0;
   padding: 0;
   color: #82979a;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   line-height: 1;
+  text-align: center;
   background: transparent;
   border: 0;
   transform: scale(1);
@@ -52,20 +56,12 @@
 .icon-user .part-a { left: 35%; top: 8%; width: 30%; height: 30%; border: 3rpx solid currentColor; border-radius: 50%; }
 .icon-user .part-b { left: 16%; bottom: 8%; width: 68%; height: 43%; border: 3rpx solid currentColor; border-radius: 50% 50% 18% 18%; }
 .icon-user .part-c { display: none; }
-.tab-label { font-size: 21rpx; font-weight: 550; }
-.tab-button.primary { justify-content: flex-start; transform-origin: center bottom; }
-.tab-button.primary .icon-wrap { width: 86rpx; height: 86rpx; margin-top: -36rpx; border: 8rpx solid #122024; border-radius: 28rpx; color: #041a1a; background: #42d7c2; box-shadow: 0 14rpx 28rpx rgba(45, 185, 170, 0.28); box-sizing: border-box; }
+.tab-label { display: block; width: 100%; font-size: 22rpx; font-weight: 500; line-height: 1.2; text-align: center; }
+.tab-button.primary { justify-content: center; height: calc(100% + 36rpx); margin-top: -36rpx; transform-origin: center bottom; }
+.tab-button.primary .icon-wrap { position: absolute; top: 0; left: 50%; width: 86rpx; height: 86rpx; border: 8rpx solid #122024; border-radius: 28rpx; color: #041a1a; background: #42d7c2; box-shadow: 0 14rpx 28rpx rgba(45, 185, 170, 0.28); box-sizing: border-box; transform: translateX(-50%); }
 .tab-button.primary .line-icon { width: 42rpx; height: 42rpx; }
-.tab-button.primary .tab-label { margin-top: -2rpx; color: #42d7c2; }
+.tab-button.primary .tab-label { position: absolute; top: 102rpx; left: 0; right: 0; margin: 0; color: #42d7c2; }
 .badge { position: absolute; top: -6rpx; right: -9rpx; display: grid; place-items: center; min-width: 30rpx; height: 30rpx; padding: 0 7rpx; border: 3rpx solid #122024; border-radius: 999rpx; box-sizing: border-box; color: #241700; background: #f1b34b; font-size: 18rpx; font-weight: 700; }
-@media (prefers-color-scheme: light) {
-  .tabbar { border-color: #c7d6d4; background: #ffffff; }
-  .tab-button { color: #5f7477; }
-  .tab-button.active { color: #087d70; }
-  .tab-button.primary .icon-wrap { border-color: #ffffff; background: #087d70; }
-  .tab-button.primary .tab-label { color: #087d70; }
-  .badge { border-color: #ffffff; }
-}
 @media (prefers-reduced-motion: reduce) {
   .tab-button { transition: opacity 1ms linear; }
   .tab-button.pressed { transform: none; opacity: 0.78; }

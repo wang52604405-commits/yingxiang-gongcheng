@@ -87,22 +87,22 @@ onShow(() => {
 .network-card.offline { border-color: rgba(241, 179, 75, 0.45); }
 .network-symbol { width: 17rpx; height: 17rpx; margin: 8rpx 0 0 5rpx; border: 3rpx solid rgba(45, 185, 170, 0.24); border-radius: 50%; background: var(--success); }
 .network-card.offline .network-symbol { background: var(--warning); border-color: rgba(241, 179, 75, 0.24); }
-.network-title { display: block; color: var(--text); font-size: 25rpx; font-weight: 650; }
+.network-title { display: block; color: var(--text); font-size: 25rpx; font-weight: 600; }
 .network-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; line-height: 1.5; }
 .retry-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; padding: 16rpx 20rpx; border-radius: 18rpx; color: var(--danger); background: rgba(255, 107, 102, 0.1); font-size: 23rpx; }
-.retry-bar button { min-height: 52rpx; padding: 0 17rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 22rpx; }
+.retry-bar button { display: inline-flex; align-items: center; justify-content: center; min-height: 52rpx; padding: 0 17rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 22rpx; line-height: 1.25; text-align: center; }
 .queue-list { display: grid; gap: 16rpx; margin-top: 24rpx; }
 .queue-card { display: grid; grid-template-columns: 112rpx 1fr auto; align-items: center; gap: 18rpx; padding: 14rpx; }
 .queue-thumb { width: 112rpx; height: 94rpx; border-radius: 18rpx; background: var(--surface-2); }
 .preview-waiting { display: grid; place-items: center; color: var(--muted); font-size: 20rpx; }
 .queue-copy { min-width: 0; }
-.queue-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.queue-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .queue-meta { display: block; overflow: hidden; margin-top: 7rpx; color: var(--muted); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
-.queue-storage { display: block; overflow: hidden; margin-top: 5rpx; color: var(--primary-strong); font-size: 19rpx; text-overflow: ellipsis; white-space: nowrap; }
+.queue-storage { display: block; overflow: hidden; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; text-overflow: ellipsis; white-space: nowrap; }
 .progress-track { height: 7rpx; margin-top: 14rpx; overflow: hidden; border-radius: 999rpx; background: var(--surface-2); }
 .progress-fill { width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: var(--primary-strong); transition: transform 160ms var(--ease-out); }
-.error-copy { display: block; margin-top: 7rpx; color: var(--danger); font-size: 19rpx; }
+.error-copy { display: block; margin-top: 7rpx; color: var(--danger); font-size: 20rpx; }
 .queue-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 10rpx; }
-.mini-action { min-height: 48rpx; padding: 0 16rpx; border-radius: 14rpx; color: #fff; background: var(--danger); font-size: 21rpx; }
+.mini-action { display: inline-flex; align-items: center; justify-content: center; min-height: 48rpx; padding: 0 16rpx; border-radius: 14rpx; color: #fff; background: var(--danger); font-size: 21rpx; line-height: 1.25; text-align: center; }
 .mini-action.confirm { color: #041a1a; background: var(--primary-strong); }
 </style>
