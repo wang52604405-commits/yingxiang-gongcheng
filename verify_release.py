@@ -3,7 +3,8 @@
 
 版本一致性覆盖：desktop / cloud / legacy_installer / inno 四文件，
 以及前端 assets 指纹（index.html 引用的 app-A{版本}.js/.css）。
-若服务器 version.json 可达，还对比线上发布版本，三方不一致直接拒绝。
+若服务器 version.json 可达，会阻止把较旧版本覆盖到较新服务器；服务器
+版本落后于本地是正常发布场景，记录后继续执行。
 """
 
 from __future__ import annotations
@@ -69,6 +70,14 @@ def read_remote_version() -> str:
         return ""
 
 
+def version_key(value: str) -> tuple[int, int, int]:
+    """将 AYYYYMMDD-主版本.次版本转换为可比较的版本序列。"""
+    match = re.fullmatch(r"A(\d{8})-(\d+)\.(\d+)", value)
+    if not match:
+        raise ValueError(f"无效版本号: {value}")
+    return tuple(int(part) for part in match.groups())
+
+
 def main() -> int:
     versions = {
         "desktop": read_version(ROOT / "desktop_launcher.py", "APP_VERSION"),
@@ -85,10 +94,16 @@ def main() -> int:
         raise SystemExit(f"前端资产指纹({fingerprint})与代码版本({next(iter(versions.values()))})不一致")
     verify_assets_present(fingerprint)
 
-    # 线上服务器版本对比（在线可达才强校验；不可达降级为提示）
+    # 线上服务器版本对比：禁止回退，允许正常的“本地新版覆盖线上旧版”。
     remote = read_remote_version()
-    if remote and remote != versions["desktop"]:
-        raise SystemExit(f"服务器线上版本({remote})与本地({versions['desktop']})不一致，禁止发布")
+    if remote:
+        try:
+            if version_key(remote) > version_key(versions["desktop"]):
+                raise SystemExit(
+                    f"服务器线上版本({remote})高于本地({versions['desktop']})，禁止回退发布"
+                )
+        except ValueError:
+            raise SystemExit(f"服务器线上版本格式异常: {remote}")
 
     sign_key = Path(os.environ.get("ALBUM_SIGN_KEY", "")).expanduser()
     ssh_key = Path(os.environ.get("ALBUM_SSH_KEY", "")).expanduser()
@@ -107,7 +122,10 @@ def main() -> int:
 
     print(f"发布契约通过: {versions['desktop']}（前端指纹 {fingerprint}）")
     if remote:
-        print(f"服务器线上确认: {remote}")
+        if remote == versions["desktop"]:
+            print(f"服务器线上确认: {remote}")
+        else:
+            print(f"服务器将从 {remote} 升级至 {versions['desktop']}")
     else:
         print("服务器线上不可达，校验降级跳过（本地五项一致）")
     return 0
