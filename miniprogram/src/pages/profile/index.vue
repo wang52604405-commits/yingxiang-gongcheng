@@ -25,7 +25,7 @@ function showPrivacy() {
 }
 
 function confirmSignOut() {
-  uni.showModal({ title: '重新连接微信账号？', content: '将清除本地登录状态并立即用当前微信重新连接。未中转原图仍保留在原账号独立队列中，不会混入其它账号。', success: ({ confirm }) => { if (confirm) signOut() } })
+  uni.showModal({ title: '重新登录桌面端账号？', content: '将清除本地登录状态并立即用当前微信重新连接。未中转原图仍保留在原账号独立队列中，不会混入其它账号。', success: ({ confirm }) => { if (confirm) signOut() } })
 }
 
 onShow(() => {
@@ -39,11 +39,11 @@ onShow(() => {
   <view class="page-shell">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">我的</text>
-    <text class="page-subtitle">账号、服务器和本机影像。</text>
+    <text class="page-subtitle">桌面端账号、云端项目和本机影像。</text>
 
     <view class="identity-card">
       <view class="avatar">{{ initial }}</view>
-      <view><text class="identity-name">{{ displayName }}</text><text class="identity-role">{{ sessionState.account?.role || '资料员' }} · 已登录</text></view>
+      <view><text class="identity-name">{{ displayName }}</text><text class="identity-role">桌面端账号：{{ sessionState.account?.username }} · 微信已绑定</text></view>
     </view>
 
     <view class="settings card">
@@ -61,8 +61,8 @@ onShow(() => {
       </view>
     </view>
 
-    <button class="secondary-button pressable signout" @tap="confirmSignOut">重新连接微信账号</button>
-    <text class="version">工程影像小程序 V0.1 · API v1</text>
+    <button class="secondary-button pressable signout" @tap="confirmSignOut">重新登录桌面端账号</button>
+    <text class="version">工程影像小程序 V1.2 · 统一采集入口</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->

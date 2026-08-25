@@ -91,19 +91,39 @@ def _sync_asset_fingerprint(new_ver: str) -> None:
     并把 index.html 引用改到新指纹，避免旧指纹被浏览器长期缓存而加载旧代码。
     """
     keep = f"app-{new_ver}"
-    # 1) 把当前可用的源码 .js/.css 重命名到 new_ver（若已是即跳过）
+    planned: list[tuple[Path, Path]] = []
+    # 1) 两种源码都成功准备好之后才允许清理旧指纹。找不到或出现多个候选时
+    # 直接中止，避免版本脚本把唯一可用的前端资源删掉。
     for ext in (".js", ".css"):
-        src = next((f for f in ASSETS.glob(f"app-A*.{ext}") if ASSET_RE.search(f.name)), None)
-        if src and ASSET_RE.search(src.name).group(1) != new_ver:
-            src.rename(ASSETS / f"{keep}{ext}")
         body = ASSETS / f"{keep}{ext}"
-        if body.is_file():
-            gz = ASSETS / f"{body.name}.gz"
-            if not gz.exists():
-                import gzip as _gz
-                with _gz.open(gz, "wb", compresslevel=6) as g:
-                    g.write(body.read_bytes())
-    # 2) 删除所有其它旧指纹文件（.js/.css/.gz），只保留 current
+        source = body
+        if not source.is_file():
+            candidates = sorted(
+                f for f in ASSETS.glob(f"app-A*{ext}")
+                if ASSET_RE.search(f.name)
+            )
+            if len(candidates) != 1:
+                names = ", ".join(f.name for f in candidates) or "无"
+                raise SystemExit(f"{ext} 前端资源候选必须恰好为 1 个，当前：{names}")
+            source = candidates[0]
+        if source.stat().st_size == 0:
+            raise SystemExit(f"前端资源为空：{source}")
+        planned.append((source, body))
+
+    prepared: list[Path] = []
+    for source, body in planned:
+        if source != body:
+            source.rename(body)
+        prepared.append(body)
+
+    # 每次都重建 gzip，不能沿用与新源码不一致的旧压缩包。
+    import gzip as _gz
+    for body in prepared:
+        gz = ASSETS / f"{body.name}.gz"
+        with _gz.open(gz, "wb", compresslevel=6) as g:
+            g.write(body.read_bytes())
+
+    # 2) 两种新资源均准备成功后，删除其它旧指纹文件，只保留 current。
     for f in (
         list(ASSETS.glob("app-A*.js"))
         + list(ASSETS.glob("app-A*.js.gz"))

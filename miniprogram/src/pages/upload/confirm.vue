@@ -84,7 +84,7 @@ onShow(applyManualSelection)
     <PageHeader title="确认自动匹配" :subtitle="photos.length ? `${photos.length} 张照片` : '读取上传批次'" />
 
     <view v-if="processing" class="notice processing-note"><text class="notice-dot" /><view><text class="notice-title">正在上传并识别</text><text>请保持小程序在前台。退出微信后不会继续后台上传，重新进入可续传。</text></view></view>
-    <view v-else-if="photos.some(photo => photo.status === 'needs_review')" class="notice"><text class="notice-dot" /><view><text class="notice-title">识别结果已返回</text><text>高置信结果也请在提交前看一眼，避免归错单元。</text></view></view>
+    <view v-else-if="photos.some(photo => photo.status === 'needs_review')" class="notice"><text class="notice-dot" /><view><text class="notice-title">识别结果已返回</text><text>高置信结果也请在提交前看一眼，避免归错工程部位。</text></view></view>
 
     <view v-if="photos.length" class="review-list">
       <view v-for="photo in photos" :key="photo.photo_uuid" class="review-card card">

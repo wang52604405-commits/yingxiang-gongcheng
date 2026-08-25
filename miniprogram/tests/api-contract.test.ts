@@ -14,7 +14,13 @@ describe('移动端 API v1 契约', () => {
       category: 'construction',
       mode: 'direct',
       assignment: { unit_code: 'YNLQ-DY-001', process_name: '钢筋安装' },
+      requirement: {
+        template_code: 'FJ-JG-001',
+        photo_requirement_name: '钢筋安装隐蔽验收',
+        required_type: 'required',
+      },
     })
+    expect(payload.requirement).toMatchObject({ template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' })
     expect(batchIdempotencyKey(payload)).toBe('batch:11111111-1111-4111-8111-111111111111')
     const metadata = {
       photo_uuid: '22222222-2222-4222-8222-222222222222',
@@ -86,6 +92,7 @@ describe('移动端 API v1 契约', () => {
     expect(node.processes).toEqual(['钢筋安装'])
     expect(node.children).toEqual([])
     expect(normalizeCloudPhoto({ photo_uuid: 'p', title: '现场', photo_date: '2026-08-25', scope: 'engineering', category: 'construction', status: 'desktop_pending', assignment: { unit_code: 'YNLQ-DY-001' }, download_url: 'https://example.test/signed' }).image_url).toBe('https://example.test/signed')
+    expect(normalizeCloudPhoto({ photo_uuid: 'p2', scope: 'engineering', status: 'desktop_pending', requirement: { template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' } }).requirement).toEqual({ template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' })
   })
 
   it('登录响应内嵌 bootstrap 与独立 bootstrap 使用同一转换规则', () => {

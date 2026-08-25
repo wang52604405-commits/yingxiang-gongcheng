@@ -190,6 +190,12 @@ class FakeCloud:
     def desktop_sync_identity(self):
         return self.identity
 
+    def desktop_sync_account_id(self):
+        return self.identity
+
+    def desktop_sync_generation(self):
+        return f"generation:{self.identity}"
+
     def desktop_project_snapshot(self, snapshot):
         self.snapshot_calls += 1
         if self.snapshot_calls <= self.fail_snapshots:
@@ -252,6 +258,8 @@ class DesktopMobileSyncTest(unittest.TestCase):
             "id": "default",
             "project_name": mobile_sync.TARGET_PROJECT_DISPLAY_NAME,
             "project_code": "YNLQ",
+            "cloud_owner_id": "fake-account",
+            "cloud_owner_username": "test-user",
         }
 
     def tearDown(self):
@@ -483,6 +491,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
                 "error": "服务器已提交，但 ACK 响应丢失",
             }],
         )
+        self.project["cloud_owner_id"] = "account-A"
         service = self.service(cloud)
         service._ensure_account_identity()
 
@@ -506,7 +515,8 @@ class DesktopMobileSyncTest(unittest.TestCase):
         service._write_state(account_b_state)
         before_b = len(cloud.acks)
         b_result = service._sync_inbox()
-        self.assertTrue(b_result["ok"])
+        self.assertFalse(b_result["ok"])
+        self.assertEqual(b_result["code"], "project_owner_mismatch")
         self.assertEqual(len(cloud.acks), before_b, "B 账号绝不能发送 A 的 pending ACK")
 
         # 切回 A：即使 inbox 已不再返回 desktop_imported 项，本地分区仍
@@ -942,6 +952,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
             self.assertEqual(restored["desktop_sync_token"], "machine-bound-sync-token")
 
         account = {
+            "account_id": "account-123",
             "username": "desktop-user",
             "server": "https://api.shuiliyingxiang.cn",
             "token": "ordinary-account-token",
@@ -969,7 +980,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
             return JsonResponse(request, requests)
 
         with patch.object(cloud_client, "_read_cloud_account", return_value=account), patch.object(
-            cloud_client.urllib.request, "urlopen", side_effect=urlopen
+            cloud_client, "_open_no_redirect", side_effect=urlopen
         ):
             self.assertTrue(cloud_client.desktop_project_snapshot({"snapshot_id": "test"})["ok"])
             self.assertTrue(cloud_client.fetch_preview_projects()["ok"])
@@ -1037,7 +1048,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
             cloud_client,
             "_post_json",
             side_effect=[
-                {"ok": True, "token": "login-token"},
+                {"ok": True, "token": "login-token", "account": {"id": "account-123", "username": "desktop-user"}},
                 {"ok": True, "desktop_sync_token": "login-machine-token", "is_member": False},
             ],
         ) as login_post, patch.object(

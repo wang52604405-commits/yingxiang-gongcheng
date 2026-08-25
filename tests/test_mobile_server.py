@@ -166,6 +166,7 @@ class MobileServerContractTest(unittest.TestCase):
         project_id="default",
         desktop_machine_id="MACHINE-A",
         revision=7,
+        requirements=None,
     ):
         # 大多数测试传账号登录令牌以表示租户；新桌面契约
         # 实际上传必须换成与请求机器一致的 desktop_sync_token。
@@ -221,6 +222,14 @@ class MobileServerContractTest(unittest.TestCase):
                 }
             ],
         }
+        if requirements is not None:
+            payload["requirements"] = requirements
+            payload["requirement_summary"] = {
+                "total": len(requirements),
+                "required": sum(1 for item in requirements if item.get("required_type") == "required"),
+                "conditional": sum(1 for item in requirements if item.get("required_type") == "conditional"),
+                "recommended": sum(1 for item in requirements if item.get("required_type") == "recommended"),
+            }
         response = cls.client.post(
             "/api/desktop/v1/project-snapshot",
             json=payload,
@@ -580,6 +589,238 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertIn("token", second.get_json())
         self.assertNotIn("binding_ticket", second.get_json())
+
+    def test_single_wechat_binding_unbinds_and_revokes_old_mobile_token(self):
+        from server import app as server_app
+
+        server_app._rate_hits.clear()
+        username = "link_guard_user"
+        password = "LinkGuard2026"
+        self._register(username, password)
+        desktop_account_token = self._login(username, password)
+        desktop_sync_token = self._activate(desktop_account_token, "MACHINE-LINK")
+
+        first_login = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": "link-first-wechat", "app_id": "wx-link-a"},
+        )
+        self.assertEqual(first_login.status_code, 200, first_login.get_json())
+        first_bind = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind",
+            json={
+                "binding_ticket": first_login.get_json()["binding_ticket"],
+                "username": username,
+                "password": password,
+            },
+        )
+        self.assertEqual(first_bind.status_code, 200, first_bind.get_json())
+        mobile_token = first_bind.get_json()["token"]
+        self.assertEqual(
+            self.client.get(
+                "/api/mobile/v1/bootstrap", headers=self._headers(mobile_token)
+            ).status_code,
+            200,
+        )
+
+        second_login = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": "link-second-wechat", "app_id": "wx-link-b"},
+        )
+        second_bind = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind",
+            json={
+                "binding_ticket": second_login.get_json()["binding_ticket"],
+                "username": username,
+                "password": password,
+            },
+        )
+        self.assertEqual(second_bind.status_code, 409, second_bind.get_json())
+        self.assertEqual(second_bind.get_json()["code"], "account_already_bound")
+
+        binding = self.client.get(
+            "/api/desktop/v1/wechat-binding?desktop_machine_id=MACHINE-LINK",
+            headers=self._headers(desktop_sync_token),
+        )
+        self.assertTrue(binding.get_json()["bound"])
+        wrong_password = self.client.delete(
+            "/api/desktop/v1/wechat-binding",
+            json={"desktop_machine_id": "MACHINE-LINK", "password": "wrong-password"},
+            headers=self._headers(desktop_sync_token),
+        )
+        self.assertEqual(wrong_password.status_code, 401)
+        unbound = self.client.delete(
+            "/api/desktop/v1/wechat-binding",
+            json={"desktop_machine_id": "MACHINE-LINK", "password": password},
+            headers=self._headers(desktop_sync_token),
+        )
+        self.assertEqual(unbound.status_code, 200, unbound.get_json())
+        self.assertIn("立即失效", unbound.get_json()["message"])
+        self.assertEqual(
+            self.client.get(
+                "/api/mobile/v1/bootstrap", headers=self._headers(mobile_token)
+            ).status_code,
+            401,
+        )
+        login_after_unbind = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": "link-first-wechat", "app_id": "wx-link-a"},
+        )
+        self.assertTrue(login_after_unbind.get_json()["binding_required"])
+
+    def test_professional_requirement_survives_upload_and_gallery_paginates_other_tree(self):
+        from server import app as server_app
+
+        server_app._rate_hits.clear()
+        username = "rule_capture_user"
+        password = "RuleCapture2026"
+        machine_id = "MACHINE-RULE"
+        self._register(username, password)
+        desktop_account_token = self._login(username, password)
+        desktop_sync_token = self._activate(desktop_account_token, machine_id)
+        requirement = {
+            "template_code": "FJ-JG-001",
+            "industry": "房建工程",
+            "project_type": "住宅工程",
+            "phase": "主体结构",
+            "division": "混凝土结构",
+            "item": "钢筋安装",
+            "process": "隐蔽验收",
+            "photo_requirement_name": "钢筋安装隐蔽验收",
+            "required_type": "required",
+            "min_photo_count": 2,
+            "recommended_photo_count": 3,
+            "shot_types": "全景、节点近景",
+            "timing": "隐蔽前",
+            "before_concealment_required": "是",
+            "exif_required": "是",
+        }
+        self._snapshot(
+            desktop_sync_token,
+            "专业采集工程",
+            desktop_machine_id=machine_id,
+            revision=20,
+            requirements=[requirement],
+        )
+
+        login = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": "rule-capture-wechat", "app_id": "wx-rule"},
+        )
+        bound = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind",
+            json={
+                "binding_ticket": login.get_json()["binding_ticket"],
+                "username": username,
+                "password": password,
+            },
+        )
+        self.assertEqual(bound.status_code, 200, bound.get_json())
+        mobile_token = bound.get_json()["token"]
+
+        rules = self.client.get(
+            "/api/mobile/v1/projects/default/requirements",
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(rules.status_code, 200, rules.get_json())
+        self.assertEqual(rules.get_json()["summary"]["required"], 1)
+        self.assertEqual(rules.get_json()["requirements"][0]["template_code"], "FJ-JG-001")
+
+        self._snapshot(
+            desktop_sync_token,
+            "专业采集工程",
+            desktop_machine_id=machine_id,
+            revision=21,
+        )
+        preserved = self.client.get(
+            "/api/mobile/v1/projects/default/requirements",
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(len(preserved.get_json()["requirements"]), 1)
+
+        batch_response = self.client.post(
+            "/api/mobile/v1/batches",
+            json={
+                "client_batch_id": str(uuid.uuid4()),
+                "project_id": "default",
+                "scope": "engineering",
+                "category": "construction",
+                "mode": "direct",
+                "assignment": {"unit_code": "YNLQ-001-01-001", "process_name": ""},
+                "requirement": {
+                    "template_code": "FJ-JG-001",
+                    "photo_requirement_name": "客户端不得覆盖服务端名称",
+                },
+            },
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(batch_response.status_code, 201, batch_response.get_json())
+        batch_id = batch_response.get_json()["batch"]["batch_id"]
+        self.assertEqual(
+            batch_response.get_json()["batch"]["requirement"]["photo_requirement_name"],
+            "钢筋安装隐蔽验收",
+        )
+        engineering_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            mobile_token, batch_id, engineering_uuid, self._jpeg(), filename="rule.jpg"
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/commit",
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{engineering_uuid}",
+            headers=self._headers(mobile_token),
+        ).get_json()["photo"]
+        self.assertEqual(detail["requirement"]["template_code"], "FJ-JG-001")
+
+        for index in range(3):
+            batch_id_other = self._create_batch(mobile_token, scope="other")
+            photo_uuid = str(uuid.uuid4())
+            uploaded_other = self._upload(
+                mobile_token,
+                batch_id_other,
+                photo_uuid,
+                self._jpeg(color=(30 + index, 90, 130)),
+                filename=f"other-{index}.jpg",
+            )
+            self.assertEqual(uploaded_other.status_code, 201, uploaded_other.get_json())
+            committed_other = self.client.post(
+                f"/api/mobile/v1/batches/{batch_id_other}/commit",
+                headers=self._headers(mobile_token),
+            )
+            self.assertEqual(committed_other.status_code, 200, committed_other.get_json())
+
+        first_page = self.client.get(
+            "/api/mobile/v1/photos?project_id=default&scope=other&"
+            "other_node_code=OTHER-SITE&limit=2",
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(first_page.status_code, 200, first_page.get_json())
+        self.assertEqual(first_page.get_json()["total"], 3)
+        self.assertEqual(len(first_page.get_json()["photos"]), 2)
+        cursor = first_page.get_json()["next_cursor"]
+        self.assertTrue(cursor)
+        second_page = self.client.get(
+            "/api/mobile/v1/photos?project_id=default&scope=other&"
+            f"other_node_code=OTHER-SITE&limit=2&cursor={cursor}",
+            headers=self._headers(mobile_token),
+        )
+        self.assertEqual(len(second_page.get_json()["photos"]), 1)
+        self.assertEqual(second_page.get_json()["next_cursor"], "")
+
+        inbox = self.client.get(
+            f"/api/desktop/v1/inbox?desktop_machine_id={machine_id}&limit=20",
+            headers=self._headers(desktop_sync_token),
+        )
+        self.assertEqual(inbox.status_code, 200, inbox.get_json())
+        engineering_item = next(
+            item for item in inbox.get_json()["items"]
+            if item["photo_uuid"] == engineering_uuid
+        )
+        self.assertEqual(engineering_item["requirement_code"], "FJ-JG-001")
+        self.assertEqual(engineering_item["requirement_name"], "钢筋安装隐蔽验收")
 
     def test_tenant_isolation_for_projects_batches_and_photos(self):
         projects_a = self.client.get(

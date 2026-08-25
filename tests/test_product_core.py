@@ -30,6 +30,35 @@ class DesktopUpdateCommandTest(unittest.TestCase):
         self.assertIn("/CLOSEAPPLICATIONS", command)
 
 
+class VersionAssetSafetyTest(unittest.TestCase):
+    def test_version_bump_never_cleans_assets_before_both_sources_exist(self):
+        import bump_version
+
+        with tempfile.TemporaryDirectory(prefix="album-version-assets-") as temp_dir:
+            assets = Path(temp_dir)
+            old_js = assets / "app-A20260822-2.64.js"
+            old_gz = assets / "app-A20260822-2.64.js.gz"
+            old_js.write_text("console.log('v1')", encoding="utf-8")
+            old_gz.write_bytes(b"old-gzip-sentinel")
+            with patch.object(bump_version, "ASSETS", assets):
+                with self.assertRaisesRegex(SystemExit, "css 前端资源候选"):
+                    bump_version._sync_asset_fingerprint("A20260825-2.65")
+            self.assertTrue(old_js.exists(), "缺少 CSS 时不得提前重命名 JS")
+            self.assertEqual(old_gz.read_bytes(), b"old-gzip-sentinel")
+
+            old_css = assets / "app-A20260822-2.64.css"
+            old_css.write_text("body{color:#123}", encoding="utf-8")
+            with patch.object(bump_version, "ASSETS", assets):
+                bump_version._sync_asset_fingerprint("A20260825-2.65")
+            new_js = assets / "app-A20260825-2.65.js"
+            new_css = assets / "app-A20260825-2.65.css"
+            self.assertTrue(new_js.exists())
+            self.assertTrue(new_css.exists())
+            import gzip
+            self.assertEqual(gzip.decompress((assets / f"{new_js.name}.gz").read_bytes()), new_js.read_bytes())
+            self.assertEqual(gzip.decompress((assets / f"{new_css.name}.gz").read_bytes()), new_css.read_bytes())
+
+
 class ServerProductContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -600,8 +629,75 @@ class DesktopSecurityContractTest(unittest.TestCase):
         )
         self.assertEqual(asset_response.headers.get("Content-Encoding"), "gzip")
         self.assertIn("immutable", asset_response.headers.get("Cache-Control", ""))
+        asset_body = _gzip.decompress(asset_response.data)
+        self.assertEqual(
+            asset_body,
+            (self.desktop.BASE_DIR / "assets" / asset_name).read_bytes(),
+            "预压缩 JS 必须与当前源码完全一致，不能把旧界面缓存一年",
+        )
+        asset_text = asset_body.decode("utf-8")
+        self.assertIn("/api/cloud/project-ownership", asset_text)
+        self.assertIn("/api/cloud/wechat-binding", asset_text)
+        self.assertIn("已阻止串号", asset_text)
         asset_response.close()
         index_response.close()
+
+    def test_z_cloud_project_ownership_is_backed_up_and_cannot_cross_accounts(self):
+        project = self.desktop.default_engineering_project()
+        project.update({
+            "id": "ownership-test",
+            "project_code": "OWN-001",
+            "project_name": "账号归属测试工程",
+            "delete_password_hash": self.desktop.generate_password_hash("OwnSafe2026"),
+            "cloud_owner_id": "",
+            "cloud_owner_username": "",
+            "cloud_owner_claimed_at": "",
+        })
+        self.desktop.write_engineering_projects({
+            "active_id": project["id"],
+            "projects": [project],
+        })
+
+        with patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_id", return_value="account-A"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_sync_account_username",
+            return_value="tenant_a",
+        ):
+            claimed = self.desktop.claim_current_project_cloud_ownership()
+            self.assertEqual(claimed["state"], "matched")
+            backup_dir = Path(claimed["backup_dir"])
+            self.assertTrue((backup_dir / self.desktop.ENGINEERING_PROJECTS_PATH.name).exists())
+            self.assertTrue((backup_dir / self.desktop.PROJECT_INFO_PATH.name).exists())
+
+            with self.client.session_transaction() as session:
+                session["username"] = "tenant_a"
+            saved = self.client.post(
+                "/api/project-info",
+                json={
+                    "id": "ownership-test",
+                    "project_code": "OWN-001",
+                    "project_name": "账号归属测试工程（编辑后）",
+                },
+            )
+            self.assertEqual(saved.status_code, 200, saved.get_json())
+            preserved = self.desktop.current_engineering_project()
+            self.assertEqual(preserved["cloud_owner_id"], "account-A")
+            self.assertEqual(preserved["cloud_owner_username"], "tenant_a")
+
+        with patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_id", return_value="account-B"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_sync_account_username",
+            return_value="tenant_b",
+        ):
+            status = self.desktop.current_project_cloud_ownership()
+            self.assertEqual(status["state"], "mismatch")
+            self.assertFalse(status["sync_allowed"])
+            with self.assertRaisesRegex(ValueError, "不能直接改绑"):
+                self.desktop.claim_current_project_cloud_ownership()
 
 
 if __name__ == "__main__":

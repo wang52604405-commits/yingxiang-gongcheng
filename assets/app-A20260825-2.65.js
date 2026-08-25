@@ -1178,6 +1178,46 @@ const $ = (selector) => document.querySelector(selector);
       if (action === "start") setTimeout(() => refreshPhotoOptimizationStatus().catch(() => {}), 500);
     }
 
+    async function refreshProfessionalProjectTypes(preferredType = "") {
+      const industryInput = $("#projectInfoIndustryInput");
+      const typeInput = $("#projectInfoProjectTypeInput");
+      if (!industryInput || !typeInput) return;
+      try {
+        const data = await apiJson("/api/professional-templates/catalog");
+        const currentIndustry = industryInput.value || "水利工程";
+        const group = (data.industries || []).find((item) => item.name === currentIndustry);
+        const types = group?.project_types || [];
+        typeInput.innerHTML = types.length
+          ? types.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")
+          : `<option value="">通用/沿用项目划分</option>`;
+        const wanted = preferredType || projectInfoValue("project_type");
+        if (wanted && types.includes(wanted)) typeInput.value = wanted;
+        else if (types.length) typeInput.value = types[0];
+        await refreshProfessionalPlanSummary();
+      } catch (error) {
+        const fallback = preferredType || projectInfoValue("project_type") || "通用/沿用项目划分";
+        typeInput.innerHTML = `<option value="${escapeHtml(fallback)}">${escapeHtml(fallback)}</option>`;
+      }
+    }
+
+    async function refreshProfessionalPlanSummary() {
+      const node = $("#professionalPlanSummary");
+      const industry = $("#projectInfoIndustryInput")?.value || "水利工程";
+      const projectType = $("#projectInfoProjectTypeInput")?.value || "";
+      if (!node) return;
+      if (industry === "水利工程") {
+        node.innerHTML = `<strong>水利工程 · 沿用现有项目划分</strong><p class="import-hint">水利模块继续使用你现有的单位工程—分部工程—单元工程体系，不改变既有照片和编码。</p>`;
+        return;
+      }
+      try {
+        const data = await apiJson(`/api/professional-templates/requirements?industry=${encodeURIComponent(industry)}&project_type=${encodeURIComponent(projectType)}`);
+        const summary = data.summary || {};
+        node.innerHTML = `<strong>${escapeHtml(industry)} · ${escapeHtml(projectType || "通用")}</strong><p class="import-hint">模板 ${escapeHtml(summary.template_version || "V1.0")}：共 ${Number(summary.total || 0)} 项；必拍 ${Number(summary.required || 0)} 项，条件必拍 ${Number(summary.conditional || 0)} 项，推荐 ${Number(summary.recommended || 0)} 项。保存后自动同步到云端和小程序。</p>`;
+      } catch (error) {
+        node.innerHTML = `<strong>专业影像采集模板</strong><p class="import-hint">模板暂时无法读取，保存工程不受影响；联网后会自动同步。</p>`;
+      }
+    }
+
     function openProjectInfoModal() {
       const settings = state.engineeringSettings || {};
       const rules = settings.numbering_rules || {};
@@ -1185,6 +1225,9 @@ const $ = (selector) => document.querySelector(selector);
       const supervision = rules.supervision || {};
       $("#projectInfoNameInput").value = projectInfoValue("project_name");
       $("#projectInfoCodeInput").value = projectInfoValue("project_code");
+      $("#projectInfoIndustryInput").value = projectInfoValue("industry") || "水利工程";
+      $("#projectInfoRegionInput").value = projectInfoValue("region");
+      refreshProfessionalProjectTypes(projectInfoValue("project_type")).catch(() => {});
       $("#projectInfoOwnerInput").value = projectInfoValue("owner");
       $("#projectInfoContractorInput").value = projectInfoValue("contractor");
       $("#projectInfoSupervisorInput").value = projectInfoValue("supervisor");
@@ -1279,6 +1322,10 @@ const $ = (selector) => document.querySelector(selector);
       const payload = {
         project_name: $("#projectInfoNameInput").value.trim(),
         project_code: $("#projectInfoCodeInput").value.trim(),
+        industry: $("#projectInfoIndustryInput").value,
+        project_type: $("#projectInfoProjectTypeInput").value,
+        region: $("#projectInfoRegionInput").value.trim(),
+        template_version: "V1.0",
         owner: $("#projectInfoOwnerInput").value.trim(),
         contractor: $("#projectInfoContractorInput").value.trim(),
         supervisor: $("#projectInfoSupervisorInput").value.trim(),
@@ -3689,6 +3736,9 @@ const $ = (selector) => document.querySelector(selector);
       ]);
       renderSupportLicense(licenseData.license || {});
       renderCloudAccount(cloudData || {});
+      if (cloudData && cloudData.logged_in) {
+        await loadWechatBinding().catch((error) => renderWechatBinding({ error: error.message || "读取失败" }, true));
+      }
       // 邀请进度
       try {
         const inv = await apiJson("/api/cloud/invite-status").catch(() => ({}));
@@ -3706,11 +3756,107 @@ const $ = (selector) => document.querySelector(selector);
         box.innerHTML = `<strong style="color:#1a7a3a">${escapeHtml(data.account)}</strong>（${tier}）`;
         form.style.display = "none";
         logoutBtn.style.display = "block";
+        renderProjectOwnership(data.project_ownership || {});
+        renderWechatBinding({}, true);
       } else {
         box.textContent = "未登录";
         form.style.display = "block";
         logoutBtn.style.display = "none";
+        renderProjectOwnership({ state: "logged_out" });
+        renderWechatBinding({}, false);
       }
+    }
+
+    function renderProjectOwnership(ownership) {
+      const target = $("#cloudProjectOwnershipBox");
+      if (!target) return;
+      const stateName = String(ownership && ownership.state || "logged_out");
+      if (stateName === "logged_out") {
+        target.style.display = "none";
+        target.innerHTML = "";
+        return;
+      }
+      const projectName = escapeHtml(ownership.project_name || "当前本地工程");
+      target.style.display = "block";
+      if (stateName === "matched") {
+        target.style.background = "#eaf7ef";
+        target.style.color = "#176a38";
+        target.innerHTML = `<strong>工程账号归属：</strong>${projectName}<br><small>已绑定当前云账号，手机与这台电脑会自动同步。</small>`;
+        return;
+      }
+      if (stateName === "mismatch") {
+        const owner = escapeHtml(ownership.owner_username || "另一账号");
+        target.style.background = "#fff0ee";
+        target.style.color = "#9c2f24";
+        target.innerHTML = `<strong>已阻止串号：</strong>${projectName}<br><small>本地工程属于账号 ${owner}，当前账号不能上传或接收该工程影像。</small>`;
+        return;
+      }
+      target.style.background = "#fff8e6";
+      target.style.color = "#7a5510";
+      target.innerHTML = `<strong>还差最后一步：</strong>${projectName}<br><small>确认后，手机登录同一账号即可自动拉取工程并把原图送回这台电脑。</small><button type="button" id="claimCloudProjectBtn" style="display:block;margin-top:8px;">绑定当前工程到此账号</button>`;
+      $("#claimCloudProjectBtn")?.addEventListener("click", () => claimCloudProjectOwnership(ownership));
+      maybePromptProjectClaim(ownership);
+    }
+
+    function maybePromptProjectClaim(ownership) {
+      if (!ownership || !ownership.can_claim) return;
+      const key = `engineering-image:ownership-prompt:${ownership.account_id || "account"}:${ownership.project_id || "project"}`;
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+      setTimeout(() => {
+        if (window.confirm(`是否把本机工程“${ownership.project_name || "当前工程"}”绑定到刚登录的云账号？\n\n绑定后，手机登录同一账号即可自动拉取工程；为防串号，绑定后不能静默改给其它账号。`)) {
+          claimCloudProjectOwnership(ownership).catch((error) => showNotice(error.message || "绑定失败", true));
+        }
+      }, 80);
+    }
+
+    async function claimCloudProjectOwnership(ownership) {
+      const button = $("#claimCloudProjectBtn");
+      if (button) button.disabled = true;
+      try {
+        const data = await apiJson("/api/cloud/project-ownership", { method: "POST" });
+        if (!data.ok) throw new Error(data.error || "绑定失败");
+        renderProjectOwnership(data.project_ownership || {});
+        showNotice("当前工程已与云账号绑定，正在同步到手机。");
+        apiJson("/api/mobile-sync/run", { method: "POST" }).catch(() => {});
+      } finally {
+        if (button && button.isConnected) button.disabled = false;
+      }
+    }
+
+    function renderWechatBinding(data, loggedIn = true) {
+      const wrapper = $("#wechatBindingBox");
+      const status = $("#wechatBindingStatus");
+      const unbind = $("#wechatUnbindBtn");
+      if (!wrapper || !status || !unbind) return;
+      if (!loggedIn) {
+        wrapper.style.display = "none";
+        status.textContent = "";
+        unbind.style.display = "none";
+        return;
+      }
+      wrapper.style.display = "block";
+      if (data.error) {
+        status.textContent = `检查失败：${data.error}`;
+        unbind.style.display = "none";
+      } else if (data.bound) {
+        const lastLogin = String(data.binding && data.binding.last_login_at || "").slice(0, 16).replace("T", " ");
+        status.textContent = lastLogin ? `已绑定，手机最近登录 ${lastLogin}` : "已绑定当前微信";
+        unbind.style.display = "block";
+      } else if (Object.prototype.hasOwnProperty.call(data, "bound")) {
+        status.textContent = "尚未绑定；手机首次登录时输入这个桌面账号即可";
+        unbind.style.display = "none";
+      } else {
+        status.textContent = "正在检查…";
+        unbind.style.display = "none";
+      }
+    }
+
+    async function loadWechatBinding() {
+      const data = await apiJson("/api/cloud/wechat-binding");
+      if (!data.ok) throw new Error(data.error || "读取微信绑定失败");
+      renderWechatBinding(data, true);
+      return data;
     }
 
     const SOFTWARE_SHARE_URL = "https://wwbro.lanzouu.com/b00l2vsyqj";
@@ -3749,6 +3895,13 @@ const $ = (selector) => document.querySelector(selector);
     $("#cancelProjectInfoBtn").addEventListener("click", closeProjectInfoModal);
     $("#projectInfoForm").addEventListener("submit", (event) => {
       saveProjectInfo(event).catch((error) => showNotice(error.message, true));
+    });
+    $("#projectInfoIndustryInput")?.addEventListener("change", () => refreshProfessionalProjectTypes("").catch(() => {}));
+    $("#projectInfoProjectTypeInput")?.addEventListener("change", () => refreshProfessionalPlanSummary().catch(() => {}));
+    $("#openProfessionalPlanBtn")?.addEventListener("click", () => {
+      const industry = $("#projectInfoIndustryInput")?.value || "水利工程";
+      const projectType = $("#projectInfoProjectTypeInput")?.value || "";
+      window.open(`/professional-plan?industry=${encodeURIComponent(industry)}&project_type=${encodeURIComponent(projectType)}`, "_blank");
     });
     $("#deleteEngineeringProjectBtn").addEventListener("click", () => {
       deleteCurrentEngineeringProject().catch((error) => showNotice(error.message, true));
@@ -3883,6 +4036,28 @@ const $ = (selector) => document.querySelector(selector);
       try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (e) {}
       showNotice("已退出云账号");
       loadSharePoints();
+    });
+    $("#wechatUnbindBtn")?.addEventListener("click", async () => {
+      const password = window.prompt("请输入当前桌面账号的登录密码，确认解绑微信：");
+      if (password === null) return;
+      if (!password) { showNotice("请输入账号密码", true); return; }
+      if (!window.confirm("解绑后，这台手机上的旧登录会立即失效；未上传原图仍保留在原账号独立队列。确定继续吗？")) return;
+      const button = $("#wechatUnbindBtn");
+      if (button) button.disabled = true;
+      try {
+        const data = await apiJson("/api/cloud/wechat-binding", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+        if (!data.ok) throw new Error(data.error || "解绑失败");
+        showNotice(data.message || "微信已解绑，旧手机登录已立即失效");
+        await loadWechatBinding();
+      } catch (error) {
+        showNotice(error.message || "解绑失败", true);
+      } finally {
+        if (button) button.disabled = false;
+      }
     });
     ["gateUsername"].forEach((id) => {
       $(`#${id}`).addEventListener("keydown", (event) => {

@@ -264,6 +264,35 @@ def _project_payload(row) -> dict:
     }
 
 
+def _requirement_payload(row) -> dict:
+    item = dict(row)
+    return {
+        "template_code": item.get("template_code", ""),
+        "industry": item.get("industry", ""),
+        "project_type": item.get("project_type", ""),
+        "phase": item.get("phase", ""),
+        "division": item.get("division", ""),
+        "subdivision": item.get("subdivision", ""),
+        "item": item.get("item", ""),
+        "process": item.get("process", ""),
+        "photo_requirement_name": item.get("requirement_name", ""),
+        "required_type": item.get("required_type", "recommended"),
+        "condition": item.get("condition_text", ""),
+        "min_photo_count": int(item.get("min_photo_count") or 0),
+        "recommended_photo_count": int(item.get("recommended_count") or 0),
+        "shot_types": item.get("shot_types", ""),
+        "timing": item.get("timing", ""),
+        "before_concealment_required": (
+            "是" if int(item.get("before_concealment") or 0) else "否"
+        ),
+        "gps_required": "是" if int(item.get("gps_required") or 0) else "否",
+        "exif_required": "是" if int(item.get("exif_required") or 0) else "否",
+        "description_template": item.get("description_template", ""),
+        "standard_source": item.get("standard_source", ""),
+        "template_version": item.get("template_version", "V1.0"),
+    }
+
+
 def _assignment_from_row(row) -> dict:
     return _json(dict(row).get("assignment_json"), {})
 
@@ -288,6 +317,16 @@ def _photo_payload(row, download_url="") -> dict:
         "unit_code": assignment.get("unit_code", ""),
         "process_name": assignment.get("process_name", ""),
         "other_node_code": assignment.get("other_node_code", ""),
+        "requirement": (
+            {
+                "template_code": item.get("requirement_code", ""),
+                "photo_requirement_name": item.get("requirement_name", ""),
+            }
+            if item.get("requirement_code")
+            else None
+        ),
+        "requirement_code": item.get("requirement_code", ""),
+        "requirement_name": item.get("requirement_name", ""),
         "title": item["title"],
         "photo_date": item["photo_date"],
         "client_captured_at": item["client_captured_at"],
@@ -770,6 +809,30 @@ def register_mobile_api(
             raise ApiProblem("project_not_found", "工程不存在或尚未从电脑同步", 404)
         return row
 
+    def capture_requirement_for(conn, account_id, project_id, raw_requirement):
+        if not isinstance(raw_requirement, dict):
+            return {}
+        template_code = _safe_text(raw_requirement.get("template_code"), 80)
+        if not template_code:
+            return {}
+        row = conn.execute(
+            "SELECT * FROM cloud_project_requirements WHERE account_id = ? "
+            "AND project_id = ? AND template_code = ? AND active = 1",
+            (account_id, project_id, template_code),
+        ).fetchone()
+        if not row:
+            raise ApiProblem(
+                "requirement_not_found",
+                "所选专业采集规则不存在或已更新，请刷新清单后重试",
+                404,
+            )
+        return {
+            "template_code": row["template_code"],
+            "photo_requirement_name": row["requirement_name"],
+            "required_type": row["required_type"],
+            "min_photo_count": int(row["min_photo_count"] or 0),
+        }
+
     def batch_for(conn, account_id, batch_id):
         row = conn.execute(
             "SELECT * FROM mobile_batches WHERE id = ? AND account_id = ?",
@@ -872,6 +935,14 @@ def register_mobile_api(
             "mode": batch["mode"],
             "target_machine_id": batch.get("target_machine_id", ""),
             "assignment": _json(batch["assignment_json"], {}),
+            "requirement": (
+                {
+                    "template_code": batch.get("requirement_code", ""),
+                    "photo_requirement_name": batch.get("requirement_name", ""),
+                }
+                if batch.get("requirement_code")
+                else None
+            ),
             "status": batch["status"],
             "error": {"code": batch["error_code"], "message": batch["error_message"]}
             if batch["error_code"] or batch["error_message"]
@@ -989,6 +1060,8 @@ def register_mobile_api(
                 )
 
             with _photo_upload_lock(current_user["id"], photo_uuid):
+                requirement_code = ""
+                requirement_name = ""
                 # 第一次短连接只做账号/归属/幂等校验；对象存储网络 I/O 期间不持有
                 # SQLite 写事务，登录、回执和队列状态不会被 50MB 上传阻塞。
                 check_conn = db.connect()
@@ -1014,7 +1087,8 @@ def register_mobile_api(
                             check_conn, current_user["id"], target
                         )
                         frozen_batch = check_conn.execute(
-                            "SELECT project_id, target_machine_id, status FROM mobile_batches "
+                            "SELECT project_id, target_machine_id, status, requirement_code, "
+                            "requirement_name FROM mobile_batches "
                             "WHERE id = ? AND account_id = ?",
                             (batch_id, current_user["id"]),
                         ).fetchone()
@@ -1027,8 +1101,10 @@ def register_mobile_api(
                                 "batch_target_conflict",
                                 "上传批次的目标电脑不一致，请重新创建批次",
                                 409,
-                            )
+                        )
                         _require_batch_uploadable(frozen_batch["status"])
+                        requirement_code = str(frozen_batch["requirement_code"] or "")
+                        requirement_name = str(frozen_batch["requirement_name"] or "")
                     normalized_assignment = (
                         _validate_assignment(
                             check_conn,
@@ -1085,7 +1161,8 @@ def register_mobile_api(
 
                     if is_mobile_original:
                         current_batch = conn.execute(
-                            "SELECT project_id, target_machine_id, status FROM mobile_batches "
+                            "SELECT project_id, target_machine_id, status, requirement_code, "
+                            "requirement_name FROM mobile_batches "
                             "WHERE id = ? AND account_id = ?",
                             (batch_id, current_user["id"]),
                         ).fetchone()
@@ -1103,6 +1180,8 @@ def register_mobile_api(
                         _require_active_machine(
                             conn, current_user["id"], target
                         )
+                        requirement_code = str(current_batch["requirement_code"] or "")
+                        requirement_name = str(current_batch["requirement_name"] or "")
 
                     timestamp = now()
                     status = (
@@ -1117,6 +1196,8 @@ def register_mobile_api(
                         "scope": scope,
                         "category": category,
                         "assignment_json": _dumps(normalized_assignment),
+                        "requirement_code": requirement_code,
+                        "requirement_name": requirement_name,
                         "title": _safe_text(title, 200),
                         "photo_date": _photo_date(photo_date),
                         "client_captured_at": _safe_text(client_captured_at, 40),
@@ -1149,7 +1230,8 @@ def register_mobile_api(
                     }
                     cur = conn.execute(
                         "INSERT INTO cloud_photos (account_id, batch_id, photo_uuid, project_id, "
-                        "source, scope, category, assignment_json, title, photo_date, "
+                        "source, scope, category, assignment_json, requirement_code, "
+                        "requirement_name, title, photo_date, "
                         "client_captured_at, orientation, width, height, original_filename, "
                         "sha256, size_bytes, mime_type, storage_key, original_sha256, "
                         "original_size_bytes, original_mime_type, original_storage_key, "
@@ -1157,8 +1239,9 @@ def register_mobile_api(
                         "preview_quality, preview_storage_key, target_machine_id, "
                         "original_cleanup_status, status, created_at, updated_at, "
                         "desktop_imported_at) VALUES (:account_id, :batch_id, :photo_uuid, "
-                        ":project_id, :source, :scope, :category, :assignment_json, :title, "
-                        ":photo_date, :client_captured_at, :orientation, :width, :height, "
+                        ":project_id, :source, :scope, :category, :assignment_json, "
+                        ":requirement_code, :requirement_name, :title, :photo_date, "
+                        ":client_captured_at, :orientation, :width, :height, "
                         ":original_filename, :sha256, :size_bytes, 'image/jpeg', :storage_key, "
                         ":original_sha256, :original_size_bytes, :original_mime_type, "
                         ":original_storage_key, :preview_sha256, :preview_size_bytes, "
@@ -1507,7 +1590,8 @@ def register_mobile_api(
         conn = db.connect()
         try:
             row = conn.execute(
-                "SELECT a.* FROM wechat_bindings w JOIN accounts a ON a.id = w.account_id "
+                "SELECT a.*, w.id AS binding_id FROM wechat_bindings w "
+                "JOIN accounts a ON a.id = w.account_id "
                 "WHERE w.app_id = ? AND w.openid = ?",
                 (app_id, exchange["openid"]),
             ).fetchone()
@@ -1523,7 +1607,12 @@ def register_mobile_api(
                 return jsonify(
                     {
                         "ok": True,
-                        "token": token_for(account["id"], scope="mobile"),
+                        "token": token_for(
+                            account["id"],
+                            scope="mobile",
+                            binding_id=account["binding_id"],
+                            mobile_auth_version=account.get("mobile_auth_version", 0),
+                        ),
                         "account": _account_payload(account),
                         "bootstrap": bootstrap_payload(conn, account),
                     }
@@ -1572,11 +1661,19 @@ def register_mobile_api(
             if occupied and int(occupied["account_id"]) != int(account["id"]):
                 raise ApiProblem("wechat_already_bound", "该微信已绑定其它账号", 409)
             account_binding = conn.execute(
-                "SELECT openid FROM wechat_bindings WHERE account_id = ? AND app_id = ?",
-                (account["id"], binding["app_id"]),
+                "SELECT id, app_id, openid FROM wechat_bindings "
+                "WHERE account_id = ? ORDER BY id LIMIT 1",
+                (account["id"],),
             ).fetchone()
-            if account_binding and account_binding["openid"] != binding["openid"]:
-                raise ApiProblem("account_already_bound", "该账号已绑定其它微信", 409)
+            if account_binding and (
+                account_binding["app_id"] != binding["app_id"]
+                or account_binding["openid"] != binding["openid"]
+            ):
+                raise ApiProblem(
+                    "account_already_bound",
+                    "该桌面端账号已绑定其它微信；如需更换，请先在电脑端“账号与会员”中解绑",
+                    409,
+                )
             timestamp = now()
             conn.execute(
                 "INSERT INTO wechat_bindings (account_id, app_id, openid, unionid, created_at, last_login_at) "
@@ -1587,11 +1684,22 @@ def register_mobile_api(
                     binding.get("unionid", ""), timestamp, timestamp,
                 ),
             )
+            stored_binding = conn.execute(
+                "SELECT id FROM wechat_bindings WHERE account_id = ?",
+                (account["id"],),
+            ).fetchone()
+            if not stored_binding:
+                raise ApiProblem("binding_failed", "微信绑定未保存，请重试", 500, True)
             conn.commit()
             return jsonify(
                 {
                     "ok": True,
-                    "token": token_for(account["id"], scope="mobile"),
+                    "token": token_for(
+                        account["id"],
+                        scope="mobile",
+                        binding_id=stored_binding["id"],
+                        mobile_auth_version=account.get("mobile_auth_version", 0),
+                    ),
                     "account": _account_payload(account),
                     "bootstrap": bootstrap_payload(conn, account),
                 }
@@ -1619,6 +1727,39 @@ def register_mobile_api(
                 (current["id"],),
             ).fetchall()
             return jsonify({"ok": True, "projects": [_project_payload(row) for row in rows]})
+        finally:
+            conn.close()
+
+    @blueprint.get("/api/mobile/v1/projects/<project_id>/requirements")
+    def project_requirements(project_id):
+        current = user()
+        project_id = _project_id(project_id)
+        required_type = _safe_text(request.args.get("required_type"), 32)
+        conn = db.connect()
+        try:
+            project = project_for(conn, current["id"], project_id)
+            sql = (
+                "SELECT * FROM cloud_project_requirements WHERE account_id = ? "
+                "AND project_id = ? AND active = 1"
+            )
+            params = [current["id"], project_id]
+            if required_type in {"required", "conditional", "recommended"}:
+                sql += " AND required_type = ?"
+                params.append(required_type)
+            sql += " ORDER BY phase, division, subdivision, item, process, id"
+            rows = conn.execute(sql, params).fetchall()
+            counts = {"required": 0, "conditional": 0, "recommended": 0}
+            for row in rows:
+                key = str(row["required_type"] or "recommended")
+                counts[key] = counts.get(key, 0) + 1
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "summary": {"total": len(rows), **counts},
+                    "requirements": [_requirement_payload(row) for row in rows],
+                }
+            )
         finally:
             conn.close()
 
@@ -1670,20 +1811,24 @@ def register_mobile_api(
         scope = _safe_text(request.args.get("scope"), 20)
         category = _safe_text(request.args.get("category"), 20)
         unit_code = _safe_text(request.args.get("unit_code"), 160)
+        other_node_code = _safe_text(request.args.get("other_node_code"), 160)
         if scope and scope not in SCOPES:
             raise ApiProblem("invalid_scope", "影像范围无效")
         if category and category not in CATEGORIES:
             raise ApiProblem("invalid_category", "照片类别无效")
         if scope == "other" and category:
             raise ApiProblem("invalid_category", "其它影像不使用施工或监理分类")
+        if unit_code and other_node_code:
+            raise ApiProblem("invalid_destination_filter", "工程部位和其它影像目录不能同时筛选")
+        if unit_code and scope == "other":
+            raise ApiProblem("invalid_destination_filter", "其它影像不能按工程部位筛选")
+        if other_node_code and scope == "engineering":
+            raise ApiProblem("invalid_destination_filter", "工程影像不能按其它影像目录筛选")
         # 手机影像库是“最近查看”时间线：首屏从最新 ID 向旧记录翻页。
         # cursor=0/缺省均代表首屏；后续 cursor 是上一页末尾（最小）的 ID。
         # 桌面 inbox 仍使用独立的 id > cursor 正向增量语义。
         clauses = ["account_id = ?", "project_id = ?"]
         params = [current["id"], project_id]
-        if cursor:
-            clauses.append("id < ?")
-            params.append(cursor)
         if scope:
             clauses.append("scope = ?")
             params.append(scope)
@@ -1693,13 +1838,28 @@ def register_mobile_api(
         if unit_code:
             clauses.append("json_extract(assignment_json, '$.unit_code') = ?")
             params.append(unit_code)
+        if other_node_code:
+            clauses.append("json_extract(assignment_json, '$.other_node_code') = ?")
+            params.append(other_node_code)
         conn = db.connect()
         try:
             project_for(conn, current["id"], project_id)
+            total = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS total FROM cloud_photos WHERE "
+                    + " AND ".join(clauses),
+                    tuple(params),
+                ).fetchone()["total"]
+            )
+            page_clauses = list(clauses)
+            page_params = list(params)
+            if cursor:
+                page_clauses.append("id < ?")
+                page_params.append(cursor)
             rows = conn.execute(
-                "SELECT * FROM cloud_photos WHERE " + " AND ".join(clauses) +
+                "SELECT * FROM cloud_photos WHERE " + " AND ".join(page_clauses) +
                 " ORDER BY id DESC LIMIT ?",
-                (*params, limit + 1),
+                (*page_params, limit + 1),
             ).fetchall()
             page = rows[:limit]
             return jsonify(
@@ -1707,6 +1867,7 @@ def register_mobile_api(
                     "ok": True,
                     "photos": [_photo_payload(row, preview_download_url(row)) for row in page],
                     "next_cursor": str(page[-1]["id"]) if len(rows) > limit and page else "",
+                    "total": total,
                 }
             )
         finally:
@@ -1852,6 +2013,14 @@ def register_mobile_api(
                 assignment = _validate_assignment(
                     conn, current["id"], project_id, scope, assignment
                 )
+            requirement = capture_requirement_for(
+                conn, current["id"], project_id, data.get("requirement")
+            )
+            if requirement and scope != "engineering":
+                raise ApiProblem(
+                    "invalid_requirement_scope",
+                    "专业采集规则只能用于工程影像",
+                )
             existing = conn.execute(
                 "SELECT * FROM mobile_batches WHERE account_id = ? AND client_batch_id = ?",
                 (current["id"], client_batch_id),
@@ -1863,6 +2032,10 @@ def register_mobile_api(
                     and existing["category"] == category
                     and existing["mode"] == mode
                     and _json(existing["assignment_json"], {}) == assignment
+                    and existing["requirement_code"]
+                    == requirement.get("template_code", "")
+                    and existing["requirement_name"]
+                    == requirement.get("photo_requirement_name", "")
                     and _machine_id(existing["target_machine_id"])
                     == target_machine_id
                 )
@@ -1887,11 +2060,14 @@ def register_mobile_api(
             timestamp = now()
             cur = conn.execute(
                 "INSERT INTO mobile_batches (account_id, client_batch_id, project_id, scope, "
-                "category, mode, assignment_json, target_machine_id, status, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
+                "category, mode, assignment_json, requirement_code, requirement_name, "
+                "target_machine_id, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
                 (
                     current["id"], client_batch_id, project_id, scope, category, mode,
-                    _dumps(assignment), target_machine_id, timestamp, timestamp,
+                    _dumps(assignment), requirement.get("template_code", ""),
+                    requirement.get("photo_requirement_name", ""), target_machine_id,
+                    timestamp, timestamp,
                 ),
             )
             conn.commit()
@@ -3482,6 +3658,87 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.get("/api/desktop/v1/wechat-binding")
+    def desktop_wechat_binding():
+        current = user()
+        desktop_machine_id = require_desktop_client(
+            current,
+            request.args.get("desktop_machine_id") or request.args.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            _require_active_machine(conn, current["id"], desktop_machine_id)
+            row = conn.execute(
+                "SELECT id, app_id, created_at, last_login_at FROM wechat_bindings "
+                "WHERE account_id = ? ORDER BY id LIMIT 1",
+                (current["id"],),
+            ).fetchone()
+            return jsonify(
+                {
+                    "ok": True,
+                    "bound": bool(row),
+                    "binding": (
+                        {
+                            "app_id": row["app_id"],
+                            "created_at": row["created_at"],
+                            "last_login_at": row["last_login_at"],
+                        }
+                        if row
+                        else None
+                    ),
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.delete("/api/desktop/v1/wechat-binding")
+    def desktop_unbind_wechat():
+        current = user()
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        password = str(data.get("password") or "")
+        if not password:
+            raise ApiProblem("password_required", "请输入当前桌面账号的登录密码")
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            _require_active_machine(conn, current["id"], desktop_machine_id)
+            account = conn.execute(
+                "SELECT password_hash FROM accounts WHERE id = ?",
+                (current["id"],),
+            ).fetchone()
+            if not account or not check_password_hash(account["password_hash"], password):
+                raise ApiProblem("account_credentials_invalid", "账号密码错误", 401)
+            binding = conn.execute(
+                "SELECT id FROM wechat_bindings WHERE account_id = ? ORDER BY id LIMIT 1",
+                (current["id"],),
+            ).fetchone()
+            if binding:
+                conn.execute(
+                    "DELETE FROM wechat_bindings WHERE id = ? AND account_id = ?",
+                    (binding["id"], current["id"]),
+                )
+                conn.execute(
+                    "UPDATE accounts SET mobile_auth_version = "
+                    "COALESCE(mobile_auth_version, 0) + 1 WHERE id = ?",
+                    (current["id"],),
+                )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "idempotent": not bool(binding),
+                    "message": "微信已解绑，旧手机登录已立即失效"
+                    if binding
+                    else "当前账号未绑定微信",
+                }
+            )
+        finally:
+            conn.close()
+
     @blueprint.post("/api/desktop/v1/project-snapshot")
     def desktop_project_snapshot():
         current = user()
@@ -3500,6 +3757,10 @@ def register_mobile_api(
         desktop_machine_id = require_desktop_client(current, desktop_machine_id)
         tree = data.get("tree") if isinstance(data.get("tree"), list) else []
         other_tree = data.get("other_tree") if isinstance(data.get("other_tree"), list) else []
+        requirements_supplied = isinstance(data.get("requirements"), list)
+        requirements = data.get("requirements") if requirements_supplied else []
+        if len(requirements) > 5000:
+            raise ApiProblem("too_many_requirements", "专业采集规则超过单工程 5000 条上限")
         nodes = _flatten_snapshot(tree, other_tree)
         conn = db.connect()
         try:
@@ -3512,11 +3773,16 @@ def register_mobile_api(
             if existing and revision < int(existing["revision"] or 0):
                 raise ApiProblem("stale_revision", "工程快照版本早于服务器版本", 409)
             timestamp = now()
-            metadata = {
+            metadata = (
+                _json(existing["metadata_json"], {})
+                if existing
+                else {}
+            )
+            metadata.update({
                 key: value
                 for key, value in project.items()
                 if key not in {"id", "project_id", "project_code", "project_name", "name"}
-            }
+            })
             metadata["unit_count"] = sum(
                 1 for node in nodes if node["node_type"] == "unit"
             )
@@ -3526,6 +3792,20 @@ def register_mobile_api(
             metadata["other_node_count"] = sum(
                 1 for node in nodes if node["scope"] == "other"
             )
+            if requirements_supplied:
+                metadata["requirement_count"] = len(
+                    [
+                        item
+                        for item in requirements
+                        if isinstance(item, dict)
+                        and _safe_text(item.get("template_code"), 80)
+                    ]
+                )
+                metadata["requirement_summary"] = (
+                    data.get("requirement_summary")
+                    if isinstance(data.get("requirement_summary"), dict)
+                    else {}
+                )
             conn.execute(
                 "INSERT INTO cloud_engineering_projects (account_id, project_id, project_code, "
                 "project_name, snapshot_id, revision, desktop_machine_id, metadata_json, active, "
@@ -3559,6 +3839,104 @@ def register_mobile_api(
                         _dumps(node["metadata"]), timestamp,
                     ),
                 )
+            if requirements_supplied:
+                conn.execute(
+                    "UPDATE cloud_project_requirements SET active = 0, updated_at = ? "
+                    "WHERE account_id = ? AND project_id = ?",
+                    (timestamp, current["id"], project_id),
+                )
+                for requirement in requirements:
+                    if not isinstance(requirement, dict):
+                        continue
+                    template_code = _safe_text(requirement.get("template_code"), 80)
+                    if not template_code:
+                        continue
+
+                    def yes_value(key, default=False):
+                        value = requirement.get(key)
+                        if value is None:
+                            return 1 if default else 0
+                        return (
+                            1
+                            if str(value).strip().lower()
+                            in {"1", "true", "yes", "是", "y"}
+                            else 0
+                        )
+
+                    required_type = _safe_text(
+                        requirement.get("required_type") or "recommended", 32
+                    )
+                    if required_type not in {"required", "conditional", "recommended"}:
+                        required_type = "recommended"
+                    conn.execute(
+                        "INSERT INTO cloud_project_requirements "
+                        "(account_id, project_id, template_code, industry, project_type, "
+                        "phase, division, subdivision, item, process, requirement_name, "
+                        "required_type, condition_text, min_photo_count, recommended_count, "
+                        "shot_types, timing, before_concealment, gps_required, exif_required, "
+                        "description_template, standard_source, template_version, active, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        "?, ?, ?, 1, ?) "
+                        "ON CONFLICT(account_id, project_id, template_code) DO UPDATE SET "
+                        "industry=excluded.industry, project_type=excluded.project_type, "
+                        "phase=excluded.phase, division=excluded.division, "
+                        "subdivision=excluded.subdivision, item=excluded.item, "
+                        "process=excluded.process, requirement_name=excluded.requirement_name, "
+                        "required_type=excluded.required_type, condition_text=excluded.condition_text, "
+                        "min_photo_count=excluded.min_photo_count, "
+                        "recommended_count=excluded.recommended_count, "
+                        "shot_types=excluded.shot_types, timing=excluded.timing, "
+                        "before_concealment=excluded.before_concealment, "
+                        "gps_required=excluded.gps_required, exif_required=excluded.exif_required, "
+                        "description_template=excluded.description_template, "
+                        "standard_source=excluded.standard_source, "
+                        "template_version=excluded.template_version, active=1, "
+                        "updated_at=excluded.updated_at",
+                        (
+                            current["id"],
+                            project_id,
+                            template_code,
+                            _safe_text(requirement.get("industry"), 80),
+                            _safe_text(requirement.get("project_type"), 120),
+                            _safe_text(requirement.get("phase"), 120),
+                            _safe_text(requirement.get("division"), 160),
+                            _safe_text(requirement.get("subdivision"), 160),
+                            _safe_text(requirement.get("item"), 160),
+                            _safe_text(requirement.get("process"), 160),
+                            _safe_text(requirement.get("photo_requirement_name"), 200),
+                            required_type,
+                            _safe_text(requirement.get("condition"), 300),
+                            _integer(requirement.get("min_photo_count"), 1, 0, 999),
+                            _integer(
+                                requirement.get("recommended_photo_count"), 1, 0, 999
+                            ),
+                            _safe_text(requirement.get("shot_types"), 200),
+                            _safe_text(requirement.get("timing"), 200),
+                            yes_value("before_concealment_required"),
+                            yes_value("gps_required"),
+                            yes_value("exif_required", True),
+                            _safe_text(requirement.get("description_template"), 500),
+                            _safe_text(requirement.get("standard_source"), 500),
+                            _safe_text(
+                                requirement.get("template_version") or "V1.0", 40
+                            ),
+                            timestamp,
+                        ),
+                    )
+            requirement_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS total FROM cloud_project_requirements "
+                    "WHERE account_id = ? AND project_id = ? AND active = 1",
+                    (current["id"], project_id),
+                ).fetchone()["total"]
+            )
+            if requirements_supplied:
+                metadata["requirement_count"] = requirement_count
+                conn.execute(
+                    "UPDATE cloud_engineering_projects SET metadata_json = ? "
+                    "WHERE account_id = ? AND project_id = ?",
+                    (_dumps(metadata), current["id"], project_id),
+                )
             client_id = desktop_machine_id or "default"
             conn.execute(
                 "INSERT INTO desktop_sync_cursors (account_id, client_id, snapshot_id, "
@@ -3578,6 +3956,7 @@ def register_mobile_api(
                     "unit_count": sum(1 for node in nodes if node["node_type"] == "unit"),
                     "process_count": sum(1 for node in nodes if node["node_type"] == "process"),
                     "other_node_count": sum(1 for node in nodes if node["scope"] == "other"),
+                    "requirement_count": requirement_count,
                 }
             )
         finally:

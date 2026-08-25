@@ -1,5 +1,5 @@
-import { CURRENT_PROJECT } from '@/config/env'
-import type { Assignment, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import { API_MODE, CURRENT_PROJECT, EMPTY_PROJECT } from '@/config/env'
+import type { Assignment, CaptureRequirementRef, PhotoCategory, Scope, UploadMode } from '@/types/domain'
 
 const PROJECT_KEY = 'engineering-image:selected-project:v1'
 const DESTINATION_KEY = 'engineering-image:selected-destination:v1'
@@ -15,11 +15,24 @@ export interface DestinationSelection {
   assignment: Assignment
 }
 
+export interface UploadPreset {
+  scope?: Scope
+  category?: PhotoCategory
+  mode?: UploadMode
+  requirement?: CaptureRequirementRef
+}
+
 export const selectionStorage = {
   setOwner: (accountId: string | number) => { activeOwner = String(accountId) },
   clearOwner: () => { activeOwner = '' },
   getOwner: () => activeOwner,
-  getProject: () => uni.getStorageSync(ownerKey(PROJECT_KEY)) || CURRENT_PROJECT,
+  getProject: () => uni.getStorageSync(ownerKey(PROJECT_KEY)) || (API_MODE === 'mock' ? CURRENT_PROJECT : EMPTY_PROJECT),
+  hasProject: () => Boolean((uni.getStorageSync(ownerKey(PROJECT_KEY)) || (API_MODE === 'mock' ? CURRENT_PROJECT : null))?.id),
+  clearProject: () => {
+    uni.removeStorageSync(ownerKey(PROJECT_KEY))
+    uni.removeStorageSync(ownerKey(DESTINATION_KEY))
+    uni.removeStorageSync(ownerKey(UPLOAD_PRESET_KEY))
+  },
   setProject: (project: { id: string; code: string; name: string }) => {
     const projectKey = ownerKey(PROJECT_KEY)
     const previous = uni.getStorageSync(projectKey) as { id?: string } | null
@@ -32,6 +45,6 @@ export const selectionStorage = {
   },
   getDestination: (): DestinationSelection | null => uni.getStorageSync(ownerKey(DESTINATION_KEY)) || null,
   setDestination: (value: DestinationSelection) => uni.setStorageSync(ownerKey(DESTINATION_KEY), value),
-  getUploadPreset: (): { scope?: Scope; category?: PhotoCategory; mode?: UploadMode } => uni.getStorageSync(ownerKey(UPLOAD_PRESET_KEY)) || {},
-  setUploadPreset: (value: { scope?: Scope; category?: PhotoCategory; mode?: UploadMode }) => uni.setStorageSync(ownerKey(UPLOAD_PRESET_KEY), value),
+  getUploadPreset: (): UploadPreset => uni.getStorageSync(ownerKey(UPLOAD_PRESET_KEY)) || {},
+  setUploadPreset: (value: UploadPreset) => uni.setStorageSync(ownerKey(UPLOAD_PRESET_KEY), value),
 }

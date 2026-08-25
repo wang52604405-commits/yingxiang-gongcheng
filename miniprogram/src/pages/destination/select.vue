@@ -36,6 +36,7 @@ async function loadTree() {
   loading.value = true
   try {
     const project = selectionStorage.getProject()
+    if (!project.id) throw new Error('当前账号尚未从电脑同步工程')
     const response = scope.value === 'engineering' ? await mobileApi.projectTree(project.id) : await mobileApi.otherTree(project.id)
     roots.value = response.nodes || []
   } catch (error) {
@@ -70,22 +71,22 @@ onLoad((query) => {
 
 <template>
   <view class="page-shell no-tabs destination-page">
-    <PageHeader :title="scope === 'engineering' ? '选择单元工程' : '选择其它影像目录'" :subtitle="scope === 'engineering' ? '先选单元，再按需选择工序' : '与电脑端其它影像目录保持一致'" />
-    <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="输入名称或 YNLQ 编码" placeholder-class="input-placeholder" /></view>
+    <PageHeader :title="scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" :subtitle="scope === 'engineering' ? '先选工程部位，再按需选择工序' : '与电脑端其它影像目录保持一致'" />
+    <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="输入工程部位名称或编码" placeholder-class="input-placeholder" /></view>
 
-    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取 888 个单元</text></view>
+    <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取工程目录</text></view>
     <view v-else-if="selectable.length" class="node-list">
       <button v-for="node in selectable" :key="node.code" class="node-card card pressable" :class="{ active: selectedNode?.code === node.code }" @tap="chooseNode(node)">
         <view class="node-copy"><text class="node-name">{{ node.name }}</text><text class="node-path">{{ node.pathLabel || '工程根目录' }}</text><text class="node-code">{{ node.code }}</text></view>
         <text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
       </button>
     </view>
-    <view v-else class="empty-state"><view class="empty-symbol"><UiIcon name="search" :size="27" /></view><text class="empty-title">没有找到匹配单元</text><text class="empty-copy">换一个名称或编码试试。</text></view>
+    <view v-else class="empty-state"><view class="empty-symbol"><UiIcon name="search" :size="27" /></view><text class="empty-title">没有找到匹配工程部位</text><text class="empty-copy">换一个名称或编码试试。</text></view>
 
     <view v-if="scope === 'engineering' && selectedNode" class="process-sheet">
       <view class="sheet-handle" />
       <text class="process-title">{{ selectedNode.name }}</text>
-      <text class="process-copy">选择工序（可跳过，直接归入单元）</text>
+      <text class="process-copy">选择工序（可跳过，直接归入当前工程部位）</text>
       <scroll-view scroll-x class="process-scroll">
         <view class="process-row">
           <button class="process-chip pressable" @tap="saveSelection('')">不分工序</button>

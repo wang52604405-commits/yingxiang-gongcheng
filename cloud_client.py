@@ -26,9 +26,9 @@ CLOUD_CONFIG_NAME = "cloud_config.json"
 CLOUD_ACCOUNT_NAME = "cloud_account.json"
 PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
-DEFAULT_SERVER_URL = "http://47.95.221.66"  # 内测服务器；域名启用后由云配置切换
+DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260822-2.64"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260825-2.65"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -50,10 +50,51 @@ DEFAULT_PRODUCT_CONFIG = {
 }
 
 
+def _allow_insecure_localhost() -> bool:
+    return str(os.environ.get("ALBUM_ALLOW_INSECURE_LOCALHOST") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _validate_outbound_url(value: str, *, base_only: bool = False) -> str:
+    raw = str(value or "").strip()
+    parts = urllib.parse.urlsplit(raw)
+    if not parts.hostname or parts.username or parts.password:
+        raise ValueError("云服务器地址无效")
+    hostname = parts.hostname.lower().rstrip(".")
+    if parts.scheme == "http":
+        if hostname not in {"127.0.0.1", "localhost", "::1"} or not _allow_insecure_localhost():
+            raise ValueError("远程云服务器必须使用 HTTPS；HTTP 只允许显式启用的本机开发环境")
+    elif parts.scheme != "https":
+        raise ValueError("云服务器地址必须使用 HTTPS")
+    if base_only and (parts.query or parts.fragment or parts.path not in {"", "/"}):
+        raise ValueError("云服务器基础地址不能包含路径、参数或片段")
+    return raw.rstrip("/") if base_only else raw
+
+
+class _NoCredentialRedirect(urllib.request.HTTPRedirectHandler):
+    """所有携带账号信息的请求均拒绝自动重定向。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # pragma: no cover
+        return None
+
+
+def _open_no_redirect(request, timeout=15):
+    return urllib.request.build_opener(_NoCredentialRedirect()).open(
+        request, timeout=timeout
+    )
+
+
 def _get_json(url, timeout=15):
+    try:
+        url = _validate_outbound_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "code": "insecure_server_url"}
     req = urllib.request.Request(url, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_no_redirect(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
@@ -262,6 +303,10 @@ def product_config(force: bool = False) -> dict:
 
 
 def _post_json(url: str, payload: dict, token: str = ""):
+    try:
+        url = _validate_outbound_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "code": "insecure_server_url"}
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -271,7 +316,7 @@ def _post_json(url: str, payload: dict, token: str = ""):
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _open_no_redirect(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
@@ -415,6 +460,13 @@ def login(username: str, password: str):
     result = _post_json(f"{base}/api/login", {"username": username, "password": password})
     if not result.get("ok"):
         return {"ok": False, "error": result.get("error", "登录失败")}
+    server_account = result.get("account") if isinstance(result.get("account"), dict) else {}
+    account_id = str(server_account.get("id") or "").strip()
+    if not account_id:
+        return {
+            "ok": False,
+            "error": "服务器未返回稳定账号编号，已拒绝建立可能串号的同步会话",
+        }
     token = result.get("token", "")
     machine_id = licensing.machine_id()
     activated = _post_json(
@@ -431,18 +483,21 @@ def login(username: str, password: str):
     # is_member：账号有有效权益即会员（无限使用）；否则免费版（300 张、无产品水印）。
     is_member = bool(activated.get("is_member")) or bool((activated.get("license") or {}).get("has_license"))
     account = {
-        "username": username,
+        "account_id": account_id,
+        "username": str(server_account.get("username") or username),
         "token": token,
         "desktop_sync_token": str(activated.get("desktop_sync_token") or ""),
         "server": base,
         "activated_at": int(time.time()),
         "is_member": is_member,
+        "auth_generation": secrets.token_hex(16),
     }
     _write_cloud_account(account)
     threading.Thread(target=lambda: (product_config(force=True), flush_error_queue()), daemon=True).start()
     return {
         "ok": True,
-        "account": username,
+        "account": str(server_account.get("username") or username),
+        "account_id": account_id,
         "is_member": is_member,
         "license": activated.get("license"),
     }
@@ -516,6 +571,7 @@ def status():
         "ok": True,
         "logged_in": bool(account),
         "account": account.get("username", ""),
+        "account_id": str(account.get("account_id") or ""),
         "server": account.get("server") or server_url(),
         "is_member": mem["is_member"],
         "member_tier": mem["member_tier"],
@@ -581,7 +637,7 @@ def invite_status(token: str = ""):
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _open_no_redirect(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
@@ -655,11 +711,15 @@ def fetch_preview_projects() -> dict:
 
 
 def _get_json_auth(url: str, token: str = ""):
+    try:
+        url = _validate_outbound_url(url)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "code": "insecure_server_url"}
     req = urllib.request.Request(url, method="GET")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _open_no_redirect(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
@@ -704,7 +764,27 @@ def _cloud_auth_context():
     account = _read_cloud_account()
     if not account:
         return None, None, {"ok": False, "logged_in": False, "error": "未登录云账号"}
-    base = str(account.get("server") or server_url()).rstrip("/")
+    account_id = str(account.get("account_id") or "").strip()
+    if not account_id:
+        return None, None, {
+            "ok": False,
+            "logged_in": True,
+            "code": "account_identity_required",
+            "error": "本机云账号记录缺少稳定账号编号，请退出后重新登录",
+            "retryable": False,
+        }
+    try:
+        base = _validate_outbound_url(
+            str(account.get("server") or server_url()), base_only=True
+        )
+    except ValueError as exc:
+        return None, None, {
+            "ok": False,
+            "logged_in": True,
+            "code": "insecure_server_url",
+            "error": str(exc),
+            "retryable": False,
+        }
     account_token = str(account.get("token") or "")
     sync_token = str(account.get("desktop_sync_token") or "")
     if not sync_token and account_token:
@@ -726,11 +806,31 @@ def desktop_sync_identity() -> str:
     account = _read_cloud_account()
     if not account:
         return ""
+    account_id = str(account.get("account_id") or "").strip()
+    if not account_id:
+        return ""
     identity = "|".join([
         str(account.get("server") or server_url()).rstrip("/"),
-        str(account.get("username") or "").strip().lower(),
+        account_id,
     ])
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+def desktop_sync_account_id() -> str:
+    """返回服务器不可变 account.id；旧账号文件必须重新登录后才可同步。"""
+    account = _read_cloud_account()
+    return str(account.get("account_id") or "").strip()
+
+
+def desktop_sync_account_username() -> str:
+    """返回服务器确认过的账号名，仅用于向用户显示当前绑定归属。"""
+    account = _read_cloud_account()
+    return str(account.get("username") or "").strip()
+
+
+def desktop_sync_generation() -> str:
+    account = _read_cloud_account()
+    return str(account.get("auth_generation") or "").strip()
 
 
 def _cloud_api_json(path: str, method: str = "GET", payload=None, query=None, timeout: int = 20):
@@ -748,7 +848,7 @@ def _cloud_api_json(path: str, method: str = "GET", payload=None, query=None, ti
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open_no_redirect(req, timeout=timeout) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             if isinstance(result, dict):
                 result.setdefault("http_status", int(getattr(resp, "status", 200) or 200))
@@ -781,6 +881,24 @@ def desktop_project_snapshot(snapshot: dict) -> dict:
         method="POST",
         payload=snapshot,
         timeout=30,
+    )
+
+
+def desktop_wechat_binding(desktop_machine_id: str) -> dict:
+    return _cloud_api_json(
+        "/api/desktop/v1/wechat-binding",
+        query={"desktop_machine_id": str(desktop_machine_id or "")},
+    )
+
+
+def desktop_unbind_wechat(password: str, desktop_machine_id: str) -> dict:
+    return _cloud_api_json(
+        "/api/desktop/v1/wechat-binding",
+        method="DELETE",
+        payload={
+            "password": str(password or ""),
+            "desktop_machine_id": str(desktop_machine_id or ""),
+        },
     )
 
 
@@ -838,7 +956,8 @@ def _safe_mobile_download_request(raw_url: str, base: str, token: str):
     raw_url = str(raw_url or "").strip()
     if not raw_url:
         raise ValueError("影像下载地址为空")
-    base_parts = urllib.parse.urlsplit(str(base or "").rstrip("/") + "/")
+    base = _validate_outbound_url(str(base or ""), base_only=True)
+    base_parts = urllib.parse.urlsplit(str(base).rstrip("/") + "/")
     if base_parts.scheme not in {"http", "https"} or not base_parts.hostname:
         raise ValueError("影像同步服务器地址无效")
     parts = urllib.parse.urlsplit(raw_url)
@@ -972,7 +1091,7 @@ def desktop_backfill_photo(file_path, metadata: dict) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with _open_no_redirect(req, timeout=45) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result if isinstance(result, dict) else {"ok": False, "error": "服务器返回数据格式不正确"}
     except urllib.error.HTTPError as exc:

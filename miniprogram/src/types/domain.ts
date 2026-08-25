@@ -25,6 +25,44 @@ export interface ProjectSummary {
   name: string
   revision?: number
   unit_count?: number
+  industry?: string
+  project_type?: string
+  region?: string
+  template_version?: string
+  requirement_count?: number
+}
+
+export interface PhotoRequirement {
+  template_code: string
+  industry: string
+  project_type: string
+  phase: string
+  division: string
+  subdivision?: string
+  item?: string
+  process?: string
+  photo_requirement_name: string
+  required_type: 'required' | 'conditional' | 'recommended'
+  condition?: string
+  min_photo_count: number
+  recommended_photo_count: number
+  shot_types?: string
+  timing?: string
+  before_concealment_required?: string
+  gps_required?: string
+  exif_required?: string
+  description_template?: string
+  standard_source?: string
+  template_version?: string
+}
+
+export interface CaptureRequirementRef {
+  template_code: string
+  photo_requirement_name: string
+  required_type?: PhotoRequirement['required_type']
+  min_photo_count?: number
+  timing?: string
+  shot_types?: string
 }
 
 export interface ProjectNode {
@@ -50,6 +88,7 @@ export interface UploadDraft {
   category?: PhotoCategory
   mode: UploadMode
   assignment?: Assignment
+  requirement?: CaptureRequirementRef
 }
 
 export interface LocalPhoto {
@@ -130,6 +169,7 @@ export interface CloudPhoto {
   process_name?: string
   other_node_code?: string
   other_node_name?: string
+  requirement?: CaptureRequirementRef
   image_url?: string
   thumb_url?: string
   download_url?: string

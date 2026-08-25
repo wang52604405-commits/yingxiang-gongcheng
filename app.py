@@ -26,6 +26,7 @@ import cloud_client
 import mobile_sync
 import tamper_guard
 import watermark_ocr
+import professional_templates
 from server import mobile_recognition
 
 try:
@@ -4384,6 +4385,14 @@ def default_engineering_project():
         "location": info.get("location", ""),
         "start_date": info.get("start_date", ""),
         "description": info.get("description", ""),
+        "industry": info.get("industry", "水利工程") or "水利工程",
+        "project_type": info.get("project_type", "水利工程（沿用项目划分）")
+        or "水利工程（沿用项目划分）",
+        "region": info.get("region", ""),
+        "template_version": info.get("template_version", "V1.0") or "V1.0",
+        "cloud_owner_id": "",
+        "cloud_owner_username": "",
+        "cloud_owner_claimed_at": "",
         "delete_password_hash": "",
         "created_at": "",
         "updated_at": "",
@@ -4455,6 +4464,71 @@ def current_engineering_project(data=None):
         if project.get("id") == active_id:
             return project
     return (data.get("projects") or [default_engineering_project()])[0]
+
+
+_project_cloud_ownership_lock = threading.Lock()
+
+
+def current_project_cloud_ownership():
+    """返回当前本地工程与已登录云账号的不可变归属关系。"""
+    project = current_engineering_project()
+    account_id = str(cloud_client.desktop_sync_account_id() or "").strip()
+    account_username = str(cloud_client.desktop_sync_account_username() or "").strip()
+    owner_id = str(project.get("cloud_owner_id") or "").strip()
+    owner_username = str(project.get("cloud_owner_username") or "").strip()
+    if not account_id:
+        state = "logged_out"
+    elif not owner_id:
+        state = "unclaimed"
+    elif owner_id == account_id:
+        state = "matched"
+    else:
+        state = "mismatch"
+    return {
+        "project_id": str(project.get("id") or DEFAULT_ENGINEERING_PROJECT_ID),
+        "project_name": str(project.get("project_name") or "默认工程"),
+        "account_id": account_id,
+        "account_username": account_username,
+        "owner_id": owner_id,
+        "owner_username": owner_username,
+        "claimed_at": str(project.get("cloud_owner_claimed_at") or ""),
+        "state": state,
+        "can_claim": state == "unclaimed",
+        "sync_allowed": state == "matched",
+    }
+
+
+def claim_current_project_cloud_ownership():
+    """把当前本地工程一次性归属到当前云账号；不提供静默转移。"""
+    with _project_cloud_ownership_lock:
+        account_id = str(cloud_client.desktop_sync_account_id() or "").strip()
+        account_username = str(cloud_client.desktop_sync_account_username() or "").strip()
+        if not account_id:
+            raise ValueError("请先重新登录云账号，再绑定当前本地工程")
+        data = read_engineering_projects()
+        project = current_engineering_project(data)
+        owner_id = str(project.get("cloud_owner_id") or "").strip()
+        if owner_id and owner_id != account_id:
+            owner_name = str(project.get("cloud_owner_username") or "另一账号").strip()
+            raise ValueError(f"当前本地工程已属于账号 {owner_name}，为防串号不能直接改绑")
+        if owner_id == account_id:
+            return current_project_cloud_ownership()
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        backup_dir = DATA_DIR / "backups" / "cloud-account-bindings" / stamp
+        backup_dir.mkdir(parents=True, exist_ok=False)
+        if ENGINEERING_PROJECTS_PATH.exists():
+            shutil.copy2(ENGINEERING_PROJECTS_PATH, backup_dir / ENGINEERING_PROJECTS_PATH.name)
+        if PROJECT_INFO_PATH.exists():
+            shutil.copy2(PROJECT_INFO_PATH, backup_dir / PROJECT_INFO_PATH.name)
+
+        project["cloud_owner_id"] = account_id
+        project["cloud_owner_username"] = account_username
+        project["cloud_owner_claimed_at"] = now_text()
+        write_engineering_projects(data)
+        result = current_project_cloud_ownership()
+        result["backup_dir"] = str(backup_dir)
+        return result
 
 
 def active_engineering_project_id():
@@ -4684,7 +4758,40 @@ def api_license_activate():
 
 @app.route("/api/cloud/status")
 def api_cloud_status():
-    return jsonify(cloud_client.status())
+    payload = cloud_client.status()
+    payload["project_ownership"] = current_project_cloud_ownership()
+    return jsonify(payload)
+
+
+@app.route("/api/cloud/project-ownership", methods=["GET", "POST"])
+def api_cloud_project_ownership():
+    _user, error = login_required_json()
+    if error:
+        return error
+    if request.method == "GET":
+        return jsonify({"ok": True, "project_ownership": current_project_cloud_ownership()})
+    try:
+        ownership = claim_current_project_cloud_ownership()
+        return jsonify({"ok": True, "project_ownership": ownership})
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+
+
+@app.route("/api/cloud/wechat-binding", methods=["GET", "DELETE"])
+def api_cloud_wechat_binding():
+    _user, error = login_required_json()
+    if error:
+        return error
+    machine_id = licensing.machine_id()
+    if request.method == "GET":
+        result = cloud_client.desktop_wechat_binding(machine_id)
+    else:
+        payload = request.get_json(silent=True) or {}
+        result = cloud_client.desktop_unbind_wechat(
+            str(payload.get("password") or ""), machine_id
+        )
+    status = int(result.get("http_status") or (200 if result.get("ok") else 400))
+    return jsonify(result), max(200, min(599, status))
 
 
 @app.route("/api/cloud/product-config")
@@ -4715,15 +4822,18 @@ def api_client_error():
 @app.route("/api/cloud/login", methods=["POST"])
 def api_cloud_login():
     payload = request.get_json(silent=True) or {}
-    result = cloud_client.login(
-        str(payload.get("username") or "").strip(),
-        str(payload.get("password") or ""),
+    result = desktop_mobile_sync_service().account_transition(
+        lambda: cloud_client.login(
+            str(payload.get("username") or "").strip(),
+            str(payload.get("password") or ""),
+        )
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "登录失败")}), 400
     session["username"] = str(result.get("account") or payload.get("username") or "").strip()
     session.permanent = bool(payload.get("remember", True))
     result["user"] = {"username": session["username"]}
+    result["project_ownership"] = current_project_cloud_ownership()
     return jsonify(result)
 
 
@@ -4755,9 +4865,11 @@ def api_cloud_register():
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "注册失败")}), 400
     registration = dict(result)
-    login_result = cloud_client.login(
-        str(payload.get("username") or "").strip(),
-        str(payload.get("password") or ""),
+    login_result = desktop_mobile_sync_service().account_transition(
+        lambda: cloud_client.login(
+            str(payload.get("username") or "").strip(),
+            str(payload.get("password") or ""),
+        )
     )
     if not login_result.get("ok"):
         return jsonify({"ok": False, "error": "注册已完成，但自动登录失败，请返回登录页重新登录"}), 400
@@ -4889,8 +5001,10 @@ def api_cloud_apply_update():
 
 @app.route("/api/cloud/logout", methods=["POST"])
 def api_cloud_logout():
-    session.pop("username", None)
-    return jsonify(cloud_client.logout())
+    result = desktop_mobile_sync_service().account_transition(cloud_client.logout)
+    if result.get("ok"):
+        session.pop("username", None)
+    return jsonify(result)
 
 
 _desktop_mobile_sync_service = None
@@ -5071,6 +5185,31 @@ def _public_project(project):
     return out
 
 
+@app.route("/professional-plan")
+def professional_plan_page():
+    return render_template("professional_plan.html")
+
+
+@app.route("/api/professional-templates/catalog", methods=["GET"])
+def api_professional_template_catalog():
+    return jsonify({"ok": True, **professional_templates.catalog()})
+
+
+@app.route("/api/professional-templates/requirements", methods=["GET"])
+def api_professional_template_requirements():
+    industry = str(request.args.get("industry") or "").strip()
+    project_type = str(request.args.get("project_type") or "").strip()
+    return jsonify(
+        {
+            "ok": True,
+            "industry": industry,
+            "project_type": project_type,
+            "summary": professional_templates.plan_summary(industry, project_type),
+            "requirements": professional_templates.requirements(industry, project_type),
+        }
+    )
+
+
 @app.route("/api/project-info", methods=["GET"])
 def api_project_info():
     data = read_engineering_projects()
@@ -5115,6 +5254,21 @@ def api_save_project_info():
             "location": str(payload.get("location") or "").strip(),
             "start_date": str(payload.get("start_date") or "").strip(),
             "description": str(payload.get("description") or "").strip(),
+            "industry": str(payload.get("industry") or "水利工程").strip(),
+            "project_type": str(payload.get("project_type") or "").strip(),
+            "region": str(payload.get("region") or "").strip(),
+            "template_version": str(
+                payload.get("template_version")
+                or professional_templates.catalog().get("version")
+                or "V1.0"
+            ).strip(),
+            "cloud_owner_id": str((existing_project or {}).get("cloud_owner_id") or ""),
+            "cloud_owner_username": str(
+                (existing_project or {}).get("cloud_owner_username") or ""
+            ),
+            "cloud_owner_claimed_at": str(
+                (existing_project or {}).get("cloud_owner_claimed_at") or ""
+            ),
             "delete_password_hash": password_hash,
             "created_at": now,
             "updated_at": now,
@@ -5284,6 +5438,11 @@ def api_bootstrap():
         "hierarchy": snapshot["hierarchy"],
         "optimization_status": _public_photo_optimization_status(),
         "app_version": cloud_client.APP_VERSION,
+        "professional_catalog": professional_templates.catalog(),
+        "professional_plan_summary": professional_templates.plan_summary(
+            current_engineering_project(engineering_data).get("industry", "水利工程"),
+            current_engineering_project(engineering_data).get("project_type", ""),
+        ),
     })
     ensure_photo_optimizer_started()
     response.headers["Cache-Control"] = "private, no-cache"

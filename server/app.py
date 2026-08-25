@@ -306,7 +306,13 @@ def _error(message: str, code: int = 400):
     return jsonify({"ok": False, "error": message}), code
 
 
-def _token_for(user_id: int, scope: str = "desktop", machine_id: str = "") -> str:
+def _token_for(
+    user_id: int,
+    scope: str = "desktop",
+    machine_id: str = "",
+    binding_id: int = 0,
+    mobile_auth_version: int = 0,
+) -> str:
     """签发带客户端作用域的账号令牌。
 
     旧版令牌只有 uid，解析时按 legacy 桌面端兼容；新版微信令牌
@@ -316,6 +322,9 @@ def _token_for(user_id: int, scope: str = "desktop", machine_id: str = "") -> st
     normalized_machine_id = str(machine_id or "").strip().upper()
     if normalized_machine_id:
         payload["machine_id"] = normalized_machine_id
+    if str(scope or "") == "mobile":
+        payload["binding_id"] = int(binding_id or 0)
+        payload["mobile_auth_version"] = int(mobile_auth_version or 0)
     return serializer.dumps(payload, salt="album-auth")
 
 
@@ -336,7 +345,24 @@ def _user_from_token(token: str):
         if not row:
             return None
         user = dict(row)
-        user["_token_scope"] = str(data.get("scope") or "legacy")
+        token_scope = str(data.get("scope") or "legacy")
+        if token_scope == "mobile":
+            binding_id = int(data.get("binding_id") or 0)
+            raw_token_version = data.get("mobile_auth_version")
+            token_version = int(raw_token_version if raw_token_version is not None else -1)
+            if (
+                binding_id <= 0
+                or token_version != int(user.get("mobile_auth_version") or 0)
+            ):
+                return None
+            binding = conn.execute(
+                "SELECT 1 FROM wechat_bindings WHERE id = ? AND account_id = ?",
+                (binding_id, user["id"]),
+            ).fetchone()
+            if not binding:
+                return None
+            user["_token_binding_id"] = binding_id
+        user["_token_scope"] = token_scope
         user["_token_machine_id"] = str(data.get("machine_id") or "").strip().upper()
         return user
     finally:
@@ -901,6 +927,7 @@ def create_app():
                 "ok": True,
                 "token": _token_for(account["id"]),
                 "account": {
+                    "id": account["id"],
                     "username": account["username"],
                     "display_name": account["display_name"],
                     "role": account["role"],

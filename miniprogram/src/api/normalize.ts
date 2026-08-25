@@ -12,7 +12,17 @@ export function normalizeProject(raw: any): ProjectSummary {
   const code = String(raw.code || raw.project_code || id)
   const name = String(raw.name || raw.project_name || '')
   if (!id || !name) throw new Error('服务器工程数据缺少编号或名称')
-  return { id, code, name, revision: Number(raw.revision || 0), unit_count: Number(raw.unit_count || raw.metadata?.unit_count || 0) }
+  const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {}
+  return {
+    id, code, name,
+    revision: Number(raw.revision || 0),
+    unit_count: Number(raw.unit_count || metadata.unit_count || 0),
+    industry: String(raw.industry || metadata.industry || '水利工程'),
+    project_type: String(raw.project_type || metadata.project_type || ''),
+    region: String(raw.region || metadata.region || ''),
+    template_version: String(raw.template_version || metadata.template_version || ''),
+    requirement_count: Number(raw.requirement_count || metadata.requirement_count || 0),
+  }
 }
 
 export function normalizeCandidate(raw: any): MatchCandidate {
@@ -47,6 +57,10 @@ export function normalizeCloudPhoto(raw: any): CloudPhoto {
     process_name: String(raw.process_name || assignment.process_name || ''),
     other_node_code: String(raw.other_node_code || assignment.other_node_code || ''),
     other_node_name: String(raw.other_node_name || assignment.other_node_name || ''),
+    requirement: raw.requirement?.template_code ? {
+      template_code: String(raw.requirement.template_code),
+      photo_requirement_name: String(raw.requirement.photo_requirement_name || ''),
+    } : undefined,
     download_url: downloadUrl,
     image_url: imageUrl,
     thumb_url: thumbUrl,

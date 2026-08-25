@@ -143,6 +143,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 }
 
 function defaultTitle(draft: UploadDraft): string {
+  if (draft.requirement?.photo_requirement_name) return draft.requirement.photo_requirement_name
   if (draft.scope === 'other') return draft.assignment?.other_node_name || '其它现场影像'
   return draft.assignment?.process_name || draft.assignment?.unit_name || '现场工程影像'
 }
@@ -358,6 +359,7 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       category: batch.draft.category,
       mode: batch.draft.mode,
       assignment: batch.draft.mode === 'direct' ? batch.draft.assignment : undefined,
+      requirement: batch.draft.requirement,
     }
     const created = await mobileApi.createBatch(payload)
     if (!isCurrentOwner(owner, generation)) return

@@ -1,5 +1,5 @@
 import { CURRENT_PROJECT } from '@/config/env'
-import type { BootstrapResponse, CloudPhoto, MatchCandidate, ProjectNode, ProjectSummary } from '@/types/domain'
+import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectNode, ProjectSummary } from '@/types/domain'
 import type { CreateBatchPayload, PhotoUploadMetadata } from './contracts'
 
 interface MockBatch {
@@ -61,6 +61,24 @@ const samplePhotos: CloudPhoto[] = [
   { photo_uuid: 'demo-4', title: '临时道路巡查', photo_date: '2026-08-24', scope: 'other', other_node_code: 'YNLQ-QT-001-01', other_node_name: '临时道路', status: 'desktop_imported', created_at: '2026-08-24T08:10:00Z' },
 ]
 
+const sampleRequirements: PhotoRequirement[] = [
+  {
+    template_code: 'SL-JZ-001', industry: '水利工程', project_type: '水闸工程', phase: '施工阶段', division: '拦河闸工程', subdivision: '进口段', process: '钢筋安装',
+    photo_requirement_name: '钢筋安装隐蔽验收', required_type: 'required', min_photo_count: 3, recommended_photo_count: 5,
+    shot_types: '全景、中景、节点近景', timing: '钢筋安装完成、隐蔽验收前', before_concealment_required: '是', exif_required: '是', template_version: 'V1.2',
+  },
+  {
+    template_code: 'SL-JZ-002', industry: '水利工程', project_type: '水闸工程', phase: '施工阶段', division: '拦河闸工程', subdivision: '闸室段', process: '模板安装',
+    photo_requirement_name: '模板尺寸与加固检查', required_type: 'conditional', condition: '采用现浇混凝土时', min_photo_count: 2, recommended_photo_count: 4,
+    shot_types: '全景、尺量近景', timing: '混凝土浇筑前', before_concealment_required: '是', exif_required: '是', template_version: 'V1.2',
+  },
+  {
+    template_code: 'SL-TF-001', industry: '水利工程', project_type: '堤防工程', phase: '施工阶段', division: '连接堤工程', process: '土方碾压',
+    photo_requirement_name: '分层铺土与碾压过程', required_type: 'recommended', min_photo_count: 2, recommended_photo_count: 3,
+    shot_types: '作业面全景、碾压设备中景', timing: '每个代表性作业面施工时', gps_required: '是', exif_required: '是', template_version: 'V1.2',
+  },
+]
+
 export async function mockRequest<T>(method: string, path: string, data?: unknown): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 80))
   if (path === '/auth/wechat-login' && method === 'POST') {
@@ -82,6 +100,17 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
     return response as T
   }
   if (path === '/projects' && method === 'GET') return { ok: true, projects: projects.map(rawProject) } as T
+  const requirementsMatch = path.match(/^\/projects\/([^/?]+)\/requirements(?:\?(.*))?$/)
+  if (requirementsMatch && method === 'GET') {
+    const requiredType = new URLSearchParams(requirementsMatch[2] || '').get('required_type')
+    const requirements = requiredType ? sampleRequirements.filter((item) => item.required_type === requiredType) : sampleRequirements
+    const summary = sampleRequirements.reduce((result, item) => {
+      result.total += 1
+      result[item.required_type] += 1
+      return result
+    }, { total: 0, required: 0, conditional: 0, recommended: 0 })
+    return { ok: true, project: { ...rawProject(projects[0]), industry: '水利工程', project_type: '水闸工程', requirement_count: sampleRequirements.length }, summary, requirements } as T
+  }
   if (path.endsWith('/tree') && !path.endsWith('/other-tree') && method === 'GET') return { ok: true, project: rawProject(projects[0]), tree: engineeringTree, units: [] } as T
   if (path.endsWith('/other-tree') && method === 'GET') return { ok: true, project: rawProject(projects[0]), tree: otherTree, units: [] } as T
   if (path.startsWith('/photos?') && method === 'GET') {
@@ -89,7 +118,7 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
     const scope = query.includes('scope=other') ? 'other' : 'engineering'
     const category = query.includes('category=supervision') ? 'supervision' : 'construction'
     const photos = samplePhotos.filter((photo) => photo.scope === scope && (scope === 'other' || photo.category === category))
-    return { ok: true, photos, next_cursor: null } as T
+    return { ok: true, photos, total: photos.length, next_cursor: null } as T
   }
   if (path.startsWith('/photos/') && method === 'GET') {
     return { ok: true, photo: samplePhotos.find((photo) => photo.photo_uuid === path.split('/').pop()) || samplePhotos[0] } as T

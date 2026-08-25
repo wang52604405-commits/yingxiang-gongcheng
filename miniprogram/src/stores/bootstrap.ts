@@ -20,7 +20,9 @@ export function applyBootstrap(accountId: string | number, response: BootstrapRe
   selectionStorage.setOwner(accountId)
   const selectedProject = selectionStorage.getProject()
   const activeProject = response.projects.find((project) => String(project.id) === String(selectedProject.id))
-    || response.current_project
+    || response.projects.find((project) => String(project.id) === String(response.current_project?.id || ''))
+    || response.projects[0]
+    || null
   bootstrapState.projects = response.projects
   bootstrapState.currentProject = activeProject
   bootstrapState.queue = response.queue
@@ -28,6 +30,7 @@ export function applyBootstrap(accountId: string | number, response: BootstrapRe
   bootstrapState.serverTime = response.server_time
   bootstrapState.ready = true
   if (activeProject) selectionStorage.setProject(activeProject)
+  else selectionStorage.clearProject()
   uni.setStorageSync(keyFor(accountId), response)
 }
 

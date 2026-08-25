@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional, Tuple
 
+import professional_templates
+
 
 MAX_PREVIEW_BYTES = 102400
 MAX_ORIGINAL_PHOTO_BYTES = 50 * 1024 * 1024
@@ -164,6 +166,14 @@ def build_project_snapshot(
         "location": str(project.get("location") or "").strip(),
         "start_date": str(project.get("start_date") or "").strip(),
         "description": str(project.get("description") or "").strip(),
+        "industry": str(project.get("industry") or "水利工程").strip(),
+        "project_type": str(project.get("project_type") or "").strip(),
+        "region": str(project.get("region") or "").strip(),
+        "template_version": str(
+            project.get("template_version")
+            or professional_templates.catalog().get("version")
+            or "V1.0"
+        ).strip(),
     }
 
     contract_groups: Dict[Tuple[str, str], dict] = {}
@@ -245,6 +255,14 @@ def build_project_snapshot(
         "project": project_payload,
         "tree": tree,
         "other_tree": _normalize_other_tree((other_images or {}).get("nodes") or []),
+        "requirements": professional_templates.requirements(
+            project_payload.get("industry", "水利工程"),
+            project_payload.get("project_type", ""),
+        ),
+        "requirement_summary": professional_templates.plan_summary(
+            project_payload.get("industry", "水利工程"),
+            project_payload.get("project_type", ""),
+        ),
     }
     content_hash = hashlib.sha256(
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -656,6 +674,55 @@ class DesktopMobileSync:
         self._active_state_identity = ""
         self.last_result = {"ok": True, "state": "idle"}
 
+    def _cloud_account_id(self) -> str:
+        reader = getattr(self.cloud, "desktop_sync_account_id", None)
+        try:
+            return str(reader() or "").strip() if callable(reader) else ""
+        except Exception:
+            return ""
+
+    def _cloud_generation(self) -> str:
+        reader = getattr(self.cloud, "desktop_sync_generation", None)
+        try:
+            return str(reader() or "").strip() if callable(reader) else ""
+        except Exception:
+            return ""
+
+    def _project_ownership_status(self) -> dict:
+        account_id = self._cloud_account_id()
+        project = self.engineering_project_reader() or {}
+        owner_id = str(project.get("cloud_owner_id") or "").strip()
+        if not account_id:
+            return {
+                "ok": False,
+                "code": "account_identity_required",
+                "error": "请重新登录云账号以建立稳定账号编号",
+                "account_id": "",
+                "owner_id": owner_id,
+            }
+        if not owner_id:
+            return {
+                "ok": False,
+                "code": "project_owner_unclaimed",
+                "error": "当前本地工程尚未绑定云账号，请先确认归属",
+                "account_id": account_id,
+                "owner_id": "",
+            }
+        if owner_id != account_id:
+            return {
+                "ok": False,
+                "code": "project_owner_mismatch",
+                "error": "当前本地工程属于另一云账号，已停止同步以防串号",
+                "account_id": account_id,
+                "owner_id": owner_id,
+            }
+        return {
+            "ok": True,
+            "account_id": account_id,
+            "owner_id": owner_id,
+            "project_id": str(project.get("id") or "default"),
+        }
+
     def _state_identity(self) -> str:
         identity_reader = getattr(self.cloud, "desktop_sync_identity", None)
         try:
@@ -749,6 +816,7 @@ class DesktopMobileSync:
 
     def status(self) -> dict:
         state = self._read_state()
+        ownership = self._project_ownership_status()
         return {
             "ok": True,
             "running": bool(self._thread and self._thread.is_alive()),
@@ -759,7 +827,17 @@ class DesktopMobileSync:
             "ack_pending_count": len(state.get("ack_pending") or {}),
             "cleanup_pending_count": len(state.get("cleanup_pending") or {}),
             "last_result": dict(self.last_result),
+            "project_ownership": ownership,
         }
+
+    def account_transition(self, callback):
+        """在同步周期边界内切换登录账号，杜绝一个周期混用两套令牌。"""
+        with self._cycle_lock:
+            result = callback()
+            if isinstance(result, dict) and result.get("ok"):
+                self._active_state_identity = ""
+                self._startup_snapshot_pending = True
+            return result
 
     def _desktop_machine_id(self) -> str:
         try:
@@ -864,6 +942,9 @@ class DesktopMobileSync:
         raise ValueError("手机指定的单元工程在电脑端不存在")
 
     def _import_inbox_item(self, item: dict, original_max_bytes: int) -> dict:
+        ownership = self._project_ownership_status()
+        if not ownership.get("ok"):
+            raise ValueError(ownership.get("error") or "本地工程云账号归属不一致")
         photo_uuid = _canonical_uuid(item.get("photo_uuid"))
         if not photo_uuid:
             raise ValueError("手机影像 UUID 无效")
@@ -1161,6 +1242,15 @@ class DesktopMobileSync:
         return self._retry_ack_pending()
 
     def _sync_inbox(self) -> dict:
+        ownership = self._project_ownership_status()
+        if not ownership.get("ok"):
+            return {
+                **ownership,
+                "imported": 0,
+                "duplicates": 0,
+                "ack_retried": 0,
+                "ack_pending": len((self._read_state().get("ack_pending") or {})),
+            }
         pending_retry = self._retry_ack_pending()
         state = self._read_state()
         result = self.cloud.desktop_inbox(
@@ -1215,6 +1305,9 @@ class DesktopMobileSync:
         }
 
     def _iter_backfill_candidates(self) -> Iterable[dict]:
+        ownership = self._project_ownership_status()
+        if not ownership.get("ok"):
+            return
         ensure_all_photo_uuids(self.manager)
         for project in self.manager.list_projects(include_other=True):
             code = str(project.get("project_code") or "").strip()
@@ -1249,6 +1342,9 @@ class DesktopMobileSync:
                 }
 
     def _sync_backfill(self) -> dict:
+        ownership = self._project_ownership_status()
+        if not ownership.get("ok"):
+            return {**ownership, "uploaded": 0}
         state = self._read_state()
         if state.get("backfill_paused"):
             return {"ok": True, "paused": True, "uploaded": 0}
@@ -1324,13 +1420,47 @@ class DesktopMobileSync:
         try:
             try:
                 self._ensure_account_identity()
+                ownership = self._project_ownership_status()
+                if not ownership.get("ok"):
+                    self.last_result = {
+                        "ok": False,
+                        "stage": "ownership",
+                        **ownership,
+                    }
+                    return self.last_result
+                cycle_identity = self._state_identity()
+                cycle_generation = self._cloud_generation()
                 snapshot = self._sync_snapshot()
                 if not snapshot.get("ok"):
                     self.last_result = {"ok": False, "stage": "snapshot", **snapshot}
                     return self.last_result
+                if (
+                    self._state_identity() != cycle_identity
+                    or self._cloud_generation() != cycle_generation
+                ):
+                    self.last_result = {
+                        "ok": False,
+                        "stage": "account_transition",
+                        "code": "account_changed_during_sync",
+                        "error": "账号在同步过程中发生变化，本轮已中止",
+                        "retryable": True,
+                    }
+                    return self.last_result
                 inbox = self._sync_inbox()
                 if not inbox.get("ok"):
                     self.last_result = {"ok": False, "stage": "inbox", **inbox}
+                    return self.last_result
+                if (
+                    self._state_identity() != cycle_identity
+                    or self._cloud_generation() != cycle_generation
+                ):
+                    self.last_result = {
+                        "ok": False,
+                        "stage": "account_transition",
+                        "code": "account_changed_during_sync",
+                        "error": "账号在同步过程中发生变化，本轮已中止",
+                        "retryable": True,
+                    }
                     return self.last_result
                 backfill = self._sync_backfill()
                 if not backfill.get("ok"):

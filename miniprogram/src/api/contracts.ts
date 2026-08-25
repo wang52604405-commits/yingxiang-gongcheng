@@ -1,4 +1,4 @@
-import type { Assignment, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import type { Assignment, CaptureRequirementRef, PhotoCategory, Scope, UploadMode } from '@/types/domain'
 
 export interface CreateBatchPayload {
   client_batch_id: string
@@ -7,6 +7,7 @@ export interface CreateBatchPayload {
   category?: PhotoCategory
   mode: UploadMode
   assignment?: Assignment
+  requirement?: CaptureRequirementRef
 }
 
 export interface PhotoUploadMetadata {
@@ -66,6 +67,7 @@ export function normalizeBatchPayload(payload: CreateBatchPayload): CreateBatchP
   }
   if (payload.scope === 'engineering' && payload.category) normalized.category = payload.category
   if (payload.assignment && Object.values(payload.assignment).some(Boolean)) normalized.assignment = { ...payload.assignment }
+  if (payload.scope === 'engineering' && payload.requirement?.template_code) normalized.requirement = { ...payload.requirement }
   return normalized
 }
 

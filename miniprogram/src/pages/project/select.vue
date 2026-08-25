@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
 import { mobileApi } from '@/api/mobile'
-import { CURRENT_PROJECT } from '@/config/env'
 import { selectionStorage } from '@/stores/selection'
 import { bootstrapState } from '@/stores/bootstrap'
 import type { ProjectSummary } from '@/types/domain'
@@ -15,9 +14,9 @@ const current = ref(selectionStorage.getProject())
 async function load() {
   try {
     const response = await mobileApi.projects()
-    projects.value = response.projects?.length ? response.projects : [{ ...CURRENT_PROJECT, unit_count: 888 }]
+    projects.value = response.projects || []
   } catch {
-    if (!projects.value.length) projects.value = [{ ...CURRENT_PROJECT, unit_count: 888 }]
+    uni.showToast({ title: '工程列表读取失败，请检查网络', icon: 'none' })
   } finally {
     loading.value = false
   }
@@ -38,13 +37,14 @@ onLoad(load)
   <view class="page-shell no-tabs">
     <PageHeader title="选择工程" subtitle="服务器同步的工程项目" />
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取工程</text></view>
-    <view v-else class="project-list">
+    <view v-else-if="projects.length" class="project-list">
       <button v-for="project in projects" :key="project.id" class="project-card card pressable" :class="{ active: current.id === project.id }" @tap="select(project)">
-        <view class="project-symbol">水</view>
-        <view class="project-copy"><text class="project-name">{{ project.name }}</text><text class="project-meta">{{ project.code }} · {{ project.unit_count || 0 }} 个单元</text></view>
+        <view class="project-symbol">{{ project.industry?.includes('房') ? '建' : project.industry?.includes('市政') ? '市' : project.industry?.includes('电') ? '电' : project.industry?.includes('水') ? '水' : '工' }}</view>
+        <view class="project-copy"><text class="project-name">{{ project.name }}</text><text class="project-meta">{{ project.industry || '水利工程' }} · {{ project.project_type || project.code }} · {{ project.unit_count || 0 }} 个工程部位</text></view>
         <text class="check">{{ current.id === project.id ? '✓' : '›' }}</text>
       </button>
     </view>
+    <view v-else class="empty-state"><text class="empty-title">这个账号还没有工程</text><text class="empty-copy">请先在原电脑登录同一账号并同步工程，手机会自动拉取真实工程数据。</text></view>
   </view>
 </template>
 

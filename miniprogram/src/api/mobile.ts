@@ -1,4 +1,4 @@
-import type { BootstrapResponse, CloudPhoto, MatchCandidate, ProjectNode, ProjectSummary } from '@/types/domain'
+import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectNode, ProjectSummary } from '@/types/domain'
 import { apiBinaryRequest, apiRequest, apiUploadPhoto } from './client'
 import { buildChunkUploadInit, normalizeBatchPayload, type ChunkUploadState, type CreateBatchPayload, type PhotoUploadMetadata } from './contracts'
 import { normalizeBatch, normalizeCloudPhoto, normalizeProject, normalizeTreeNode, type NormalizedBatch } from './normalize'
@@ -56,6 +56,16 @@ export const mobileApi = {
     const raw = await apiRequest<any>('GET', '/projects')
     return { ok: true as const, projects: Array.isArray(raw.projects) ? raw.projects.map(normalizeProject) : [] }
   },
+  projectRequirements: async (projectId: string, requiredType = '') => {
+    const suffix = requiredType ? `?required_type=${encodeURIComponent(requiredType)}` : ''
+    const raw = await apiRequest<any>('GET', `/projects/${encodeURIComponent(projectId)}/requirements${suffix}`)
+    return {
+      ok: true as const,
+      project: normalizeProject(raw.project),
+      summary: raw.summary || { total: 0, required: 0, conditional: 0, recommended: 0 },
+      requirements: (Array.isArray(raw.requirements) ? raw.requirements : []) as PhotoRequirement[],
+    }
+  },
   projectTree: async (projectId: string) => {
     const raw = await apiRequest<any>('GET', `/projects/${encodeURIComponent(projectId)}/tree`)
     return { ok: true as const, project: normalizeProject(raw.project), nodes: Array.isArray(raw.tree) ? raw.tree.map(normalizeTreeNode) : [], units: Array.isArray(raw.units) ? raw.units : [] }
@@ -64,9 +74,9 @@ export const mobileApi = {
     const raw = await apiRequest<any>('GET', `/projects/${encodeURIComponent(projectId)}/other-tree`)
     return { ok: true as const, project: normalizeProject(raw.project), nodes: Array.isArray(raw.tree) ? raw.tree.map(normalizeTreeNode) : [], units: Array.isArray(raw.units) ? raw.units : [] }
   },
-  photos: (query: { project_id: string; scope: string; category?: string; unit_code?: string; cursor?: string; limit?: number }) => {
+  photos: (query: { project_id: string; scope: string; category?: string; unit_code?: string; other_node_code?: string; cursor?: string; limit?: number }) => {
     const params = Object.entries(query).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&')
-    return apiRequest<any>('GET', `/photos?${params}`).then((raw) => ({ ok: true as const, photos: Array.isArray(raw.photos) ? raw.photos.map(normalizeCloudPhoto) : [], next_cursor: raw.next_cursor }))
+    return apiRequest<any>('GET', `/photos?${params}`).then((raw) => ({ ok: true as const, photos: Array.isArray(raw.photos) ? raw.photos.map(normalizeCloudPhoto) : [], next_cursor: String(raw.next_cursor || ''), total: Number(raw.total || 0) }))
   },
   photo: (photoUuid: string) => apiRequest<any>('GET', `/photos/${encodeURIComponent(photoUuid)}`).then((raw) => ({ ok: true as const, photo: normalizeCloudPhoto(raw.photo) })),
   createBatch: async (payload: CreateBatchPayload) => {

@@ -312,13 +312,20 @@ def upload_chunked(api, token, batch_id, photo_uuid, photo, title):
 
 
 class StagingCloud:
-    def __init__(self, api: Api, token: str, machine_id: str):
+    def __init__(self, api: Api, token: str, machine_id: str, account_id: str):
         self.api = api
         self.token = token
         self.machine_id = machine_id
+        self.account_id = str(account_id or "").strip()
 
     def desktop_sync_identity(self):
-        return "isolated-staging-e2e"
+        return f"isolated-staging-e2e:{self.account_id}"
+
+    def desktop_sync_account_id(self):
+        return self.account_id
+
+    def desktop_sync_generation(self):
+        return f"isolated-staging-e2e:{self.account_id}"
 
     def desktop_inbox(self, cursor="", limit=50, desktop_machine_id=""):
         payload, _ = self.api.json(
@@ -387,6 +394,9 @@ def run(args):
         os.environ["ALBUM_SERVER_DATA"] = str(temp / "server-import-data")
         os.environ["ALBUM_SERVER_DB"] = str(temp / "server-import-data" / "unused.db")
         os.environ["ALBUM_SERVER_SECRET"] = secrets.token_hex(32)
+        # 命令行已同时验证 loopback 和显式 staging 哨兵；只在这个隔离
+        # 进程内允许桌面下载器访问本机 HTTP，生产默认仍严格要求 HTTPS。
+        os.environ["ALBUM_ALLOW_INSECURE_LOCALHOST"] = "1"
 
         from app import AlbumManager
         import mobile_sync
@@ -415,6 +425,10 @@ def run(args):
         api.json("POST", "/api/register", payload={"username": username, "password": password})
         login, _ = api.json("POST", "/api/login", payload={"username": username, "password": password})
         account_token = login["token"]
+        account_id = str((login.get("account") or {}).get("id") or "").strip()
+        require(account_id, "桌面登录未返回不可变 account_id")
+        project["cloud_owner_id"] = account_id
+        project["cloud_owner_username"] = username
         activated, _ = api.json(
             "POST",
             "/api/activate",
@@ -597,7 +611,7 @@ def run(args):
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         desktop_manager = AlbumManager(temp / "desktop" / "albums")
-        cloud = StagingCloud(api, desktop_token, machine_id)
+        cloud = StagingCloud(api, desktop_token, machine_id, account_id)
         synchronizer = mobile_sync.DesktopMobileSync(
             desktop_manager,
             cloud,

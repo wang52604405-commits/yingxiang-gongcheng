@@ -87,4 +87,21 @@ describe('账号命名空间', () => {
     expect(bootstrapState.currentProject?.id).toBe('project-b')
     expect(selectionStorage.getProject()).toMatchObject({ id: 'project-b', name: '乙工程（服务器刷新）' })
   })
+
+  it('真实账号没有服务器工程时清除旧选择，不伪造默认工程', () => {
+    selectionStorage.setOwner('A')
+    selectionStorage.setProject({ id: 'stale-project', code: 'STALE', name: '旧缓存工程' })
+    applyBootstrap('A', {
+      ok: true,
+      account: { id: 'A', username: 'A' },
+      server_time: '2026-08-25T00:00:00Z',
+      current_project: null,
+      projects: [],
+      queue: {},
+      recent_uploads: [],
+    })
+    expect(bootstrapState.currentProject).toBeNull()
+    expect(selectionStorage.hasProject()).toBe(false)
+    expect(selectionStorage.getProject()).toMatchObject({ id: '', name: '尚未从电脑同步工程' })
+  })
 })

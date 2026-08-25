@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import H5TabBar from '@/components/H5TabBar.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
+import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
 import type { CloudPhoto, PhotoCategory, Scope } from '@/types/domain'
@@ -16,25 +17,54 @@ const scope = ref<Scope>('engineering')
 const category = ref<PhotoCategory>('construction')
 const photos = ref<CloudPhoto[]>([])
 const loading = ref(false)
+const loadingMore = ref(false)
+const nextCursor = ref('')
+const totalCount = ref(0)
 const selectedDestination = ref(selectionStorage.getDestination())
 const uniApi = uni
+let requestVersion = 0
 
-async function loadPhotos() {
-  loading.value = true
+async function loadPhotos(reset = true) {
+  if (!project.value.id) {
+    photos.value = []
+    totalCount.value = 0
+    nextCursor.value = ''
+    loading.value = false
+    loadingMore.value = false
+    uni.stopPullDownRefresh()
+    return
+  }
+  if (!reset && (loadingMore.value || !nextCursor.value)) return
+  const version = reset ? ++requestVersion : requestVersion
+  if (reset) loading.value = true
+  else loadingMore.value = true
   try {
     const response = await mobileApi.photos({
       project_id: project.value.id,
       scope: scope.value,
       category: scope.value === 'engineering' ? category.value : undefined,
       unit_code: scope.value === 'engineering' ? selectedDestination.value?.assignment.unit_code : undefined,
+      other_node_code: scope.value === 'other' ? selectedDestination.value?.assignment.other_node_code : undefined,
+      cursor: reset ? undefined : nextCursor.value,
       limit: 60,
     })
-    photos.value = response.photos || []
+    if (version !== requestVersion) return
+    const incoming: CloudPhoto[] = response.photos || []
+    if (reset) photos.value = incoming
+    else {
+      const existing = new Set(photos.value.map((photo) => photo.photo_uuid))
+      photos.value = [...photos.value, ...incoming.filter((photo) => !existing.has(photo.photo_uuid))]
+    }
+    nextCursor.value = response.next_cursor || ''
+    totalCount.value = response.total
   } catch (error) {
-    uni.showToast({ title: error instanceof Error ? error.message : '影像加载失败', icon: 'none' })
+    if (version === requestVersion) uni.showToast({ title: error instanceof Error ? error.message : '影像加载失败', icon: 'none' })
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (version === requestVersion) {
+      loading.value = false
+      loadingMore.value = false
+      uni.stopPullDownRefresh()
+    }
   }
 }
 
@@ -52,9 +82,8 @@ function chooseDestination() {
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=library` })
 }
 
-function openUpload() {
-  selectionStorage.setUploadPreset({ scope: scope.value, category: category.value, mode: 'direct' })
-  uni.switchTab({ url: '/pages/upload/index' })
+function openCapture() {
+  void launchCapture({ scope: scope.value, category: category.value, mode: 'direct' })
 }
 
 onShow(() => {
@@ -63,7 +92,8 @@ onShow(() => {
   selectedDestination.value = selectionStorage.getDestination()
   void loadPhotos()
 })
-onPullDownRefresh(loadPhotos)
+onPullDownRefresh(() => loadPhotos(true))
+onReachBottom(() => { void loadPhotos(false) })
 </script>
 
 <template>
@@ -74,7 +104,7 @@ onPullDownRefresh(loadPhotos)
         <text class="page-title">影像库</text>
         <text class="page-subtitle">按电脑端的工程层级查看。</text>
       </view>
-      <button class="search-button pressable" aria-label="搜索单元工程" @tap="chooseDestination"><UiIcon name="search" :size="21" /></button>
+      <button class="search-button pressable" aria-label="搜索工程部位" @tap="chooseDestination"><UiIcon name="search" :size="21" /></button>
     </view>
 
     <view class="segment library-segment">
@@ -85,7 +115,7 @@ onPullDownRefresh(loadPhotos)
     <button class="path-card pressable" @tap="chooseDestination">
       <view class="path-copy">
         <text class="path-label">当前归档位置</text>
-        <text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部单元工程' : '全部其它影像' }}</text>
+        <text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部工程部位' : '全部其它影像' }}</text>
         <text class="path-code">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_code || selectedDestination.assignment.other_node_code : project.code }}</text>
       </view>
       <text class="path-arrow">›</text>
@@ -94,9 +124,9 @@ onPullDownRefresh(loadPhotos)
     <view class="section-head unit-head">
       <view>
         <text class="section-title">{{ scope === 'engineering' ? '工程照片' : '其它照片' }}</text>
-        <text class="count-copy">共 {{ photos.length }} 张影像</text>
+        <text class="count-copy">共 {{ totalCount }} 张影像 · 已显示 {{ photos.length }} 张</text>
       </view>
-      <button class="upload-small pressable" @tap="openUpload">＋ 上传</button>
+      <button class="upload-small pressable" @tap="openCapture">＋ 采集</button>
     </view>
 
     <view v-if="scope === 'engineering'" class="segment category-segment">
@@ -115,10 +145,12 @@ onPullDownRefresh(loadPhotos)
         </view>
       </button>
     </view>
+    <button v-if="photos.length && nextCursor" class="load-more pressable" :disabled="loadingMore" @tap="loadPhotos(false)">{{ loadingMore ? '正在加载…' : '继续加载更多' }}</button>
+    <text v-else-if="photos.length" class="all-loaded">已显示全部 {{ photos.length }} 张影像</text>
     <view v-else class="empty-state">
       <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
       <text class="empty-title">这里还没有影像</text>
-      <text class="empty-copy">切换归档位置，或点击“上传”添加现场照片。</text>
+      <text class="empty-copy">切换归档位置，或点击“采集”添加现场照片。</text>
     </view>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="1" :badge="queueRuntime.pendingCount.value" />
@@ -152,4 +184,6 @@ onPullDownRefresh(loadPhotos)
 .tile-date { font-size: 18rpx; opacity: 0.76; }
 .loading-inline { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360rpx; color: var(--muted); font-size: 24rpx; }
 .loading-inline .loading-spinner { width: 48rpx; height: 48rpx; margin-bottom: 18rpx; }
+.load-more { display: block; min-width: 260rpx; min-height: 66rpx; margin: 24rpx auto 0; padding: 0 24rpx; border: 1rpx solid var(--line); border-radius: 20rpx; color: var(--primary-strong); background: var(--surface); font-size: 22rpx; }
+.all-loaded { display: block; padding: 26rpx 0 10rpx; color: var(--muted); text-align: center; font-size: 20rpx; }
 </style>

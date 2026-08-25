@@ -8,3 +8,9 @@ export const CURRENT_PROJECT = {
   name: '邯郸市永年区洺河龙泉缓洪工程',
   code: 'YNLQ',
 } as const
+
+export const EMPTY_PROJECT = {
+  id: '',
+  name: '尚未从电脑同步工程',
+  code: '',
+} as const

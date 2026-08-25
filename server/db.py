@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     display_name  TEXT DEFAULT '',
     role          TEXT DEFAULT 'user',
     status        TEXT DEFAULT 'active',
+    mobile_auth_version INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT DEFAULT (datetime('now', 'localtime')),
     notes         TEXT DEFAULT ''
 );
@@ -172,6 +173,37 @@ CREATE TABLE IF NOT EXISTS cloud_units (
     FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+CREATE TABLE IF NOT EXISTS cloud_project_requirements (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id           INTEGER NOT NULL,
+    project_id           TEXT NOT NULL,
+    template_code        TEXT NOT NULL,
+    industry             TEXT NOT NULL DEFAULT '',
+    project_type         TEXT NOT NULL DEFAULT '',
+    phase                TEXT NOT NULL DEFAULT '',
+    division             TEXT NOT NULL DEFAULT '',
+    subdivision          TEXT NOT NULL DEFAULT '',
+    item                 TEXT NOT NULL DEFAULT '',
+    process              TEXT NOT NULL DEFAULT '',
+    requirement_name     TEXT NOT NULL DEFAULT '',
+    required_type        TEXT NOT NULL DEFAULT 'recommended',
+    condition_text       TEXT NOT NULL DEFAULT '',
+    min_photo_count      INTEGER NOT NULL DEFAULT 1,
+    recommended_count    INTEGER NOT NULL DEFAULT 1,
+    shot_types           TEXT NOT NULL DEFAULT '',
+    timing               TEXT NOT NULL DEFAULT '',
+    before_concealment   INTEGER NOT NULL DEFAULT 0,
+    gps_required         INTEGER NOT NULL DEFAULT 0,
+    exif_required        INTEGER NOT NULL DEFAULT 1,
+    description_template TEXT NOT NULL DEFAULT '',
+    standard_source      TEXT NOT NULL DEFAULT '',
+    template_version     TEXT NOT NULL DEFAULT 'V1.0',
+    active               INTEGER NOT NULL DEFAULT 1,
+    updated_at           TEXT NOT NULL,
+    UNIQUE (account_id, project_id, template_code),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
 CREATE TABLE IF NOT EXISTS mobile_batches (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id      INTEGER NOT NULL,
@@ -181,6 +213,8 @@ CREATE TABLE IF NOT EXISTS mobile_batches (
     category        TEXT NOT NULL DEFAULT '',
     mode            TEXT NOT NULL,
     assignment_json TEXT NOT NULL DEFAULT '{}',
+    requirement_code TEXT NOT NULL DEFAULT '',
+    requirement_name TEXT NOT NULL DEFAULT '',
     target_machine_id TEXT NOT NULL DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'local_ready',
     error_code      TEXT NOT NULL DEFAULT '',
@@ -202,6 +236,8 @@ CREATE TABLE IF NOT EXISTS cloud_photos (
     scope                TEXT NOT NULL,
     category             TEXT NOT NULL DEFAULT '',
     assignment_json      TEXT NOT NULL DEFAULT '{}',
+    requirement_code     TEXT NOT NULL DEFAULT '',
+    requirement_name     TEXT NOT NULL DEFAULT '',
     title                TEXT NOT NULL DEFAULT '',
     photo_date           TEXT NOT NULL DEFAULT '',
     client_captured_at   TEXT NOT NULL DEFAULT '',
@@ -314,6 +350,9 @@ ON cloud_engineering_projects(account_id, active, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mobile_units_tree
 ON cloud_units(account_id, project_id, scope, active, sort_order, id);
 
+CREATE INDEX IF NOT EXISTS idx_cloud_project_requirements
+ON cloud_project_requirements(account_id, project_id, active, required_type, id);
+
 CREATE INDEX IF NOT EXISTS idx_mobile_batches_account
 ON mobile_batches(account_id, id DESC);
 
@@ -342,6 +381,7 @@ ACCOUNTS_EXTRA_COLUMNS = {
     "inviter_id": "INTEGER DEFAULT 0",
     "invite_reward_months": "INTEGER DEFAULT 0",
     "email": "TEXT DEFAULT ''",
+    "mobile_auth_version": "INTEGER NOT NULL DEFAULT 0",
 }
 
 INVITES_EXTRA_COLUMNS = {
@@ -357,6 +397,8 @@ MOBILE_EXTRA_COLUMNS = {
     },
     "mobile_batches": {
         "target_machine_id": "TEXT NOT NULL DEFAULT ''",
+        "requirement_code": "TEXT NOT NULL DEFAULT ''",
+        "requirement_name": "TEXT NOT NULL DEFAULT ''",
     },
     "cloud_photos": {
         "original_sha256": "TEXT NOT NULL DEFAULT ''",
@@ -373,6 +415,8 @@ MOBILE_EXTRA_COLUMNS = {
         "original_cleanup_status": "TEXT NOT NULL DEFAULT ''",
         "original_cleanup_error": "TEXT NOT NULL DEFAULT ''",
         "original_deleted_at": "TEXT NOT NULL DEFAULT ''",
+        "requirement_code": "TEXT NOT NULL DEFAULT ''",
+        "requirement_name": "TEXT NOT NULL DEFAULT ''",
     },
     "mobile_upload_sessions": {
         "cleanup_status": "TEXT NOT NULL DEFAULT ''",
@@ -418,6 +462,24 @@ def migrate() -> None:
             for name, decl in additions.items():
                 if name not in table_columns:
                     conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {decl}')
+
+        duplicate_wechat_accounts = conn.execute(
+            "SELECT account_id, COUNT(*) AS total FROM wechat_bindings "
+            "GROUP BY account_id HAVING COUNT(*) > 1"
+        ).fetchall()
+        if duplicate_wechat_accounts:
+            details = ", ".join(
+                f"account_id={row['account_id']}({row['total']}条)"
+                for row in duplicate_wechat_accounts
+            )
+            raise RuntimeError(
+                "检测到同一桌面账号绑定多个微信，拒绝静默迁移；"
+                f"请先备份并人工处理：{details}"
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_wechat_bindings_one_account "
+            "ON wechat_bindings(account_id)"
+        )
 
         if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' "

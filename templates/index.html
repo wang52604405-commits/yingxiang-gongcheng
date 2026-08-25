@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260822-2.64.css">
+  <link rel="stylesheet" href="/assets/app-A20260825-2.65.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -130,8 +130,13 @@
                           <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
                           <small style="display:block;margin-top:7px;color:#765b22;line-height:1.5;">登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。</small>
                         </div>
-                        <button type="button" id="cloudLogoutBtn" style="margin-top:8px;display:none;background:#bd2a20">退出登录</button>
                       </div>
+                      <div id="cloudProjectOwnershipBox" style="display:none;margin-top:9px;padding:9px 10px;border-radius:7px;line-height:1.55;"></div>
+                      <div id="wechatBindingBox" style="display:none;margin-top:9px;padding:9px 10px;background:#eef6f0;border-radius:7px;line-height:1.55;">
+                        <strong>手机小程序：</strong><span id="wechatBindingStatus">正在检查…</span>
+                        <button type="button" id="wechatUnbindBtn" class="secondary" style="display:none;margin-top:7px;">解绑微信</button>
+                      </div>
+                      <button type="button" id="cloudLogoutBtn" style="margin-top:8px;display:none;background:#bd2a20">退出登录</button>
                     </div>
                     <div style="margin-top:8px;"><strong>内测说明：</strong> 邀请奖励只按后台记录的有效邀请自动计算，不再采用截图积分，避免漏记和重复核销。</div>
                   </div>
@@ -644,6 +649,9 @@
             <div class="project-settings-grid">
               <label>工程名称<input id="projectInfoNameInput" type="text" placeholder="请输入工程名称"></label>
               <label>工程编号<input id="projectInfoCodeInput" type="text" placeholder="可选"></label>
+              <label>工程专业<select id="projectInfoIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="电力工程">电力工程</option></select></label>
+              <label>工程类型<select id="projectInfoProjectTypeInput" class="orientation-select"><option value="">请选择工程类型</option></select></label>
+              <label>归档地区<input id="projectInfoRegionInput" type="text" placeholder="省/市，可选；用于后续地区模板"></label>
               <label>建设单位<input id="projectInfoOwnerInput" type="text" placeholder="可选"></label>
               <label>施工单位<input id="projectInfoContractorInput" type="text" placeholder="可选"></label>
               <label>监理单位<input id="projectInfoSupervisorInput" type="text" placeholder="可选"></label>
@@ -651,6 +659,7 @@
               <label>开工日期<input id="projectInfoStartDateInput" type="date"></label>
               <label>工程删除密码<input id="projectInfoDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="新工程必填；编辑时留空表示不修改"></label>
               <p class="import-hint wide">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
+              <div class="project-settings-card wide" id="professionalPlanSummary"><strong>专业影像采集模板</strong><p class="import-hint">水利沿用现有项目划分；房建、市政、电力会按专业模板同步“必拍 / 条件必拍 / 推荐”清单到小程序。</p><button class="secondary" type="button" id="openProfessionalPlanBtn">查看详细采集清单</button></div>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
             </div>
           </section>
@@ -794,6 +803,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260822-2.64.js"></script>
+  <script defer src="/assets/app-A20260825-2.65.js"></script>
 </body>
 </html>
