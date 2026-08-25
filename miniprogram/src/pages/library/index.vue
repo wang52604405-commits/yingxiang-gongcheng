@@ -6,7 +6,6 @@ import H5TabBar from '@/components/H5TabBar.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
-import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
 import type { CloudPhoto, PhotoCategory, Scope } from '@/types/domain'
@@ -82,10 +81,6 @@ function chooseDestination() {
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=library` })
 }
 
-function openCapture() {
-  void launchCapture({ scope: scope.value, category: category.value, mode: 'direct' })
-}
-
 onShow(() => {
   syncTabBar(1)
   project.value = selectionStorage.getProject()
@@ -126,7 +121,6 @@ onReachBottom(() => { void loadPhotos(false) })
         <text class="section-title">{{ scope === 'engineering' ? '工程照片' : '其它照片' }}</text>
         <text class="count-copy">共 {{ totalCount }} 张影像 · 已显示 {{ photos.length }} 张</text>
       </view>
-      <button class="upload-small pressable" @tap="openCapture">＋ 采集</button>
     </view>
 
     <view v-if="scope === 'engineering'" class="segment category-segment">
@@ -150,7 +144,7 @@ onReachBottom(() => { void loadPhotos(false) })
     <view v-else class="empty-state">
       <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
       <text class="empty-title">这里还没有影像</text>
-      <text class="empty-copy">切换归档位置，或点击“采集”添加现场照片。</text>
+      <text class="empty-copy">切换归档位置，或点击底部中间的“采集”添加现场照片。</text>
     </view>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="1" :badge="queueRuntime.pendingCount.value" />
@@ -170,7 +164,6 @@ onReachBottom(() => { void loadPhotos(false) })
 .path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; color: var(--muted); }
 .unit-head { margin-bottom: 18rpx; }
 .count-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 21rpx; }
-.upload-small { display: inline-flex; align-items: center; justify-content: center; min-height: 60rpx; padding: 0 20rpx; border-radius: 17rpx; color: #041a1a; background: var(--primary-strong); font-size: 23rpx; font-weight: 600; line-height: 1.2; }
 .category-segment { margin-bottom: 20rpx; }
 .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10rpx; }
 .photo-tile { position: relative; display: block; width: 100%; min-width: 0; aspect-ratio: 1 / 1.14; overflow: hidden; border-radius: 18rpx; background: var(--surface); }

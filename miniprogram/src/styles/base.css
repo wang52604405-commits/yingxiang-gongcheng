@@ -72,7 +72,7 @@ uni-button::after {
 
 .page-shell {
   min-height: 100vh;
-  padding: calc(var(--safe-top) + 176rpx) 30rpx calc(150rpx + var(--safe-bottom));
+  padding: 0 30rpx calc(150rpx + var(--safe-bottom));
   background: var(--bg);
 }
 
