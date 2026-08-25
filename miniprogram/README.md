@@ -48,6 +48,16 @@ npm run dev:mp-weixin
 npm run build:mp-weixin
 ```
 
+## 微信开发者工具直连 GitHub
+
+仓库源代码分支是 `codex/wechat-miniapp-v1`。仓库配置了自动发布流程：当源代码分支更新且仓库 Secret `WECHAT_APP_ID` 已配置后，GitHub Actions 会编译微信包并更新 `codex/wechat-mp-release` 分支。这个发布分支的根目录就是微信开发者工具可以直接打开的原生小程序目录。
+
+在微信开发者工具中打开“版本管理”，配置本仓库的 GitHub 地址，选择 `codex/wechat-mp-release` 分支并执行“拉取”。后续源代码更新后，先在 GitHub Actions 等待发布分支完成，再在开发者工具中执行“拉取”。版本管理的 GitHub 拉取、提交和推送入口位于“版本管理”面板，具体认证名称随开发者工具版本可能略有不同。
+
+仓库 Secret 配置：GitHub 仓库 `Settings → Secrets and variables → Actions → New repository secret`，名称填写 `WECHAT_APP_ID`，值填写真实小程序 AppID。AppID 只写入编译产物的 `project.config.json`；AppSecret、服务器密钥和 OSS 凭据不进入 GitHub。
+
+没有配置 `WECHAT_APP_ID` 时，发布流程只提示并跳过发布分支，不影响源代码测试。开发者工具临时验收仍可手动执行 `npm run build:mp-weixin`，然后打开 `dist/build/mp-weixin`。
+
 `build:mp-weixin` 完成后会自动确认：
 
 1. 构建包使用 real API 标记且没有 mock 标记；
