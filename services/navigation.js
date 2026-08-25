@@ -1,0 +1,1 @@
+"use strict";require("../common/vendor.js"),exports.syncTabBar=function(e){var l,t,a;const n=getCurrentPages().at(-1);null==(a=null==(t=null==(l=null==n?void 0:n.getTabBar)?void 0:l.call(n))?void 0:t.setData)||a.call(t,{selected:e})};

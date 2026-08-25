@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "app-header": "../../components/AppHeader",
+    "ui-icon": "../../components/UiIcon"
+  }
+}

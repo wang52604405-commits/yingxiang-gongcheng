@@ -1,0 +1,1 @@
+"use strict";const e=require("../common/vendor.js"),n=e.defineComponent({__name:"UiIcon",props:{name:{},size:{default:20}},setup:n=>(n,o)=>({a:e.n(`icon-${n.name}`),b:`${n.size}px`,c:`${n.size}px`})}),o=e._export_sfc(n,[["__scopeId","data-v-e31d487e"]]);wx.createComponent(o);

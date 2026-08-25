@@ -1,0 +1,1 @@
+"use strict";const e=require("../common/vendor.js"),o=e.defineComponent({__name:"AppHeader",props:{projectName:{},online:{type:Boolean}},emits:["selectProject"],setup:o=>(o,t)=>({a:e.t(o.projectName),b:e.o(e=>o.$emit("selectProject"),"01"),c:e.t(!1===o.online?"当前离线":"网络已连接"),d:!1===o.online?1:""})}),t=e._export_sfc(o,[["__scopeId","data-v-08b1a609"]]);wx.createComponent(t);
