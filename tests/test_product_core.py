@@ -56,6 +56,49 @@ class ServerProductContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         return response.get_json()["token"]
 
+    def test_login_and_me_return_same_stable_account_id(self):
+        response = self.post(
+            "/api/login",
+            {"username": "test_admin", "password": "TestAdmin2026Secure"},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertIsInstance(payload["account"]["id"], int)
+        # 新字段只能做加法，旧桌面端依赖的账号字段必须原样保留。
+        self.assertTrue(
+            {"username", "display_name", "role"}.issubset(payload["account"])
+        )
+        me = self.client.get(
+            "/api/me",
+            headers={"Authorization": "Bearer " + payload["token"]},
+        )
+        self.assertEqual(me.status_code, 200, me.get_json())
+        me_payload = me.get_json()
+        self.assertEqual(me_payload["account"]["id"], payload["account"]["id"])
+        self.assertTrue(
+            {"username", "display_name", "role"}.issubset(me_payload["account"])
+        )
+        self.assertIn("license", me_payload)
+
+        # 同一账号重复登录时 subject 不随 token 或会话变化。
+        second = self.post(
+            "/api/login",
+            {"username": "test_admin", "password": "TestAdmin2026Secure"},
+        ).get_json()
+        self.assertEqual(second["account"]["id"], payload["account"]["id"])
+
+        # 模拟服务重启后重新建 Flask app，数据库里的稳定 ID 仍保持不变。
+        from server.app import create_app
+
+        restarted = create_app().test_client().post(
+            "/api/login",
+            json={"username": "test_admin", "password": "TestAdmin2026Secure"},
+        )
+        self.assertEqual(restarted.status_code, 200, restarted.get_json())
+        self.assertEqual(
+            restarted.get_json()["account"]["id"], payload["account"]["id"]
+        )
+
     def test_product_config_invite_qualification_and_telemetry(self):
         product = self.client.get("/api/product-config").get_json()["product"]
         self.assertEqual(product["free"]["photo_limit"], 300)

@@ -7,8 +7,8 @@
   3. 重启 album-auth 服务
   4. 健康检查（/api/me 返回 401 即服务已起）
 
-安全：不含私钥 / 邮箱授权码（服务器用 systemd 环境变量注入，
-配置在 /etc/systemd/system/album-auth.service，不受本脚本影响）。
+安全：不含私钥 / 邮箱授权码（服务器的 systemd unit 只引用受限的
+/etc/album-auth/album-auth.env，本脚本不上传、不读取也不改写该文件）。
 私钥由服务器 /etc/album-auth/private_key.pem 提供，本脚本不触碰。
 
 用法：python deploy_auth.py

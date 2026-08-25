@@ -828,6 +828,7 @@ def create_app():
                 "ok": True,
                 "token": _token_for(account["id"]),
                 "account": {
+                    "id": int(account["id"]),
                     "username": account["username"],
                     "display_name": account["display_name"],
                     "role": account["role"],
@@ -941,6 +942,7 @@ def create_app():
             {
                 "ok": True,
                 "account": {
+                    "id": int(user["id"]),
                     "username": user["username"],
                     "display_name": user["display_name"],
                     "role": user["role"],

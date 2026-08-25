@@ -1,0 +1,3 @@
+/server/deploy/*.sh text eol=lf
+/server/deploy/*.service text eol=lf
+/server/deploy/*.conf text eol=lf
