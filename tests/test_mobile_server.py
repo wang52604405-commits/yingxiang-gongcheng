@@ -382,6 +382,200 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertNotEqual(config.SERVER_INSTANCE_ID, "album-auth-staging")
 
+    def test_account_first_login_requires_confirmation_and_then_allows_quick_login(self):
+        from server import app as server_app
+
+        server_app._rate_hits.clear()
+        username = "account_first_user"
+        password = "AccountFirst2026"
+        app_id = "wx-account-first"
+        code = "account-first-wechat"
+        self._register(username, password)
+        server_app._rate_hits.clear()
+
+        wrong = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": "missing_account_first_user",
+                "password": "WrongPassword2026",
+                "code": code,
+                "app_id": app_id,
+            },
+        )
+        self.assertEqual(wrong.status_code, 401, wrong.get_json())
+        self.assertEqual(wrong.get_json()["code"], "account_credentials_invalid")
+        self.assertNotIn("binding_intent", wrong.get_json())
+        self.assertNotIn("token", wrong.get_json())
+
+        verified = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": username,
+                "password": password,
+                "code": code,
+                "app_id": app_id,
+            },
+        )
+        self.assertEqual(verified.status_code, 200, verified.get_json())
+        verified_payload = verified.get_json()
+        self.assertEqual(verified_payload["account"]["username"], username)
+        self.assertEqual(verified_payload["binding_intent_expires_in"], 600)
+        self.assertTrue(verified_payload["binding_required"])
+        self.assertTrue(verified_payload["binding_intent"])
+        self.assertNotIn("token", verified_payload)
+        self.assertNotIn("bootstrap", verified_payload)
+
+        account_id = verified_payload["account"]["id"]
+        conn = self.db.connect()
+        try:
+            before_confirmation = conn.execute(
+                "SELECT COUNT(*) AS total FROM wechat_bindings WHERE account_id = ?",
+                (account_id,),
+            ).fetchone()["total"]
+        finally:
+            conn.close()
+        self.assertEqual(before_confirmation, 0)
+
+        intent = verified_payload["binding_intent"]
+        tampered_intent = intent[:-1] + ("A" if intent[-1] != "A" else "B")
+        tampered = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind-confirm",
+            json={"binding_intent": tampered_intent},
+        )
+        self.assertEqual(tampered.status_code, 401, tampered.get_json())
+        self.assertEqual(tampered.get_json()["code"], "binding_intent_invalid")
+
+        confirmed = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind-confirm",
+            json={"binding_intent": intent},
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
+        confirmed_payload = confirmed.get_json()
+        self.assertFalse(confirmed_payload["idempotent"])
+        self.assertTrue(confirmed_payload["token"])
+        self.assertEqual(confirmed_payload["account"]["id"], account_id)
+        self.assertIn("projects", confirmed_payload["bootstrap"])
+
+        repeated = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind-confirm",
+            json={"binding_intent": intent},
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.get_json())
+        self.assertTrue(repeated.get_json()["idempotent"])
+        self.assertTrue(repeated.get_json()["token"])
+
+        quick = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": code, "app_id": app_id},
+        )
+        self.assertEqual(quick.status_code, 200, quick.get_json())
+        self.assertTrue(quick.get_json()["token"])
+        self.assertEqual(quick.get_json()["account"]["id"], account_id)
+        self.assertNotIn("binding_ticket", quick.get_json())
+        server_app._rate_hits.clear()
+
+    def test_account_first_binding_rechecks_both_one_to_one_conflicts(self):
+        from server import app as server_app
+
+        server_app._rate_hits.clear()
+        owner = "account_first_owner"
+        other = "account_first_other"
+        race = "account_first_race"
+        password = "BindingConflict2026"
+        app_id = "wx-account-conflict"
+        self._register(owner, password)
+        self._register(other, password)
+        self._register(race, password)
+        server_app._rate_hits.clear()
+
+        owner_verified = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": owner,
+                "password": password,
+                "code": "owner-wechat",
+                "app_id": app_id,
+            },
+        )
+        owner_confirmed = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind-confirm",
+            json={"binding_intent": owner_verified.get_json()["binding_intent"]},
+        )
+        self.assertEqual(owner_confirmed.status_code, 200, owner_confirmed.get_json())
+
+        occupied_wechat = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": other,
+                "password": password,
+                "code": "owner-wechat",
+                "app_id": app_id,
+            },
+        )
+        self.assertEqual(occupied_wechat.status_code, 409, occupied_wechat.get_json())
+        self.assertEqual(occupied_wechat.get_json()["code"], "wechat_already_bound")
+
+        occupied_account = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": owner,
+                "password": password,
+                "code": "different-wechat",
+                "app_id": app_id,
+            },
+        )
+        self.assertEqual(occupied_account.status_code, 409, occupied_account.get_json())
+        self.assertEqual(occupied_account.get_json()["code"], "account_already_bound")
+
+        # 登录验证和最终确认之间若账号被另一微信占用，确认接口必须在写事务内
+        # 再次检查，不能用旧 intent 覆盖或新增第二条绑定。
+        race_verified = self.client.post(
+            "/api/mobile/v1/auth/account-login",
+            json={
+                "username": race,
+                "password": password,
+                "code": "race-original-wechat",
+                "app_id": app_id,
+            },
+        )
+        self.assertEqual(race_verified.status_code, 200, race_verified.get_json())
+        legacy_login = self.client.post(
+            "/api/mobile/v1/auth/wechat-login",
+            json={"code": "race-new-wechat", "app_id": app_id},
+        )
+        legacy_bound = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind",
+            json={
+                "binding_ticket": legacy_login.get_json()["binding_ticket"],
+                "username": race,
+                "password": password,
+            },
+        )
+        self.assertEqual(legacy_bound.status_code, 200, legacy_bound.get_json())
+
+        stale_confirmation = self.client.post(
+            "/api/mobile/v1/auth/wechat-bind-confirm",
+            json={"binding_intent": race_verified.get_json()["binding_intent"]},
+        )
+        self.assertEqual(
+            stale_confirmation.status_code, 409, stale_confirmation.get_json()
+        )
+        self.assertEqual(
+            stale_confirmation.get_json()["code"], "account_already_bound"
+        )
+
+        conn = self.db.connect()
+        try:
+            race_count = conn.execute(
+                "SELECT COUNT(*) AS total FROM wechat_bindings w "
+                "JOIN accounts a ON a.id = w.account_id WHERE a.username = ?",
+                (race,),
+            ).fetchone()["total"]
+        finally:
+            conn.close()
+        self.assertEqual(race_count, 1)
+        server_app._rate_hits.clear()
+
     def test_schema_is_additive_and_wechat_binding_uses_existing_account(self):
         conn = self.db.connect()
         try:

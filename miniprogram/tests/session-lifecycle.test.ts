@@ -5,7 +5,7 @@ describe('小程序生命周期登录闸门', () => {
   it('onLaunch/onShow 并发只验证一次，缓存账号在验证完成前绝不恢复上传', async () => {
     let resolveLogin!: (value: boolean) => void
     const ensure = vi.fn(() => new Promise<boolean>((resolve) => { resolveLogin = resolve }))
-    const session: any = { ready: true, account: { id: 'old-cache', username: 'old' }, bindingRequired: false }
+    const session: any = { ready: true, account: { id: 'old-cache', username: 'old' }, stage: 'authenticated' }
     const queue = {
       clearOwner: vi.fn(),
       setOwner: vi.fn(),

@@ -8,8 +8,13 @@ export interface AuthResponse {
   token?: string
   account?: { id: number | string; username: string; display_name?: string; role?: string }
   binding_required?: boolean
-  binding_ticket?: string
   bootstrap?: BootstrapResponse
+}
+
+export interface AccountLoginResponse {
+  ok: true
+  account: { id: number | string; username: string; display_name?: string; role?: string }
+  binding_intent: string
 }
 
 export function normalizeBootstrapResponse(raw: any): BootstrapResponse {
@@ -40,12 +45,20 @@ function normalizeChunkUpload(raw: any): ChunkUploadState {
 }
 
 export const mobileApi = {
+  accountLogin: (username: string, password: string, code: string, appId: string): Promise<AccountLoginResponse> => {
+    return apiRequest<AccountLoginResponse>('POST', '/auth/account-login', {
+      username,
+      password,
+      code,
+      app_id: appId,
+    }, false)
+  },
   wechatLogin: async (code: string, appId: string): Promise<AuthResponse> => {
     const raw = await apiRequest<any>('POST', '/auth/wechat-login', { code, app_id: appId }, false)
     return { ...raw, bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined }
   },
-  wechatBind: async (bindingTicket: string, username: string, password: string): Promise<AuthResponse> => {
-    const raw = await apiRequest<any>('POST', '/auth/wechat-bind', { binding_ticket: bindingTicket, username, password }, false)
+  wechatBindConfirm: async (bindingIntent: string): Promise<AuthResponse> => {
+    const raw = await apiRequest<any>('POST', '/auth/wechat-bind-confirm', { binding_intent: bindingIntent }, false)
     return { ...raw, bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined }
   },
   bootstrap: async (): Promise<BootstrapResponse> => {

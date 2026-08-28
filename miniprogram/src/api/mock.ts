@@ -79,25 +79,33 @@ const sampleRequirements: PhotoRequirement[] = [
   },
 ]
 
+const mockAccount = { id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: '资料员' }
+
+function mockBootstrap(): BootstrapResponse {
+  return {
+    ok: true,
+    account: mockAccount,
+    server_time: new Date().toISOString(),
+    current_project: rawProject(projects[0]) as any,
+    projects: projects.map(rawProject) as any,
+    queue: { desktop_pending: 1 },
+    recent_uploads: samplePhotos.slice(0, 3),
+  }
+}
+
 export async function mockRequest<T>(method: string, path: string, data?: unknown): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 80))
-  if (path === '/auth/wechat-login' && method === 'POST') {
-    return { ok: true, token: 'mock-token', account: { id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: '资料员' } } as T
+  if (path === '/auth/account-login' && method === 'POST') {
+    return { ok: true, account: mockAccount, binding_intent: 'mock-binding-intent' } as T
   }
-  if (path === '/auth/wechat-bind' && method === 'POST') {
-    return { ok: true, token: 'mock-token', account: { id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: '资料员' } } as T
+  if (path === '/auth/wechat-login' && method === 'POST') {
+    return { ok: true, token: 'mock-token', account: mockAccount, bootstrap: mockBootstrap() } as T
+  }
+  if (path === '/auth/wechat-bind-confirm' && method === 'POST') {
+    return { ok: true, token: 'mock-token', account: mockAccount, bootstrap: mockBootstrap() } as T
   }
   if (path === '/bootstrap' && method === 'GET') {
-    const response: BootstrapResponse = {
-      ok: true,
-      account: { id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: '资料员' },
-      server_time: new Date().toISOString(),
-      current_project: rawProject(projects[0]) as any,
-      projects: projects.map(rawProject) as any,
-      queue: { desktop_pending: 1 },
-      recent_uploads: samplePhotos.slice(0, 3),
-    }
-    return response as T
+    return mockBootstrap() as T
   }
   if (path === '/projects' && method === 'GET') return { ok: true, projects: projects.map(rawProject) } as T
   const requirementsMatch = path.match(/^\/projects\/([^/?]+)\/requirements(?:\?(.*))?$/)

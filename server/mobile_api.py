@@ -40,6 +40,8 @@ SCOPES = {"engineering", "other"}
 CATEGORIES = {"construction", "supervision"}
 MODES = {"direct", "auto"}
 BATCH_UPLOADABLE_STATUSES = {"local_ready", "server_saved"}
+ACCOUNT_BIND_INTENT_MAX_AGE = 10 * 60
+ACCOUNT_BIND_INTENT_SALT = "wechat-account-bind-intent"
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
@@ -1580,6 +1582,191 @@ def register_mobile_api(
             ),
         }
 
+    def binding_for_account(conn, account, binding: dict):
+        """校验并保存账号与微信的一对一绑定；调用方负责事务和提交。"""
+        app_id = _safe_text(binding.get("app_id"), 128)
+        openid = _safe_text(binding.get("openid"), 256)
+        unionid = _safe_text(binding.get("unionid"), 256)
+        if not app_id or not openid:
+            raise ApiProblem("binding_intent_invalid", "绑定凭证无效", 401)
+
+        occupied = conn.execute(
+            "SELECT account_id FROM wechat_bindings WHERE app_id = ? AND openid = ?",
+            (app_id, openid),
+        ).fetchone()
+        if occupied and int(occupied["account_id"]) != int(account["id"]):
+            raise ApiProblem("wechat_already_bound", "该微信已绑定其它账号", 409)
+        account_binding = conn.execute(
+            "SELECT id, app_id, openid FROM wechat_bindings "
+            "WHERE account_id = ? ORDER BY id LIMIT 1",
+            (account["id"],),
+        ).fetchone()
+        if account_binding and (
+            account_binding["app_id"] != app_id
+            or account_binding["openid"] != openid
+        ):
+            raise ApiProblem(
+                "account_already_bound",
+                "该桌面端账号已绑定其它微信；如需更换，请先在电脑端“账号与会员”中解绑",
+                409,
+            )
+
+        idempotent = bool(account_binding)
+        timestamp = now()
+        conn.execute(
+            "INSERT INTO wechat_bindings (account_id, app_id, openid, unionid, created_at, last_login_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, openid) DO UPDATE SET "
+            "last_login_at = excluded.last_login_at, unionid = excluded.unionid",
+            (account["id"], app_id, openid, unionid, timestamp, timestamp),
+        )
+        stored_binding = conn.execute(
+            "SELECT id FROM wechat_bindings WHERE account_id = ?",
+            (account["id"],),
+        ).fetchone()
+        if not stored_binding:
+            raise ApiProblem("binding_failed", "微信绑定未保存，请重试", 500, True)
+        return stored_binding, idempotent
+
+    def mobile_login_payload(conn, account, binding_id: int, **extra) -> dict:
+        return {
+            "ok": True,
+            **extra,
+            "token": token_for(
+                account["id"],
+                scope="mobile",
+                binding_id=binding_id,
+                mobile_auth_version=account.get("mobile_auth_version", 0),
+            ),
+            "account": _account_payload(account),
+            "bootstrap": bootstrap_payload(conn, account),
+        }
+
+    @blueprint.post("/api/mobile/v1/auth/account-login")
+    def account_login():
+        """先验证桌面账号；只签发十分钟绑定意图，不创建绑定或手机令牌。"""
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        username = _safe_text(data.get("username"), 64)
+        password = str(data.get("password") or "")
+        app_id = _safe_text(data.get("app_id"), 128)
+        exchange = _exchange_wechat_code(data.get("code"), app_id)
+
+        conn = db.connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE username = ?", (username,)
+            ).fetchone()
+            if not row or not check_password_hash(row["password_hash"], password):
+                raise ApiProblem("account_credentials_invalid", "账号或密码错误", 401)
+            account = dict(row)
+            if account["status"] != "active":
+                raise ApiProblem("account_disabled", "账号已被停用", 403)
+
+            # 先做一次冲突预检以便立即反馈；确认接口会在写事务内再次校验，
+            # 防止两次请求之间发生换绑竞态。
+            occupied = conn.execute(
+                "SELECT account_id FROM wechat_bindings WHERE app_id = ? AND openid = ?",
+                (app_id, exchange["openid"]),
+            ).fetchone()
+            if occupied and int(occupied["account_id"]) != int(account["id"]):
+                raise ApiProblem("wechat_already_bound", "该微信已绑定其它账号", 409)
+            account_binding = conn.execute(
+                "SELECT app_id, openid FROM wechat_bindings "
+                "WHERE account_id = ? ORDER BY id LIMIT 1",
+                (account["id"],),
+            ).fetchone()
+            if account_binding and (
+                account_binding["app_id"] != app_id
+                or account_binding["openid"] != exchange["openid"]
+            ):
+                raise ApiProblem(
+                    "account_already_bound",
+                    "该桌面端账号已绑定其它微信；如需更换，请先在电脑端“账号与会员”中解绑",
+                    409,
+                )
+
+            intent = ticket_serializer.dumps(
+                {
+                    "purpose": "account-first-wechat-bind",
+                    "account_id": int(account["id"]),
+                    "mobile_auth_version": int(account.get("mobile_auth_version") or 0),
+                    "app_id": app_id,
+                    "openid": exchange["openid"],
+                    "unionid": exchange["unionid"],
+                    "nonce": uuid.uuid4().hex,
+                },
+                salt=ACCOUNT_BIND_INTENT_SALT,
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "binding_required": True,
+                    "binding_intent": intent,
+                    "binding_intent_expires_in": ACCOUNT_BIND_INTENT_MAX_AGE,
+                    "account": _account_payload(account),
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/auth/wechat-bind-confirm")
+    def wechat_bind_confirm():
+        """明确确认短期绑定意图；绑定落库后才签发 mobile 令牌。"""
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        intent = str(data.get("binding_intent") or "")
+        try:
+            binding = ticket_serializer.loads(
+                intent,
+                salt=ACCOUNT_BIND_INTENT_SALT,
+                max_age=ACCOUNT_BIND_INTENT_MAX_AGE,
+            )
+        except SignatureExpired as exc:
+            raise ApiProblem(
+                "binding_intent_expired", "绑定确认已过期，请重新登录", 401
+            ) from exc
+        except BadSignature as exc:
+            raise ApiProblem("binding_intent_invalid", "绑定确认无效", 401) from exc
+        if not isinstance(binding, dict) or binding.get("purpose") != "account-first-wechat-bind":
+            raise ApiProblem("binding_intent_invalid", "绑定确认无效", 401)
+        try:
+            account_id = int(binding.get("account_id") or 0)
+            intent_auth_version = int(binding.get("mobile_auth_version") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ApiProblem("binding_intent_invalid", "绑定确认无效", 401) from exc
+        if account_id <= 0:
+            raise ApiProblem("binding_intent_invalid", "绑定确认无效", 401)
+
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            if not row:
+                raise ApiProblem("binding_intent_invalid", "绑定确认无效", 401)
+            account = dict(row)
+            if account["status"] != "active":
+                raise ApiProblem("account_disabled", "账号已被停用", 403)
+            if intent_auth_version != int(account.get("mobile_auth_version") or 0):
+                raise ApiProblem(
+                    "binding_intent_stale", "账号绑定状态已变化，请重新登录", 401
+                )
+            stored_binding, idempotent = binding_for_account(conn, account, binding)
+            conn.commit()
+            return jsonify(
+                mobile_login_payload(
+                    conn,
+                    account,
+                    stored_binding["id"],
+                    idempotent=idempotent,
+                )
+            )
+        finally:
+            conn.close()
+
     @blueprint.post("/api/mobile/v1/auth/wechat-login")
     def wechat_login():
         if rate_limited_fn and rate_limited_fn():
@@ -1605,17 +1792,7 @@ def register_mobile_api(
                 )
                 conn.commit()
                 return jsonify(
-                    {
-                        "ok": True,
-                        "token": token_for(
-                            account["id"],
-                            scope="mobile",
-                            binding_id=account["binding_id"],
-                            mobile_auth_version=account.get("mobile_auth_version", 0),
-                        ),
-                        "account": _account_payload(account),
-                        "bootstrap": bootstrap_payload(conn, account),
-                    }
+                    mobile_login_payload(conn, account, account["binding_id"])
                 )
         finally:
             conn.close()
@@ -1654,56 +1831,9 @@ def register_mobile_api(
             account = dict(row)
             if account["status"] != "active":
                 raise ApiProblem("account_disabled", "账号已被停用", 403)
-            occupied = conn.execute(
-                "SELECT account_id FROM wechat_bindings WHERE app_id = ? AND openid = ?",
-                (binding["app_id"], binding["openid"]),
-            ).fetchone()
-            if occupied and int(occupied["account_id"]) != int(account["id"]):
-                raise ApiProblem("wechat_already_bound", "该微信已绑定其它账号", 409)
-            account_binding = conn.execute(
-                "SELECT id, app_id, openid FROM wechat_bindings "
-                "WHERE account_id = ? ORDER BY id LIMIT 1",
-                (account["id"],),
-            ).fetchone()
-            if account_binding and (
-                account_binding["app_id"] != binding["app_id"]
-                or account_binding["openid"] != binding["openid"]
-            ):
-                raise ApiProblem(
-                    "account_already_bound",
-                    "该桌面端账号已绑定其它微信；如需更换，请先在电脑端“账号与会员”中解绑",
-                    409,
-                )
-            timestamp = now()
-            conn.execute(
-                "INSERT INTO wechat_bindings (account_id, app_id, openid, unionid, created_at, last_login_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id, openid) DO UPDATE SET "
-                "last_login_at = excluded.last_login_at, unionid = excluded.unionid",
-                (
-                    account["id"], binding["app_id"], binding["openid"],
-                    binding.get("unionid", ""), timestamp, timestamp,
-                ),
-            )
-            stored_binding = conn.execute(
-                "SELECT id FROM wechat_bindings WHERE account_id = ?",
-                (account["id"],),
-            ).fetchone()
-            if not stored_binding:
-                raise ApiProblem("binding_failed", "微信绑定未保存，请重试", 500, True)
+            stored_binding, _idempotent = binding_for_account(conn, account, binding)
             conn.commit()
-            return jsonify(
-                {
-                    "ok": True,
-                    "token": token_for(
-                        account["id"],
-                        scope="mobile",
-                        binding_id=stored_binding["id"],
-                        mobile_auth_version=account.get("mobile_auth_version", 0),
-                    ),
-                    "account": _account_payload(account),
-                    "bootstrap": bootstrap_payload(conn, account),
-                }
-            )
+            return jsonify(mobile_login_payload(conn, account, stored_binding["id"]))
         finally:
             conn.close()
 

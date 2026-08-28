@@ -1,6 +1,12 @@
 {
   "pages": [
     {
+      "path": "pages/auth/bind",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/home/index",
       "style": {
         "navigationStyle": "custom"
@@ -27,12 +33,6 @@
     },
     {
       "path": "pages/profile/index",
-      "style": {
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/auth/bind",
       "style": {
         "navigationStyle": "custom"
       }

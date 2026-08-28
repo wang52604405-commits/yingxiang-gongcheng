@@ -11,8 +11,9 @@ import { selectionStorage } from '@/stores/selection'
 import { formatBytes } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
-const displayName = computed(() => sessionState.account?.display_name || sessionState.account?.username || '工程资料员')
-const initial = computed(() => displayName.value.slice(0, 1))
+const authenticated = computed(() => sessionState.ready && sessionState.stage === 'authenticated' && Boolean(sessionState.account))
+const displayName = computed(() => authenticated.value ? (sessionState.account?.display_name || sessionState.account?.username || '当前账号') : '未登录')
+const initial = computed(() => authenticated.value ? displayName.value.slice(0, 1) : '—')
 const uniApi = uni
 
 function showPrivacy() {
@@ -24,7 +25,7 @@ function showPrivacy() {
 }
 
 function confirmSignOut() {
-  uni.showModal({ title: '切换账号？', content: '未上传原图仍保留在当前账号队列中。', success: ({ confirm }) => { if (confirm) signOut() } })
+  uni.showModal({ title: '切换账号？', content: '将返回账号登录页；未上传原图仍保留在原账号队列中。', success: ({ confirm }) => { if (confirm) signOut() } })
 }
 
 onShow(() => {
@@ -39,9 +40,13 @@ onShow(() => {
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">我的</text>
 
-    <view class="identity-card">
+    <view class="identity-card" :class="{ unauthenticated: !authenticated }">
       <view class="avatar">{{ initial }}</view>
-      <view class="identity-copy"><text class="identity-name">{{ displayName }}</text><text class="identity-role">{{ sessionState.account?.username }} · 已绑定微信</text></view>
+      <view class="identity-copy">
+        <text class="identity-name">{{ displayName }}</text>
+        <text v-if="authenticated" class="identity-role">{{ sessionState.account?.username }} · 已绑定微信</text>
+        <text v-else class="identity-role">请先登录账号</text>
+      </view>
     </view>
 
     <view v-if="!queueRuntime.state.online" class="notice offline-notice"><text class="notice-dot" /><text>离线，原图保存在本机</text></view>
@@ -55,7 +60,7 @@ onShow(() => {
       </button>
     </view>
 
-    <button class="account-button pressable" @tap="confirmSignOut">切换账号</button>
+    <button v-if="authenticated" class="account-button pressable" @tap="confirmSignOut">切换账号</button>
     <text class="version">工程影像 V1.2</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
@@ -65,6 +70,7 @@ onShow(() => {
 
 <style scoped>
 .identity-card { display: flex; align-items: center; gap: 22rpx; margin-top: 28rpx; padding: 26rpx; border-radius: 26rpx; color: #fff; background: linear-gradient(135deg, var(--top), var(--primary)); }
+.identity-card.unauthenticated { color: var(--text); background: var(--surface); }
 .avatar { display: grid; flex: 0 0 auto; place-items: center; width: 88rpx; height: 88rpx; border-radius: 25rpx; background: rgba(255, 255, 255, 0.14); font-size: 36rpx; font-weight: 600; }
 .identity-copy { min-width: 0; }
 .identity-name { display: block; font-size: 31rpx; font-weight: 700; }

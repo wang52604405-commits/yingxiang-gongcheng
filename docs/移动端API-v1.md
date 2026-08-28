@@ -15,13 +15,23 @@
 
 ## 2. 登录与启动
 
+### `POST /api/mobile/v1/auth/account-login`
+
+账号密码登录的第一步。请求：`{ username, password, code, app_id }`。服务器验证现有云账号、交换本次微信 `code`，成功后只返回 `{ account, binding_intent }`。`binding_intent` 是有效期 10 分钟的绑定意图凭据，不包含密码；此步骤不创建微信绑定，也不签发移动端 token。
+
+### `POST /api/mobile/v1/auth/wechat-bind-confirm`
+
+用户在第二步明确确认绑定当前微信后，请求：`{ binding_intent }`。服务器重新校验绑定意图、账号状态和绑定关系，成功创建或确认同一绑定后才返回 `{ token, account, bootstrap }`。同一账号与同一微信的重复确认保持幂等；冲突绑定不会被静默覆盖。
+
 ### `POST /api/mobile/v1/auth/wechat-login`
 
-请求：`{ code, app_id }`。已绑定时返回 `{ token, account, bootstrap }`；`token` 显式带 `scope=mobile`。未绑定时返回 `{ binding_required: true, binding_ticket }`。登录与绑定复用按真实客户端 IP 的短窗限流；服务只在 127.0.0.1 后信任一层 nginx 转发头。
+已绑定用户主动点击“微信快捷登录”时使用。请求：`{ code, app_id }`。已绑定时返回 `{ token, account, bootstrap }`；`token` 显式带 `scope=mobile`。未绑定时返回 `{ binding_required: true, binding_ticket }`，新客户端提示用户改用账号密码登录，不会在启动时静默继续绑定。
 
 ### `POST /api/mobile/v1/auth/wechat-bind`
 
-请求：`{ binding_ticket, username, password }`。验证现有云账号后绑定 OpenID，返回 `{ token, account, bootstrap }`；服务器不保存微信 code 或明文密码。
+旧版客户端兼容接口。请求：`{ binding_ticket, username, password }`。验证现有云账号后绑定 OpenID，返回 `{ token, account, bootstrap }`；服务器不保存微信 code 或明文密码。新客户端不再使用此接口完成首次绑定。
+
+没有有效本地 token 时，新客户端直接显示账号密码登录页，不会在启动时自动发起微信快捷登录。已有有效 token 时仍先调用 `bootstrap` 校验会话；会话失效后返回登录页，由用户重新账号登录，或主动选择已绑定微信的快捷登录。登录与绑定接口复用按真实客户端 IP 的短窗限流；服务只在 127.0.0.1 后信任一层 nginx 转发头。
 
 ### `GET /api/mobile/v1/bootstrap`
 
