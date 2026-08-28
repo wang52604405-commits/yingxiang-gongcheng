@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  downloadServerPreview,
   normalizeOrientation,
   parseJpegExif,
   persistOriginalSource,
@@ -80,5 +81,21 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
     await expect(persistPreparedPreview(prepared, adapter)).rejects.toThrow('超过 100KB')
     expect(remove).toHaveBeenCalledWith('/user/preview.jpg')
     expect(remove).not.toHaveBeenCalledWith('/user/original.jpg')
+  })
+
+  it('服务器生成的预览再次校验不超过 100KB 后才持久保存', async () => {
+    ;(globalThis as any).uni = {
+      downloadFile: ({ success }: any) => success({ statusCode: 200, tempFilePath: '/tmp/server-preview.jpg' }),
+    }
+    const adapter: CompressionAdapter = {
+      getImageInfo: async () => ({ path: '', width: 0, height: 0, orientation: 1 }),
+      renderJpeg: async () => '',
+      getFileSize: async (path) => path.startsWith('/tmp/') ? 92_000 : 91_500,
+      persist: async () => '/user/server-preview.jpg',
+    }
+    await expect(downloadServerPreview('https://api.example.test/preview', adapter)).resolves.toEqual({
+      previewPath: '/user/server-preview.jpg',
+      previewSize: 91_500,
+    })
   })
 })

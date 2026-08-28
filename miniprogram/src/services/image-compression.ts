@@ -25,6 +25,14 @@ export interface PersistedOriginal {
   originalFilename: string
 }
 
+export interface OriginalInspection {
+  originalMimeType: SupportedOriginalMimeType
+  width: number
+  height: number
+  orientation: number
+  capturedAt: string
+}
+
 export interface PreparedPreview {
   originalMimeType: SupportedOriginalMimeType
   previewTempPath: string
@@ -317,6 +325,27 @@ function originalIdentity(originalFilename: string, type = ''): { filename: stri
   return { filename, mimeType }
 }
 
+export async function inspectOriginalSource(
+  originalPath: string,
+  originalFilename: string,
+  fallbackCapturedAt = new Date().toISOString(),
+  adapter: CompressionAdapter = wechatCompressionAdapter,
+): Promise<OriginalInspection> {
+  const info = await adapter.getImageInfo(originalPath)
+  if (!info.width || !info.height) throw new Error('无法读取照片尺寸')
+  const identity = originalIdentity(originalFilename, info.type)
+  const sourceMetadata = adapter === wechatCompressionAdapter
+    ? await readSourceMetadata(originalPath, fallbackCapturedAt)
+    : {}
+  return {
+    originalMimeType: identity.mimeType,
+    width: info.width,
+    height: info.height,
+    orientation: normalizeOrientation(sourceMetadata.orientation || info.orientation),
+    capturedAt: sourceMetadata.capturedAt || fallbackCapturedAt,
+  }
+}
+
 export async function persistOriginalSource(
   sourcePath: string,
   adapter: CompressionAdapter = wechatCompressionAdapter,
@@ -370,6 +399,34 @@ export async function preparePreview(
     dimensions = next
   }
   throw new Error('照片内容过于复杂，无法生成 100KB 以内的本机预览')
+}
+
+export async function downloadServerPreview(
+  url: string,
+  adapter: CompressionAdapter = wechatCompressionAdapter,
+): Promise<{ previewPath: string; previewSize: number }> {
+  if (!url) throw new Error('服务器没有返回预览地址')
+  const tempPath = await wxPromise<string>((success, fail) => uni.downloadFile({
+    url,
+    timeout: 30_000,
+    success: (result) => {
+      if (result.statusCode >= 200 && result.statusCode < 300 && result.tempFilePath) success(result.tempFilePath)
+      else fail(new Error(`预览下载失败（HTTP ${result.statusCode}）`))
+    },
+    fail,
+  }))
+  const downloadedSize = await adapter.getFileSize(tempPath)
+  if (!isPreviewWithinLimit(downloadedSize)) throw new Error('服务器预览超过 100KB，已拒绝保存')
+  let previewPath = ''
+  try {
+    previewPath = await adapter.persist(tempPath)
+    const previewSize = await adapter.getFileSize(previewPath)
+    if (!isPreviewWithinLimit(previewSize)) throw new Error('保存后的服务器预览超过 100KB，已拒绝保留')
+    return { previewPath, previewSize }
+  } catch (error) {
+    if (previewPath) await adapter.remove?.(previewPath)
+    throw error
+  }
 }
 
 export async function persistPreparedPreview(

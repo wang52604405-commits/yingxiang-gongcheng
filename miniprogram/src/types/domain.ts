@@ -125,6 +125,8 @@ export interface LocalPhoto {
   original_removed?: boolean
   server_saved_at?: string
   preparation_pending?: boolean
+  preview_recovery_pending?: boolean
+  preview_error?: string
   upload_mode?: 'direct' | 'chunked'
   upload_chunk_size?: number
   upload_total_chunks?: number

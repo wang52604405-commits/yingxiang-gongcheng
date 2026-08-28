@@ -19,9 +19,10 @@ function openConfirm(clientBatchId: string) {
 
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
   if (photo.original_path) {
-    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览待恢复'
+    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览由服务器恢复'
     return `原图 ${formatBytes(photo.original_size)}${preview}`
   }
+  if (!photo.preview_path) return '原图已上传 · 预览自动恢复中'
   return `预览 ${formatBytes(photo.preview_size)}`
 }
 

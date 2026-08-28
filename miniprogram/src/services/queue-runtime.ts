@@ -5,7 +5,7 @@ import type { CreateBatchPayload } from '@/api/contracts'
 import type { Assignment, LocalBatch, LocalPhoto, PhotoStatus, UploadDraft } from '@/types/domain'
 import { createUuid } from './ids'
 import { hashFile } from './sha256'
-import { getSourceFileSize, persistPreparedPreview, preparePreview } from './image-compression'
+import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedPreview, preparePreview } from './image-compression'
 import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_UPLOAD_CONCURRENCY, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
 import { canTransition, recoverInterruptedStatus } from './photo-state'
 import { notifyAuthExpired } from './auth-expiry-coordinator'
@@ -95,11 +95,17 @@ function isAuthExpired(error: unknown): error is ApiError {
   return error instanceof ApiError && (error.statusCode === 401 || ['unauthorized', 'token_expired', 'AUTH_EXPIRED'].includes(error.code))
 }
 
+function errorMessage(error: unknown, fallback = '处理失败'): string {
+  if (error instanceof Error && error.message) return error.message
+  if (error && typeof error === 'object' && 'errMsg' in error) return String((error as { errMsg?: unknown }).errMsg || fallback)
+  return fallback
+}
+
 function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, preparation = false): void {
   if (!isCurrentOwner(photo.owner_account_id)) return
   photo.retry_from = retryFrom
   photo.status = 'failed'
-  const message = error instanceof Error ? error.message : '处理失败'
+  const message = errorMessage(error)
   photo.error = preparation ? `原图已安全保存；${message}` : message
   photo.failure_code = isAuthExpired(error) ? 'AUTH_EXPIRED' : error instanceof ApiError ? error.code : undefined
   photo.retryable = isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
@@ -186,32 +192,46 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
   const owner = photo.owner_account_id
   if (!isCurrentOwner(owner, generation) || !photo.original_path) return false
   try {
-    if (!photo.preview_path) {
-      const prepared = await preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at)
+    if (!photo.original_mime_type || !photo.width || !photo.height) {
+      const inspected = await inspectOriginalSource(photo.original_path, photo.original_filename, photo.client_captured_at)
       if (!isCurrentOwner(owner, generation)) return false
-      const saved = await persistPreparedPreview(prepared)
-      if (!isCurrentOwner(owner, generation)) {
-        await removeSavedFile(saved.previewPath)
-        return false
-      }
-      photo.preview_path = saved.previewPath
-      photo.preview_size = saved.previewSize
-      photo.preview_width = saved.previewWidth
-      photo.preview_height = saved.previewHeight
-      photo.width = saved.width
-      photo.height = saved.height
-      photo.orientation = saved.orientation
-      photo.client_captured_at = saved.capturedAt
-      photo.photo_date = saved.capturedAt.slice(0, 10)
-      photo.original_mime_type = saved.originalMimeType
+      photo.width = inspected.width
+      photo.height = inspected.height
+      photo.orientation = inspected.orientation
+      photo.client_captured_at = inspected.capturedAt
+      photo.photo_date = inspected.capturedAt.slice(0, 10)
+      photo.original_mime_type = inspected.originalMimeType
       persist(owner)
+    }
+    if (!photo.preview_path) {
+      try {
+        const prepared = await preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at)
+        if (!isCurrentOwner(owner, generation)) return false
+        const saved = await persistPreparedPreview(prepared)
+        if (!isCurrentOwner(owner, generation)) {
+          await removeSavedFile(saved.previewPath)
+          return false
+        }
+        photo.preview_path = saved.previewPath
+        photo.preview_size = saved.previewSize
+        photo.preview_width = saved.previewWidth
+        photo.preview_height = saved.previewHeight
+        photo.preview_recovery_pending = false
+        photo.preview_error = undefined
+        persist(owner)
+      } catch (error) {
+        // 本机压缩能力不应阻断原图中转；服务器会从原图生成严格不超过 100KB 的 JPEG。
+        photo.preview_recovery_pending = true
+        photo.preview_error = errorMessage(error, '本机预览生成失败，将从服务器恢复')
+        persist(owner)
+      }
     }
     if (!photo.original_sha256) {
       photo.original_sha256 = await hashFile(photo.original_path)
       if (!isCurrentOwner(owner, generation)) return false
       persist(owner)
     }
-    if (!photo.preview_sha256) {
+    if (photo.preview_path && !photo.preview_sha256) {
       photo.preview_sha256 = await hashFile(photo.preview_path)
       if (!isCurrentOwner(owner, generation)) return false
       persist(owner)
@@ -233,11 +253,51 @@ async function repairIncompletePhotos(generation: number): Promise<void> {
   }
 }
 
+async function recoverServerPreview(photo: LocalPhoto, generation: number): Promise<void> {
+  const owner = photo.owner_account_id
+  if (!isCurrentOwner(owner, generation) || photo.preview_path) return
+  let savedPath = ''
+  try {
+    const detail = await mobileApi.photo(photo.photo_uuid)
+    const url = detail.photo.download_url || detail.photo.image_url || ''
+    const saved = await downloadServerPreview(url)
+    savedPath = saved.previewPath
+    const sha256 = await hashFile(saved.previewPath)
+    if (!isCurrentOwner(owner, generation)) {
+      await removeSavedFile(saved.previewPath)
+      return
+    }
+    photo.preview_path = saved.previewPath
+    photo.preview_size = saved.previewSize
+    photo.preview_sha256 = sha256
+    photo.preview_width ||= photo.width
+    photo.preview_height ||= photo.height
+    photo.preview_recovery_pending = false
+    photo.preview_error = undefined
+    persist(owner)
+  } catch (error) {
+    if (savedPath) await removeSavedFile(savedPath)
+    throw error
+  }
+}
+
+async function tryRecoverServerPreview(photo: LocalPhoto, generation: number): Promise<void> {
+  if (photo.preview_path || !isCurrentOwner(photo.owner_account_id, generation)) return
+  try {
+    await recoverServerPreview(photo, generation)
+  } catch (error) {
+    if (!isCurrentOwner(photo.owner_account_id, generation)) return
+    photo.preview_recovery_pending = true
+    photo.preview_error = errorMessage(error, '服务器预览稍后自动恢复')
+    persist(photo.owner_account_id)
+  }
+}
+
 async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: number): Promise<void> {
   const owner = batch.owner_account_id
   if (!isCurrentOwner(owner, generation) || !state.online || photo.status !== 'local_ready') return
-  if (!photo.original_path || !photo.original_sha256 || !photo.preview_path || !photo.original_mime_type) {
-    markFailed(photo, new Error('本机原图或预览不完整，请先恢复照片'), 'local_ready', true)
+  if (!photo.original_path || !photo.original_sha256 || !photo.original_mime_type) {
+    markFailed(photo, new Error('本机原图信息不完整，请先恢复照片'), 'local_ready', true)
     return
   }
   try {
@@ -289,6 +349,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     photo.progress = 100
     photo.server_saved_at = now()
     setStatus(photo, 'server_saved')
+    await tryRecoverServerPreview(photo, generation)
     await cleanupOriginal(photo)
   } catch (error) {
     if (!isCurrentOwner(owner, generation)) return
@@ -317,7 +378,10 @@ async function applyRemoteStatus(photo: LocalPhoto, remoteStatus: string): Promi
   const targetRank = REMOTE_STATUS_RANK[target] || 0
   const failedDuringUpload = photo.status === 'failed' && ['local_ready', 'uploading'].includes(photo.retry_from || 'local_ready') && !photo.preparation_pending
   if (targetRank > currentRank || failedDuringUpload) setStatus(photo, target, !canTransition(photo.status, target))
-  if (targetRank >= 1) await cleanupOriginal(photo)
+  if (targetRank >= 1) {
+    await tryRecoverServerPreview(photo, ownerGeneration)
+    await cleanupOriginal(photo)
+  }
 }
 
 async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promise<void> {
@@ -427,7 +491,10 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
         }
       }
     }
-    for (const photo of state.photos.filter((item) => REMOTE_STATUS_RANK[item.status])) await cleanupOriginal(photo)
+    for (const photo of state.photos.filter((item) => REMOTE_STATUS_RANK[item.status])) {
+      await tryRecoverServerPreview(photo, generation)
+      await cleanupOriginal(photo)
+    }
   } finally {
     if (isCurrentOwner(owner, generation)) state.running = false
     void reason
