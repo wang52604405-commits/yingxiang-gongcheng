@@ -27,7 +27,7 @@ const visible = computed(() => {
 async function load() {
   loading.value = true
   try {
-    if (!project.value.id) throw new Error('当前账号尚未从电脑同步工程')
+    if (!project.value.id) throw new Error('请先选择或加入工程')
     const response = await mobileApi.projectRequirements(project.value.id)
     project.value = response.project
     summary.value = response.summary

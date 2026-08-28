@@ -1,5 +1,11 @@
 import type { CloudPhoto, MatchCandidate, ProjectNode, ProjectSummary } from '@/types/domain'
 import { API_BASE_URL } from '@/config/env'
+import { normalizeProjectRole } from '@/services/project-membership'
+
+function optionalBoolean(...values: unknown[]): boolean | undefined {
+  const value = values.find((item) => typeof item === 'boolean')
+  return typeof value === 'boolean' ? value : undefined
+}
 
 export function normalizeMediaUrl(value: unknown): string {
   const url = String(value || '')
@@ -13,8 +19,16 @@ export function normalizeProject(raw: any): ProjectSummary {
   const name = String(raw.name || raw.project_name || '')
   if (!id || !name) throw new Error('服务器工程数据缺少编号或名称')
   const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {}
+  const membership = raw.membership && typeof raw.membership === 'object' ? raw.membership : {}
+  const permissions = membership.permissions && typeof membership.permissions === 'object' ? membership.permissions : {}
   return {
     id, code, name,
+    owner_account_id: String(raw.owner_account_id || membership.owner_account_id || ''),
+    local_project_id: String(raw.local_project_id || raw.source_project_id || ''),
+    access_role: normalizeProjectRole(raw.access_role || membership.role),
+    member_count: Math.max(0, Number(raw.member_count ?? membership.member_count ?? 0)),
+    can_capture: optionalBoolean(raw.can_capture, membership.can_capture, permissions.can_capture),
+    can_manage_members: optionalBoolean(raw.can_manage_members, membership.can_manage_members, permissions.can_manage_members),
     revision: Number(raw.revision || 0),
     unit_count: Number(raw.unit_count || metadata.unit_count || 0),
     industry: String(raw.industry || metadata.industry || '水利工程'),
@@ -52,6 +66,9 @@ export function normalizeCloudPhoto(raw: any): CloudPhoto {
     photo_date: String(raw.photo_date || '').slice(0, 10),
     photographer: String(raw.photographer || ''),
     uploaded_by: String(raw.uploaded_by || ''),
+    photographer_account_id: String(raw.photographer_account_id || ''),
+    uploaded_by_account_id: String(raw.uploaded_by_account_id || ''),
+    capture_source: raw.capture_source === 'album' ? 'album' : raw.capture_source === 'camera' ? 'camera' : undefined,
     scope: raw.scope === 'other' ? 'other' : 'engineering',
     category: raw.category === 'supervision' ? 'supervision' : raw.scope === 'other' ? undefined : 'construction',
     unit_code: String(raw.unit_code || assignment.unit_code || ''),

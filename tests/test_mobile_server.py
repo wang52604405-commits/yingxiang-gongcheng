@@ -289,24 +289,28 @@ class MobileServerContractTest(unittest.TestCase):
         filename="现场.jpg",
         original_size_bytes=None,
         original_filename=None,
+        capture_source=None,
     ):
+        fields = {
+            "file": (io.BytesIO(content), filename),
+            "photo_uuid": photo_uuid,
+            "client_captured_at": "2026-08-25T01:02:03Z",
+            "orientation": "1",
+            "width": "640",
+            "height": "480",
+            "sha256": sha or hashlib.sha256(content).hexdigest(),
+            "original_size_bytes": str(
+                len(content) if original_size_bytes is None else original_size_bytes
+            ),
+            "original_filename": (
+                filename if original_filename is None else original_filename
+            ),
+        }
+        if capture_source is not None:
+            fields["capture_source"] = capture_source
         return self.client.post(
             f"/api/mobile/v1/batches/{batch_id}/photos",
-            data={
-                "file": (io.BytesIO(content), filename),
-                "photo_uuid": photo_uuid,
-                "client_captured_at": "2026-08-25T01:02:03Z",
-                "orientation": "1",
-                "width": "640",
-                "height": "480",
-                "sha256": sha or hashlib.sha256(content).hexdigest(),
-                "original_size_bytes": str(
-                    len(content) if original_size_bytes is None else original_size_bytes
-                ),
-                "original_filename": (
-                    filename if original_filename is None else original_filename
-                ),
-            },
+            data=fields,
             headers=self._headers(token),
             content_type="multipart/form-data",
         )
@@ -1096,8 +1100,12 @@ class MobileServerContractTest(unittest.TestCase):
         projects_b = self.client.get(
             "/api/mobile/v1/projects", headers=self._headers(self.token_b)
         ).get_json()["projects"]
-        projects_a_by_id = {project["project_id"]: project for project in projects_a}
-        projects_b_by_id = {project["project_id"]: project for project in projects_b}
+        projects_a_by_id = {
+            project["local_project_id"]: project for project in projects_a
+        }
+        projects_b_by_id = {
+            project["local_project_id"]: project for project in projects_b
+        }
         self.assertEqual(projects_a_by_id["default"]["project_name"], "甲账号工程")
         self.assertEqual(projects_b_by_id["default"]["project_name"], "乙账号工程")
         self.assertNotIn("gallery-order", projects_b_by_id)
@@ -1272,12 +1280,25 @@ class MobileServerContractTest(unittest.TestCase):
         route_project = "machine-route"
         self._snapshot(self.token_a, "机器冻结工程", project_id=route_project)
         frozen_batch = self._create_batch(self.token_a, project_id=route_project)
-        self._snapshot(
-            self.token_a,
-            "机器冻结工程",
-            project_id=route_project,
-            desktop_machine_id="MACHINE-A-ALT",
-            revision=8,
+        switched = self.client.post(
+            "/api/desktop/v1/project-snapshot",
+            json={
+                "snapshot_id": str(uuid.uuid4()),
+                "revision": 8,
+                "desktop_machine_id": "MACHINE-A-ALT",
+                "project": {
+                    "id": route_project,
+                    "project_code": "YNLQ",
+                    "project_name": "机器冻结工程",
+                },
+                "tree": [],
+                "other_tree": [],
+            },
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(switched.status_code, 409, switched.get_json())
+        self.assertEqual(
+            switched.get_json()["code"], "project_archive_machine_conflict"
         )
         frozen_detail = self.client.get(
             f"/api/mobile/v1/batches/{frozen_batch}",
@@ -2408,11 +2429,239 @@ class MobileServerContractTest(unittest.TestCase):
             batch_id,
             photo_uuid,
             self._jpeg((44, 96, 118)),
+            capture_source="camera",
         )
         self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
         photo = uploaded.get_json()["photo"]
         self.assertEqual(photo["photographer"], "tenant_a")
         self.assertEqual(photo["uploaded_by"], "tenant_a")
+        self.assertEqual(photo["capture_source"], "camera")
+
+    def test_project_members_share_gallery_and_owner_desktop_archive(self):
+        project_id = "team-shared-v13"
+        snapshot = self._snapshot(
+            self.desktop_token_a,
+            "多人共享工程",
+            project_id=project_id,
+            desktop_machine_id="MACHINE-A",
+            revision=1,
+        ).get_json()
+        project_ref = snapshot["project_ref"]
+        owner_account_id = int(snapshot["owner_account_id"])
+        conn = self.db.connect()
+        try:
+            member_account_id = int(
+                conn.execute(
+                    "SELECT id FROM accounts WHERE username = 'tenant_b'"
+                ).fetchone()["id"]
+            )
+        finally:
+            conn.close()
+
+        created = self.client.post(
+            "/api/desktop/v1/project-invites",
+            json={
+                "project_id": project_id,
+                "role": "capturer",
+                "desktop_machine_id": "MACHINE-A",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(created.status_code, 201, created.get_json())
+        invitation = created.get_json()["invite"]
+        code = invitation["code"]
+        self.assertEqual(len(code), 10)
+        self.assertEqual(invitation["role"], "capturer")
+
+        listed_invites = self.client.get(
+            f"/api/desktop/v1/project-invites?project_id={project_id}"
+            "&desktop_machine_id=MACHINE-A",
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(listed_invites.status_code, 200, listed_invites.get_json())
+        self.assertNotIn("code", listed_invites.get_json()["invites"][0])
+        conn = self.db.connect()
+        try:
+            stored = conn.execute(
+                "SELECT invite_code_hash FROM project_invitations WHERE id = ?",
+                (invitation["invite_id"],),
+            ).fetchone()["invite_code_hash"]
+            self.assertEqual(stored, hashlib.sha256(code.encode("ascii")).hexdigest())
+            self.assertNotEqual(stored, code)
+        finally:
+            conn.close()
+
+        preview = self.client.post(
+            "/api/mobile/v1/project-invites/preview",
+            json={"code": code},
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(preview.status_code, 200, preview.get_json())
+        self.assertFalse(preview.get_json()["already_member"])
+        self.assertNotIn("code", preview.get_json()["invite"])
+        self.assertEqual(
+            preview.get_json()["invite"]["project"]["project_ref"], project_ref
+        )
+
+        joined = self.client.post(
+            "/api/mobile/v1/project-invites/join",
+            json={"code": code},
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(joined.status_code, 200, joined.get_json())
+        self.assertEqual(joined.get_json()["project"]["project_id"], project_ref)
+        self.assertEqual(joined.get_json()["membership"]["role"], "capturer")
+        retried_join = self.client.post(
+            "/api/mobile/v1/project-invites/join",
+            json={"code": code},
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(retried_join.status_code, 200, retried_join.get_json())
+        self.assertTrue(retried_join.get_json()["idempotent"])
+        self.assertTrue(retried_join.get_json()["already_member"])
+
+        members = self.client.get(
+            f"/api/desktop/v1/project-members?project_id={project_id}"
+            "&desktop_machine_id=MACHINE-A",
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(members.status_code, 200, members.get_json())
+        member = next(
+            item for item in members.get_json()["members"]
+            if item["account_id"] == member_account_id
+        )
+        self.assertEqual(member["role"], "capturer")
+        tree = self.client.get(
+            f"/api/mobile/v1/projects/{project_ref}/tree",
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(tree.status_code, 200, tree.get_json())
+        self.assertEqual(tree.get_json()["project"]["project_ref"], project_ref)
+
+        batch_id = self._create_batch(self.token_b, project_id=project_ref)
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_b,
+            batch_id,
+            photo_uuid,
+            self._jpeg((18, 107, 92)),
+            capture_source="camera",
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        mobile_photo = uploaded.get_json()["photo"]
+        self.assertEqual(mobile_photo["owner_account_id"], owner_account_id)
+        self.assertEqual(mobile_photo["uploaded_by_account_id"], member_account_id)
+        self.assertEqual(mobile_photo["photographer_account_id"], member_account_id)
+        self.assertEqual(mobile_photo["capture_source"], "camera")
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/commit",
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+
+        gallery = self.client.get(
+            f"/api/mobile/v1/photos?project_id={project_ref}",
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(gallery.status_code, 200, gallery.get_json())
+        shared_photo = next(
+            item for item in gallery.get_json()["photos"]
+            if item["photo_uuid"] == photo_uuid
+        )
+        preview_url = shared_photo["download_url"]
+        inbox = self.client.get(
+            "/api/desktop/v1/inbox?desktop_machine_id=MACHINE-A&limit=100",
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(inbox.status_code, 200, inbox.get_json())
+        desktop_photo = next(
+            item for item in inbox.get_json()["items"]
+            if item["photo_uuid"] == photo_uuid
+        )
+        self.assertEqual(desktop_photo["project_id"], project_id)
+        self.assertEqual(desktop_photo["project_ref"], project_ref)
+        self.assertEqual(desktop_photo["owner_account_id"], owner_account_id)
+        self.assertEqual(desktop_photo["uploaded_by_account_id"], member_account_id)
+
+        acked = self.client.post(
+            f"/api/desktop/v1/photos/{photo_uuid}/ack",
+            json={
+                "desktop_machine_id": "MACHINE-A",
+                "local_project_code": "LOCAL-TEAM",
+                "local_photo_id": "PHOTO-TEAM-1",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(acked.status_code, 200, acked.get_json())
+        conn = self.db.connect()
+        try:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT status FROM mobile_batches WHERE id = ? AND account_id = ?",
+                    (batch_id, member_account_id),
+                ).fetchone()["status"],
+                "desktop_imported",
+            )
+        finally:
+            conn.close()
+
+        downgraded = self.client.patch(
+            f"/api/desktop/v1/project-members/{member_account_id}",
+            json={
+                "project_id": project_id,
+                "role": "viewer",
+                "desktop_machine_id": "MACHINE-A",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(downgraded.status_code, 200, downgraded.get_json())
+        denied_batch = self.client.post(
+            "/api/mobile/v1/batches",
+            json={
+                "client_batch_id": str(uuid.uuid4()),
+                "project_id": project_ref,
+                "scope": "engineering",
+                "category": "construction",
+                "mode": "direct",
+                "assignment": {
+                    "unit_code": "YNLQ-001-01-001",
+                    "process_name": "",
+                },
+            },
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(denied_batch.status_code, 403, denied_batch.get_json())
+
+        removed = self.client.delete(
+            f"/api/desktop/v1/project-members/{member_account_id}",
+            json={
+                "project_id": project_id,
+                "desktop_machine_id": "MACHINE-A",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        member_projects = self.client.get(
+            "/api/mobile/v1/projects", headers=self._headers(self.token_b)
+        ).get_json()["projects"]
+        self.assertNotIn(project_ref, {item["project_ref"] for item in member_projects})
+        denied_detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}?project_id={project_ref}",
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(denied_detail.status_code, 404, denied_detail.get_json())
+        self.assertEqual(self.client.get(preview_url).status_code, 404)
+
+        deleted = self.client.post(
+            f"/api/desktop/v1/photos/{photo_uuid}/delete",
+            json={
+                "desktop_machine_id": "MACHINE-A",
+                "local_project_code": "LOCAL-TEAM",
+                "local_photo_id": "PHOTO-TEAM-1",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
 
     def test_shared_match_confidence_and_ocr_failure_degrades_to_review(self):
         from server import mobile_recognition

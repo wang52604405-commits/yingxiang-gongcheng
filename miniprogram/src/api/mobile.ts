@@ -1,7 +1,8 @@
-import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectNode, ProjectSummary } from '@/types/domain'
+import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectAccessRole, ProjectInvite, ProjectMember, ProjectNode, ProjectSummary } from '@/types/domain'
 import { apiBinaryRequest, apiRequest, apiUploadPhoto } from './client'
 import { buildChunkUploadInit, normalizeBatchPayload, type ChunkUploadState, type CreateBatchPayload, type PhotoUploadMetadata } from './contracts'
 import { normalizeBatch, normalizeCloudPhoto, normalizeProject, normalizeTreeNode, type NormalizedBatch } from './normalize'
+import { normalizeProjectRole } from '@/services/project-membership'
 
 export const CHUNK_FINALIZE_TIMEOUT_MS = 120_000
 
@@ -17,6 +18,29 @@ export interface AccountLoginResponse {
   ok: true
   account: { id: number | string; username: string; display_name?: string; role?: string }
   binding_intent: string
+}
+
+function normalizeProjectMember(raw: any): ProjectMember {
+  return {
+    account_id: String(raw?.account_id ?? raw?.id ?? ''),
+    username: String(raw?.username || ''),
+    display_name: String(raw?.display_name || raw?.username || '成员'),
+    role: normalizeProjectRole(raw?.role || raw?.access_role) || 'viewer',
+    joined_at: String(raw?.joined_at || ''),
+    is_me: Boolean(raw?.is_me),
+  }
+}
+
+function normalizeProjectInvite(raw: any): ProjectInvite {
+  const invite = raw?.invite && typeof raw.invite === 'object' ? raw.invite : raw
+  return {
+    code: String(invite?.code || '').toUpperCase(),
+    role: normalizeProjectRole(invite?.role) || 'capturer',
+    expires_at: String(invite?.expires_at || ''),
+    project: normalizeProject(invite?.project),
+    inviter_name: String(invite?.inviter_name || ''),
+    already_joined: Boolean(invite?.already_joined || raw?.already_joined),
+  }
 }
 
 export function normalizeBootstrapResponse(raw: any): BootstrapResponse {
@@ -118,6 +142,46 @@ export const mobileApi = {
       original_size_bytes: metadata.original_size_bytes,
       total_chunks: totalChunks,
     }, true, CHUNK_FINALIZE_TIMEOUT_MS)
+  },
+  projectMembers: async (projectId: string) => {
+    const raw = await apiRequest<any>('GET', `/projects/${encodeURIComponent(projectId)}/members`)
+    return {
+      ok: true as const,
+      project: normalizeProject(raw.project),
+      members: Array.isArray(raw.members) ? raw.members.map(normalizeProjectMember) : [],
+    }
+  },
+  createProjectInvite: async (projectId: string, role: ProjectAccessRole) => {
+    const raw = await apiRequest<any>('POST', `/projects/${encodeURIComponent(projectId)}/invites`, { role })
+    return { ok: true as const, invite: normalizeProjectInvite(raw) }
+  },
+  previewProjectInvite: async (code: string) => {
+    const raw = await apiRequest<any>('POST', '/project-invites/preview', { code })
+    const invite = normalizeProjectInvite(raw)
+    return { ok: true as const, invite, already_member: Boolean(raw.already_member || raw.already_joined || invite.already_joined) }
+  },
+  joinProjectInvite: async (code: string) => {
+    const raw = await apiRequest<any>('POST', '/project-invites/join', { code })
+    return {
+      ok: true as const,
+      project: normalizeProject(raw.project),
+      membership: raw.membership && typeof raw.membership === 'object' ? raw.membership : undefined,
+      bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined,
+      idempotent: Boolean(raw.idempotent || raw.already_member),
+    }
+  },
+  updateProjectMember: async (projectId: string, accountId: string, role: ProjectAccessRole) => {
+    const raw = await apiRequest<any>('PATCH', `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`, { role })
+    return {
+      ok: true as const,
+      project: raw.project ? normalizeProject(raw.project) : undefined,
+      member: raw.member ? normalizeProjectMember(raw.member) : undefined,
+      members: Array.isArray(raw.members) ? raw.members.map(normalizeProjectMember) : undefined,
+    }
+  },
+  removeProjectMember: async (projectId: string, accountId: string) => {
+    const raw = await apiRequest<any>('DELETE', `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`)
+    return { ok: true as const, removed: raw.removed !== false, members: Array.isArray(raw.members) ? raw.members.map(normalizeProjectMember) : undefined }
   },
   batch: async (batchId: string): Promise<{ ok: true; batch_id: string; status: string; photos: NormalizedBatch['photos'] }> => {
     const raw = await apiRequest<any>('GET', `/batches/${encodeURIComponent(batchId)}`)

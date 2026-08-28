@@ -1,4 +1,4 @@
-import type { Assignment, CaptureRequirementRef, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import type { Assignment, CaptureRequirementRef, PhotoCaptureSource, PhotoCategory, Scope, UploadMode } from '@/types/domain'
 
 export interface CreateBatchPayload {
   client_batch_id: string
@@ -6,6 +6,7 @@ export interface CreateBatchPayload {
   scope: Scope
   category?: PhotoCategory
   mode: UploadMode
+  capture_source?: PhotoCaptureSource
   assignment?: Assignment
   requirement?: CaptureRequirementRef
 }
@@ -22,6 +23,7 @@ export interface PhotoUploadMetadata {
   original_mime_type: 'image/jpeg' | 'image/png'
   title: string
   photo_date: string
+  capture_source?: PhotoCaptureSource
 }
 
 export interface ChunkUploadInitPayload extends Omit<PhotoUploadMetadata, 'original_mime_type'> {
@@ -53,6 +55,7 @@ export function buildChunkUploadInit(metadata: PhotoUploadMetadata, chunkSizeByt
     height: metadata.height,
     title: metadata.title,
     photo_date: metadata.photo_date,
+    ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),
     chunk_size_bytes: chunkSizeBytes,
     total_chunks: Math.ceil(metadata.original_size_bytes / chunkSizeBytes),
   }
@@ -66,6 +69,7 @@ export function normalizeBatchPayload(payload: CreateBatchPayload): CreateBatchP
     mode: payload.mode,
   }
   if (payload.scope === 'engineering' && payload.category) normalized.category = payload.category
+  if (payload.capture_source) normalized.capture_source = payload.capture_source
   if (payload.assignment && Object.values(payload.assignment).some(Boolean)) normalized.assignment = { ...payload.assignment }
   if (payload.scope === 'engineering' && payload.requirement?.template_code) normalized.requirement = { ...payload.requirement }
   return normalized
@@ -84,6 +88,7 @@ export function buildPhotoUploadForm(metadata: PhotoUploadMetadata): Record<stri
     original_mime_type: metadata.original_mime_type,
     title: metadata.title,
     photo_date: metadata.photo_date,
+    ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),
   }
 }
 

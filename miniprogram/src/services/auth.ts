@@ -7,10 +7,12 @@ import { applyBootstrap, clearBootstrapView, hydrateBootstrap, loadBootstrap } f
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
 import { registerAuthExpiredHandler } from './auth-expiry-coordinator'
+import { consumePendingInvite, peekPendingInvite } from './pending-invite'
 
 const ACCOUNT_KEY = 'engineering-image:account:v1'
 const AUTH_ROUTE = 'pages/auth/bind'
 const HOME_URL = '/pages/home/index'
+const JOIN_PROJECT_ROUTE = 'pages/project/join'
 
 export type AuthStage = 'checking' | 'account_login' | 'bind_wechat' | 'authenticated'
 
@@ -48,6 +50,12 @@ function moveToLogin(): void {
 function moveToHome(): void {
   setTimeout(() => {
     const route = currentRoute()
+    const inviteCode = peekPendingInvite()
+    if (inviteCode && route !== JOIN_PROJECT_ROUTE) {
+      consumePendingInvite()
+      uni.reLaunch({ url: `/${JOIN_PROJECT_ROUTE}?code=${encodeURIComponent(inviteCode)}` })
+      return
+    }
     if (!route || route === AUTH_ROUTE) uni.reLaunch({ url: HOME_URL })
   }, 0)
 }

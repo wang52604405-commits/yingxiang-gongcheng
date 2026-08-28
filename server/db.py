@@ -156,6 +156,48 @@ CREATE TABLE IF NOT EXISTS cloud_engineering_projects (
     FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+CREATE TABLE IF NOT EXISTS project_members (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_owner_account_id INTEGER NOT NULL,
+    project_id               TEXT NOT NULL,
+    member_account_id        INTEGER NOT NULL,
+    role                     TEXT NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'active',
+    invited_by_account_id    INTEGER NOT NULL DEFAULT 0,
+    joined_at                TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    removed_at               TEXT NOT NULL DEFAULT '',
+    removed_by_account_id    INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (project_owner_account_id, project_id, member_account_id),
+    CHECK (role IN ('owner', 'admin', 'capturer', 'viewer')),
+    CHECK (status IN ('active', 'removed')),
+    CHECK (role != 'owner' OR member_account_id = project_owner_account_id),
+    FOREIGN KEY (project_owner_account_id, project_id)
+        REFERENCES cloud_engineering_projects(account_id, project_id),
+    FOREIGN KEY (member_account_id) REFERENCES accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS project_invitations (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_owner_account_id INTEGER NOT NULL,
+    project_id               TEXT NOT NULL,
+    invite_code_hash         TEXT UNIQUE NOT NULL,
+    role                     TEXT NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'pending',
+    created_by_account_id    INTEGER NOT NULL,
+    accepted_by_account_id   INTEGER NOT NULL DEFAULT 0,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    expires_at               TEXT NOT NULL,
+    accepted_at              TEXT NOT NULL DEFAULT '',
+    revoked_at               TEXT NOT NULL DEFAULT '',
+    CHECK (role IN ('admin', 'capturer', 'viewer')),
+    CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+    FOREIGN KEY (project_owner_account_id, project_id)
+        REFERENCES cloud_engineering_projects(account_id, project_id),
+    FOREIGN KEY (created_by_account_id) REFERENCES accounts(id)
+);
+
 CREATE TABLE IF NOT EXISTS cloud_units (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id    INTEGER NOT NULL,
@@ -208,6 +250,7 @@ CREATE TABLE IF NOT EXISTS mobile_batches (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id      INTEGER NOT NULL,
     client_batch_id TEXT NOT NULL,
+    project_owner_account_id INTEGER NOT NULL DEFAULT 0,
     project_id      TEXT NOT NULL,
     scope           TEXT NOT NULL,
     category        TEXT NOT NULL DEFAULT '',
@@ -231,6 +274,7 @@ CREATE TABLE IF NOT EXISTS cloud_photos (
     account_id           INTEGER NOT NULL,
     batch_id             INTEGER,
     photo_uuid           TEXT NOT NULL,
+    project_owner_account_id INTEGER NOT NULL DEFAULT 0,
     project_id           TEXT NOT NULL,
     source               TEXT NOT NULL DEFAULT 'mobile',
     scope                TEXT NOT NULL,
@@ -241,7 +285,10 @@ CREATE TABLE IF NOT EXISTS cloud_photos (
     title                TEXT NOT NULL DEFAULT '',
     photo_date           TEXT NOT NULL DEFAULT '',
     photographer         TEXT NOT NULL DEFAULT '',
+    photographer_account_id INTEGER NOT NULL DEFAULT 0,
     uploaded_by          TEXT NOT NULL DEFAULT '',
+    uploaded_by_account_id INTEGER NOT NULL DEFAULT 0,
+    capture_source       TEXT NOT NULL DEFAULT '',
     client_captured_at   TEXT NOT NULL DEFAULT '',
     orientation          INTEGER NOT NULL DEFAULT 1,
     width                INTEGER NOT NULL DEFAULT 0,
@@ -276,6 +323,7 @@ CREATE TABLE IF NOT EXISTS cloud_photos (
     desktop_imported_at  TEXT NOT NULL DEFAULT '',
     deleted_at           TEXT NOT NULL DEFAULT '',
     deleted_by_machine_id TEXT NOT NULL DEFAULT '',
+    deleted_by_account_id INTEGER NOT NULL DEFAULT 0,
     UNIQUE (account_id, photo_uuid),
     UNIQUE (storage_key),
     FOREIGN KEY (account_id) REFERENCES accounts(id),
@@ -315,6 +363,7 @@ CREATE TABLE IF NOT EXISTS mobile_upload_sessions (
     account_id        INTEGER NOT NULL,
     batch_id          INTEGER NOT NULL,
     photo_uuid        TEXT NOT NULL,
+    project_owner_account_id INTEGER NOT NULL DEFAULT 0,
     project_id        TEXT NOT NULL,
     target_machine_id TEXT NOT NULL,
     original_sha256   TEXT NOT NULL,
@@ -350,6 +399,22 @@ CREATE TABLE IF NOT EXISTS mobile_upload_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_mobile_projects_account
 ON cloud_engineering_projects(account_id, active, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_project_members_account
+ON project_members(member_account_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_project_members_project
+ON project_members(project_owner_account_id, project_id, status, role);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_members_one_owner
+ON project_members(project_owner_account_id, project_id)
+WHERE role = 'owner' AND status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_project_invitations_project
+ON project_invitations(project_owner_account_id, project_id, status, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_project_invitations_expiry
+ON project_invitations(status, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_mobile_units_tree
 ON cloud_units(account_id, project_id, scope, active, sort_order, id);
@@ -400,15 +465,21 @@ MOBILE_EXTRA_COLUMNS = {
         "desktop_machine_id": "TEXT NOT NULL DEFAULT ''",
     },
     "mobile_batches": {
+        "project_owner_account_id": "INTEGER NOT NULL DEFAULT 0",
         "target_machine_id": "TEXT NOT NULL DEFAULT ''",
         "requirement_code": "TEXT NOT NULL DEFAULT ''",
         "requirement_name": "TEXT NOT NULL DEFAULT ''",
     },
     "cloud_photos": {
+        "project_owner_account_id": "INTEGER NOT NULL DEFAULT 0",
         "photographer": "TEXT NOT NULL DEFAULT ''",
+        "photographer_account_id": "INTEGER NOT NULL DEFAULT 0",
         "uploaded_by": "TEXT NOT NULL DEFAULT ''",
+        "uploaded_by_account_id": "INTEGER NOT NULL DEFAULT 0",
+        "capture_source": "TEXT NOT NULL DEFAULT ''",
         "deleted_at": "TEXT NOT NULL DEFAULT ''",
         "deleted_by_machine_id": "TEXT NOT NULL DEFAULT ''",
+        "deleted_by_account_id": "INTEGER NOT NULL DEFAULT 0",
         "original_sha256": "TEXT NOT NULL DEFAULT ''",
         "original_size_bytes": "INTEGER NOT NULL DEFAULT 0",
         "original_mime_type": "TEXT NOT NULL DEFAULT ''",
@@ -427,6 +498,7 @@ MOBILE_EXTRA_COLUMNS = {
         "requirement_name": "TEXT NOT NULL DEFAULT ''",
     },
     "mobile_upload_sessions": {
+        "project_owner_account_id": "INTEGER NOT NULL DEFAULT 0",
         "cleanup_status": "TEXT NOT NULL DEFAULT ''",
         "cleanup_error": "TEXT NOT NULL DEFAULT ''",
     },
@@ -470,6 +542,98 @@ def migrate() -> None:
             for name, decl in additions.items():
                 if name not in table_columns:
                     conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {decl}')
+
+        # V1.3 共享工程继续把这些表的 account_id 解释为“上传者账号”。
+        # project_owner_account_id 是工程资料边界；旧数据原本由本账号独占，
+        # 因此可无损回填为 account_id，既不复制照片也不改变任何现有主键。
+        for table in ("mobile_batches", "cloud_photos", "mobile_upload_sessions"):
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone():
+                conn.execute(
+                    f'UPDATE "{table}" SET project_owner_account_id = account_id '
+                    "WHERE COALESCE(project_owner_account_id, 0) <= 0"
+                )
+
+        # 每个既有工程补一条负责人关系。重复迁移只会恢复负责人关系，
+        # 不会删除、覆盖或隐式加入其它成员。
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'project_members'"
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO project_members "
+                "(project_owner_account_id, project_id, member_account_id, role, status, "
+                "invited_by_account_id, joined_at, updated_at, removed_at, "
+                "removed_by_account_id) "
+                "SELECT account_id, project_id, account_id, 'owner', 'active', account_id, "
+                "COALESCE(NULLIF(created_at, ''), datetime('now')), "
+                "COALESCE(NULLIF(updated_at, ''), datetime('now')), '', 0 "
+                "FROM cloud_engineering_projects WHERE 1 "
+                "ON CONFLICT(project_owner_account_id, project_id, member_account_id) "
+                "DO UPDATE SET role = 'owner', status = 'active', removed_at = '', "
+                "removed_by_account_id = 0, updated_at = excluded.updated_at"
+            )
+
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cloud_photos'"
+        ).fetchone():
+            conn.execute(
+                "UPDATE cloud_photos SET uploaded_by_account_id = account_id "
+                "WHERE COALESCE(uploaded_by_account_id, 0) <= 0"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET photographer_account_id = account_id "
+                "WHERE source = 'mobile' AND photographer != '' "
+                "AND COALESCE(photographer_account_id, 0) <= 0"
+            )
+            conn.execute(
+                "UPDATE cloud_photos SET capture_source = CASE "
+                "WHEN source = 'desktop' THEN 'desktop' ELSE '' END "
+                "WHERE capture_source = '' AND source = 'desktop'"
+            )
+            duplicate_shared_photo_ids = conn.execute(
+                "SELECT project_owner_account_id, photo_uuid, COUNT(*) AS total "
+                "FROM cloud_photos GROUP BY project_owner_account_id, photo_uuid "
+                "HAVING COUNT(*) > 1 LIMIT 10"
+            ).fetchall()
+            if duplicate_shared_photo_ids:
+                details = ", ".join(
+                    f"owner={row['project_owner_account_id']},uuid={row['photo_uuid']}"
+                    f"({row['total']}条)"
+                    for row in duplicate_shared_photo_ids
+                )
+                raise RuntimeError(
+                    "检测到共享工程范围内重复 photo_uuid，拒绝静默迁移；"
+                    f"请先备份并人工处理：{details}"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_photos_shared_uuid "
+                "ON cloud_photos(project_owner_account_id, photo_uuid)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cloud_photos_shared_gallery "
+                "ON cloud_photos(project_owner_account_id, project_id, deleted_at, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cloud_photos_shared_inbox "
+                "ON cloud_photos(project_owner_account_id, target_machine_id, status, id)"
+            )
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mobile_batches'"
+        ).fetchone():
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mobile_batches_shared_project "
+                "ON mobile_batches(project_owner_account_id, project_id, account_id, id DESC)"
+            )
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'mobile_upload_sessions'"
+        ).fetchone():
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mobile_upload_sessions_shared_project "
+                "ON mobile_upload_sessions(project_owner_account_id, project_id, account_id, id)"
+            )
 
         duplicate_wechat_accounts = conn.execute(
             "SELECT account_id, COUNT(*) AS total FROM wechat_bindings "

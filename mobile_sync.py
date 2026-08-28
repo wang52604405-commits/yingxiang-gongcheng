@@ -57,6 +57,24 @@ def _canonical_uuid(value) -> str:
         return ""
 
 
+def _engineering_project_identity(project: dict) -> dict:
+    project = project if isinstance(project, dict) else {}
+    local_project_id = str(project.get("id") or "default").strip() or "default"
+    owner_account_id = str(project.get("cloud_owner_id") or "").strip()
+    project_ref = str(
+        project.get("cloud_project_ref")
+        or project.get("project_ref")
+        or ""
+    ).strip()
+    if not project_ref and owner_account_id:
+        project_ref = f"{owner_account_id}:{local_project_id}"
+    return {
+        "local_project_id": local_project_id,
+        "owner_account_id": owner_account_id,
+        "project_ref": project_ref,
+    }
+
+
 def _new_photo_uuid(seen=None) -> str:
     seen = seen if seen is not None else set()
     while True:
@@ -155,9 +173,13 @@ def build_project_snapshot(
 ) -> dict:
     """构建服务器可事务替换的完整工程快照。"""
     project = engineering_project if isinstance(engineering_project, dict) else {}
-    project_id = str(project.get("id") or "default").strip() or "default"
+    identity = _engineering_project_identity(project)
+    project_id = identity["local_project_id"]
     project_payload = {
         "id": project_id,
+        "local_project_id": project_id,
+        "project_ref": identity["project_ref"],
+        "owner_account_id": identity["owner_account_id"],
         "project_name": str(project.get("project_name") or "默认工程").strip(),
         "project_code": str(project.get("project_code") or project_id).strip(),
         "owner": str(project.get("owner") or "").strip(),
@@ -691,6 +713,7 @@ class DesktopMobileSync:
     def _project_ownership_status(self) -> dict:
         account_id = self._cloud_account_id()
         project = self.engineering_project_reader() or {}
+        identity = _engineering_project_identity(project)
         owner_id = str(project.get("cloud_owner_id") or "").strip()
         if not account_id:
             return {
@@ -699,6 +722,7 @@ class DesktopMobileSync:
                 "error": "请重新登录云账号以建立稳定账号编号",
                 "account_id": "",
                 "owner_id": owner_id,
+                **identity,
             }
         if not owner_id:
             return {
@@ -707,6 +731,7 @@ class DesktopMobileSync:
                 "error": "当前本地工程尚未绑定云账号，请先确认归属",
                 "account_id": account_id,
                 "owner_id": "",
+                **identity,
             }
         if owner_id != account_id:
             return {
@@ -715,12 +740,14 @@ class DesktopMobileSync:
                 "error": "当前本地工程属于另一云账号，已停止同步以防串号",
                 "account_id": account_id,
                 "owner_id": owner_id,
+                **identity,
             }
         return {
             "ok": True,
             "account_id": account_id,
             "owner_id": owner_id,
-            "project_id": str(project.get("id") or "default"),
+            "project_id": identity["local_project_id"],
+            **identity,
         }
 
     def _state_identity(self) -> str:
@@ -932,9 +959,17 @@ class DesktopMobileSync:
         snapshot["revision"] = revision
         result = self.cloud.desktop_project_snapshot(snapshot)
         if result.get("ok"):
+            result_project = result.get("project") if isinstance(result.get("project"), dict) else {}
+            project_ref = str(
+                result.get("project_ref")
+                or result_project.get("project_ref")
+                or snapshot.get("project", {}).get("project_ref")
+                or ""
+            ).strip()
             state["snapshot_revision"] = revision
             state["snapshot_content_hash"] = content_hash
             state["snapshot_id"] = snapshot["snapshot_id"]
+            state["project_ref"] = project_ref
             state["snapshot_synced_at"] = datetime.now().isoformat(timespec="seconds")
             self._write_state(state)
             self._startup_snapshot_pending = False
@@ -1215,9 +1250,29 @@ class DesktopMobileSync:
             raise ValueError("当前电脑缺少稳定机器编号，已拒绝导入")
         if target_machine_id != current_machine_id:
             raise ValueError("原图不属于当前电脑，已拒绝导入")
-        current_project_id = str(self.engineering_project_reader().get("id") or "default")
-        item_project_id = str(item.get("project_id") or current_project_id)
-        if item_project_id != current_project_id:
+        current_project = self.engineering_project_reader() or {}
+        identity = _engineering_project_identity(current_project)
+        current_project_id = identity["local_project_id"]
+        current_project_ref = identity["project_ref"]
+        item_project_ref = str(item.get("project_ref") or "").strip()
+        item_local_project_id = str(item.get("local_project_id") or "").strip()
+        item_project_id = str(item.get("project_id") or "").strip()
+        item_owner_id = str(
+            item.get("project_owner_account_id")
+            or item.get("owner_account_id")
+            or ""
+        ).strip()
+        if item_owner_id and identity["owner_account_id"] and item_owner_id != identity["owner_account_id"]:
+            raise ValueError("原图属于另一工程账号，已拒绝导入")
+        if item_project_ref:
+            project_matches = bool(current_project_ref) and item_project_ref == current_project_ref
+        elif item_local_project_id:
+            project_matches = item_local_project_id == current_project_id
+        else:
+            # 兼容旧服务器只返回本地 project_id，以及新服务器把 canonical
+            # project_ref 同时放在 project_id 的过渡期。
+            project_matches = item_project_id in {current_project_id, current_project_ref}
+        if not project_matches:
             raise ValueError("原图不属于当前工程，已拒绝导入")
         expected_sha = str(item.get("original_sha256") or "").strip().lower()
         try:
@@ -1322,6 +1377,23 @@ class DesktopMobileSync:
                 "sha256": details["sha256"],
                 "pixel_width": details["width"],
                 "pixel_height": details["height"],
+                "photographer_account_id": str(
+                    item.get("photographer_account_id")
+                    or ""
+                ).strip(),
+                "uploaded_by_account_id": str(
+                    item.get("uploaded_by_account_id")
+                    or item.get("uploader_account_id")
+                    or item.get("account_id")
+                    or ""
+                ).strip(),
+                "project_owner_account_id": str(
+                    item.get("project_owner_account_id")
+                    or item.get("owner_account_id")
+                    or identity["owner_account_id"]
+                    or ""
+                ).strip(),
+                "capture_source": str(item.get("capture_source") or "mobile").strip(),
             }
         }
         raw_orientation = str(item.get("orientation") or "").strip().lower()
@@ -1589,6 +1661,9 @@ class DesktopMobileSync:
         ownership = self._project_ownership_status()
         if not ownership.get("ok"):
             return
+        project_identity = _engineering_project_identity(
+            self.engineering_project_reader() or {}
+        )
         ensure_all_photo_uuids(self.manager)
         for project in self.manager.list_projects(include_other=True):
             code = str(project.get("project_code") or "").strip()
@@ -1607,7 +1682,10 @@ class DesktopMobileSync:
                 if not filename or not source.exists():
                     continue
                 target = {
-                    "project_id": str(self.engineering_project_reader().get("id") or "default"),
+                    "project_id": project_identity["local_project_id"],
+                    "local_project_id": project_identity["local_project_id"],
+                    "project_ref": project_identity["project_ref"],
+                    "project_owner_account_id": project_identity["owner_account_id"],
                     "scope": "other" if is_other else "engineering",
                     "category": "" if is_other else str(photo.get("category") or "construction"),
                     "unit_code": "" if is_other else str(hierarchy.get("unit_code") or data.get("display_project_code") or code),
@@ -1661,6 +1739,8 @@ class DesktopMobileSync:
                 "photo_date": str(photo.get("photo_date") or ""),
                 "photographer": str(photo.get("photographer") or ""),
                 "uploaded_by": str(photo.get("uploaded_by") or ""),
+                "photographer_account_id": str(photo.get("photographer_account_id") or ""),
+                "uploaded_by_account_id": str(photo.get("uploaded_by_account_id") or ""),
                 "client_captured_at": _iso_local_time(str(photo.get("upload_time") or "")),
                 "orientation": preview.get("exif_orientation", 1),
                 "width": preview["width"],

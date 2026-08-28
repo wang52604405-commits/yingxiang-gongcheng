@@ -1,5 +1,5 @@
 import { CURRENT_PROJECT } from '@/config/env'
-import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectNode, ProjectSummary } from '@/types/domain'
+import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectMember, ProjectNode, ProjectSummary } from '@/types/domain'
 import type { CreateBatchPayload, PhotoUploadMetadata } from './contracts'
 
 interface MockBatch {
@@ -9,11 +9,20 @@ interface MockBatch {
   committed: boolean
 }
 
-const projects: ProjectSummary[] = [{ ...CURRENT_PROJECT, revision: 1, unit_count: 888 }]
-const rawProject = (project: ProjectSummary) => ({ id: project.id, project_id: project.id, project_code: project.code, project_name: project.name, revision: project.revision || 0, metadata: { unit_count: project.unit_count || 0 } })
+const projects: ProjectSummary[] = [{ ...CURRENT_PROJECT, id: 'mock-account:default', owner_account_id: 'mock-account', local_project_id: 'default', access_role: 'owner', member_count: 2, can_capture: true, can_manage_members: true, revision: 1, unit_count: 888 }]
+const rawProject = (project: ProjectSummary) => ({
+  id: project.id, project_id: project.id, project_ref: project.id, local_project_id: project.local_project_id,
+  owner_account_id: project.owner_account_id, project_code: project.code, project_name: project.name,
+  access_role: project.access_role, member_count: project.member_count, can_capture: project.can_capture,
+  can_manage_members: project.can_manage_members, revision: project.revision || 0, metadata: { unit_count: project.unit_count || 0 },
+})
 const batches = new Map<string, MockBatch>()
 const batchByClientId = new Map<string, string>()
 const chunkUploads = new Map<string, { metadata: PhotoUploadMetadata; chunkSize: number; totalChunks: number; uploaded: Set<number>; status: string }>()
+let mockMembers: ProjectMember[] = [
+  { account_id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: 'owner', is_me: true },
+  { account_id: 'mock-capturer', username: 'collector', display_name: '现场采集员', role: 'capturer' },
+]
 
 const engineeringTree: ProjectNode[] = [
   {
@@ -55,7 +64,7 @@ const otherTree: ProjectNode[] = [
 ]
 
 const samplePhotos: CloudPhoto[] = [
-  { photo_uuid: 'demo-1', title: '钢筋安装检查', photo_date: '2026-08-25', scope: 'engineering', category: 'construction', unit_code: 'YNLQ-DY-001', unit_name: '拦河闸进口段', process_name: '钢筋安装', status: 'desktop_imported', created_at: '2026-08-25T01:28:00Z' },
+  { photo_uuid: 'demo-1', title: '钢筋安装检查', photo_date: '2026-08-25', photographer: '现场采集员', uploaded_by: '现场采集员', photographer_account_id: 'mock-capturer', uploaded_by_account_id: 'mock-capturer', capture_source: 'camera', scope: 'engineering', category: 'construction', unit_code: 'YNLQ-DY-001', unit_name: '拦河闸进口段', process_name: '钢筋安装', status: 'desktop_imported', created_at: '2026-08-25T01:28:00Z' },
   { photo_uuid: 'demo-2', title: '模板验收', photo_date: '2026-08-25', scope: 'engineering', category: 'supervision', unit_code: 'YNLQ-DY-002', unit_name: '拦河闸闸室段', process_name: '模板验收', status: 'desktop_imported', created_at: '2026-08-25T00:56:00Z' },
   { photo_uuid: 'demo-3', title: '土方碾压', photo_date: '2026-08-24', scope: 'engineering', category: 'construction', unit_code: 'YNLQ-DY-003', unit_name: '拦河闸连接堤', process_name: '碾压检测', status: 'desktop_pending', created_at: '2026-08-24T09:10:00Z' },
   { photo_uuid: 'demo-4', title: '临时道路巡查', photo_date: '2026-08-24', scope: 'other', other_node_code: 'YNLQ-QT-001-01', other_node_name: '临时道路', status: 'desktop_imported', created_at: '2026-08-24T08:10:00Z' },
@@ -108,6 +117,28 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
     return mockBootstrap() as T
   }
   if (path === '/projects' && method === 'GET') return { ok: true, projects: projects.map(rawProject) } as T
+  const memberListMatch = path.match(/^\/projects\/([^/]+)\/members$/)
+  if (memberListMatch && method === 'GET') return { ok: true, project: rawProject(projects[0]), members: mockMembers } as T
+  const createInviteMatch = path.match(/^\/projects\/([^/]+)\/invites$/)
+  if (createInviteMatch && method === 'POST') {
+    const role = String((data as any)?.role || 'capturer')
+    return { ok: true, invite: { invite_id: 'mock-invite', code: 'TEAM123456', role, expires_at: '2026-08-30T00:00:00Z', project: rawProject(projects[0]), inviter_name: '工程资料员' } } as T
+  }
+  if (path === '/project-invites/preview' && method === 'POST') {
+    return { ok: true, invite: { invite_id: 'mock-invite', code: String((data as any)?.code || 'TEAM123456'), role: 'capturer', expires_at: '2026-08-30T00:00:00Z', project: rawProject(projects[0]), inviter_name: '工程资料员' } } as T
+  }
+  if (path === '/project-invites/join' && method === 'POST') {
+    return { ok: true, project: { ...rawProject(projects[0]), access_role: 'capturer', can_manage_members: false }, membership: { role: 'capturer' }, bootstrap: mockBootstrap() } as T
+  }
+  const memberMutationMatch = path.match(/^\/projects\/([^/]+)\/members\/([^/]+)$/)
+  if (memberMutationMatch && method === 'PATCH') {
+    mockMembers = mockMembers.map((member) => member.account_id === decodeURIComponent(memberMutationMatch[2]) ? { ...member, role: (data as any)?.role || member.role } : member)
+    return { ok: true, member: mockMembers.find((member) => member.account_id === decodeURIComponent(memberMutationMatch[2])), members: mockMembers } as T
+  }
+  if (memberMutationMatch && method === 'DELETE') {
+    mockMembers = mockMembers.filter((member) => member.account_id !== decodeURIComponent(memberMutationMatch[2]))
+    return { ok: true, removed: true, members: mockMembers } as T
+  }
   const requirementsMatch = path.match(/^\/projects\/([^/?]+)\/requirements(?:\?(.*))?$/)
   if (requirementsMatch && method === 'GET') {
     const requiredType = new URLSearchParams(requirementsMatch[2] || '').get('required_type')

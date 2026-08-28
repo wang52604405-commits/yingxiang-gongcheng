@@ -102,6 +102,6 @@ describe('账号命名空间', () => {
     })
     expect(bootstrapState.currentProject).toBeNull()
     expect(selectionStorage.hasProject()).toBe(false)
-    expect(selectionStorage.getProject()).toMatchObject({ id: '', name: '尚未从电脑同步工程' })
+    expect(selectionStorage.getProject()).toMatchObject({ id: '', name: '尚未选择工程' })
   })
 })

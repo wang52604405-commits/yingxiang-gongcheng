@@ -200,6 +200,23 @@ describe('账号登录、微信绑定与 token 过期', () => {
     expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/home/index' })
   })
 
+  it('从微信邀请进入时，账号绑定完成后恢复加入项目页面', async () => {
+    pages = [{ route: 'pages/auth/bind' }]
+    mocks.accountLogin.mockResolvedValue({ ok: true, account: { id: 'B', username: 'builder' }, binding_intent: 'intent-B' })
+    const bootstrap = { ok: true, account: { id: 'B', username: 'builder' }, projects: [], current_project: null, queue: {}, recent_uploads: [], server_time: '' }
+    mocks.wechatBindConfirm.mockResolvedValue({ ok: true, token: 'mobile-token', account: bootstrap.account, bootstrap })
+
+    const { rememberPendingInvite } = await import('@/services/pending-invite')
+    rememberPendingInvite('TEAM123456')
+    const { confirmWechatBinding, loginWithAccount } = await import('@/services/auth')
+    await loginWithAccount('builder', 'password1')
+    await confirmWechatBinding()
+    await vi.runAllTimersAsync()
+
+    expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/project/join?code=TEAM123456' })
+    expect(reLaunch).not.toHaveBeenCalledWith({ url: '/pages/home/index' })
+  })
+
   it('微信快捷登录只在用户主动点击后执行，未绑定时保留账号页错误', async () => {
     pages = [{ route: 'pages/auth/bind' }]
     mocks.wechatLogin.mockResolvedValue({ ok: true, binding_required: true })

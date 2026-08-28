@@ -5,15 +5,20 @@ import { createSessionLifecycle } from '@/services/session-lifecycle'
 import { ensureSession, sessionState } from '@/services/auth'
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
+import { rememberLaunchInvite } from '@/services/pending-invite'
 
 const sessionLifecycle = createSessionLifecycle({ ensure: ensureSession, session: sessionState, queue: queueRuntime, selection: selectionStorage })
 
-onLaunch(() => {
+onLaunch((options) => {
+  rememberLaunchInvite(options)
   console.info(BUILD_CHANNEL)
   void sessionLifecycle.activate()
 })
 
 onShow(() => {
+  const wxApi = (globalThis as { wx?: { getEnterOptionsSync?: () => unknown } }).wx
+  const enterOptions = (uni as any).getEnterOptionsSync?.() || wxApi?.getEnterOptionsSync?.()
+  rememberLaunchInvite(enterOptions)
   void sessionLifecycle.activate()
 })
 

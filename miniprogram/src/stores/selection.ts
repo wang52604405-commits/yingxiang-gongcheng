@@ -1,5 +1,5 @@
 import { API_MODE, CURRENT_PROJECT, EMPTY_PROJECT } from '@/config/env'
-import type { Assignment, CaptureRequirementRef, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import type { Assignment, CaptureRequirementRef, PhotoCategory, ProjectSummary, Scope, UploadMode } from '@/types/domain'
 
 const PROJECT_KEY = 'engineering-image:selected-project:v1'
 const DESTINATION_KEY = 'engineering-image:selected-destination:v1'
@@ -33,7 +33,7 @@ export const selectionStorage = {
     uni.removeStorageSync(ownerKey(DESTINATION_KEY))
     uni.removeStorageSync(ownerKey(UPLOAD_PRESET_KEY))
   },
-  setProject: (project: { id: string; code: string; name: string }) => {
+  setProject: (project: ProjectSummary) => {
     const projectKey = ownerKey(PROJECT_KEY)
     const previous = uni.getStorageSync(projectKey) as { id?: string } | null
     const changed = String(previous?.id || '') !== String(project.id)

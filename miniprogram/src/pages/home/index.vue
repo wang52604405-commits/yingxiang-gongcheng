@@ -42,7 +42,7 @@ async function loadHome() {
 function openProject() { uni.navigateTo({ url: '/pages/project/select' }) }
 function openRequirements() {
   if (!selectionStorage.hasProject()) {
-    uni.showModal({ title: '尚未同步工程', content: '请先在原电脑登录同一账号并同步工程。', showCancel: false })
+    uni.showModal({ title: '还没有工程', content: '请先选择或加入工程。', showCancel: false, success: () => openProject() })
     return
   }
   uni.navigateTo({ url: '/pages/requirements/index' })

@@ -340,6 +340,17 @@ class StagingIsolationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertTrue(payload["ok"])
+            self.assertIn("project_members", payload["mobile_tables"])
+            self.assertIn("project_invitations", payload["mobile_tables"])
+            self.assertEqual(
+                payload["shared_project_invariants"],
+                {
+                    "projects": 0,
+                    "owner_members": 0,
+                    "projects_without_owner": 0,
+                    "invalid_project_owner_ids": 0,
+                },
+            )
             self.assertEqual(payload["source_sha256"], source_hash)
             self.assertEqual(file_sha256(source), source_hash)
             self.assertEqual(file_sha256(sentinel), sentinel_hash)

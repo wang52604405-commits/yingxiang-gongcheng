@@ -1,6 +1,8 @@
 export type Scope = 'engineering' | 'other'
 export type PhotoCategory = 'construction' | 'supervision'
 export type UploadMode = 'direct' | 'auto'
+export type PhotoCaptureSource = 'camera' | 'album'
+export type ProjectAccessRole = 'owner' | 'admin' | 'capturer' | 'viewer'
 
 export type PhotoStatus =
   | 'local_ready'
@@ -23,6 +25,12 @@ export interface ProjectSummary {
   id: string
   code: string
   name: string
+  owner_account_id?: string
+  local_project_id?: string
+  access_role?: ProjectAccessRole
+  member_count?: number
+  can_capture?: boolean
+  can_manage_members?: boolean
   revision?: number
   unit_count?: number
   industry?: string
@@ -30,6 +38,24 @@ export interface ProjectSummary {
   region?: string
   template_version?: string
   requirement_count?: number
+}
+
+export interface ProjectMember {
+  account_id: string
+  username: string
+  display_name: string
+  role: ProjectAccessRole
+  joined_at?: string
+  is_me?: boolean
+}
+
+export interface ProjectInvite {
+  code: string
+  role: ProjectAccessRole
+  expires_at?: string
+  project: ProjectSummary
+  inviter_name?: string
+  already_joined?: boolean
 }
 
 export interface PhotoRequirement {
@@ -87,6 +113,7 @@ export interface UploadDraft {
   scope: Scope
   category?: PhotoCategory
   mode: UploadMode
+  capture_source?: PhotoCaptureSource
   assignment?: Assignment
   requirement?: CaptureRequirementRef
 }
@@ -172,6 +199,9 @@ export interface CloudPhoto {
   photo_date: string
   photographer?: string
   uploaded_by?: string
+  photographer_account_id?: string
+  uploaded_by_account_id?: string
+  capture_source?: PhotoCaptureSource
   scope: Scope
   category?: PhotoCategory
   unit_code?: string

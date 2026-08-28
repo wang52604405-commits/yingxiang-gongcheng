@@ -9,6 +9,7 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
 import { formatBytes } from '@/utils/format'
+import { projectMemberSummary } from '@/services/project-membership'
 
 const project = ref(selectionStorage.getProject())
 const authenticated = computed(() => sessionState.ready && sessionState.stage === 'authenticated' && Boolean(sessionState.account))
@@ -26,6 +27,14 @@ function showPrivacy() {
 
 function confirmSignOut() {
   uni.showModal({ title: '切换账号？', content: '将返回账号登录页；未上传原图仍保留在原账号队列中。', success: ({ confirm }) => { if (confirm) signOut() } })
+}
+
+function openMembers() {
+  if (!project.value.id) {
+    uni.navigateTo({ url: '/pages/project/select' })
+    return
+  }
+  uni.navigateTo({ url: '/pages/project/members' })
 }
 
 onShow(() => {
@@ -52,6 +61,9 @@ onShow(() => {
     <view v-if="!queueRuntime.state.online" class="notice offline-notice"><text class="notice-dot" /><text>离线，原图保存在本机</text></view>
 
     <view class="settings card">
+      <button class="setting-row pressable" @tap="openMembers">
+        <view class="setting-icon"><UiIcon name="user" :size="18" /></view><text class="setting-title">项目成员</text><text class="setting-value">{{ project.id ? projectMemberSummary(project) : '未选择工程' }}</text>
+      </button>
       <button class="setting-row pressable" @tap="uniApi.switchTab({ url: '/pages/queue/index' })">
         <view class="setting-icon"><UiIcon name="storage" :size="18" /></view><text class="setting-title">本机影像</text><text class="setting-value">{{ formatBytes(queueRuntime.queueBytes.value) }}</text>
       </button>
@@ -61,7 +73,7 @@ onShow(() => {
     </view>
 
     <button v-if="authenticated" class="account-button pressable" @tap="confirmSignOut">切换账号</button>
-    <text class="version">工程影像 V1.2</text>
+    <text class="version">工程影像 V1.3</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->

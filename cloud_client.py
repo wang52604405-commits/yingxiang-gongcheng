@@ -30,7 +30,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260828-2.70"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260829-2.71"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -981,6 +981,94 @@ def desktop_project_snapshot(snapshot: dict) -> dict:
         method="POST",
         payload=snapshot,
         timeout=30,
+    )
+
+
+def desktop_project_members(project_id: str, desktop_machine_id: str) -> dict:
+    """读取当前归档工程的成员；服务器仍以 owner + 归档机做最终鉴权。"""
+    return _cloud_api_json(
+        "/api/desktop/v1/project-members",
+        query={
+            "project_id": str(project_id or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
+def desktop_project_invites(project_id: str, desktop_machine_id: str) -> dict:
+    """读取邀请状态；已生成的邀请码明文不会由列表接口再次返回。"""
+    return _cloud_api_json(
+        "/api/desktop/v1/project-invites",
+        query={
+            "project_id": str(project_id or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
+def desktop_create_project_invite(
+    project_id: str,
+    role: str,
+    desktop_machine_id: str,
+) -> dict:
+    return _cloud_api_json(
+        "/api/desktop/v1/project-invites",
+        method="POST",
+        payload={
+            "project_id": str(project_id or "").strip(),
+            "role": str(role or "capturer").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
+def desktop_revoke_project_invite(
+    invite_id,
+    project_id: str,
+    desktop_machine_id: str,
+) -> dict:
+    quoted = urllib.parse.quote(str(invite_id or ""), safe="")
+    return _cloud_api_json(
+        f"/api/desktop/v1/project-invites/{quoted}",
+        method="DELETE",
+        payload={
+            "project_id": str(project_id or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
+def desktop_update_project_member(
+    member_account_id,
+    project_id: str,
+    role: str,
+    desktop_machine_id: str,
+) -> dict:
+    quoted = urllib.parse.quote(str(member_account_id or ""), safe="")
+    return _cloud_api_json(
+        f"/api/desktop/v1/project-members/{quoted}",
+        method="PATCH",
+        payload={
+            "project_id": str(project_id or "").strip(),
+            "role": str(role or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
+def desktop_remove_project_member(
+    member_account_id,
+    project_id: str,
+    desktop_machine_id: str,
+) -> dict:
+    quoted = urllib.parse.quote(str(member_account_id or ""), safe="")
+    return _cloud_api_json(
+        f"/api/desktop/v1/project-members/{quoted}",
+        method="DELETE",
+        payload={
+            "project_id": str(project_id or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
     )
 
 

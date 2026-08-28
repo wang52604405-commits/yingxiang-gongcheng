@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260828-2.70.css">
+  <link rel="stylesheet" href="/assets/app-A20260829-2.71.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -640,11 +640,12 @@
       <form id="projectInfoForm" class="photo-edit-form project-settings-form">
         <nav class="project-settings-tabs" aria-label="工程设置分类">
           <button class="active" type="button" data-project-settings-tab="info">1. 工程信息</button>
-          <button type="button" data-project-settings-tab="numbering">2. 编号规则</button>
-          <button type="button" data-project-settings-tab="matching">3. 导入匹配</button>
-          <button type="button" data-project-settings-tab="fields">4. 照片字段</button>
-          <button type="button" data-project-settings-tab="print">5. 打印设置</button>
-          <button type="button" data-project-settings-tab="storage">6. 照片存储</button>
+          <button type="button" data-project-settings-tab="members">2. 项目成员</button>
+          <button type="button" data-project-settings-tab="numbering">3. 编号规则</button>
+          <button type="button" data-project-settings-tab="matching">4. 导入匹配</button>
+          <button type="button" data-project-settings-tab="fields">5. 照片字段</button>
+          <button type="button" data-project-settings-tab="print">6. 打印设置</button>
+          <button type="button" data-project-settings-tab="storage">7. 照片存储</button>
         </nav>
         <div class="project-settings-body">
           <section class="project-settings-panel active" data-project-settings-panel="info">
@@ -665,6 +666,40 @@
               <div class="project-settings-card wide" id="professionalPlanSummary"><strong>专业影像采集模板</strong><p class="import-hint">水利沿用现有项目划分；房建、市政、电力会按专业模板同步“必拍 / 条件必拍 / 推荐”清单到小程序。</p><button class="secondary" type="button" id="openProfessionalPlanBtn">查看详细采集清单</button></div>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
             </div>
+          </section>
+          <section class="project-settings-panel project-members-panel" data-project-settings-panel="members">
+            <div class="project-members-heading">
+              <div>
+                <h4>项目成员 <span id="projectMemberCount" class="project-member-count">0 人</span></h4>
+                <p id="projectMembersSummary" class="import-hint">正在读取成员…</p>
+              </div>
+              <button class="secondary" type="button" id="refreshProjectMembersBtn">刷新</button>
+            </div>
+            <div class="project-member-invite-card">
+              <label>邀请角色
+                <select id="projectInviteRoleInput" class="orientation-select">
+                  <option value="capturer" selected>采集员</option>
+                  <option value="viewer">只读</option>
+                  <option value="admin">管理员</option>
+                </select>
+              </label>
+              <button type="button" id="createProjectInviteBtn">生成邀请码</button>
+            </div>
+            <div id="projectInviteResult" class="project-invite-result" hidden aria-live="polite">
+              <div>
+                <small>新邀请码</small>
+                <strong id="projectInviteCode">—</strong>
+                <span id="projectInviteMeta"></span>
+              </div>
+              <button class="secondary" type="button" id="copyProjectInviteBtn">复制</button>
+            </div>
+            <div id="projectMembersList" class="project-members-list" aria-live="polite">
+              <div class="empty">正在读取成员…</div>
+            </div>
+            <section id="projectInvitesSection" class="project-invites-section" hidden>
+              <div class="project-member-section-title">待使用邀请</div>
+              <div id="projectInvitesList" class="project-invites-list"></div>
+            </section>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="numbering">
             <h4>编号规则</h4>
@@ -806,6 +841,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260828-2.70.js"></script>
+  <script defer src="/assets/app-A20260829-2.71.js"></script>
 </body>
 </html>

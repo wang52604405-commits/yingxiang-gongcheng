@@ -99,6 +99,11 @@ function isAuthExpired(error: unknown): error is ApiError {
   return error instanceof ApiError && (error.statusCode === 401 || ['unauthorized', 'token_expired', 'AUTH_EXPIRED'].includes(error.code))
 }
 
+function isProjectAccessRevoked(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError)) return false
+  return ['project_access_revoked', 'project_permission_denied', 'project_access_denied', 'project_not_found'].includes(String(error.code || '').toLowerCase())
+}
+
 function errorMessage(error: unknown, fallback = '处理失败'): string {
   if (error instanceof Error && error.message) return error.message
   if (error && typeof error === 'object' && 'errMsg' in error) return String((error as { errMsg?: unknown }).errMsg || fallback)
@@ -171,10 +176,10 @@ function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, p
   if (!isCurrentOwner(photo.owner_account_id)) return
   photo.retry_from = retryFrom
   photo.status = 'failed'
-  const message = errorMessage(error)
+  const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；原图仍保存在本机' : errorMessage(error)
   photo.error = preparation ? `原图已安全保存；${message}` : message
   photo.failure_code = isAuthExpired(error) ? 'AUTH_EXPIRED' : error instanceof ApiError ? error.code : undefined
-  photo.retryable = isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
+  photo.retryable = isProjectAccessRevoked(error) ? false : isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
   photo.auto_retry_pending = undefined
   photo.auto_retry_attempts = undefined
   photo.next_retry_at = undefined
@@ -392,6 +397,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       original_mime_type: photo.original_mime_type,
       title: photo.title,
       photo_date: photo.photo_date,
+      capture_source: photo.draft.capture_source,
     }
     if (!requiresChunkedUpload(photo.original_size)) {
       photo.upload_mode = 'direct'
@@ -506,6 +512,7 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       scope: batch.draft.scope,
       category: batch.draft.category,
       mode: batch.draft.mode,
+      capture_source: batch.draft.capture_source,
       assignment: batch.draft.mode === 'direct' ? batch.draft.assignment : undefined,
       requirement: batch.draft.requirement,
     }

@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import re
+import secrets
 import tempfile
 import threading
 import time
@@ -46,6 +47,12 @@ UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
+PROJECT_ROLES = {"owner", "admin", "capturer", "viewer"}
+CAPTURE_ROLES = {"owner", "admin", "capturer"}
+MANAGE_MEMBER_ROLES = {"owner", "admin"}
+INVITABLE_ROLES = {"admin", "capturer", "viewer"}
+PROJECT_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60
+PROJECT_INVITE_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 _PHOTO_UPLOAD_LOCKS = {}
 _PHOTO_UPLOAD_LOCKS_GUARD = threading.Lock()
 _CHUNK_SESSION_LOCKS = {}
@@ -204,6 +211,29 @@ def _project_id(value) -> str:
     return text
 
 
+def _project_ref(owner_account_id: int, project_id: str) -> str:
+    return f"{int(owner_account_id)}:{_project_id(project_id)}"
+
+
+def _parse_project_ref(value, current_account_id: int) -> tuple[int, str, bool]:
+    """解析 ownerId:localProjectId；旧 owner 客户端仍可发送裸本地 ID。"""
+
+    text = str(value or "").strip()
+    owner_text, separator, local_project_id = text.partition(":")
+    if separator and owner_text.isdigit() and int(owner_text) > 0:
+        return int(owner_text), _project_id(local_project_id), False
+    return int(current_account_id), _project_id(text), True
+
+
+def _project_permissions(role: str) -> dict:
+    normalized = str(role or "")
+    return {
+        "can_view": normalized in PROJECT_ROLES,
+        "can_capture": normalized in CAPTURE_ROLES,
+        "can_manage_members": normalized in MANAGE_MEMBER_ROLES,
+    }
+
+
 def _machine_id(value) -> str:
     return _safe_text(value, 160).upper()
 
@@ -252,9 +282,20 @@ def _account_payload(user: dict) -> dict:
 
 def _project_payload(row) -> dict:
     item = dict(row)
+    owner_account_id = int(
+        item.get("project_owner_account_id") or item.get("account_id") or 0
+    )
+    local_project_id = item["project_id"]
+    project_ref = _project_ref(owner_account_id, local_project_id)
+    access_role = str(item.get("access_role") or "owner")
+    permissions = _project_permissions(access_role)
+    member_count = int(item.get("member_count") or 1)
     return {
-        "id": item["project_id"],
-        "project_id": item["project_id"],
+        "id": project_ref,
+        "project_id": project_ref,
+        "project_ref": project_ref,
+        "local_project_id": local_project_id,
+        "owner_account_id": owner_account_id,
         "project_code": item["project_code"],
         "project_name": item["project_name"],
         "snapshot_id": item["snapshot_id"],
@@ -263,6 +304,15 @@ def _project_payload(row) -> dict:
         "active": bool(item["active"]),
         "updated_at": item["updated_at"],
         "metadata": _json(item.get("metadata_json"), {}),
+        "access_role": access_role,
+        "member_count": member_count,
+        **permissions,
+        "membership": {
+            "role": access_role,
+            "member_count": member_count,
+            "joined_at": item.get("joined_at", ""),
+            "permissions": permissions,
+        },
     }
 
 
@@ -307,11 +357,19 @@ def _photo_payload(row, download_url="") -> dict:
     preview_size = int(item.get("preview_size_bytes") or item["size_bytes"])
     preview_width = int(item.get("preview_width") or item["width"] or 0)
     preview_height = int(item.get("preview_height") or item["height"] or 0)
+    owner_account_id = int(
+        item.get("project_owner_account_id") or item.get("account_id") or 0
+    )
+    local_project_id = item["project_id"]
+    project_ref = _project_ref(owner_account_id, local_project_id)
     payload = {
         "cursor": int(item["id"]),
         "photo_uuid": item["photo_uuid"],
         "batch_id": item["batch_id"],
-        "project_id": item["project_id"],
+        "project_id": project_ref,
+        "project_ref": project_ref,
+        "local_project_id": local_project_id,
+        "owner_account_id": owner_account_id,
         "source": item["source"],
         "scope": item["scope"],
         "category": item["category"],
@@ -332,7 +390,14 @@ def _photo_payload(row, download_url="") -> dict:
         "title": item["title"],
         "photo_date": item["photo_date"],
         "photographer": item.get("photographer", ""),
+        "photographer_account_id": int(
+            item.get("photographer_account_id") or 0
+        ),
         "uploaded_by": item.get("uploaded_by", ""),
+        "uploaded_by_account_id": int(
+            item.get("uploaded_by_account_id") or item.get("account_id") or 0
+        ),
+        "capture_source": item.get("capture_source", ""),
         "client_captured_at": item["client_captured_at"],
         "orientation": int(item["orientation"] or 1),
         "width": preview_width,
@@ -804,15 +869,185 @@ def register_mobile_api(
             raise ApiProblem("invalid_json", "请求内容必须为 JSON 对象")
         return value
 
-    def project_for(conn, account_id, project_id):
+    def project_record_for_owner(conn, owner_account_id, local_project_id):
         row = conn.execute(
             "SELECT * FROM cloud_engineering_projects WHERE account_id = ? "
             "AND project_id = ? AND active = 1",
-            (account_id, project_id),
+            (int(owner_account_id), local_project_id),
         ).fetchone()
         if not row:
-            raise ApiProblem("project_not_found", "工程不存在或尚未从电脑同步", 404)
-        return row
+            raise ApiProblem("project_not_found", "工程不存在或无权访问", 404)
+        return dict(row)
+
+    def project_for(conn, account_id, project_reference, allowed_roles=None):
+        owner_account_id, local_project_id, _legacy = _parse_project_ref(
+            project_reference, account_id
+        )
+        row = conn.execute(
+            "SELECT p.*, pm.role AS access_role, pm.joined_at, "
+            "(SELECT COUNT(*) FROM project_members total_members "
+            " WHERE total_members.project_owner_account_id = p.account_id "
+            " AND total_members.project_id = p.project_id "
+            " AND total_members.status = 'active') AS member_count "
+            "FROM cloud_engineering_projects p JOIN project_members pm "
+            "ON pm.project_owner_account_id = p.account_id "
+            "AND pm.project_id = p.project_id "
+            "WHERE p.account_id = ? AND p.project_id = ? AND p.active = 1 "
+            "AND pm.member_account_id = ? AND pm.status = 'active'",
+            (owner_account_id, local_project_id, int(account_id)),
+        ).fetchone()
+        if not row:
+            # 不区分工程不存在和无成员关系，避免枚举其它账号的工程。
+            raise ApiProblem("project_not_found", "工程不存在或无权访问", 404)
+        project = dict(row)
+        if allowed_roles and project["access_role"] not in set(allowed_roles):
+            raise ApiProblem("project_permission_denied", "当前项目角色无此权限", 403)
+        project["project_owner_account_id"] = int(project["account_id"])
+        return project
+
+    def project_for_desktop(conn, current, local_project_id, desktop_machine_id):
+        project = project_record_for_owner(conn, current["id"], local_project_id)
+        machine_id = _require_active_machine(
+            conn, current["id"], desktop_machine_id
+        )
+        if _machine_id(project.get("desktop_machine_id")) != machine_id:
+            raise ApiProblem(
+                "wrong_desktop_machine", "该工程由另一台工程电脑统一归档", 403
+            )
+        project["project_owner_account_id"] = int(current["id"])
+        return project
+
+    def member_payload(row, current_account_id=0):
+        item = dict(row)
+        role = str(item.get("role") or "viewer")
+        return {
+            "account_id": int(item["member_account_id"]),
+            "username": item.get("username", ""),
+            "display_name": item.get("display_name", ""),
+            "role": role,
+            "joined_at": item.get("joined_at", ""),
+            "is_me": int(item["member_account_id"]) == int(current_account_id or 0),
+            "permissions": _project_permissions(role),
+        }
+
+    def expire_project_invitations(conn):
+        conn.execute(
+            "UPDATE project_invitations SET status = 'expired', updated_at = ? "
+            "WHERE status = 'pending' AND expires_at <= ?",
+            (now(), now()),
+        )
+
+    def project_members_rows(conn, owner_account_id, local_project_id):
+        return conn.execute(
+            "SELECT pm.*, a.username, a.display_name FROM project_members pm "
+            "JOIN accounts a ON a.id = pm.member_account_id "
+            "WHERE pm.project_owner_account_id = ? AND pm.project_id = ? "
+            "AND pm.status = 'active' "
+            "ORDER BY CASE pm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 "
+            "WHEN 'capturer' THEN 2 ELSE 3 END, pm.joined_at, pm.id",
+            (owner_account_id, local_project_id),
+        ).fetchall()
+
+    def normalize_invite_code(value) -> str:
+        return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+
+    def invite_code_hash(value) -> str:
+        code = normalize_invite_code(value)
+        if len(code) != 10:
+            raise ApiProblem("project_invite_invalid", "邀请码无效或已过期", 404)
+        return hashlib.sha256(code.encode("ascii")).hexdigest()
+
+    def project_invitation_payload(conn, invitation_row, *, raw_code=""):
+        invitation = dict(invitation_row)
+        owner_account_id = int(invitation["project_owner_account_id"])
+        local_project_id = invitation["project_id"]
+        project = project_record_for_owner(
+            conn, owner_account_id, local_project_id
+        )
+        member_count = int(
+            conn.execute(
+                "SELECT COUNT(*) AS total FROM project_members "
+                "WHERE project_owner_account_id = ? AND project_id = ? "
+                "AND status = 'active'",
+                (owner_account_id, local_project_id),
+            ).fetchone()["total"]
+        )
+        project["project_owner_account_id"] = owner_account_id
+        project["access_role"] = invitation["role"]
+        project["member_count"] = member_count
+        inviter = conn.execute(
+            "SELECT username, display_name FROM accounts WHERE id = ?",
+            (invitation["created_by_account_id"],),
+        ).fetchone()
+        payload = {
+            "invite_id": int(invitation["id"]),
+            "role": invitation["role"],
+            "status": invitation["status"],
+            "expires_at": invitation["expires_at"],
+            "project": _project_payload(project),
+            "inviter_name": (
+                (inviter["display_name"] or inviter["username"]) if inviter else ""
+            ),
+        }
+        if raw_code:
+            payload["code"] = raw_code
+        return payload
+
+    def create_project_invitation(
+        conn, current, project, role, *, expires_in=PROJECT_INVITE_TTL_SECONDS
+    ):
+        role = _safe_text(role, 20)
+        if role not in INVITABLE_ROLES:
+            raise ApiProblem("invalid_project_role", "邀请角色无效")
+        actor_role = str(project.get("access_role") or "owner")
+        if actor_role == "admin" and role == "admin":
+            raise ApiProblem(
+                "project_permission_denied", "只有负责人可以邀请管理员", 403
+            )
+        pending_count = int(
+            conn.execute(
+                "SELECT COUNT(*) AS total FROM project_invitations WHERE "
+                "project_owner_account_id = ? AND project_id = ? AND status = 'pending'",
+                (project["account_id"], project["project_id"]),
+            ).fetchone()["total"]
+        )
+        if pending_count >= 50:
+            raise ApiProblem("project_invite_limit", "当前工程待使用邀请码过多", 409)
+        raw_code = ""
+        code_hash = ""
+        for _attempt in range(10):
+            raw_code = "".join(
+                secrets.choice(PROJECT_INVITE_CODE_ALPHABET) for _ in range(10)
+            )
+            code_hash = hashlib.sha256(raw_code.encode("ascii")).hexdigest()
+            if not conn.execute(
+                "SELECT 1 FROM project_invitations WHERE invite_code_hash = ?",
+                (code_hash,),
+            ).fetchone():
+                break
+        else:
+            raise ApiProblem("project_invite_failed", "邀请码生成失败，请重试", 503, True)
+        timestamp = now()
+        cur = conn.execute(
+            "INSERT INTO project_invitations "
+            "(project_owner_account_id, project_id, invite_code_hash, role, status, "
+            "created_by_account_id, created_at, updated_at, expires_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (
+                project["account_id"],
+                project["project_id"],
+                code_hash,
+                role,
+                current["id"],
+                timestamp,
+                timestamp,
+                _future_timestamp(timestamp, int(expires_in)),
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM project_invitations WHERE id = ?", (cur.lastrowid,)
+        ).fetchone()
+        return project_invitation_payload(conn, row, raw_code=raw_code)
 
     def capture_requirement_for(conn, account_id, project_id, raw_requirement):
         if not isinstance(raw_requirement, dict):
@@ -838,17 +1073,32 @@ def register_mobile_api(
             "min_photo_count": int(row["min_photo_count"] or 0),
         }
 
-    def batch_for(conn, account_id, batch_id):
+    def batch_for(conn, account_id, batch_id, *, require_capture=False):
         row = conn.execute(
             "SELECT * FROM mobile_batches WHERE id = ? AND account_id = ?",
             (batch_id, account_id),
         ).fetchone()
         if not row:
             raise ApiProblem("batch_not_found", "上传批次不存在", 404)
-        return row
+        batch = dict(row)
+        owner_account_id = int(
+            batch.get("project_owner_account_id") or batch["account_id"]
+        )
+        project_for(
+            conn,
+            account_id,
+            _project_ref(owner_account_id, batch["project_id"]),
+            CAPTURE_ROLES if require_capture else PROJECT_ROLES,
+        )
+        return batch
 
-    def signed_download_url(row, *, original: bool = False) -> str:
+    def signed_download_url(
+        row, *, original: bool = False, viewer_account_id: int = 0
+    ) -> str:
         item = dict(row)
+        owner_account_id = int(
+            item.get("project_owner_account_id") or item.get("account_id") or 0
+        )
         if original:
             if item.get("original_cleanup_status") == "deleted":
                 return ""
@@ -878,9 +1128,12 @@ def register_mobile_api(
                 ) from exc
         token = ticket_serializer.dumps(
             {
-                "account_id": item["account_id"],
+                "uploader_account_id": int(item["account_id"]),
+                "project_owner_account_id": owner_account_id,
+                "project_id": item["project_id"],
                 "photo_uuid": item["photo_uuid"],
                 "target_machine_id": item.get("target_machine_id", "") if original else "",
+                "viewer_account_id": 0 if original else int(viewer_account_id or 0),
             },
             salt=salt,
         )
@@ -891,8 +1144,10 @@ def register_mobile_api(
             _external=False,
         )
 
-    def preview_download_url(row) -> str:
-        return signed_download_url(row, original=False)
+    def preview_download_url(row, viewer_account_id=0) -> str:
+        return signed_download_url(
+            row, original=False, viewer_account_id=viewer_account_id
+        )
 
     def original_download_url(row) -> str:
         return signed_download_url(row, original=True)
@@ -900,6 +1155,13 @@ def register_mobile_api(
     def desktop_photo_payload(row) -> dict:
         item = dict(row)
         payload = _photo_payload(row)
+        payload["project_ref"] = _project_ref(
+            int(item.get("project_owner_account_id") or item["account_id"]),
+            item["project_id"],
+        )
+        # 桌面端本地工程查找继续使用原有 project_id；canonical 引用单独返回。
+        payload["project_id"] = item["project_id"]
+        payload["local_project_id"] = item["project_id"]
         original_sha = item.get("original_sha256", "")
         original_size = int(item.get("original_size_bytes") or 0)
         url = original_download_url(row)
@@ -924,6 +1186,10 @@ def register_mobile_api(
 
     def batch_payload(conn, batch_row) -> dict:
         batch = dict(batch_row)
+        owner_account_id = int(
+            batch.get("project_owner_account_id") or batch["account_id"]
+        )
+        project_reference = _project_ref(owner_account_id, batch["project_id"])
         photos = conn.execute(
             "SELECT * FROM cloud_photos WHERE account_id = ? AND batch_id = ? ORDER BY id",
             (batch["account_id"], batch["id"]),
@@ -932,12 +1198,19 @@ def register_mobile_api(
         photo_items = []
         for photo in photos:
             status_counts[photo["status"]] = status_counts.get(photo["status"], 0) + 1
-            photo_items.append(_photo_payload(photo, preview_download_url(photo)))
+            photo_items.append(
+                _photo_payload(
+                    photo, preview_download_url(photo, batch["account_id"])
+                )
+            )
         return {
             "id": int(batch["id"]),
             "batch_id": int(batch["id"]),
             "client_batch_id": batch["client_batch_id"],
-            "project_id": batch["project_id"],
+            "project_id": project_reference,
+            "project_ref": project_reference,
+            "local_project_id": batch["project_id"],
+            "owner_account_id": owner_account_id,
             "scope": batch["scope"],
             "category": batch["category"],
             "mode": batch["mode"],
@@ -976,15 +1249,25 @@ def register_mobile_api(
         *, current_user, photo_uuid, project_id, scope, category, assignment,
         title, photo_date, client_captured_at, orientation, source, batch_id,
         file_storage, claimed_sha, claimed_size="", target_machine_id="",
-        original_filename="", photographer="", uploaded_by="", upload_max_bytes=None
+        original_filename="", photographer="", uploaded_by="", upload_max_bytes=None,
+        project_owner_account_id=0, capture_source=""
     ):
         is_mobile_original = source == "mobile"
+        owner_account_id = int(project_owner_account_id or current_user["id"])
         actor_name = _safe_text(
             current_user.get("display_name") or current_user.get("username") or "",
             100,
         )
+        raw_capture_source = str(capture_source or "").strip().lower()
+        normalized_capture_source = (
+            raw_capture_source
+            if is_mobile_original and raw_capture_source in {"camera", "album"}
+            else ("" if is_mobile_original else "desktop")
+        )
         resolved_photographer = (
-            actor_name if is_mobile_original else _safe_text(photographer, 100)
+            actor_name
+            if is_mobile_original and normalized_capture_source == "camera"
+            else ("" if is_mobile_original else _safe_text(photographer, 100))
         )
         resolved_uploaded_by = (
             actor_name
@@ -1061,7 +1344,13 @@ def register_mobile_api(
                     else existing["preview_sha256"] or existing["sha256"]
                 )
                 return (
-                    existing_identity == identity_sha
+                    int(existing["account_id"]) == int(current_user["id"])
+                    and int(
+                        existing["project_owner_account_id"]
+                        or existing["account_id"]
+                    )
+                    == owner_account_id
+                    and existing_identity == identity_sha
                     and existing["project_id"] == project_id
                     and existing["source"] == source
                     and (
@@ -1079,7 +1368,7 @@ def register_mobile_api(
                     409,
                 )
 
-            with _photo_upload_lock(current_user["id"], photo_uuid):
+            with _photo_upload_lock(owner_account_id, photo_uuid):
                 requirement_code = ""
                 requirement_name = ""
                 # 第一次短连接只做账号/归属/幂等校验；对象存储网络 I/O 期间不持有
@@ -1087,12 +1376,18 @@ def register_mobile_api(
                 check_conn = db.connect()
                 try:
                     existing = check_conn.execute(
-                        "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
-                        (current_user["id"], photo_uuid),
+                        "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                        "AND photo_uuid = ?",
+                        (owner_account_id, photo_uuid),
                     ).fetchone()
                     if existing:
                         return reject_or_return(existing)
-                    project = project_for(check_conn, current_user["id"], project_id)
+                    project = project_for(
+                        check_conn,
+                        current_user["id"],
+                        _project_ref(owner_account_id, project_id),
+                        CAPTURE_ROLES,
+                    )
                     target = _machine_id(
                         target_machine_id or project["desktop_machine_id"]
                     )
@@ -1104,16 +1399,18 @@ def register_mobile_api(
                                 409,
                             )
                         _require_active_machine(
-                            check_conn, current_user["id"], target
+                            check_conn, owner_account_id, target
                         )
                         frozen_batch = check_conn.execute(
-                            "SELECT project_id, target_machine_id, status, requirement_code, "
-                            "requirement_name FROM mobile_batches "
+                            "SELECT project_owner_account_id, project_id, target_machine_id, "
+                            "status, requirement_code, requirement_name FROM mobile_batches "
                             "WHERE id = ? AND account_id = ?",
                             (batch_id, current_user["id"]),
                         ).fetchone()
                         if (
                             not frozen_batch
+                            or int(frozen_batch["project_owner_account_id"] or 0)
+                            != owner_account_id
                             or frozen_batch["project_id"] != project_id
                             or _machine_id(frozen_batch["target_machine_id"]) != target
                         ):
@@ -1128,7 +1425,7 @@ def register_mobile_api(
                     normalized_assignment = (
                         _validate_assignment(
                             check_conn,
-                            current_user["id"],
+                            owner_account_id,
                             project_id,
                             scope,
                             assignment,
@@ -1169,8 +1466,9 @@ def register_mobile_api(
                 try:
                     conn.execute("BEGIN IMMEDIATE")
                     existing = conn.execute(
-                        "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
-                        (current_user["id"], photo_uuid),
+                        "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                        "AND photo_uuid = ?",
+                        (owner_account_id, photo_uuid),
                     ).fetchone()
                     if existing:
                         # 单 worker 进程内不应走到这里；若运维误启多 worker，不能
@@ -1181,13 +1479,15 @@ def register_mobile_api(
 
                     if is_mobile_original:
                         current_batch = conn.execute(
-                            "SELECT project_id, target_machine_id, status, requirement_code, "
-                            "requirement_name FROM mobile_batches "
+                            "SELECT project_owner_account_id, project_id, target_machine_id, "
+                            "status, requirement_code, requirement_name FROM mobile_batches "
                             "WHERE id = ? AND account_id = ?",
                             (batch_id, current_user["id"]),
                         ).fetchone()
                         if (
                             not current_batch
+                            or int(current_batch["project_owner_account_id"] or 0)
+                            != owner_account_id
                             or current_batch["project_id"] != project_id
                             or _machine_id(current_batch["target_machine_id"]) != target
                         ):
@@ -1198,7 +1498,7 @@ def register_mobile_api(
                             )
                         _require_batch_uploadable(current_batch["status"])
                         _require_active_machine(
-                            conn, current_user["id"], target
+                            conn, owner_account_id, target
                         )
                         requirement_code = str(current_batch["requirement_code"] or "")
                         requirement_name = str(current_batch["requirement_name"] or "")
@@ -1209,6 +1509,7 @@ def register_mobile_api(
                     )
                     values = {
                         "account_id": current_user["id"],
+                        "project_owner_account_id": owner_account_id,
                         "batch_id": batch_id,
                         "photo_uuid": photo_uuid,
                         "project_id": project_id,
@@ -1221,7 +1522,15 @@ def register_mobile_api(
                         "title": _safe_text(title, 200),
                         "photo_date": _photo_date(photo_date),
                         "photographer": resolved_photographer,
+                        "photographer_account_id": (
+                            int(current_user["id"])
+                            if is_mobile_original
+                            and normalized_capture_source == "camera"
+                            else 0
+                        ),
                         "uploaded_by": resolved_uploaded_by,
+                        "uploaded_by_account_id": int(current_user["id"]),
+                        "capture_source": normalized_capture_source,
                         "client_captured_at": _safe_text(client_captured_at, 40),
                         "orientation": _integer(orientation, 1, 1, 8),
                         "width": uploaded["width"],
@@ -1251,9 +1560,12 @@ def register_mobile_api(
                         "desktop_imported_at": timestamp if source == "desktop" else "",
                     }
                     cur = conn.execute(
-                        "INSERT INTO cloud_photos (account_id, batch_id, photo_uuid, project_id, "
+                        "INSERT INTO cloud_photos (account_id, batch_id, photo_uuid, "
+                        "project_owner_account_id, project_id, "
                         "source, scope, category, assignment_json, requirement_code, "
-                        "requirement_name, title, photo_date, photographer, uploaded_by, "
+                        "requirement_name, title, photo_date, photographer, "
+                        "photographer_account_id, uploaded_by, uploaded_by_account_id, "
+                        "capture_source, "
                         "client_captured_at, orientation, width, height, original_filename, "
                         "sha256, size_bytes, mime_type, storage_key, original_sha256, "
                         "original_size_bytes, original_mime_type, original_storage_key, "
@@ -1261,9 +1573,11 @@ def register_mobile_api(
                         "preview_quality, preview_storage_key, target_machine_id, "
                         "original_cleanup_status, status, created_at, updated_at, "
                         "desktop_imported_at) VALUES (:account_id, :batch_id, :photo_uuid, "
-                        ":project_id, :source, :scope, :category, :assignment_json, "
+                        ":project_owner_account_id, :project_id, :source, :scope, :category, "
+                        ":assignment_json, "
                         ":requirement_code, :requirement_name, :title, :photo_date, "
-                        ":photographer, :uploaded_by, "
+                        ":photographer, :photographer_account_id, :uploaded_by, "
+                        ":uploaded_by_account_id, :capture_source, "
                         ":client_captured_at, :orientation, :width, :height, "
                         ":original_filename, :sha256, :size_bytes, 'image/jpeg', :storage_key, "
                         ":original_sha256, :original_size_bytes, :original_mime_type, "
@@ -1383,6 +1697,8 @@ def register_mobile_api(
         if (
             photo["source"] == "mobile"
             and int(photo["batch_id"] or 0) == int(session["batch_id"])
+            and int(photo["project_owner_account_id"] or photo["account_id"])
+            == int(session["project_owner_account_id"] or session["account_id"])
             and photo["project_id"] == session["project_id"]
             and _machine_id(photo["target_machine_id"])
             == _machine_id(session["target_machine_id"])
@@ -1400,6 +1716,12 @@ def register_mobile_api(
     def require_chunk_batch_context(batch_row, session_row) -> None:
         if (
             int(batch_row["id"]) != int(session_row["batch_id"])
+            or int(
+                batch_row["project_owner_account_id"] or batch_row["account_id"]
+            )
+            != int(
+                session_row["project_owner_account_id"] or session_row["account_id"]
+            )
             or batch_row["project_id"] != session_row["project_id"]
             or _machine_id(batch_row["target_machine_id"])
             != _machine_id(session_row["target_machine_id"])
@@ -1540,30 +1862,52 @@ def register_mobile_api(
 
     def bootstrap_payload(conn, current_user) -> dict:
         projects = conn.execute(
-            "SELECT * FROM cloud_engineering_projects WHERE account_id = ? AND active = 1 "
-            "ORDER BY updated_at DESC, id DESC",
+            "SELECT p.*, pm.role AS access_role, pm.joined_at, "
+            "(SELECT COUNT(*) FROM project_members total_members "
+            " WHERE total_members.project_owner_account_id = p.account_id "
+            " AND total_members.project_id = p.project_id "
+            " AND total_members.status = 'active') AS member_count "
+            "FROM cloud_engineering_projects p JOIN project_members pm "
+            "ON pm.project_owner_account_id = p.account_id "
+            "AND pm.project_id = p.project_id "
+            "WHERE pm.member_account_id = ? AND pm.status = 'active' "
+            "AND p.active = 1 ORDER BY p.updated_at DESC, p.id DESC",
             (current_user["id"],),
         ).fetchall()
         counts = conn.execute(
-            "SELECT status, COUNT(*) AS total FROM cloud_photos WHERE account_id = ? "
-            "AND source = 'mobile' AND deleted_at = '' GROUP BY status",
-            (current_user["id"],),
+            "SELECT photos.status, COUNT(*) AS total FROM cloud_photos photos "
+            "JOIN project_members pm "
+            "ON pm.project_owner_account_id = photos.project_owner_account_id "
+            "AND pm.project_id = photos.project_id "
+            "WHERE photos.account_id = ? AND pm.member_account_id = ? "
+            "AND pm.status = 'active' AND photos.source = 'mobile' "
+            "AND photos.deleted_at = '' GROUP BY photos.status",
+            (current_user["id"], current_user["id"]),
         ).fetchall()
         chunk_counts = conn.execute(
-            "SELECT status, COUNT(*) AS total, COALESCE(SUM(total_size_bytes), 0) "
-            "AS reserved_bytes FROM mobile_upload_sessions WHERE account_id = ? "
-            "AND (status IN ('active', 'finalizing') OR cleanup_status = 'pending') "
-            "GROUP BY status",
-            (current_user["id"],),
+            "SELECT sessions.status, COUNT(*) AS total, "
+            "COALESCE(SUM(sessions.total_size_bytes), 0) AS reserved_bytes "
+            "FROM mobile_upload_sessions sessions JOIN project_members pm "
+            "ON pm.project_owner_account_id = sessions.project_owner_account_id "
+            "AND pm.project_id = sessions.project_id "
+            "WHERE sessions.account_id = ? AND pm.member_account_id = ? "
+            "AND pm.status = 'active' AND (sessions.status IN ('active', 'finalizing') "
+            "OR sessions.cleanup_status = 'pending') GROUP BY sessions.status",
+            (current_user["id"], current_user["id"]),
         ).fetchall()
         hierarchy_rows = conn.execute(
-            "SELECT scope, node_type, COUNT(*) AS total FROM cloud_units "
-            "WHERE account_id = ? AND active = 1 GROUP BY scope, node_type",
+            "SELECT u.scope, u.node_type, COUNT(*) AS total FROM cloud_units u "
+            "JOIN project_members pm ON pm.project_owner_account_id = u.account_id "
+            "AND pm.project_id = u.project_id WHERE pm.member_account_id = ? "
+            "AND pm.status = 'active' AND u.active = 1 GROUP BY u.scope, u.node_type",
             (current_user["id"],),
         ).fetchall()
         recent = conn.execute(
-            "SELECT * FROM cloud_photos WHERE account_id = ? AND deleted_at = '' "
-            "ORDER BY id DESC LIMIT 10",
+            "SELECT photos.* FROM cloud_photos photos JOIN project_members pm "
+            "ON pm.project_owner_account_id = photos.project_owner_account_id "
+            "AND pm.project_id = photos.project_id WHERE pm.member_account_id = ? "
+            "AND pm.status = 'active' AND photos.deleted_at = '' "
+            "ORDER BY photos.id DESC LIMIT 10",
             (current_user["id"],),
         ).fetchall()
         project_items = [_project_payload(row) for row in projects]
@@ -1586,7 +1930,10 @@ def register_mobile_api(
                 for row in chunk_counts
             },
             "recent_uploads": [
-                _photo_payload(row, preview_download_url(row)) for row in recent
+                _photo_payload(
+                    row, preview_download_url(row, current_user["id"])
+                )
+                for row in recent
             ],
             "upload_contract": {
                 "original_formats": ["JPEG", "PNG"],
@@ -1874,27 +2221,331 @@ def register_mobile_api(
         conn = db.connect()
         try:
             rows = conn.execute(
-                "SELECT * FROM cloud_engineering_projects WHERE account_id = ? AND active = 1 "
-                "ORDER BY project_name, project_id",
+                "SELECT p.*, pm.role AS access_role, pm.joined_at, "
+                "(SELECT COUNT(*) FROM project_members total_members "
+                " WHERE total_members.project_owner_account_id = p.account_id "
+                " AND total_members.project_id = p.project_id "
+                " AND total_members.status = 'active') AS member_count "
+                "FROM cloud_engineering_projects p JOIN project_members pm "
+                "ON pm.project_owner_account_id = p.account_id "
+                "AND pm.project_id = p.project_id "
+                "WHERE pm.member_account_id = ? AND pm.status = 'active' "
+                "AND p.active = 1 ORDER BY p.project_name, p.project_id",
                 (current["id"],),
             ).fetchall()
             return jsonify({"ok": True, "projects": [_project_payload(row) for row in rows]})
         finally:
             conn.close()
 
+    @blueprint.get("/api/mobile/v1/projects/<project_id>/members")
+    def mobile_project_members(project_id):
+        current = user()
+        conn = db.connect()
+        try:
+            project = project_for(conn, current["id"], project_id, PROJECT_ROLES)
+            rows = project_members_rows(
+                conn, int(project["account_id"]), project["project_id"]
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "members": [
+                        member_payload(row, current["id"]) for row in rows
+                    ],
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.get("/api/mobile/v1/projects/<project_id>/invites")
+    def mobile_project_invites(project_id):
+        current = user()
+        conn = db.connect()
+        try:
+            project = project_for(
+                conn, current["id"], project_id, MANAGE_MEMBER_ROLES
+            )
+            expire_project_invitations(conn)
+            conn.commit()
+            rows = conn.execute(
+                "SELECT * FROM project_invitations WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND status = 'pending' ORDER BY id DESC",
+                (project["account_id"], project["project_id"]),
+            ).fetchall()
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "invites": [
+                        project_invitation_payload(conn, row) for row in rows
+                    ],
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/projects/<project_id>/invites")
+    def mobile_create_project_invite(project_id):
+        current = user()
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = project_for(
+                conn, current["id"], project_id, MANAGE_MEMBER_ROLES
+            )
+            expire_project_invitations(conn)
+            invite = create_project_invitation(
+                conn, current, project, data.get("role") or "capturer"
+            )
+            conn.commit()
+            return jsonify({"ok": True, "invite": invite}), 201
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/project-invites/preview")
+    def mobile_preview_project_invite():
+        current = user()
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        code = normalize_invite_code(data.get("code"))
+        code_hash = invite_code_hash(code)
+        conn = db.connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM project_invitations WHERE invite_code_hash = ? "
+                "AND status = 'pending' AND expires_at > ?",
+                (code_hash, now()),
+            ).fetchone()
+            if not row:
+                raise ApiProblem(
+                    "project_invite_invalid", "邀请码无效或已过期", 404
+                )
+            existing = conn.execute(
+                "SELECT 1 FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+                (
+                    row["project_owner_account_id"],
+                    row["project_id"],
+                    current["id"],
+                ),
+            ).fetchone()
+            invite = project_invitation_payload(conn, row)
+            invite["already_joined"] = bool(existing)
+            return jsonify(
+                {
+                    "ok": True,
+                    "invite": invite,
+                    "already_member": bool(existing),
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/project-invites/join")
+    def mobile_join_project_invite():
+        current = user()
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        code_hash = invite_code_hash(data.get("code"))
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            invitation = conn.execute(
+                "SELECT * FROM project_invitations WHERE invite_code_hash = ?",
+                (code_hash,),
+            ).fetchone()
+            if not invitation:
+                raise ApiProblem(
+                    "project_invite_invalid", "邀请码无效、已使用或已过期", 404
+                )
+            existing = conn.execute(
+                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ?",
+                (
+                    invitation["project_owner_account_id"],
+                    invitation["project_id"],
+                    current["id"],
+                ),
+            ).fetchone()
+            timestamp = now()
+            already_member = bool(existing and existing["status"] == "active")
+            idempotent = bool(
+                invitation["status"] == "accepted"
+                and int(invitation["accepted_by_account_id"] or 0)
+                == int(current["id"])
+                and already_member
+            )
+            if not idempotent and (
+                invitation["status"] != "pending"
+                or invitation["expires_at"] <= timestamp
+            ):
+                raise ApiProblem(
+                    "project_invite_invalid", "邀请码无效、已使用或已过期", 404
+                )
+            if not idempotent:
+                if not already_member:
+                    conn.execute(
+                        "INSERT INTO project_members "
+                        "(project_owner_account_id, project_id, member_account_id, role, status, "
+                        "invited_by_account_id, joined_at, updated_at, removed_at, "
+                        "removed_by_account_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, '', 0) "
+                        "ON CONFLICT(project_owner_account_id, project_id, member_account_id) "
+                        "DO UPDATE SET role = excluded.role, status = 'active', "
+                        "invited_by_account_id = excluded.invited_by_account_id, "
+                        "joined_at = excluded.joined_at, updated_at = excluded.updated_at, "
+                        "removed_at = '', removed_by_account_id = 0",
+                        (
+                            invitation["project_owner_account_id"],
+                            invitation["project_id"],
+                            current["id"],
+                            invitation["role"],
+                            invitation["created_by_account_id"],
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+                changed = conn.execute(
+                    "UPDATE project_invitations SET status = 'accepted', "
+                    "accepted_by_account_id = ?, accepted_at = ?, updated_at = ? "
+                    "WHERE id = ? AND status = 'pending'",
+                    (current["id"], timestamp, timestamp, invitation["id"]),
+                )
+                if changed.rowcount != 1:
+                    raise ApiProblem(
+                        "project_invite_invalid", "邀请码已被使用", 409
+                    )
+            conn.commit()
+            project = project_for(
+                conn,
+                current["id"],
+                _project_ref(
+                    invitation["project_owner_account_id"],
+                    invitation["project_id"],
+                ),
+                PROJECT_ROLES,
+            )
+            project_payload = _project_payload(project)
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": project_payload,
+                    "membership": project_payload["membership"],
+                    "bootstrap": bootstrap_payload(conn, current),
+                    "idempotent": idempotent,
+                    "already_member": already_member,
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.patch(
+        "/api/mobile/v1/projects/<project_id>/members/<int:member_account_id>"
+    )
+    def mobile_update_project_member(project_id, member_account_id):
+        current = user()
+        data = json_body()
+        requested_role = _safe_text(data.get("role"), 20)
+        if requested_role not in {"admin", "capturer", "viewer"}:
+            raise ApiProblem("invalid_project_role", "成员角色无效")
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = project_for(
+                conn, current["id"], project_id, MANAGE_MEMBER_ROLES
+            )
+            actor_role = project["access_role"]
+            target = conn.execute(
+                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+                (project["account_id"], project["project_id"], member_account_id),
+            ).fetchone()
+            if not target:
+                raise ApiProblem("project_member_not_found", "工程成员不存在", 404)
+            if target["role"] == "owner":
+                raise ApiProblem(
+                    "project_owner_protected", "负责人不能在当前版本中变更角色", 409
+                )
+            if actor_role == "admin" and (
+                target["role"] == "admin" or requested_role == "admin"
+            ):
+                raise ApiProblem(
+                    "project_permission_denied", "管理员不能调整其他管理员", 403
+                )
+            timestamp = now()
+            conn.execute(
+                "UPDATE project_members SET role = ?, updated_at = ? WHERE id = ?",
+                (requested_role, timestamp, target["id"]),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT pm.*, a.username, a.display_name FROM project_members pm "
+                "JOIN accounts a ON a.id = pm.member_account_id WHERE pm.id = ?",
+                (target["id"],),
+            ).fetchone()
+            return jsonify(
+                {"ok": True, "member": member_payload(row, current["id"])}
+            )
+        finally:
+            conn.close()
+
+    @blueprint.delete(
+        "/api/mobile/v1/projects/<project_id>/members/<int:member_account_id>"
+    )
+    def mobile_remove_project_member(project_id, member_account_id):
+        current = user()
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = project_for(
+                conn, current["id"], project_id, MANAGE_MEMBER_ROLES
+            )
+            target = conn.execute(
+                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+                (project["account_id"], project["project_id"], member_account_id),
+            ).fetchone()
+            if not target:
+                conn.rollback()
+                return jsonify({"ok": True, "idempotent": True})
+            if target["role"] == "owner":
+                raise ApiProblem(
+                    "project_owner_protected", "负责人不能退出或被移除", 409
+                )
+            if project["access_role"] == "admin" and target["role"] == "admin":
+                raise ApiProblem(
+                    "project_permission_denied", "管理员不能移除其他管理员", 403
+                )
+            timestamp = now()
+            conn.execute(
+                "UPDATE project_members SET status = 'removed', removed_at = ?, "
+                "removed_by_account_id = ?, updated_at = ? WHERE id = ?",
+                (timestamp, current["id"], timestamp, target["id"]),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "idempotent": False})
+        finally:
+            conn.close()
+
     @blueprint.get("/api/mobile/v1/projects/<project_id>/requirements")
     def project_requirements(project_id):
         current = user()
-        project_id = _project_id(project_id)
         required_type = _safe_text(request.args.get("required_type"), 32)
         conn = db.connect()
         try:
-            project = project_for(conn, current["id"], project_id)
+            project = project_for(conn, current["id"], project_id, PROJECT_ROLES)
+            owner_account_id = int(project["account_id"])
+            local_project_id = project["project_id"]
             sql = (
                 "SELECT * FROM cloud_project_requirements WHERE account_id = ? "
                 "AND project_id = ? AND active = 1"
             )
-            params = [current["id"], project_id]
+            params = [owner_account_id, local_project_id]
             if required_type in {"required", "conditional", "recommended"}:
                 sql += " AND required_type = ?"
                 params.append(required_type)
@@ -1917,14 +2568,15 @@ def register_mobile_api(
 
     def project_tree_response(project_id, scope):
         current = user()
-        project_id = _project_id(project_id)
         conn = db.connect()
         try:
-            project = project_for(conn, current["id"], project_id)
+            project = project_for(conn, current["id"], project_id, PROJECT_ROLES)
+            owner_account_id = int(project["account_id"])
+            local_project_id = project["project_id"]
             rows = conn.execute(
                 "SELECT * FROM cloud_units WHERE account_id = ? AND project_id = ? "
                 "AND scope = ? AND active = 1 ORDER BY sort_order, id",
-                (current["id"], project_id, scope),
+                (owner_account_id, local_project_id, scope),
             ).fetchall()
             leaves = [
                 {
@@ -1959,7 +2611,7 @@ def register_mobile_api(
     def photos():
         current = user()
         cursor, limit = _page_args()
-        project_id = _project_id(request.args.get("project_id"))
+        project_reference = str(request.args.get("project_id") or "").strip()
         scope = _safe_text(request.args.get("scope"), 20)
         category = _safe_text(request.args.get("category"), 20)
         unit_code = _safe_text(request.args.get("unit_code"), 160)
@@ -1979,8 +2631,21 @@ def register_mobile_api(
         # 手机影像库是“最近查看”时间线：首屏从最新 ID 向旧记录翻页。
         # cursor=0/缺省均代表首屏；后续 cursor 是上一页末尾（最小）的 ID。
         # 桌面 inbox 仍使用独立的 id > cursor 正向增量语义。
-        clauses = ["account_id = ?", "project_id = ?", "deleted_at = ''"]
-        params = [current["id"], project_id]
+        conn = db.connect()
+        try:
+            project = project_for(
+                conn, current["id"], project_reference, PROJECT_ROLES
+            )
+            owner_account_id = int(project["account_id"])
+            local_project_id = project["project_id"]
+        finally:
+            conn.close()
+        clauses = [
+            "project_owner_account_id = ?",
+            "project_id = ?",
+            "deleted_at = ''",
+        ]
+        params = [owner_account_id, local_project_id]
         if scope:
             clauses.append("scope = ?")
             params.append(scope)
@@ -1995,7 +2660,7 @@ def register_mobile_api(
             params.append(other_node_code)
         conn = db.connect()
         try:
-            project_for(conn, current["id"], project_id)
+            project_for(conn, current["id"], project_reference, PROJECT_ROLES)
             total = int(
                 conn.execute(
                     "SELECT COUNT(*) AS total FROM cloud_photos WHERE "
@@ -2017,7 +2682,12 @@ def register_mobile_api(
             return jsonify(
                 {
                     "ok": True,
-                    "photos": [_photo_payload(row, preview_download_url(row)) for row in page],
+                    "photos": [
+                        _photo_payload(
+                            row, preview_download_url(row, current["id"])
+                        )
+                        for row in page
+                    ],
                     "next_cursor": str(page[-1]["id"]) if len(rows) > limit and page else "",
                     "total": total,
                 }
@@ -2031,14 +2701,45 @@ def register_mobile_api(
         photo_uuid = _uuid(photo_uuid, "photo_uuid")
         conn = db.connect()
         try:
-            row = conn.execute(
-                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ? "
-                "AND deleted_at = ''",
-                (current["id"], photo_uuid),
-            ).fetchone()
-            if not row:
+            requested_project = str(request.args.get("project_id") or "").strip()
+            params = [photo_uuid, current["id"]]
+            project_clause = ""
+            if requested_project:
+                project = project_for(
+                    conn, current["id"], requested_project, PROJECT_ROLES
+                )
+                project_clause = (
+                    "AND photos.project_owner_account_id = ? "
+                    "AND photos.project_id = ? "
+                )
+                params.extend((int(project["account_id"]), project["project_id"]))
+            rows = conn.execute(
+                "SELECT photos.* FROM cloud_photos photos JOIN project_members pm "
+                "ON pm.project_owner_account_id = photos.project_owner_account_id "
+                "AND pm.project_id = photos.project_id "
+                "WHERE photos.photo_uuid = ? AND pm.member_account_id = ? "
+                "AND pm.status = 'active' AND photos.deleted_at = '' "
+                + project_clause
+                + "ORDER BY photos.id LIMIT 2",
+                params,
+            ).fetchall()
+            if not rows:
                 raise ApiProblem("photo_not_found", "照片不存在", 404)
-            return jsonify({"ok": True, "photo": _photo_payload(row, preview_download_url(row))})
+            if len(rows) > 1:
+                raise ApiProblem(
+                    "project_reference_required",
+                    "照片标识在多个共享工程中重复，请指定工程",
+                    409,
+                )
+            row = rows[0]
+            return jsonify(
+                {
+                    "ok": True,
+                    "photo": _photo_payload(
+                        row, preview_download_url(row, current["id"])
+                    ),
+                }
+            )
         finally:
             conn.close()
 
@@ -2060,9 +2761,21 @@ def register_mobile_api(
         conn = db.connect()
         try:
             row = conn.execute(
-                "SELECT preview_storage_key, storage_key FROM cloud_photos "
-                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
-                (int(signed.get("account_id") or 0), photo_uuid),
+                "SELECT photos.preview_storage_key, photos.storage_key "
+                "FROM cloud_photos photos JOIN project_members pm "
+                "ON pm.project_owner_account_id = photos.project_owner_account_id "
+                "AND pm.project_id = photos.project_id "
+                "WHERE photos.account_id = ? AND photos.project_owner_account_id = ? "
+                "AND photos.project_id = ? AND photos.photo_uuid = ? "
+                "AND photos.deleted_at = '' AND pm.member_account_id = ? "
+                "AND pm.status = 'active'",
+                (
+                    int(signed.get("uploader_account_id") or 0),
+                    int(signed.get("project_owner_account_id") or 0),
+                    str(signed.get("project_id") or ""),
+                    photo_uuid,
+                    int(signed.get("viewer_account_id") or 0),
+                ),
             ).fetchone()
         finally:
             conn.close()
@@ -2111,7 +2824,9 @@ def register_mobile_api(
         signed_machine_id = require_desktop_client(
             current, signed.get("target_machine_id")
         )
-        if int(signed.get("account_id") or 0) != int(current["id"]):
+        owner_account_id = int(signed.get("project_owner_account_id") or 0)
+        uploader_account_id = int(signed.get("uploader_account_id") or 0)
+        if owner_account_id != int(current["id"]):
             raise ApiProblem("download_url_invalid", "原图下载地址无效", 401)
         conn = db.connect()
         try:
@@ -2120,8 +2835,14 @@ def register_mobile_api(
                 "SELECT original_storage_key, original_mime_type, storage_key, "
                 "target_machine_id, "
                 "original_cleanup_status FROM cloud_photos "
-                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
-                (int(signed.get("account_id") or 0), photo_uuid),
+                "WHERE account_id = ? AND project_owner_account_id = ? "
+                "AND project_id = ? AND photo_uuid = ? AND deleted_at = ''",
+                (
+                    uploader_account_id,
+                    owner_account_id,
+                    str(signed.get("project_id") or ""),
+                    photo_uuid,
+                ),
             ).fetchone()
         finally:
             conn.close()
@@ -2149,7 +2870,7 @@ def register_mobile_api(
         current = user()
         data = json_body()
         client_batch_id = _uuid(data.get("client_batch_id"), "client_batch_id")
-        project_id = _project_id(data.get("project_id"))
+        project_reference = str(data.get("project_id") or "").strip()
         scope = _safe_text(data.get("scope"), 20)
         category = _safe_text(data.get("category"), 20)
         mode = _safe_text(data.get("mode"), 20)
@@ -2164,7 +2885,11 @@ def register_mobile_api(
         conn = db.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            project = project_for(conn, current["id"], project_id)
+            project = project_for(
+                conn, current["id"], project_reference, CAPTURE_ROLES
+            )
+            project_owner_account_id = int(project["account_id"])
+            project_id = project["project_id"]
             target_machine_id = _machine_id(project["desktop_machine_id"])
             if not target_machine_id:
                 raise ApiProblem(
@@ -2175,14 +2900,14 @@ def register_mobile_api(
             assignment = data.get("assignment") if isinstance(data.get("assignment"), dict) else {}
             if mode == "direct":
                 assignment = _validate_assignment(
-                    conn, current["id"], project_id, scope, assignment
+                    conn, project_owner_account_id, project_id, scope, assignment
                 )
             elif assignment:
                 assignment = _validate_assignment(
-                    conn, current["id"], project_id, scope, assignment
+                    conn, project_owner_account_id, project_id, scope, assignment
                 )
             requirement = capture_requirement_for(
-                conn, current["id"], project_id, data.get("requirement")
+                conn, project_owner_account_id, project_id, data.get("requirement")
             )
             if requirement and scope != "engineering":
                 raise ApiProblem(
@@ -2195,7 +2920,12 @@ def register_mobile_api(
             ).fetchone()
             if existing:
                 same_request = (
-                    existing["project_id"] == project_id
+                    int(
+                        existing["project_owner_account_id"]
+                        or existing["account_id"]
+                    )
+                    == project_owner_account_id
+                    and existing["project_id"] == project_id
                     and existing["scope"] == scope
                     and existing["category"] == category
                     and existing["mode"] == mode
@@ -2218,7 +2948,9 @@ def register_mobile_api(
                     {"ok": True, "idempotent": True, "batch": batch_payload(conn, existing)}
                 )
             try:
-                _require_active_machine(conn, current["id"], target_machine_id)
+                _require_active_machine(
+                    conn, project_owner_account_id, target_machine_id
+                )
             except ApiProblem as exc:
                 raise ApiProblem(
                     "project_desktop_not_active",
@@ -2227,12 +2959,14 @@ def register_mobile_api(
                 ) from exc
             timestamp = now()
             cur = conn.execute(
-                "INSERT INTO mobile_batches (account_id, client_batch_id, project_id, scope, "
+                "INSERT INTO mobile_batches (account_id, client_batch_id, "
+                "project_owner_account_id, project_id, scope, "
                 "category, mode, assignment_json, requirement_code, requirement_name, "
                 "target_machine_id, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
                 (
-                    current["id"], client_batch_id, project_id, scope, category, mode,
+                    current["id"], client_batch_id, project_owner_account_id,
+                    project_id, scope, category, mode,
                     _dumps(assignment), requirement.get("template_code", ""),
                     requirement.get("photo_requirement_name", ""), target_machine_id,
                     timestamp, timestamp,
@@ -2251,9 +2985,13 @@ def register_mobile_api(
         conn = db.connect()
         try:
             rows = conn.execute(
-                "SELECT * FROM mobile_batches WHERE account_id = ? AND id > ? "
-                "ORDER BY id LIMIT ?",
-                (current["id"], cursor, limit + 1),
+                "SELECT b.* FROM mobile_batches b JOIN project_members pm "
+                "ON pm.project_owner_account_id = b.project_owner_account_id "
+                "AND pm.project_id = b.project_id "
+                "WHERE b.account_id = ? AND b.id > ? "
+                "AND pm.member_account_id = ? AND pm.status = 'active' "
+                "ORDER BY b.id LIMIT ?",
+                (current["id"], cursor, current["id"], limit + 1),
             ).fetchall()
             page = rows[:limit]
             return jsonify(
@@ -2283,7 +3021,9 @@ def register_mobile_api(
         current = user()
         conn = db.connect()
         try:
-            batch = batch_for(conn, current["id"], batch_id)
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
             _require_batch_uploadable(batch["status"])
             assignment = _json(batch["assignment_json"], {})
         finally:
@@ -2311,12 +3051,17 @@ def register_mobile_api(
             target_machine_id=batch["target_machine_id"],
             original_filename=request.form.get("original_filename", ""),
             upload_max_bytes=config.MOBILE_DIRECT_UPLOAD_MAX_BYTES,
+            project_owner_account_id=batch.get("project_owner_account_id")
+            or batch["account_id"],
+            capture_source=request.form.get("capture_source", ""),
         )
         return jsonify(
             {
                 "ok": True,
                 "idempotent": idempotent,
-                "photo": _photo_payload(row, preview_download_url(row)),
+                "photo": _photo_payload(
+                    row, preview_download_url(row, current["id"])
+                ),
             }
         ), (200 if idempotent else 201)
 
@@ -2362,6 +3107,12 @@ def register_mobile_api(
             ),
             "title": _safe_text(data.get("title"), 200),
             "photo_date": _photo_date(data.get("photo_date", "")),
+            "capture_source": (
+                str(data.get("capture_source") or "").strip().lower()
+                if str(data.get("capture_source") or "").strip().lower()
+                in {"camera", "album"}
+                else ""
+            ),
         }
         expire_chunk_sessions()
         with _chunk_session_lock(current["id"], photo_uuid):
@@ -2369,10 +3120,15 @@ def register_mobile_api(
             reset_session_id = None
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                batch = batch_for(conn, current["id"], batch_id)
+                batch = batch_for(
+                    conn, current["id"], batch_id, require_capture=True
+                )
                 _require_batch_uploadable(batch["status"])
+                owner_account_id = int(
+                    batch.get("project_owner_account_id") or batch["account_id"]
+                )
                 target_machine_id = _require_active_machine(
-                    conn, current["id"], batch["target_machine_id"]
+                    conn, owner_account_id, batch["target_machine_id"]
                 )
                 existing = conn.execute(
                     "SELECT * FROM mobile_upload_sessions WHERE account_id = ? "
@@ -2381,13 +3137,20 @@ def register_mobile_api(
                 ).fetchone()
                 wanted_metadata = _dumps(metadata)
                 existing_photo = conn.execute(
-                    "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
-                    (current["id"], photo_uuid),
+                    "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                    "AND photo_uuid = ?",
+                    (owner_account_id, photo_uuid),
                 ).fetchone()
                 if existing_photo and not existing:
                     if not (
                         existing_photo["source"] == "mobile"
+                        and int(existing_photo["account_id"]) == int(current["id"])
                         and int(existing_photo["batch_id"] or 0) == int(batch_id)
+                        and int(
+                            existing_photo["project_owner_account_id"]
+                            or existing_photo["account_id"]
+                        )
+                        == owner_account_id
                         and existing_photo["project_id"] == batch["project_id"]
                         and _machine_id(existing_photo["target_machine_id"])
                         == target_machine_id
@@ -2403,15 +3166,17 @@ def register_mobile_api(
                     timestamp = now()
                     cur = conn.execute(
                         "INSERT INTO mobile_upload_sessions (account_id, batch_id, "
-                        "photo_uuid, project_id, target_machine_id, original_sha256, "
+                        "photo_uuid, project_owner_account_id, project_id, "
+                        "target_machine_id, original_sha256, "
                         "total_size_bytes, chunk_size_bytes, total_chunks, original_filename, "
                         "metadata_json, status, cleanup_status, created_at, updated_at, "
-                        "expires_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        "expires_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
                         "'completed', 'cleaned', ?, ?, ?, ?)",
                         (
                             current["id"],
                             batch_id,
                             photo_uuid,
+                            owner_account_id,
                             batch["project_id"],
                             target_machine_id,
                             original_sha,
@@ -2439,13 +3204,19 @@ def register_mobile_api(
                             "idempotent": True,
                             "upload": chunk_upload_payload(conn, row),
                             "photo": _photo_payload(
-                                existing_photo, preview_download_url(existing_photo)
+                                existing_photo,
+                                preview_download_url(existing_photo, current["id"]),
                             ),
                         }
                     )
                 if existing:
                     same_request = (
                         int(existing["batch_id"]) == int(batch_id)
+                        and int(
+                            existing["project_owner_account_id"]
+                            or existing["account_id"]
+                        )
+                        == owner_account_id
                         and existing["project_id"] == batch["project_id"]
                         and _machine_id(existing["target_machine_id"])
                         == target_machine_id
@@ -2489,7 +3260,8 @@ def register_mobile_api(
                                 "idempotent": True,
                                 "upload": chunk_upload_payload(conn, row),
                                 "photo": _photo_payload(
-                                    matching, preview_download_url(matching)
+                                    matching,
+                                    preview_download_url(matching, current["id"]),
                                 ),
                             }
                         )
@@ -2552,10 +3324,15 @@ def register_mobile_api(
                     # 文件清理期间数据库锁已释放；重新确认批次仍允许上传，
                     # 防止并发提交后把终态批次重新打开。
                     conn.execute("BEGIN IMMEDIATE")
-                    batch = batch_for(conn, current["id"], batch_id)
+                    batch = batch_for(
+                        conn, current["id"], batch_id, require_capture=True
+                    )
                     _require_batch_uploadable(batch["status"])
+                    owner_account_id = int(
+                        batch.get("project_owner_account_id") or batch["account_id"]
+                    )
                     target_machine_id = _require_active_machine(
-                        conn, current["id"], batch["target_machine_id"]
+                        conn, owner_account_id, batch["target_machine_id"]
                     )
                     existing = conn.execute(
                         "SELECT * FROM mobile_upload_sessions WHERE id = ? "
@@ -2620,7 +3397,8 @@ def register_mobile_api(
                         (reset_session_id,),
                     )
                     conn.execute(
-                        "UPDATE mobile_upload_sessions SET batch_id = ?, project_id = ?, "
+                        "UPDATE mobile_upload_sessions SET batch_id = ?, "
+                        "project_owner_account_id = ?, project_id = ?, "
                         "target_machine_id = ?, original_sha256 = ?, total_size_bytes = ?, "
                         "chunk_size_bytes = ?, total_chunks = ?, original_filename = ?, "
                         "metadata_json = ?, status = 'active', error_code = '', "
@@ -2629,6 +3407,7 @@ def register_mobile_api(
                         "WHERE id = ? AND account_id = ?",
                         (
                             batch_id,
+                            owner_account_id,
                             batch["project_id"],
                             target_machine_id,
                             original_sha,
@@ -2647,14 +3426,16 @@ def register_mobile_api(
                 else:
                     cur = conn.execute(
                         "INSERT INTO mobile_upload_sessions (account_id, batch_id, "
-                        "photo_uuid, project_id, target_machine_id, original_sha256, "
+                        "photo_uuid, project_owner_account_id, project_id, "
+                        "target_machine_id, original_sha256, "
                         "total_size_bytes, chunk_size_bytes, total_chunks, original_filename, "
                         "metadata_json, status, created_at, updated_at, expires_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
                         (
                             current["id"],
                             batch_id,
                             photo_uuid,
+                            owner_account_id,
                             batch["project_id"],
                             target_machine_id,
                             original_sha,
@@ -2724,11 +3505,18 @@ def register_mobile_api(
                     raise ApiProblem(
                         "chunk_upload_expired", "分片上传会话已过期，请重新开始", 409
                     )
-                batch = batch_for(conn, current["id"], batch_id)
+                batch = batch_for(
+                    conn, current["id"], batch_id, require_capture=True
+                )
                 require_chunk_batch_context(batch, session)
                 _require_batch_uploadable(batch["status"])
                 _require_active_machine(
-                    conn, current["id"], session["target_machine_id"]
+                    conn,
+                    int(
+                        session["project_owner_account_id"]
+                        or session["account_id"]
+                    ),
+                    session["target_machine_id"],
                 )
                 total_chunks = int(session["total_chunks"])
                 if chunk_index < 0 or chunk_index >= total_chunks:
@@ -2802,11 +3590,18 @@ def register_mobile_api(
                     raise ApiProblem(
                         "chunk_upload_not_active", "分片上传会话已结束", 409
                     )
-                batch = batch_for(conn, current["id"], batch_id)
+                batch = batch_for(
+                    conn, current["id"], batch_id, require_capture=True
+                )
                 require_chunk_batch_context(batch, session)
                 _require_batch_uploadable(batch["status"])
                 _require_active_machine(
-                    conn, current["id"], session["target_machine_id"]
+                    conn,
+                    int(
+                        session["project_owner_account_id"]
+                        or session["account_id"]
+                    ),
+                    session["target_machine_id"],
                 )
                 existing = conn.execute(
                     "SELECT * FROM mobile_upload_chunks WHERE session_id = ? "
@@ -2952,7 +3747,8 @@ def register_mobile_api(
                             "ok": True,
                             "idempotent": True,
                             "photo": _photo_payload(
-                                existing_photo, preview_download_url(existing_photo)
+                                existing_photo,
+                                preview_download_url(existing_photo, current["id"]),
                             ),
                             "upload": chunk_upload_payload(conn, row),
                         }
@@ -2971,11 +3767,18 @@ def register_mobile_api(
                     raise ApiProblem(
                         "chunk_upload_expired", "分片上传会话已过期，请重新开始", 409
                     )
-                batch = batch_for(conn, current["id"], batch_id)
+                batch = batch_for(
+                    conn, current["id"], batch_id, require_capture=True
+                )
                 require_chunk_batch_context(batch, session)
                 _require_batch_uploadable(batch["status"])
                 _require_active_machine(
-                    conn, current["id"], session["target_machine_id"]
+                    conn,
+                    int(
+                        session["project_owner_account_id"]
+                        or session["account_id"]
+                    ),
+                    session["target_machine_id"],
                 )
                 chunks = conn.execute(
                     "SELECT * FROM mobile_upload_chunks WHERE session_id = ? "
@@ -3049,6 +3852,12 @@ def register_mobile_api(
                         target_machine_id=session["target_machine_id"],
                         original_filename=session["original_filename"],
                         upload_max_bytes=config.MOBILE_MAX_ORIGINAL_BYTES,
+                        project_owner_account_id=(
+                            session["project_owner_account_id"]
+                            or batch["project_owner_account_id"]
+                            or current["id"]
+                        ),
+                        capture_source=metadata.get("capture_source", ""),
                     )
                     photo_inserted = True
                 except ApiProblem as exc:
@@ -3106,7 +3915,9 @@ def register_mobile_api(
                     {
                         "ok": True,
                         "idempotent": False,
-                        "photo": _photo_payload(photo, preview_download_url(photo)),
+                        "photo": _photo_payload(
+                            photo, preview_download_url(photo, current["id"])
+                        ),
                         "upload": upload_payload,
                     }
                 ), 201
@@ -3347,11 +4158,19 @@ def register_mobile_api(
                     "AND status = 'analyzing' ORDER BY id",
                     (account_id, batch_id),
                 ).fetchall()
-                project = project_for(conn, account_id, batch["project_id"])
+                project_owner_account_id = int(
+                    batch["project_owner_account_id"] or batch["account_id"]
+                )
+                project = project_for(
+                    conn,
+                    account_id,
+                    _project_ref(project_owner_account_id, batch["project_id"]),
+                    CAPTURE_ROLES,
+                )
                 unit_rows = conn.execute(
                     "SELECT * FROM cloud_units WHERE account_id = ? AND project_id = ? "
                     "AND scope = 'engineering' AND active = 1 ORDER BY sort_order, id",
-                    (account_id, batch["project_id"]),
+                    (project_owner_account_id, batch["project_id"]),
                 ).fetchall()
                 candidates = mobile_recognition.candidates_from_cloud_rows(
                     project, unit_rows
@@ -3560,7 +4379,9 @@ def register_mobile_api(
         conn = db.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            batch = batch_for(conn, current["id"], batch_id)
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
             latest_job = conn.execute(
                 "SELECT * FROM mobile_jobs WHERE account_id = ? AND batch_id = ? "
                 "AND job_type = 'analyze' ORDER BY id DESC LIMIT 1",
@@ -3667,7 +4488,9 @@ def register_mobile_api(
             job = conn.execute(
                 "SELECT * FROM mobile_jobs WHERE id = ?", (job_id,)
             ).fetchone()
-            batch = batch_for(conn, current["id"], batch_id)
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
             response_payload = {
                 "ok": True,
                 "idempotent": False,
@@ -3714,7 +4537,9 @@ def register_mobile_api(
         conn = db.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            batch = batch_for(conn, current["id"], batch_id)
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
             if batch["status"] in {"desktop_pending", "desktop_imported"}:
                 raise ApiProblem(
                     "batch_committed", "批次已提交电脑归档，不能再修改归属", 409
@@ -3737,7 +4562,13 @@ def register_mobile_api(
                     )
                 target = item.get("assignment") if isinstance(item.get("assignment"), dict) else item
                 normalized = _validate_assignment(
-                    conn, current["id"], batch["project_id"], batch["scope"], target
+                    conn,
+                    int(
+                        batch["project_owner_account_id"] or batch["account_id"]
+                    ),
+                    batch["project_id"],
+                    batch["scope"],
+                    target,
                 )
                 conn.execute(
                     "UPDATE cloud_photos SET assignment_json = ?, title = ?, photo_date = ?, "
@@ -3767,7 +4598,9 @@ def register_mobile_api(
         conn = db.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            batch = batch_for(conn, current["id"], batch_id)
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
             if batch["status"] in {"desktop_pending", "desktop_imported"}:
                 conn.rollback()
                 return jsonify(
@@ -3803,7 +4636,11 @@ def register_mobile_api(
                 if photo["status"] in {"desktop_pending", "desktop_imported"}:
                     continue
                 normalized = _validate_assignment(
-                    conn, current["id"], batch["project_id"], batch["scope"],
+                    conn,
+                    int(
+                        batch["project_owner_account_id"] or batch["account_id"]
+                    ),
+                    batch["project_id"], batch["scope"],
                     _json(photo["assignment_json"], {}),
                 )
                 conn.execute(
@@ -3938,6 +4775,18 @@ def register_mobile_api(
             ).fetchone()
             if existing and revision < int(existing["revision"] or 0):
                 raise ApiProblem("stale_revision", "工程快照版本早于服务器版本", 409)
+            existing_archive_machine = _machine_id(
+                existing["desktop_machine_id"] if existing else ""
+            )
+            if (
+                existing_archive_machine
+                and existing_archive_machine != desktop_machine_id
+            ):
+                raise ApiProblem(
+                    "project_archive_machine_conflict",
+                    "该工程已绑定另一台归档电脑，请先在原电脑解除绑定",
+                    409,
+                )
             timestamp = now()
             metadata = (
                 _json(existing["metadata_json"], {})
@@ -3984,6 +4833,25 @@ def register_mobile_api(
                 (
                     current["id"], project_id, project_code, project_name, snapshot_id,
                     revision, desktop_machine_id, _dumps(metadata), timestamp, timestamp,
+                ),
+            )
+            # 每个桌面工程天然拥有一个不可移除的 owner 成员。旧账号在首次同步
+            # 快照时也会补齐这条关系，移动端随后即可用 canonical 工程引用访问。
+            conn.execute(
+                "INSERT INTO project_members "
+                "(project_owner_account_id, project_id, member_account_id, role, status, "
+                "invited_by_account_id, joined_at, updated_at, removed_at, "
+                "removed_by_account_id) VALUES (?, ?, ?, 'owner', 'active', ?, ?, ?, '', 0) "
+                "ON CONFLICT(project_owner_account_id, project_id, member_account_id) "
+                "DO UPDATE SET role = 'owner', status = 'active', updated_at = excluded.updated_at, "
+                "removed_at = '', removed_by_account_id = 0",
+                (
+                    current["id"],
+                    project_id,
+                    current["id"],
+                    current["id"],
+                    timestamp,
+                    timestamp,
                 ),
             )
             conn.execute(
@@ -4116,6 +4984,9 @@ def register_mobile_api(
                 {
                     "ok": True,
                     "project_id": project_id,
+                    "project_ref": _project_ref(current["id"], project_id),
+                    "local_project_id": project_id,
+                    "owner_account_id": int(current["id"]),
                     "snapshot_id": snapshot_id,
                     "revision": revision,
                     "desktop_machine_id": desktop_machine_id,
@@ -4125,6 +4996,237 @@ def register_mobile_api(
                     "requirement_count": requirement_count,
                 }
             )
+        finally:
+            conn.close()
+
+    def desktop_project_context(conn, current, project_id, desktop_machine_id):
+        local_project_id = _project_id(project_id)
+        project = project_for_desktop(
+            conn, current, local_project_id, desktop_machine_id
+        )
+        project["access_role"] = "owner"
+        project["member_count"] = int(
+            conn.execute(
+                "SELECT COUNT(*) AS total FROM project_members "
+                "WHERE project_owner_account_id = ? AND project_id = ? "
+                "AND status = 'active'",
+                (current["id"], local_project_id),
+            ).fetchone()["total"]
+        )
+        owner_membership = conn.execute(
+            "SELECT joined_at FROM project_members WHERE project_owner_account_id = ? "
+            "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+            (current["id"], local_project_id, current["id"]),
+        ).fetchone()
+        project["joined_at"] = owner_membership["joined_at"] if owner_membership else ""
+        return project
+
+    @blueprint.get("/api/desktop/v1/project-members")
+    def desktop_project_members():
+        current = user()
+        project_id = request.args.get("project_id")
+        desktop_machine_id = require_desktop_client(
+            current,
+            request.args.get("desktop_machine_id") or request.args.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            project = desktop_project_context(
+                conn, current, project_id, desktop_machine_id
+            )
+            rows = project_members_rows(
+                conn, current["id"], project["project_id"]
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "members": [member_payload(row, current["id"]) for row in rows],
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.get("/api/desktop/v1/project-invites")
+    def desktop_project_invites():
+        current = user()
+        project_id = request.args.get("project_id")
+        desktop_machine_id = require_desktop_client(
+            current,
+            request.args.get("desktop_machine_id") or request.args.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            project = desktop_project_context(
+                conn, current, project_id, desktop_machine_id
+            )
+            expire_project_invitations(conn)
+            conn.commit()
+            rows = conn.execute(
+                "SELECT * FROM project_invitations WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND status = 'pending' ORDER BY id DESC",
+                (current["id"], project["project_id"]),
+            ).fetchall()
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    # 邀请码明文只在创建响应出现；列表绝不返回散列或旧明文。
+                    "invites": [project_invitation_payload(conn, row) for row in rows],
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/desktop/v1/project-invites")
+    def desktop_create_project_invite():
+        current = user()
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = desktop_project_context(
+                conn, current, data.get("project_id"), desktop_machine_id
+            )
+            expire_project_invitations(conn)
+            invitation = create_project_invitation(
+                conn, current, project, data.get("role") or "capturer"
+            )
+            conn.commit()
+            return jsonify({"ok": True, "invite": invitation}), 201
+        finally:
+            conn.close()
+
+    @blueprint.delete("/api/desktop/v1/project-invites/<int:invite_id>")
+    def desktop_revoke_project_invite(invite_id):
+        current = user()
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = desktop_project_context(
+                conn, current, data.get("project_id"), desktop_machine_id
+            )
+            expire_project_invitations(conn)
+            invitation = conn.execute(
+                "SELECT * FROM project_invitations WHERE id = ? "
+                "AND project_owner_account_id = ? AND project_id = ?",
+                (invite_id, current["id"], project["project_id"]),
+            ).fetchone()
+            if not invitation:
+                raise ApiProblem("project_invite_not_found", "工程邀请不存在", 404)
+            if invitation["status"] == "accepted":
+                raise ApiProblem("project_invite_used", "该邀请码已被使用", 409)
+            idempotent = invitation["status"] != "pending"
+            if not idempotent:
+                timestamp = now()
+                conn.execute(
+                    "UPDATE project_invitations SET status = 'revoked', revoked_at = ?, "
+                    "updated_at = ? WHERE id = ? AND status = 'pending'",
+                    (timestamp, timestamp, invite_id),
+                )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "invite_id": invite_id,
+                    "status": "revoked",
+                    "idempotent": idempotent,
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.patch("/api/desktop/v1/project-members/<int:member_account_id>")
+    def desktop_update_project_member(member_account_id):
+        current = user()
+        data = json_body()
+        requested_role = _safe_text(data.get("role"), 20)
+        if requested_role not in {"admin", "capturer", "viewer"}:
+            raise ApiProblem("invalid_project_role", "成员角色无效")
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = desktop_project_context(
+                conn, current, data.get("project_id"), desktop_machine_id
+            )
+            target = conn.execute(
+                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+                (current["id"], project["project_id"], member_account_id),
+            ).fetchone()
+            if not target:
+                raise ApiProblem("project_member_not_found", "工程成员不存在", 404)
+            if target["role"] == "owner":
+                raise ApiProblem(
+                    "project_owner_protected", "负责人不能在当前版本中变更角色", 409
+                )
+            conn.execute(
+                "UPDATE project_members SET role = ?, updated_at = ? WHERE id = ?",
+                (requested_role, now(), target["id"]),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT pm.*, a.username, a.display_name FROM project_members pm "
+                "JOIN accounts a ON a.id = pm.member_account_id WHERE pm.id = ?",
+                (target["id"],),
+            ).fetchone()
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "member": member_payload(row, current["id"]),
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.delete("/api/desktop/v1/project-members/<int:member_account_id>")
+    def desktop_remove_project_member(member_account_id):
+        current = user()
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = desktop_project_context(
+                conn, current, data.get("project_id"), desktop_machine_id
+            )
+            target = conn.execute(
+                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+                "AND project_id = ? AND member_account_id = ? AND status = 'active'",
+                (current["id"], project["project_id"], member_account_id),
+            ).fetchone()
+            if not target:
+                conn.rollback()
+                return jsonify({"ok": True, "idempotent": True})
+            if target["role"] == "owner":
+                raise ApiProblem(
+                    "project_owner_protected", "负责人不能退出或被移除", 409
+                )
+            timestamp = now()
+            conn.execute(
+                "UPDATE project_members SET status = 'removed', removed_at = ?, "
+                "removed_by_account_id = ?, updated_at = ? WHERE id = ?",
+                (timestamp, current["id"], timestamp, target["id"]),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "idempotent": False})
         finally:
             conn.close()
 
@@ -4145,7 +5247,8 @@ def register_mobile_api(
             params = [current["id"], desktop_machine_id]
             params.extend((cursor, limit + 1))
             rows = conn.execute(
-                "SELECT * FROM cloud_photos WHERE account_id = ? AND source = 'mobile' "
+                "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                "AND source = 'mobile' "
                 "AND status = 'desktop_pending' AND deleted_at = '' " + machine_clause +
                 "AND id > ? ORDER BY id LIMIT ?",
                 params,
@@ -4185,11 +5288,12 @@ def register_mobile_api(
             )
             conn.execute("BEGIN IMMEDIATE")
             photo = conn.execute(
-                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
+                "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                "AND photo_uuid = ?",
                 (current["id"], photo_uuid),
             ).fetchone()
             if not photo:
-                # 账号内不存在即视为已删除；不跨账号查询，避免泄露其它租户数据。
+                # 负责人的共享工程内不存在即视为已删除；不跨 owner 查询。
                 conn.commit()
                 return jsonify(
                     {
@@ -4267,9 +5371,16 @@ def register_mobile_api(
 
             timestamp = now()
             conn.execute(
-                "UPDATE cloud_photos SET deleted_at = ?, deleted_by_machine_id = ? "
-                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
-                (timestamp, desktop_machine_id, current["id"], photo_uuid),
+                "UPDATE cloud_photos SET deleted_at = ?, deleted_by_machine_id = ?, "
+                "deleted_by_account_id = ? WHERE id = ? "
+                "AND project_owner_account_id = ? AND deleted_at = ''",
+                (
+                    timestamp,
+                    desktop_machine_id,
+                    current["id"],
+                    photo["id"],
+                    current["id"],
+                ),
             )
             conn.commit()
             return jsonify(
@@ -4306,13 +5417,14 @@ def register_mobile_api(
             )
             conn.execute("BEGIN IMMEDIATE")
             photo = conn.execute(
-                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
+                "SELECT * FROM cloud_photos WHERE project_owner_account_id = ? "
+                "AND photo_uuid = ?",
                 (current["id"], photo_uuid),
             ).fetchone()
             if not photo:
                 raise ApiProblem("photo_not_found", "照片不存在", 404)
-            target_machine_id = photo["target_machine_id"]
-            if target_machine_id not in {"", "default"} and (
+            target_machine_id = _machine_id(photo["target_machine_id"])
+            if target_machine_id not in {"", "DEFAULT"} and (
                 not desktop_machine_id or desktop_machine_id != target_machine_id
             ):
                 raise ApiProblem("wrong_desktop_machine", "该原图属于另一台工程电脑", 403)
@@ -4332,23 +5444,23 @@ def register_mobile_api(
                 conn.execute(
                     "UPDATE cloud_photos SET status = 'desktop_imported', local_project_code = ?, "
                     "local_photo_id = ?, desktop_imported_at = ?, updated_at = ? "
-                    "WHERE account_id = ? AND photo_uuid = ?",
+                    "WHERE id = ? AND project_owner_account_id = ?",
                     (
                         local_project_code, local_photo_id, timestamp, timestamp,
-                        current["id"], photo_uuid,
+                        photo["id"], current["id"],
                     ),
                 )
                 if photo["batch_id"]:
                     remaining = conn.execute(
                         "SELECT COUNT(*) AS total FROM cloud_photos WHERE account_id = ? "
                         "AND batch_id = ? AND status != 'desktop_imported'",
-                        (current["id"], photo["batch_id"]),
+                        (photo["account_id"], photo["batch_id"]),
                     ).fetchone()["total"]
                     if int(remaining) == 0:
                         conn.execute(
                             "UPDATE mobile_batches SET status = 'desktop_imported', updated_at = ? "
                             "WHERE account_id = ? AND id = ?",
-                            (timestamp, current["id"], photo["batch_id"]),
+                            (timestamp, photo["account_id"], photo["batch_id"]),
                         )
                 conn.commit()
         finally:
@@ -4379,14 +5491,15 @@ def register_mobile_api(
             cleanup_conn.execute(
                 "UPDATE cloud_photos SET original_cleanup_status = ?, "
                 "original_cleanup_error = ?, original_deleted_at = ?, updated_at = ? "
-                "WHERE account_id = ? AND photo_uuid = ? AND status = 'desktop_imported'",
+                "WHERE id = ? AND project_owner_account_id = ? "
+                "AND status = 'desktop_imported'",
                 (
                     cleanup_status,
                     cleanup_error,
                     deleted_at,
                     now(),
+                    photo["id"],
                     current["id"],
-                    photo_uuid,
                 ),
             )
             cleanup_conn.commit()
@@ -4406,13 +5519,16 @@ def register_mobile_api(
     @blueprint.post("/api/desktop/v1/backfill-photo")
     def desktop_backfill_photo():
         current = user()
+        project_id = _project_id(request.form.get("project_id"))
         desktop_machine_id = require_desktop_client(
             current,
             request.form.get("desktop_machine_id") or request.form.get("machine_id"),
         )
         machine_conn = db.connect()
         try:
-            _require_active_machine(machine_conn, current["id"], desktop_machine_id)
+            project_for_desktop(
+                machine_conn, current, project_id, desktop_machine_id
+            )
         finally:
             machine_conn.close()
         scope = _safe_text(request.form.get("scope"), 20)
@@ -4432,7 +5548,7 @@ def register_mobile_api(
         row, idempotent = insert_photo(
             current_user=current,
             photo_uuid=_uuid(request.form.get("photo_uuid"), "photo_uuid"),
-            project_id=_project_id(request.form.get("project_id")),
+            project_id=project_id,
             scope=scope,
             category=category,
             assignment=assignment,
@@ -4453,12 +5569,16 @@ def register_mobile_api(
             original_filename=request.form.get("original_filename", ""),
             photographer=request.form.get("photographer", ""),
             uploaded_by=request.form.get("uploaded_by", ""),
+            project_owner_account_id=current["id"],
+            capture_source="desktop",
         )
         return jsonify(
             {
                 "ok": True,
                 "idempotent": idempotent,
-                "photo": _photo_payload(row, preview_download_url(row)),
+                "photo": _photo_payload(
+                    row, preview_download_url(row, current["id"])
+                ),
             }
         ), (200 if idempotent else 201)
 

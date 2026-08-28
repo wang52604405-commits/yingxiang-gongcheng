@@ -44,6 +44,24 @@
       }
     },
     {
+      "path": "pages/project/members",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/project/invite",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/project/join",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/destination/select",
       "style": {
         "navigationStyle": "custom"

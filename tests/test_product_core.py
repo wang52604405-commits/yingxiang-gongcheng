@@ -10,7 +10,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 class DesktopUpdateCommandTest(unittest.TestCase):
@@ -756,6 +756,10 @@ class DesktopSecurityContractTest(unittest.TestCase):
                 "sha256": hashlib.sha256(mobile_raw).hexdigest(),
                 "pixel_width": 1800,
                 "pixel_height": 1200,
+                "photographer_account_id": "member-8",
+                "uploaded_by_account_id": "member-8",
+                "project_owner_account_id": "owner-1",
+                "capture_source": "camera",
             }},
         )
         saved = self.desktop.manager.get_project(mobile_project["project_code"])["photos"][0]
@@ -766,6 +770,10 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(mobile_target.read_bytes(), mobile_raw)
         self.assertFalse(saved["optimized"])
         self.assertTrue(saved["mobile_original_received"])
+        self.assertEqual(saved["photographer_account_id"], "member-8")
+        self.assertEqual(saved["uploaded_by_account_id"], "member-8")
+        self.assertEqual(saved["project_owner_account_id"], "owner-1")
+        self.assertEqual(saved["capture_source"], "camera")
         self.desktop.manager.optimize_existing_photo(
             mobile_project["project_code"], added[0]["id"]
         )
@@ -907,6 +915,9 @@ class DesktopSecurityContractTest(unittest.TestCase):
         import gzip as _gzip
         import re as _re
         index_html = _gzip.decompress(index_response.data).decode("utf-8")
+        self.assertIn('data-project-settings-tab="members"', index_html)
+        self.assertIn('id="projectMembersList"', index_html)
+        self.assertIn('id="createProjectInviteBtn"', index_html)
         asset_match = _re.search(r"/assets/(app-A\d{8}-\d+\.\d+\.js)", index_html)
         self.assertIsNotNone(asset_match, "index.html 中未找到版本化 JS asset")
         asset_name = asset_match.group(1)
@@ -924,6 +935,8 @@ class DesktopSecurityContractTest(unittest.TestCase):
         asset_text = asset_body.decode("utf-8")
         self.assertIn("/api/cloud/project-ownership", asset_text)
         self.assertIn("/api/cloud/wechat-binding", asset_text)
+        self.assertIn("/api/cloud/project-members", asset_text)
+        self.assertIn("/api/cloud/project-invites", asset_text)
         self.assertIn("已阻止串号", asset_text)
         asset_response.close()
         index_response.close()
@@ -953,6 +966,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
         ):
             claimed = self.desktop.claim_current_project_cloud_ownership()
             self.assertEqual(claimed["state"], "matched")
+            self.assertEqual(claimed["project_ref"], "account-A:ownership-test")
             backup_dir = Path(claimed["backup_dir"])
             self.assertTrue((backup_dir / self.desktop.ENGINEERING_PROJECTS_PATH.name).exists())
             self.assertTrue((backup_dir / self.desktop.PROJECT_INFO_PATH.name).exists())
@@ -971,6 +985,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
             preserved = self.desktop.current_engineering_project()
             self.assertEqual(preserved["cloud_owner_id"], "account-A")
             self.assertEqual(preserved["cloud_owner_username"], "tenant_a")
+            self.assertEqual(preserved["cloud_project_ref"], "account-A:ownership-test")
 
         with patch.object(
             self.desktop.cloud_client, "desktop_sync_account_id", return_value="account-B"
@@ -984,6 +999,80 @@ class DesktopSecurityContractTest(unittest.TestCase):
             self.assertFalse(status["sync_allowed"])
             with self.assertRaisesRegex(ValueError, "不能直接改绑"):
                 self.desktop.claim_current_project_cloud_ownership()
+
+    def test_z_project_member_proxy_uses_owner_local_project_and_archive_machine(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "project-owner"
+        ownership = {
+            "state": "matched",
+            "local_project_id": "owner-local-project",
+            "project_ref": "42:owner-local-project",
+        }
+        members_payload = {
+            "ok": True,
+            "members": [{"account_id": 42, "role": "owner"}],
+        }
+        with patch.object(
+            self.desktop, "current_project_cloud_ownership", return_value=ownership
+        ), patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_project_members",
+            return_value=members_payload,
+        ) as get_members, patch.object(
+            self.desktop.cloud_client,
+            "desktop_create_project_invite",
+            return_value={"ok": True, "invite": {"invite_id": 9, "code": "ABCDEF0123456789"}},
+        ) as create_invite, patch.object(
+            self.desktop.cloud_client,
+            "desktop_update_project_member",
+            return_value={"ok": True},
+        ) as update_member, patch.object(
+            self.desktop.cloud_client,
+            "desktop_remove_project_member",
+            return_value={"ok": True},
+        ) as remove_member, patch.object(
+            self.desktop.cloud_client,
+            "desktop_revoke_project_invite",
+            return_value={"ok": True},
+        ) as revoke_invite:
+            members = self.client.get("/api/cloud/project-members")
+            invite = self.client.post(
+                "/api/cloud/project-invites", json={"role": "capturer"}
+            )
+            updated = self.client.patch(
+                "/api/cloud/project-members/77", json={"role": "viewer"}
+            )
+            removed = self.client.delete("/api/cloud/project-members/77")
+            revoked = self.client.delete("/api/cloud/project-invites/9")
+
+        self.assertEqual(members.status_code, 200, members.get_json())
+        self.assertEqual(members.get_json()["members"][0]["role"], "owner")
+        self.assertEqual(invite.status_code, 200, invite.get_json())
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        self.assertEqual(revoked.status_code, 200, revoked.get_json())
+        get_members.assert_called_once_with("owner-local-project", "ARCHIVE-PC")
+        create_invite.assert_called_once_with(
+            "owner-local-project", "capturer", "ARCHIVE-PC"
+        )
+        update_member.assert_called_once_with(
+            "77", "owner-local-project", "viewer", "ARCHIVE-PC"
+        )
+        remove_member.assert_called_once_with("77", "owner-local-project", "ARCHIVE-PC")
+        revoke_invite.assert_called_once_with("9", "owner-local-project", "ARCHIVE-PC")
+
+        with patch.object(
+            self.desktop,
+            "current_project_cloud_ownership",
+            return_value={"state": "mismatch"},
+        ), patch.object(
+            self.desktop.cloud_client, "desktop_project_members", new=MagicMock()
+        ) as blocked_call:
+            blocked = self.client.get("/api/cloud/project-members")
+        self.assertEqual(blocked.status_code, 409)
+        blocked_call.assert_not_called()
 
 
 if __name__ == "__main__":

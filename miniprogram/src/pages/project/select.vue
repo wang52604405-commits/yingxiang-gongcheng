@@ -6,6 +6,7 @@ import { mobileApi } from '@/api/mobile'
 import { selectionStorage } from '@/stores/selection'
 import { bootstrapState } from '@/stores/bootstrap'
 import type { ProjectSummary } from '@/types/domain'
+import { projectMemberSummary } from '@/services/project-membership'
 
 const projects = ref<ProjectSummary[]>([...bootstrapState.projects])
 const loading = ref(!projects.value.length)
@@ -30,6 +31,10 @@ function select(project: ProjectSummary) {
   setTimeout(() => uni.navigateBack(), 250)
 }
 
+function joinProject() {
+  uni.navigateTo({ url: '/pages/project/join' })
+}
+
 onLoad(load)
 </script>
 
@@ -40,11 +45,12 @@ onLoad(load)
     <view v-else-if="projects.length" class="project-list card">
       <button v-for="project in projects" :key="project.id" class="project-card pressable" :class="{ active: current.id === project.id }" @tap="select(project)">
         <view class="project-symbol">{{ project.industry?.includes('房') ? '建' : project.industry?.includes('市政') ? '市' : project.industry?.includes('电') ? '电' : project.industry?.includes('水') ? '水' : '工' }}</view>
-        <view class="project-copy"><text class="project-name">{{ project.name }}</text><text class="project-meta">{{ project.industry || '水利工程' }} · {{ project.project_type || project.code }} · {{ project.unit_count || 0 }} 个工程部位</text></view>
+        <view class="project-copy"><text class="project-name">{{ project.name }}</text><text class="project-meta">{{ project.industry || '水利工程' }} · {{ projectMemberSummary(project) }}</text><text class="project-units">{{ project.unit_count || 0 }} 个工程部位</text></view>
         <text class="check">{{ current.id === project.id ? '✓' : '›' }}</text>
       </button>
     </view>
-    <view v-else class="empty-state"><text class="empty-title">暂无工程</text><text class="empty-copy">请先在电脑端同步工程</text></view>
+    <view v-else class="empty-state"><text class="empty-title">暂无工程</text><text class="empty-copy">可从电脑同步，或加入已有工程</text><button class="primary-button pressable empty-join" @tap="joinProject">加入项目</button></view>
+    <button v-if="!loading && projects.length" class="join-project-button pressable" @tap="joinProject">加入另一个项目</button>
   </view>
 </template>
 
@@ -57,5 +63,8 @@ onLoad(load)
 .project-copy { min-width: 0; }
 .project-name { display: block; color: var(--text); font-size: 28rpx; font-weight: 600; line-height: 1.45; }
 .project-meta { display: block; margin-top: 7rpx; color: var(--muted); font-size: 21rpx; }
+.project-units { display: block; margin-top: 4rpx; color: var(--muted); font-size: 20rpx; }
 .check { display: grid; place-items: center; width: 40rpx; height: 48rpx; color: var(--primary-strong); text-align: center; font-size: 34rpx; line-height: 1; }
+.join-project-button { display: flex; align-items: center; justify-content: center; min-height: 40px; margin: 24rpx auto 0; padding: 0 22rpx; color: var(--primary-strong); font-size: 24rpx; }
+.empty-join { width: 300rpx; margin-top: 28rpx; }
 </style>

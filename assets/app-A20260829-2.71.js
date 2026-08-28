@@ -51,6 +51,13 @@ const $ = (selector) => document.querySelector(selector);
       selectedPrintPhotos: {},
       overviewExpandedUnits: new Set(),
       optimizationStatus: {},
+      projectMembers: [],
+      projectInvites: [],
+      projectMembership: {},
+      projectMembersProjectId: "",
+      projectMembersLoading: false,
+      projectMembersError: "",
+      latestProjectInvite: null,
       auth: { user: null }
     };
 
@@ -1126,6 +1133,213 @@ const $ = (selector) => document.querySelector(selector);
       document.querySelectorAll("[data-project-settings-panel]").forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.projectSettingsPanel === nextTab);
       });
+      const membersMode = nextTab === "members";
+      const form = $("#projectInfoForm");
+      if (form) form.classList.toggle("members-mode", membersMode);
+      const cancelButton = $("#cancelProjectInfoBtn");
+      if (cancelButton) cancelButton.textContent = membersMode ? "关闭" : "取消";
+      if (membersMode && !state.projectMembersLoading && state.projectMembersProjectId !== state.activeEngineeringProjectId) {
+        loadProjectMembers().catch(() => {});
+      }
+    }
+
+    const PROJECT_MEMBER_ROLES = ["admin", "capturer", "viewer"];
+
+    function projectMemberRoleLabel(role) {
+      return ({ owner: "负责人", admin: "管理员", capturer: "采集员", viewer: "只读" })[String(role || "")] || "成员";
+    }
+
+    function projectMemberAccountId(member) {
+      return String(member?.member_account_id ?? member?.account_id ?? member?.id ?? "").trim();
+    }
+
+    function projectInviteId(invite) {
+      return String(invite?.invite_id ?? invite?.id ?? "").trim();
+    }
+
+    function projectMemberDisplayName(member) {
+      return String(member?.display_name || member?.username || member?.account || `账号 ${projectMemberAccountId(member)}`).trim();
+    }
+
+    function compactDateTime(value) {
+      return String(value || "").slice(0, 16).replace("T", " ");
+    }
+
+    function renderProjectInvites() {
+      const section = $("#projectInvitesSection");
+      const list = $("#projectInvitesList");
+      if (!section || !list) return;
+      const invites = (state.projectInvites || []).filter((invite) => {
+        const status = String(invite?.status || "active");
+        return !["used", "revoked", "expired"].includes(status);
+      });
+      section.hidden = invites.length === 0;
+      list.innerHTML = invites.map((invite) => {
+        const inviteId = projectInviteId(invite);
+        const expiresAt = compactDateTime(invite.expires_at);
+        const createdAt = compactDateTime(invite.created_at);
+        return `<div class="project-invite-row">
+          <div class="project-invite-main">
+            <span class="project-member-name">${escapeHtml(projectMemberRoleLabel(invite.role))}邀请码</span>
+            <span class="project-invite-meta">${escapeHtml(expiresAt ? `有效至 ${expiresAt}` : createdAt ? `创建于 ${createdAt}` : "等待成员使用")}</span>
+          </div>
+          <button class="project-invite-revoke" type="button" data-project-invite-revoke="${escapeHtml(inviteId)}">撤销</button>
+        </div>`;
+      }).join("");
+    }
+
+    function renderProjectMembers() {
+      const list = $("#projectMembersList");
+      const count = $("#projectMemberCount");
+      const summary = $("#projectMembersSummary");
+      const createButton = $("#createProjectInviteBtn");
+      const refreshButton = $("#refreshProjectMembersBtn");
+      if (!list || !count || !summary) return;
+      const members = Array.isArray(state.projectMembers) ? state.projectMembers : [];
+      count.textContent = `${members.length} 人`;
+      if (state.projectMembersLoading) {
+        summary.textContent = "正在读取成员…";
+        list.innerHTML = `<div class="empty">正在读取成员…</div>`;
+      } else if (state.projectMembersError) {
+        summary.textContent = state.projectMembersError;
+        list.innerHTML = `<div class="empty">${escapeHtml(state.projectMembersError)}</div>`;
+      } else {
+        summary.textContent = members.length > 1 ? "成员照片统一归档到这台电脑" : "本机为项目归档电脑";
+        list.innerHTML = members.length ? members.map((member) => {
+          const accountId = projectMemberAccountId(member);
+          const role = String(member.role || member.membership_role || "viewer");
+          const isOwner = role === "owner" || Boolean(member.is_owner);
+          const displayName = projectMemberDisplayName(member);
+          const username = String(member.username || member.account || "").trim();
+          const joinedAt = compactDateTime(member.joined_at || member.created_at);
+          const meta = [username && username !== displayName ? username : "", joinedAt ? `加入 ${joinedAt}` : ""].filter(Boolean).join(" · ");
+          const roleControl = isOwner
+            ? `<span class="project-member-role-badge">负责人</span>`
+            : `<select class="project-member-role-select" data-project-member-role="${escapeHtml(accountId)}" aria-label="调整 ${escapeHtml(displayName)} 的角色">
+                ${PROJECT_MEMBER_ROLES.map((value) => `<option value="${value}" ${value === role ? "selected" : ""}>${projectMemberRoleLabel(value)}</option>`).join("")}
+              </select>
+              <button class="project-member-remove" type="button" data-project-member-remove="${escapeHtml(accountId)}" data-project-member-name="${escapeHtml(displayName)}">移除</button>`;
+          return `<div class="project-member-row">
+            <span class="project-member-avatar" aria-hidden="true">${escapeHtml(displayName.slice(0, 1) || "人")}</span>
+            <div class="project-member-main">
+              <span class="project-member-name">${escapeHtml(displayName)}</span>
+              <span class="project-member-meta">${escapeHtml(meta || projectMemberRoleLabel(role))}</span>
+            </div>
+            ${roleControl}
+          </div>`;
+        }).join("") : `<div class="empty">暂无成员</div>`;
+      }
+      if (createButton) createButton.disabled = state.projectMembersLoading || Boolean(state.projectMembersError);
+      if (refreshButton) refreshButton.disabled = state.projectMembersLoading;
+      renderProjectInvites();
+    }
+
+    async function loadProjectMembers() {
+      const projectId = String(state.activeEngineeringProjectId || "");
+      if (state.projectMembersProjectId !== projectId) {
+        state.latestProjectInvite = null;
+        state.projectMembers = [];
+        state.projectInvites = [];
+        const latestInvite = $("#projectInviteResult");
+        if (latestInvite) latestInvite.hidden = true;
+      }
+      state.projectMembersProjectId = projectId;
+      state.projectMembersLoading = true;
+      state.projectMembersError = "";
+      renderProjectMembers();
+      const [membersResult, invitesResult] = await Promise.allSettled([
+        apiJson("/api/cloud/project-members"),
+        apiJson("/api/cloud/project-invites")
+      ]);
+      if (membersResult.status === "fulfilled") {
+        const data = membersResult.value || {};
+        state.projectMembers = Array.isArray(data.members) ? data.members : [];
+        state.projectMembership = data.membership || data.project?.membership || {};
+      } else {
+        state.projectMembers = [];
+        state.projectMembership = {};
+        state.projectMembersError = membersResult.reason?.message || "成员读取失败";
+      }
+      if (invitesResult.status === "fulfilled") {
+        state.projectInvites = Array.isArray(invitesResult.value?.invites) ? invitesResult.value.invites : [];
+      } else if (!state.projectMembersError) {
+        state.projectMembersError = invitesResult.reason?.message || "邀请状态读取失败";
+      }
+      state.projectMembersLoading = false;
+      renderProjectMembers();
+    }
+
+    async function createProjectInvite() {
+      const role = $("#projectInviteRoleInput")?.value || "capturer";
+      const button = $("#createProjectInviteBtn");
+      if (button) button.disabled = true;
+      try {
+        const data = await apiJson("/api/cloud/project-invites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role })
+        });
+        const invite = data.invite || data;
+        const code = String(invite.code || invite.invite_code || "").trim();
+        if (!code) throw new Error("服务器没有返回邀请码，请重试");
+        state.latestProjectInvite = { ...invite, code };
+        const result = $("#projectInviteResult");
+        if (result) result.hidden = false;
+        $("#projectInviteCode").textContent = code;
+        const expiry = compactDateTime(invite.expires_at);
+        $("#projectInviteMeta").textContent = `${projectMemberRoleLabel(invite.role || role)}${expiry ? ` · 有效至 ${expiry}` : ""}`;
+        await loadProjectMembers();
+        showNotice("邀请码已生成，可以发给成员。 ");
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    async function updateProjectMemberRole(accountId, role, select) {
+      if (!PROJECT_MEMBER_ROLES.includes(role)) return;
+      if (select) select.disabled = true;
+      try {
+        await apiJson(`/api/cloud/project-members/${encodeURIComponent(accountId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role })
+        });
+        await loadProjectMembers();
+        showNotice("成员角色已更新。 ");
+      } catch (error) {
+        await loadProjectMembers().catch(() => {});
+        throw error;
+      } finally {
+        if (select && select.isConnected) select.disabled = false;
+      }
+    }
+
+    async function removeProjectMember(accountId, displayName, button) {
+      if (!window.confirm(`确认移除成员“${displayName || accountId}”？历史照片仍会保留。`)) return;
+      if (button) button.disabled = true;
+      try {
+        await apiJson(`/api/cloud/project-members/${encodeURIComponent(accountId)}`, { method: "DELETE" });
+        await loadProjectMembers();
+        showNotice("成员已移除，历史照片保持不变。 ");
+      } finally {
+        if (button && button.isConnected) button.disabled = false;
+      }
+    }
+
+    async function revokeProjectInvite(inviteId, button) {
+      if (!window.confirm("确认撤销这个邀请码？")) return;
+      if (button) button.disabled = true;
+      try {
+        await apiJson(`/api/cloud/project-invites/${encodeURIComponent(inviteId)}`, { method: "DELETE" });
+        if (projectInviteId(state.latestProjectInvite) === String(inviteId)) {
+          state.latestProjectInvite = null;
+          $("#projectInviteResult").hidden = true;
+        }
+        await loadProjectMembers();
+        showNotice("邀请码已撤销。 ");
+      } finally {
+        if (button && button.isConnected) button.disabled = false;
+      }
     }
 
     function syncPrintPhotoPresetInputs() {
@@ -1262,6 +1476,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#projectInfoModal").setAttribute("aria-hidden", "false");
       renderPhotoOptimizationStatus();
       refreshPhotoOptimizationStatus().catch(() => {});
+      loadProjectMembers().catch(() => {});
       setTimeout(() => $("#projectInfoNameInput").focus(), 0);
     }
 
@@ -3921,6 +4136,43 @@ const $ = (selector) => document.querySelector(selector);
     });
     document.querySelectorAll("[data-project-settings-tab]").forEach((button) => {
       button.addEventListener("click", () => setProjectSettingsTab(button.dataset.projectSettingsTab));
+    });
+    $("#refreshProjectMembersBtn")?.addEventListener("click", () => {
+      loadProjectMembers().catch((error) => showNotice(error.message || "成员读取失败", true));
+    });
+    $("#createProjectInviteBtn")?.addEventListener("click", () => {
+      createProjectInvite().catch((error) => showNotice(error.message || "邀请码生成失败", true));
+    });
+    $("#copyProjectInviteBtn")?.addEventListener("click", () => {
+      const code = String(state.latestProjectInvite?.code || $("#projectInviteCode")?.textContent || "").trim();
+      if (!code || code === "—") {
+        showNotice("请先生成邀请码。", true);
+        return;
+      }
+      copyText(code)
+        .then(() => showNotice("项目邀请码已复制。"))
+        .catch((error) => showNotice(error.message || "复制失败", true));
+    });
+    $("#projectMembersList")?.addEventListener("change", (event) => {
+      const select = event.target.closest("[data-project-member-role]");
+      if (!select) return;
+      updateProjectMemberRole(select.dataset.projectMemberRole, select.value, select)
+        .catch((error) => showNotice(error.message || "角色更新失败", true));
+    });
+    $("#projectMembersList")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-project-member-remove]");
+      if (!button) return;
+      removeProjectMember(
+        button.dataset.projectMemberRemove,
+        button.dataset.projectMemberName,
+        button
+      ).catch((error) => showNotice(error.message || "移除失败", true));
+    });
+    $("#projectInvitesList")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-project-invite-revoke]");
+      if (!button) return;
+      revokeProjectInvite(button.dataset.projectInviteRevoke, button)
+        .catch((error) => showNotice(error.message || "撤销失败", true));
     });
     $("#settingsPrintPhotoPresetInput").addEventListener("change", syncPrintPhotoPresetInputs);
     $("#closeFolderReviewBtn").addEventListener("click", closeFolderReview);

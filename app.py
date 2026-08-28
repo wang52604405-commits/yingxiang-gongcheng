@@ -1590,6 +1590,10 @@ class AlbumManager:
         item.setdefault("process_name", "")
         item.setdefault("process_code", "")
         item.setdefault("uploaded_by", "")
+        item.setdefault("photographer_account_id", "")
+        item.setdefault("uploaded_by_account_id", "")
+        item.setdefault("project_owner_account_id", "")
+        item.setdefault("capture_source", "")
         item["rotation"] = normalize_photo_rotation(item.get("rotation"))
         orientation = self._normalize_orientation(item.get("orientation"))
         item["orientation"] = orientation
@@ -2024,6 +2028,10 @@ class AlbumManager:
                 "process_name": process_name,
                 "process_code": process_code,
                 "uploaded_by": str(uploaded_by or "").strip(),
+                "photographer_account_id": str(meta.get("photographer_account_id") or "").strip(),
+                "uploaded_by_account_id": str(meta.get("uploaded_by_account_id") or "").strip(),
+                "project_owner_account_id": str(meta.get("project_owner_account_id") or "").strip(),
+                "capture_source": str(meta.get("capture_source") or "desktop").strip(),
                 "orientation": orientation,
                 "orientation_label": PHOTO_ORIENTATION_LABELS[orientation],
                 "rotation": 0,
@@ -2132,6 +2140,10 @@ class AlbumManager:
                 "process_name": photo_process_name,
                 "process_code": photo_process_code,
                 "uploaded_by": str(photo.get("uploaded_by") or "").strip(),
+                "photographer_account_id": str(photo.get("photographer_account_id") or "").strip(),
+                "uploaded_by_account_id": str(photo.get("uploaded_by_account_id") or "").strip(),
+                "project_owner_account_id": str(photo.get("project_owner_account_id") or "").strip(),
+                "capture_source": str(photo.get("capture_source") or "").strip(),
                 "orientation": orientation,
                 "orientation_label": PHOTO_ORIENTATION_LABELS[orientation],
                 "rotation": normalize_photo_rotation(photo.get("rotation")),
@@ -4395,6 +4407,7 @@ def default_engineering_project():
         "cloud_owner_id": "",
         "cloud_owner_username": "",
         "cloud_owner_claimed_at": "",
+        "cloud_project_ref": "",
         "delete_password_hash": "",
         "created_at": "",
         "updated_at": "",
@@ -4471,6 +4484,21 @@ def current_engineering_project(data=None):
 _project_cloud_ownership_lock = threading.Lock()
 
 
+def engineering_project_cloud_ref(project):
+    """返回服务器 canonical 工程标识；旧本地工程可由 owner + local id 无损推导。"""
+    project = project if isinstance(project, dict) else {}
+    stored = str(
+        project.get("cloud_project_ref")
+        or project.get("project_ref")
+        or ""
+    ).strip()
+    if stored:
+        return stored
+    owner_id = str(project.get("cloud_owner_id") or "").strip()
+    local_project_id = str(project.get("id") or DEFAULT_ENGINEERING_PROJECT_ID).strip()
+    return f"{owner_id}:{local_project_id}" if owner_id and local_project_id else ""
+
+
 def current_project_cloud_ownership():
     """返回当前本地工程与已登录云账号的不可变归属关系。"""
     project = current_engineering_project()
@@ -4494,6 +4522,8 @@ def current_project_cloud_ownership():
         "owner_id": owner_id,
         "owner_username": owner_username,
         "claimed_at": str(project.get("cloud_owner_claimed_at") or ""),
+        "project_ref": engineering_project_cloud_ref(project),
+        "local_project_id": str(project.get("id") or DEFAULT_ENGINEERING_PROJECT_ID),
         "state": state,
         "can_claim": state == "unclaimed",
         "sync_allowed": state == "matched",
@@ -4527,6 +4557,7 @@ def claim_current_project_cloud_ownership():
         project["cloud_owner_id"] = account_id
         project["cloud_owner_username"] = account_username
         project["cloud_owner_claimed_at"] = now_text()
+        project["cloud_project_ref"] = f"{account_id}:{project.get('id') or DEFAULT_ENGINEERING_PROJECT_ID}"
         write_engineering_projects(data)
         result = current_project_cloud_ownership()
         result["backup_dir"] = str(backup_dir)
@@ -4777,6 +4808,100 @@ def api_cloud_project_ownership():
         return jsonify({"ok": True, "project_ownership": ownership})
     except ValueError as exc:
         return json_error(str(exc), 409)
+
+
+def _desktop_team_project_context():
+    ownership = current_project_cloud_ownership()
+    if ownership.get("state") != "matched":
+        if ownership.get("state") == "logged_out":
+            raise ValueError("请先登录工程所属云账号")
+        if ownership.get("state") == "unclaimed":
+            raise ValueError("请先把当前工程绑定到云账号")
+        raise ValueError("只有工程所属账号可以在归档电脑管理项目成员")
+    machine_id = str(licensing.machine_id() or "").strip()
+    if not machine_id:
+        raise ValueError("当前电脑缺少稳定机器编号")
+    return str(ownership.get("local_project_id") or DEFAULT_ENGINEERING_PROJECT_ID), machine_id
+
+
+def _cloud_proxy_response(result):
+    payload = dict(result or {})
+    status = int(payload.get("http_status") or (200 if payload.get("ok") else 400))
+    return jsonify(payload), max(200, min(599, status))
+
+
+@app.route("/api/cloud/project-members", methods=["GET"])
+def api_cloud_project_members():
+    _user, error = login_required_json()
+    if error:
+        return error
+    try:
+        project_id, machine_id = _desktop_team_project_context()
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    return _cloud_proxy_response(
+        cloud_client.desktop_project_members(project_id, machine_id)
+    )
+
+
+@app.route("/api/cloud/project-members/<member_account_id>", methods=["PATCH", "DELETE"])
+def api_cloud_project_member(member_account_id):
+    _user, error = login_required_json()
+    if error:
+        return error
+    try:
+        project_id, machine_id = _desktop_team_project_context()
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    if request.method == "DELETE":
+        result = cloud_client.desktop_remove_project_member(
+            member_account_id, project_id, machine_id
+        )
+    else:
+        payload = request.get_json(silent=True) or {}
+        role = str(payload.get("role") or "").strip()
+        if role not in {"admin", "capturer", "viewer"}:
+            return json_error("成员角色无效", 400)
+        result = cloud_client.desktop_update_project_member(
+            member_account_id, project_id, role, machine_id
+        )
+    return _cloud_proxy_response(result)
+
+
+@app.route("/api/cloud/project-invites", methods=["GET", "POST"])
+def api_cloud_project_invites():
+    _user, error = login_required_json()
+    if error:
+        return error
+    try:
+        project_id, machine_id = _desktop_team_project_context()
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    if request.method == "GET":
+        result = cloud_client.desktop_project_invites(project_id, machine_id)
+    else:
+        payload = request.get_json(silent=True) or {}
+        role = str(payload.get("role") or "capturer").strip()
+        if role not in {"admin", "capturer", "viewer"}:
+            return json_error("邀请角色无效", 400)
+        result = cloud_client.desktop_create_project_invite(
+            project_id, role, machine_id
+        )
+    return _cloud_proxy_response(result)
+
+
+@app.route("/api/cloud/project-invites/<invite_id>", methods=["DELETE"])
+def api_cloud_project_invite(invite_id):
+    _user, error = login_required_json()
+    if error:
+        return error
+    try:
+        project_id, machine_id = _desktop_team_project_context()
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    return _cloud_proxy_response(
+        cloud_client.desktop_revoke_project_invite(invite_id, project_id, machine_id)
+    )
 
 
 @app.route("/api/cloud/wechat-binding", methods=["GET", "DELETE"])
@@ -5270,6 +5395,9 @@ def api_save_project_info():
             ),
             "cloud_owner_claimed_at": str(
                 (existing_project or {}).get("cloud_owner_claimed_at") or ""
+            ),
+            "cloud_project_ref": str(
+                (existing_project or {}).get("cloud_project_ref") or ""
             ),
             "delete_password_hash": password_hash,
             "created_at": now,

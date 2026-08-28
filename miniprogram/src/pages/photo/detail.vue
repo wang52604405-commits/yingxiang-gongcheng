@@ -6,6 +6,7 @@ import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { STATUS_LABELS } from '@/services/photo-state'
 import type { CloudPhoto, LocalPhoto } from '@/types/domain'
+import { sessionState } from '@/services/auth'
 
 const photoId = ref('')
 const local = ref<LocalPhoto | null>(null)
@@ -14,6 +15,9 @@ const loading = ref(true)
 const imageUrl = computed(() => local.value?.preview_path || cloud.value?.image_url || cloud.value?.thumb_url || '')
 const title = computed(() => local.value?.title || cloud.value?.title || '影像详情')
 const status = computed(() => local.value?.status || cloud.value?.status)
+const localActor = computed(() => sessionState.account?.display_name || sessionState.account?.username || '')
+const photographer = computed(() => cloud.value?.photographer || (local.value?.draft.capture_source === 'camera' ? localActor.value : ''))
+const uploadedBy = computed(() => cloud.value?.uploaded_by || (local.value ? localActor.value : ''))
 
 async function load() {
   queueRuntime.hydrate()
@@ -51,7 +55,8 @@ onLoad((query) => {
       <view class="detail-card card">
         <view class="detail-row"><text>题名</text><text>{{ title }}</text></view>
         <view class="detail-row"><text>日期</text><text>{{ local?.photo_date || cloud?.photo_date }}</text></view>
-        <view v-if="cloud?.photographer || cloud?.uploaded_by" class="detail-row"><text>拍摄者</text><text>{{ cloud?.photographer || cloud?.uploaded_by }}</text></view>
+        <view v-if="photographer" class="detail-row"><text>拍摄者</text><text>{{ photographer }}</text></view>
+        <view v-if="uploadedBy" class="detail-row"><text>上传者</text><text>{{ uploadedBy }}</text></view>
         <view class="detail-row"><text>归档位置</text><text>{{ local?.draft.assignment?.unit_name || local?.draft.assignment?.other_node_name || cloud?.unit_name || cloud?.other_node_name || '待确认' }}</text></view>
         <view v-if="local?.draft.assignment?.process_name || cloud?.process_name" class="detail-row"><text>工序</text><text>{{ local?.draft.assignment?.process_name || cloud?.process_name }}</text></view>
         <view class="detail-row"><text>状态</text><text class="status-value">{{ status ? STATUS_LABELS[status] : '--' }}</text></view>

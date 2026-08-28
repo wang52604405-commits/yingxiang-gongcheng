@@ -26,7 +26,7 @@ export const tokenStorage = {
 }
 
 export async function apiRequest<T>(
-  method: 'GET' | 'POST' | 'PATCH' | 'PUT',
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   path: string,
   data?: unknown,
   requiresAuth = true,

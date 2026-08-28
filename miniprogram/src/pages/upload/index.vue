@@ -10,6 +10,7 @@ import { choosePhotoPaths } from '@/services/media-picker'
 import { selectionStorage } from '@/stores/selection'
 import type { CaptureRequirementRef, PhotoCategory, Scope, UploadDraft, UploadMode } from '@/types/domain'
 import { formatBytes } from '@/utils/format'
+import { canCaptureProject, capturePermissionMessage } from '@/services/project-membership'
 
 const project = ref(selectionStorage.getProject())
 const scope = ref<Scope>('engineering')
@@ -22,13 +23,14 @@ const pickedPaths = ref<string[]>([])
 const choosing = ref(false)
 const submitting = ref(false)
 const sourceInitialized = ref(false)
+const permissionWarningShown = ref(false)
 const uniApi = uni
 
 const destinationLabel = computed(() => {
   const assignment = destination.value?.scope === scope.value ? destination.value.assignment : undefined
   return assignment?.unit_name || assignment?.other_node_name || (scope.value === 'engineering' ? '选择工程部位' : '选择其它影像目录')
 })
-const canSubmit = computed(() => Boolean(pickedPaths.value.length) && !choosing.value && !submitting.value && (mode.value === 'auto' || destination.value?.scope === scope.value))
+const canSubmit = computed(() => canCaptureProject(project.value) && Boolean(pickedPaths.value.length) && !choosing.value && !submitting.value && (mode.value === 'auto' || destination.value?.scope === scope.value))
 const sourceLabel = computed(() => source.value === 'camera' ? '现场拍照' : '手机相册')
 const submitLabel = computed(() => submitting.value ? '正在保存…' : pickedPaths.value.length ? `确认采集 ${pickedPaths.value.length} 张` : '请先选择照片')
 const progressText = computed(() => {
@@ -59,9 +61,26 @@ function savePreset() {
     requirement: requirement.value || undefined,
   })
 }
+
+function ensureCapturePermission(): boolean {
+  const denied = capturePermissionMessage(project.value)
+  if (!denied) {
+    permissionWarningShown.value = false
+    return true
+  }
+  if (!permissionWarningShown.value) {
+    permissionWarningShown.value = true
+    uni.showModal({ title: denied.title, content: denied.content, showCancel: false, success: () => {
+      if (!project.value.id) uni.navigateTo({ url: '/pages/project/select' })
+      else uni.navigateBack()
+    } })
+  }
+  return false
+}
 function chooseDestination() { uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=capture` }) }
 
 async function pickMedia(nextSource: CaptureSource = source.value) {
+  if (!ensureCapturePermission()) return
   if (queueRuntime.queueUsagePercent.value >= 100) {
     uni.showModal({ title: '本机同步队列已满', content: '待同步影像已经达到 160MB，请联网完成同步后再继续采集。', showCancel: false })
     return
@@ -82,8 +101,10 @@ async function reselectMedia() {
   if (nextSource) await pickMedia(nextSource)
 }
 async function submitCapture() {
+  project.value = selectionStorage.getProject()
+  if (!ensureCapturePermission()) return
   if (!project.value.id) {
-    uni.showModal({ title: '尚未同步工程', content: '请先在原电脑登录同一账号并同步工程。', showCancel: false })
+    uni.showModal({ title: '还没有工程', content: '请先选择或加入工程。', showCancel: false })
     return
   }
   if (!pickedPaths.value.length) { await reselectMedia(); return }
@@ -98,6 +119,7 @@ async function submitCapture() {
       scope: scope.value,
       category: scope.value === 'engineering' ? category.value : undefined,
       mode: mode.value,
+      capture_source: source.value,
       assignment: mode.value === 'direct' ? destination.value?.assignment : undefined,
       requirement: scope.value === 'engineering' && category.value === 'construction'
         ? requirement.value || undefined
@@ -137,7 +159,7 @@ function changeCategory(next: PhotoCategory) {
 onLoad((query) => {
   applyStoredState()
   source.value = query?.source === 'album' ? 'album' : 'camera'
-  if (query?.autopick === '1' && !sourceInitialized.value) {
+  if (query?.autopick === '1' && !sourceInitialized.value && ensureCapturePermission()) {
     sourceInitialized.value = true
     setTimeout(() => { void pickMedia(source.value) }, 80)
   }
@@ -145,6 +167,7 @@ onLoad((query) => {
 onShow(() => {
   project.value = selectionStorage.getProject()
   applyStoredState()
+  ensureCapturePermission()
 })
 </script>
 

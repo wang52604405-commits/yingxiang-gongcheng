@@ -2679,6 +2679,155 @@
       color: var(--top);
       font-size: 13px;
     }
+    .project-members-panel {
+      gap: 10px;
+    }
+    .project-members-heading,
+    .project-member-invite-card,
+    .project-invite-result,
+    .project-member-row,
+    .project-invite-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .project-members-heading {
+      justify-content: space-between;
+    }
+    .project-members-heading h4 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .project-members-heading .import-hint {
+      margin: 4px 0 0;
+    }
+    .project-member-count,
+    .project-member-role-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: #0d7064;
+      background: #e5f7f3;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .project-member-invite-card {
+      justify-content: space-between;
+      padding: 10px;
+      border: 1px solid #c8dedb;
+      border-radius: 10px;
+      background: #f4fbf9;
+    }
+    .project-member-invite-card label {
+      display: grid;
+      grid-template-columns: auto minmax(120px, 180px);
+      align-items: center;
+      gap: 9px;
+      margin: 0;
+      color: #365e64;
+      font-weight: 700;
+    }
+    .project-member-invite-card select {
+      min-height: 36px;
+    }
+    .project-invite-result {
+      justify-content: space-between;
+      padding: 11px 12px;
+      border: 1px solid #8dd4ca;
+      border-radius: 10px;
+      background: #eafaf7;
+    }
+    .project-invite-result[hidden] { display: none; }
+    .project-invite-result > div {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: auto auto;
+      align-items: baseline;
+      gap: 2px 10px;
+    }
+    .project-invite-result small,
+    .project-invite-result span {
+      color: #53777b;
+      font-size: 12px;
+    }
+    .project-invite-result strong {
+      color: #075f55;
+      font-size: 23px;
+      letter-spacing: .14em;
+      font-variant-numeric: tabular-nums;
+    }
+    .project-invite-result span {
+      grid-column: 2;
+    }
+    .project-members-list,
+    .project-invites-list {
+      display: grid;
+      gap: 8px;
+    }
+    .project-member-row,
+    .project-invite-row {
+      min-height: 58px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .project-member-avatar {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      color: #0b6e64;
+      background: #e7f6f3;
+      font-weight: 800;
+    }
+    .project-member-main,
+    .project-invite-main {
+      min-width: 0;
+      flex: 1;
+      display: grid;
+      gap: 3px;
+    }
+    .project-member-name {
+      overflow: hidden;
+      color: var(--top);
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .project-member-meta,
+    .project-invite-meta {
+      overflow: hidden;
+      color: #6b7d88;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .project-member-role-select {
+      width: 112px !important;
+      min-height: 36px;
+    }
+    .project-member-remove,
+    .project-invite-revoke {
+      color: #a7372c;
+      background: #fff;
+      border-color: #e7b8b3;
+    }
+    .project-member-section-title {
+      margin: 2px 0 7px;
+      color: #4e6b73;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .project-settings-form.members-mode .project-settings-actions .danger,
+    .project-settings-form.members-mode .project-settings-actions button[type="submit"] {
+      display: none;
+    }
     .project-settings-actions {
       grid-column: 1 / -1;
       min-height: 52px;
@@ -3313,7 +3462,9 @@
         grid-template-rows: auto minmax(0, 1fr) auto;
       }
       .project-settings-tabs {
-        grid-template-columns: repeat(5, minmax(92px, 1fr));
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(104px, 1fr);
         overflow-x: auto;
         border-right: 0;
         border-bottom: 1px solid var(--line);
@@ -3332,6 +3483,23 @@
       }
       .project-settings-actions .danger {
         grid-column: 1 / -1;
+      }
+      .project-settings-form.members-mode .project-settings-actions {
+        grid-template-columns: 1fr;
+      }
+      .project-member-row,
+      .project-invite-row {
+        align-items: stretch;
+        flex-wrap: wrap;
+      }
+      .project-member-main,
+      .project-invite-main {
+        flex-basis: calc(100% - 48px);
+      }
+      .project-member-role-select,
+      .project-member-remove,
+      .project-invite-revoke {
+        flex: 1;
       }
       .photo-edit-actions {
         display: grid;

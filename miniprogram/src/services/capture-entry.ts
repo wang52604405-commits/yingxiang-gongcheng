@@ -1,5 +1,6 @@
 import { selectionStorage } from '@/stores/selection'
 import type { CaptureRequirementRef, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import { capturePermissionMessage } from './project-membership'
 
 export type CaptureSource = 'camera' | 'album'
 
@@ -22,12 +23,12 @@ export async function chooseCaptureSource(): Promise<CaptureSource | null> {
 }
 
 export async function launchCapture(options: CaptureLaunchOptions = {}): Promise<boolean> {
-  if (!selectionStorage.hasProject()) {
-    uni.showModal({
-      title: '尚未同步工程',
-      content: '请先在原电脑登录同一账号并完成工程账号绑定，手机拉取到真实工程后才能采集。',
-      showCancel: false,
-    })
+  const project = selectionStorage.getProject()
+  const denied = capturePermissionMessage(project)
+  if (denied) {
+    uni.showModal({ title: denied.title, content: denied.content, showCancel: false, success: () => {
+      if (!project?.id) uni.navigateTo({ url: '/pages/project/select' })
+    } })
     return false
   }
   const source = await chooseCaptureSource()

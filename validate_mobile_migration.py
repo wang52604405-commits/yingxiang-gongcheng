@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""在 SQLite 备份副本上验证微信小程序 V1 的增量迁移。
+"""在 SQLite 备份副本上验证微信小程序 V1.3 的增量迁移。
 
 该脚本永远不直接迁移传入的源文件：必须另给 ``--copy`` 和显式的
 ``--copy-root`` 安全根目录，脚本排他创建 0600 副本，再只对副本建新表/索引并
@@ -33,6 +33,8 @@ LEGACY_TABLES = (
 MOBILE_TABLES = (
     "wechat_bindings",
     "cloud_engineering_projects",
+    "project_members",
+    "project_invitations",
     "cloud_units",
     "mobile_batches",
     "cloud_photos",
@@ -41,6 +43,51 @@ MOBILE_TABLES = (
     "mobile_upload_sessions",
     "mobile_upload_chunks",
 )
+
+
+def _shared_project_invariants(database: Path) -> dict[str, int]:
+    """核对共享工程迁移只补负责人关系，并正确回填工程归属。"""
+    connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
+    try:
+        projects = int(
+            connection.execute("SELECT COUNT(*) FROM cloud_engineering_projects").fetchone()[0]
+        )
+        owner_members = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM project_members "
+                "WHERE role = 'owner' AND status = 'active' "
+                "AND member_account_id = project_owner_account_id"
+            ).fetchone()[0]
+        )
+        projects_without_owner = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM cloud_engineering_projects p "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM project_members m "
+                "WHERE m.project_owner_account_id = p.account_id "
+                "AND m.project_id = p.project_id "
+                "AND m.member_account_id = p.account_id "
+                "AND m.role = 'owner' AND m.status = 'active')"
+            ).fetchone()[0]
+        )
+        invalid_owner_ids = 0
+        for table in ("mobile_batches", "cloud_photos", "mobile_upload_sessions"):
+            invalid_owner_ids += int(
+                connection.execute(
+                    f'SELECT COUNT(*) FROM "{table}" '
+                    "WHERE project_owner_account_id IS NULL "
+                    "OR project_owner_account_id <= 0"
+                ).fetchone()[0]
+            )
+        return {
+            "projects": projects,
+            "owner_members": owner_members,
+            "projects_without_owner": projects_without_owner,
+            "invalid_project_owner_ids": invalid_owner_ids,
+        }
+    finally:
+        connection.close()
 
 
 # 允许读取经过 SQLite backup API 生成的 /opt/album-auth/backups 副本，
@@ -281,6 +328,7 @@ def main() -> int:
     db.init_db()
     after = _counts(destination, LEGACY_TABLES)
     mobile = _counts(destination, MOBILE_TABLES)
+    shared_projects = _shared_project_invariants(destination)
 
     integrity, foreign_key_errors = _integrity(destination)
     secret_after = (
@@ -300,6 +348,15 @@ def main() -> int:
         )
     if set(mobile) != set(MOBILE_TABLES):
         raise SystemExit("移动端表未完整创建：" + json.dumps(mobile, ensure_ascii=False))
+    if (
+        shared_projects["owner_members"] != shared_projects["projects"]
+        or shared_projects["projects_without_owner"]
+        or shared_projects["invalid_project_owner_ids"]
+    ):
+        raise SystemExit(
+            "共享工程负责人迁移不完整："
+            + json.dumps(shared_projects, ensure_ascii=False)
+        )
     # 旧库可能已有历史外键孤儿记录。本验证器不擅自修复旧数据，只要求
     # 增量迁移不增加、删除或改变这些历史问题。
     if integrity != "ok" or foreign_key_errors != foreign_keys_before:
@@ -326,6 +383,7 @@ def main() -> int:
                 "copy_mode": f"{stat.S_IMODE(destination.stat().st_mode):04o}",
                 "legacy_counts_unchanged": after,
                 "mobile_tables": mobile,
+                "shared_project_invariants": shared_projects,
                 "integrity": integrity,
                 "preexisting_foreign_key_errors_unchanged": foreign_key_errors,
             },

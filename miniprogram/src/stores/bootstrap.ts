@@ -16,10 +16,11 @@ export const bootstrapState = reactive<{
   serverTime: string
 }>({ ready: false, loading: false, projects: [], currentProject: null, queue: {}, recentUploads: [], serverTime: '' })
 
-export function applyBootstrap(accountId: string | number, response: BootstrapResponse): void {
+export function applyBootstrap(accountId: string | number, response: BootstrapResponse, preferredProjectId = ''): void {
   selectionStorage.setOwner(accountId)
   const selectedProject = selectionStorage.getProject()
-  const activeProject = response.projects.find((project) => String(project.id) === String(selectedProject.id))
+  const activeProject = response.projects.find((project) => String(project.id) === String(preferredProjectId))
+    || response.projects.find((project) => String(project.id) === String(selectedProject.id))
     || response.projects.find((project) => String(project.id) === String(response.current_project?.id || ''))
     || response.projects[0]
     || null
@@ -41,11 +42,11 @@ export function hydrateBootstrap(accountId: string | number): BootstrapResponse 
   return cached || null
 }
 
-export async function loadBootstrap(accountId: string | number): Promise<BootstrapResponse> {
+export async function loadBootstrap(accountId: string | number, preferredProjectId = ''): Promise<BootstrapResponse> {
   bootstrapState.loading = true
   try {
     const response = await mobileApi.bootstrap()
-    applyBootstrap(accountId, response)
+    applyBootstrap(accountId, response, preferredProjectId)
     return response
   } finally {
     bootstrapState.loading = false

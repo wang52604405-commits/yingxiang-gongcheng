@@ -648,4 +648,33 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(storage.get('engineering-image:queue:v2:account:A').photos[0].photo_uuid).toBe('photo-a')
     expect(unlink).not.toHaveBeenCalled()
   })
+
+  it('成员被移除后停止自动重试且保留本机原图', async () => {
+    const photo = localPhoto('32', 'revoked-photo')
+    photo.status = 'local_ready'
+    photo.remote_batch_id = undefined
+    photo.progress = 0
+    const batch = localBatch(photo)
+    batch.remote_batch_id = undefined
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, true)
+    const { ApiError } = await import('@/api/client')
+    mocks.createBatch.mockRejectedValue(new ApiError('已无工程访问权限', 'project_access_revoked', false, 403))
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'failed',
+      retryable: false,
+      original_path: '/user/32-original.jpg',
+      error: '已无此工程采集权限；原图仍保存在本机',
+    })
+    expect(unlink).not.toHaveBeenCalled()
+  })
 })

@@ -129,6 +129,10 @@ class FakeManager:
                     "photo_date": meta.get("photo_date") or photo_date,
                     "photographer": photographer,
                     "uploaded_by": uploaded_by,
+                    "photographer_account_id": str(meta.get("photographer_account_id") or ""),
+                    "uploaded_by_account_id": str(meta.get("uploaded_by_account_id") or ""),
+                    "project_owner_account_id": str(meta.get("project_owner_account_id") or ""),
+                    "capture_source": str(meta.get("capture_source") or ""),
                     "orientation": orientation,
                     "process_name": process_name,
                     "mobile_compressed_200k": bool(meta.get("mobile_compressed_200k")),
@@ -362,6 +366,10 @@ class DesktopMobileSyncTest(unittest.TestCase):
             for unit in part["units"]
         ]
         self.assertEqual(snapshot["project"]["project_name"], mobile_sync.TARGET_PROJECT_DISPLAY_NAME)
+        self.assertEqual(snapshot["project"]["id"], "default")
+        self.assertEqual(snapshot["project"]["local_project_id"], "default")
+        self.assertEqual(snapshot["project"]["owner_account_id"], "fake-account")
+        self.assertEqual(snapshot["project"]["project_ref"], "fake-account:default")
         self.assertEqual(snapshot["desktop_machine_id"], "MACHINE-A")
         self.assertEqual(len(units), 888)
         self.assertTrue(all(unit["unit_code"].startswith("YNLQ-") for unit in units))
@@ -604,6 +612,95 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertEqual(third["ack_pending"], 0)
         self.assertEqual(third["cleanup_pending"], 0)
         self.assertEqual(cloud.inbox_machine_ids, ["MACHINE-A", "MACHINE-A", "MACHINE-A"])
+
+    def test_team_member_photo_uses_canonical_project_and_keeps_actor_audit(self):
+        self.add_unit()
+        self.project.update({
+            "cloud_owner_id": "42",
+            "cloud_project_ref": "42:default",
+        })
+        raw = noisy_jpeg_bytes(size=(1200, 800))
+        photo_uuid = str(uuid.uuid4())
+        item = {
+            "photo_uuid": photo_uuid,
+            "project_id": "default",
+            "project_ref": "42:default",
+            "local_project_id": "default",
+            "owner_account_id": 42,
+            "account_id": 77,
+            "photographer_account_id": 78,
+            "uploaded_by_account_id": 77,
+            "capture_source": "camera",
+            "scope": "engineering",
+            "category": "construction",
+            "unit_code": "YNLQ-001-01-001",
+            "photographer": "现场李工",
+            "uploaded_by": "成员王工",
+            "original_download_url": "/download/original",
+            "original_sha256": hashlib.sha256(raw).hexdigest(),
+            "original_size_bytes": len(raw),
+            "original_filename": "team-camera.jpg",
+            "original_mime_type": "image/jpeg",
+            "target_machine_id": "MACHINE-A",
+        }
+        cloud = FakeCloud(raw=raw, items=[item], identity="42")
+
+        result = self.service(cloud)._sync_inbox()
+
+        self.assertEqual(result["imported"], 1)
+        stored = self.manager.get_project("YNLQ-001-01-001")["photos"][0]
+        self.assertEqual(stored["photo_uuid"], photo_uuid)
+        self.assertEqual(stored["photographer"], "现场李工")
+        self.assertEqual(stored["uploaded_by"], "成员王工")
+        self.assertEqual(stored["photographer_account_id"], "78")
+        self.assertEqual(stored["uploaded_by_account_id"], "77")
+        self.assertEqual(stored["project_owner_account_id"], "42")
+        self.assertEqual(stored["capture_source"], "camera")
+
+    def test_team_member_photo_never_infers_photographer_from_uploader_and_rejects_other_project(self):
+        self.add_unit()
+        self.project.update({
+            "cloud_owner_id": "42",
+            "cloud_project_ref": "42:default",
+        })
+        raw = jpeg_bytes()
+        base = {
+            "photo_uuid": str(uuid.uuid4()),
+            "project_id": "default",
+            "project_ref": "42:default",
+            "local_project_id": "default",
+            "owner_account_id": 42,
+            "account_id": 77,
+            "photographer_account_id": 0,
+            "uploaded_by_account_id": 77,
+            "capture_source": "album",
+            "scope": "engineering",
+            "category": "construction",
+            "unit_code": "YNLQ-001-01-001",
+            "original_download_url": "/download/original",
+            "original_sha256": hashlib.sha256(raw).hexdigest(),
+            "original_size_bytes": len(raw),
+            "original_filename": "team-album.jpg",
+            "original_mime_type": "image/jpeg",
+            "target_machine_id": "MACHINE-A",
+        }
+        cloud = FakeCloud(raw=raw, items=[base], identity="42")
+        imported = self.service(cloud)._sync_inbox()
+        self.assertEqual(imported["imported"], 1)
+        stored = self.manager.get_project("YNLQ-001-01-001")["photos"][0]
+        self.assertEqual(stored["photographer_account_id"], "")
+        self.assertEqual(stored["uploaded_by_account_id"], "77")
+
+        rejected_cloud = FakeCloud(raw=raw, items=[{
+            **base,
+            "photo_uuid": str(uuid.uuid4()),
+            "project_ref": "43:default",
+            "owner_account_id": 43,
+        }], identity="42")
+        rejected = self.service(rejected_cloud)._sync_inbox()
+        self.assertFalse(rejected["ok"])
+        self.assertIn("另一工程账号", rejected["error"])
+        self.assertEqual(len(self.manager.get_project("YNLQ-001-01-001")["photos"]), 1)
 
     def test_mobile_original_bad_sha_and_wrong_machine_are_rejected(self):
         self.add_unit()
@@ -1208,6 +1305,31 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertIsNone(unsafe_fallback, "普通账号令牌不得回退用于 desktop/v1")
         self.assertEqual(refresh_error["code"], "desktop_sync_token_required")
         failed_refresh.assert_called_once()
+
+        team_calls = []
+
+        def team_api(path, method="GET", payload=None, query=None, timeout=20):
+            team_calls.append((path, method, payload, query, timeout))
+            return {"ok": True}
+
+        with patch.object(cloud_client, "_cloud_api_json", side_effect=team_api):
+            cloud_client.desktop_project_members("local-project", "MACHINE-A")
+            cloud_client.desktop_project_invites("local-project", "MACHINE-A")
+            cloud_client.desktop_create_project_invite("local-project", "capturer", "MACHINE-A")
+            cloud_client.desktop_update_project_member("member/7", "local-project", "viewer", "MACHINE-A")
+            cloud_client.desktop_remove_project_member("member/7", "local-project", "MACHINE-A")
+            cloud_client.desktop_revoke_project_invite("invite/9", "local-project", "MACHINE-A")
+
+        self.assertEqual(team_calls[0][0:2], ("/api/desktop/v1/project-members", "GET"))
+        self.assertEqual(team_calls[0][3]["desktop_machine_id"], "MACHINE-A")
+        self.assertEqual(team_calls[1][0], "/api/desktop/v1/project-invites")
+        self.assertEqual(team_calls[2][1], "POST")
+        self.assertEqual(team_calls[2][2]["role"], "capturer")
+        self.assertEqual(team_calls[3][0], "/api/desktop/v1/project-members/member%2F7")
+        self.assertEqual(team_calls[3][1], "PATCH")
+        self.assertEqual(team_calls[4][1], "DELETE")
+        self.assertEqual(team_calls[5][0], "/api/desktop/v1/project-invites/invite%2F9")
+        self.assertEqual(team_calls[5][1], "DELETE")
 
         strict_error_calls = []
         with patch.object(cloud_client, "_read_cloud_account", return_value=old_account), patch.object(

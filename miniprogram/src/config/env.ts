@@ -11,6 +11,6 @@ export const CURRENT_PROJECT = {
 
 export const EMPTY_PROJECT = {
   id: '',
-  name: '尚未从电脑同步工程',
+  name: '尚未选择工程',
   code: '',
 } as const

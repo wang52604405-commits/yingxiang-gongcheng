@@ -36,7 +36,7 @@ async function loadTree() {
   loading.value = true
   try {
     const project = selectionStorage.getProject()
-    if (!project.id) throw new Error('当前账号尚未从电脑同步工程')
+    if (!project.id) throw new Error('请先选择或加入工程')
     const response = scope.value === 'engineering' ? await mobileApi.projectTree(project.id) : await mobileApi.otherTree(project.id)
     roots.value = response.nodes || []
   } catch (error) {
