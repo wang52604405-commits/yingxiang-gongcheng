@@ -495,7 +495,11 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertEqual(before_confirmation, 0)
 
         intent = verified_payload["binding_intent"]
-        tampered_intent = intent[:-1] + ("A" if intent[-1] != "A" else "B")
+        intent_body, signature = intent.rsplit(".", 1)
+        # 改签名主体的首字符，避免只改 Base64URL 尾字符时落在未使用位上，
+        # 在不同运行环境中仍可能解码成相同字节而形成偶发假通过。
+        tampered_signature = ("A" if signature[0] != "A" else "B") + signature[1:]
+        tampered_intent = f"{intent_body}.{tampered_signature}"
         tampered = self.client.post(
             "/api/mobile/v1/auth/wechat-bind-confirm",
             json={"binding_intent": tampered_intent},
