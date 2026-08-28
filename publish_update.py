@@ -32,6 +32,8 @@ SSH_KEY = Path(os.environ.get(
 ))
 SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_UPDATES = "/var/www/updates"
+# 官网下载目录与自动更新通道使用同一份正式安装包，避免下载页落后于软件更新。
+REMOTE_SITE_DOWNLOAD = "/var/www/shuiliyingxiang/download"
 # 远程更新文件固定使用 ASCII 名称，避免 Windows scp 与 Linux shell 的中文路径编码不一致。
 REMOTE_EXE_NAME = "album-installer.exe"
 PUBLIC_UPDATE_BASE = os.environ.get(
@@ -99,6 +101,19 @@ def upload_installer() -> None:
         raise SystemExit("上传后的安装包 SHA-256 校验失败，已拒绝发布")
     ssh_cmd(["mv", remote_tmp, f"{REMOTE_UPDATES}/{REMOTE_EXE_NAME}"])
     print(f"[OK] 已上传到 {REMOTE_UPDATES}/{REMOTE_EXE_NAME}")
+
+
+def sync_website_download() -> None:
+    """把更新通道中的正式包同步到官网固定下载链接。"""
+    remote_source = f"{REMOTE_UPDATES}/{REMOTE_EXE_NAME}"
+    remote_target = f"{REMOTE_SITE_DOWNLOAD}/工程影像管理平台-安装程序.exe"
+    if DRY_RUN:
+        print(f"[DRY_RUN] 跳过官网同步: {remote_target}")
+        return
+    ssh_cmd(["install", "-d", REMOTE_SITE_DOWNLOAD])
+    ssh_cmd(["cp", remote_source, remote_target])
+    ssh_cmd(["chown", "www-data:www-data", remote_target])
+    print(f"[OK] 官网下载链接已同步: {remote_target}")
 
 
 def get_note() -> str:
@@ -200,6 +215,7 @@ def main() -> int:
 
     # 上传 + 更新 version.json
     upload_installer()
+    sync_website_download()
     note = get_note()
     new_ver = _local_version()
     write_remote_version(new_ver, note)
