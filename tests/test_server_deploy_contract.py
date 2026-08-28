@@ -103,6 +103,24 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("[Text.UTF8Encoding]::new($false)", workflow)
         self.assertNotIn("git diff --name-only HEAD^ HEAD", workflow)
 
+    def test_successful_production_deploy_dispatches_exact_wechat_source(self):
+        deploy_workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        wechat_workflow = (
+            ROOT / ".github" / "workflows" / "wechat-devtools-release.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("trigger-wechat-release:", deploy_workflow)
+        self.assertIn("needs: deploy", deploy_workflow)
+        self.assertIn("actions: write", deploy_workflow)
+        self.assertIn("createWorkflowDispatch", deploy_workflow)
+        self.assertIn("source_sha: context.sha", deploy_workflow)
+        self.assertIn("source_sha:", wechat_workflow)
+        self.assertIn("ref: ${{ inputs.source_sha || github.sha }}", wechat_workflow)
+        self.assertIn("SOURCE_COMMIT: ${{ inputs.source_sha || github.sha }}", wechat_workflow)
+        self.assertNotIn("workflow_run:", wechat_workflow)
+
     def test_nginx_https_keeps_legacy_http_api_without_redirect(self):
         http = self.read("nginx-http.conf")
         https = self.read("nginx.conf")

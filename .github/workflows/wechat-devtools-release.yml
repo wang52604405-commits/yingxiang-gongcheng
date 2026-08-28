@@ -2,11 +2,16 @@ name: 微信开发者工具发布分支
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows:
-      - 自动部署 5088 + 发布客户更新
-    types:
-      - completed
+    inputs:
+      source_sha:
+        description: 已成功部署、需要编译为微信包的源提交
+        required: false
+        type: string
+      source_ref:
+        description: 源分支，仅写入发布包追溯信息
+        required: false
+        default: main
+        type: string
 
 permissions:
   contents: write
@@ -18,17 +23,14 @@ concurrency:
 jobs:
   publish:
     name: 编译并更新 codex/wechat-mp-release
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main')
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: 拉取源代码
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - name: 安装 Node.js 20
         uses: actions/setup-node@v7
@@ -72,8 +74,8 @@ jobs:
       - name: 发布编译产物分支
         if: steps.appid.outputs.configured == 'true'
         env:
-          SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
-          SOURCE_REF: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          SOURCE_COMMIT: ${{ inputs.source_sha || github.sha }}
+          SOURCE_REF: ${{ inputs.source_ref || github.ref_name }}
         run: |
           set -euo pipefail
           release_dir="$(mktemp -d)"

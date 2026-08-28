@@ -172,3 +172,27 @@ jobs:
           if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_CREDENTIAL_DIR)) {
             Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
           }
+
+  trigger-wechat-release:
+    name: 触发微信开发者工具发布包
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 调用微信发布工作流
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'wechat-devtools-release.yml',
+              ref: 'main',
+              inputs: {
+                source_sha: context.sha,
+                source_ref: 'main'
+              }
+            })
