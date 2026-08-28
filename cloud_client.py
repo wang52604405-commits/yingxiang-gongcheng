@@ -24,9 +24,9 @@ CLOUD_CONFIG_NAME = "cloud_config.json"
 CLOUD_ACCOUNT_NAME = "cloud_account.json"
 PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
-DEFAULT_SERVER_URL = "https://47.95.221.66"  # 正式服务器只使用 HTTPS IP，不依赖域名
+DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTPS 域名
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260827-2.66"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260828-2.67"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -91,9 +91,14 @@ def server_url() -> str:
         or DEFAULT_SERVER_URL
     ).rstrip("/")
     parts = urllib.parse.urlsplit(configured)
-    # 旧版保存过 http://47.95.221.66；升级后不能继续让账号密码走明文。
-    # 自动修正的仅是连接地址，项目、照片和账号记录均不删除。
-    if parts.scheme != "https" or not parts.hostname:
+    # 旧版保存过 http://47.95.221.66，2.66 也曾临时使用 HTTPS IP。
+    # 正式入口启用后统一迁移到备案域名；只修正连接地址，绝不删除项目、照片或账号记录。
+    needs_repair = (
+        parts.scheme != "https"
+        or not parts.hostname
+        or parts.hostname == "47.95.221.66"
+    )
+    if needs_repair:
         if cfg.get("server_url"):
             repaired = dict(cfg)
             repaired["server_url"] = DEFAULT_SERVER_URL
