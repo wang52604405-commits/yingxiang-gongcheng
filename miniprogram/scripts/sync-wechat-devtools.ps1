@@ -1,7 +1,10 @@
 param(
-  [string]$ProjectPath = 'D:\Desktop\engineering-image-wechat-release',
+  [string]$ProjectPath = 'D:\Desktop\工程影像微信发布版',
   [string]$Repository = 'https://github.com/wang52604405-commits/yingxiang-gongcheng.git',
-  [string]$Branch = 'codex/wechat-mp-release'
+  [string]$Branch = 'codex/wechat-mp-release',
+  [switch]$Upload,
+  [string]$Version = '1.2.20260828',
+  [string]$Description = '备案域名接入、桌面同步与原图中转闭环'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,4 +82,12 @@ if (-not (Test-WechatCliProfile)) {
 if ($LASTEXITCODE -ne 0) {
   Write-Warning 'WeChat DevTools CLI is not ready. Open DevTools -> Settings -> Security Settings -> Service Port, enable it once, then run this script again.'
   exit 0
+}
+
+if ($Upload) {
+  Write-Host "Uploading WeChat development version: $Version"
+  & $cli upload --project $ProjectPath --version $Version --desc $Description --lang zh
+  if ($LASTEXITCODE -ne 0) {
+    throw 'WeChat development version upload failed.'
+  }
 }

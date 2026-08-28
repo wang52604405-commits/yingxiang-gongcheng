@@ -2520,14 +2520,20 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertIn("ExecStart=\n", production_dropin)
         self.assertIn("-w 1 --threads 4", production_dropin)
         self.assertNotIn("\nEnvironment=", production_dropin)
-        self.assertNotIn("\nEnvironmentFile=", production_dropin)
+        self.assertIn(
+            "EnvironmentFile=-/etc/album-auth/mobile.env",
+            production_dropin,
+        )
+        self.assertNotIn("\nEnvironment=", production_dropin)
 
         deploy_sh = (root / "server" / "deploy" / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('SERVER_DIR="$APP_DIR/server"', deploy_sh)
-        self.assertIn('cp -a "$SRC_DIR/." "$SERVER_DIR"/', deploy_sh)
-        self.assertIn('$APP_DIR/server/requirements.txt', deploy_sh)
-        self.assertIn("systemctl cat album-auth.service", deploy_sh)
-        self.assertIn('[ -e "$DATA_DIR/server.db" ]', deploy_sh)
+        self.assertIn('CODE_DIR="$APP_DIR/server"', deploy_sh)
+        self.assertIn('"$SERVER_SRC/" "$STAGE_DIR/server/"', deploy_sh)
+        self.assertIn('"$STAGE_DIR/server/requirements.txt"', deploy_sh)
+        self.assertIn("trap rollback ERR", deploy_sh)
+        self.assertIn("PRAGMA quick_check;", deploy_sh)
+        self.assertIn("server/mobile_api.py", deploy_sh)
+        self.assertIn("/api/mobile/v1/projects", deploy_sh)
 
         production_service = (
             root / "server" / "deploy" / "album-auth.service"
@@ -2556,7 +2562,7 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertIn("-w 1 --threads 4 --timeout 300", staging_service)
         self.assertIn("--timeout 300", production_dropin)
 
-        nginx = (root / "server" / "deploy" / "nginx.conf").read_text(encoding="utf-8")
+        nginx = (root / "server" / "deploy" / "nginx-domain.conf").read_text(encoding="utf-8")
         self.assertIn("api.shuiliyingxiang.cn", nginx)
         self.assertIn("listen 443 ssl", nginx)
         self.assertIn("client_max_body_size 52m", nginx)

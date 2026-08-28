@@ -2,3 +2,6 @@ assets/app-*.js text eol=lf
 assets/app-*.css text eol=lf
 .github/workflows/*.yml text eol=lf
 *.gz binary
+/server/deploy/*.sh text eol=lf
+/server/deploy/*.service text eol=lf
+/server/deploy/*.conf text eol=lf

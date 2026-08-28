@@ -25,7 +25,9 @@ VERSION_RE = re.compile(r"A\d{8}-\d+\.\d+")
 # 前端资源文件名：index.html 中引用的 app-A<版本>.js/.css（同时校验 .gz 是否齐）
 ASSET_RE = re.compile(r"app-(A\d{8}-\d+\.\d+)\.(?:js|css)")
 # 服务器发布清单路径：与 desktop_launcher.UPDATE_URL 保持一致
-UPDATE_URL = os.environ.get("ALBUM_UPDATE_URL", "http://47.95.221.66/update/version.json")
+UPDATE_URL = os.environ.get(
+    "ALBUM_UPDATE_URL", "https://api.shuiliyingxiang.cn/update/version.json"
+)
 ONLINE_TIMEOUT = 8
 
 

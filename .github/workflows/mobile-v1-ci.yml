@@ -14,7 +14,7 @@ on:
       - ".github/workflows/mobile-v1-ci.yml"
   push:
     branches:
-      - "codex/wechat-miniapp-v1"
+      - "main"
 
 permissions:
   contents: read

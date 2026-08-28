@@ -989,6 +989,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
             "Bearer machine-bound-sync-token",
             "desktop/v1 只能优先使用本机同步令牌",
         )
+
         self.assertEqual(
             requests[1].get_header("Authorization"),
             "Bearer ordinary-account-token",
@@ -1078,6 +1079,71 @@ class DesktopMobileSyncTest(unittest.TestCase):
         })
         self.assertEqual(sanitized["desktop_sync_token"], "[REDACTED]")
         self.assertNotIn("never-log-this-token", json.dumps(sanitized))
+
+    def test_legacy_server_url_migrates_without_breaking_explicit_local_staging(self):
+        config_path = self.root / "cloud_config.json"
+        account_path = self.root / "cloud_account.json"
+        config_path.write_text(
+            json.dumps({"server_url": "http://47.95.221.66"}), encoding="utf-8"
+        )
+        account_path.write_text(
+            json.dumps({
+                "username": "desktop-user",
+                "server": "https://47.95.221.66",
+                "token_protected": "keep-this-ciphertext",
+            }),
+            encoding="utf-8",
+        )
+        with patch.object(cloud_client, "cloud_config_path", return_value=config_path), patch.object(
+            cloud_client, "cloud_account_path", return_value=account_path
+        ), patch.object(cloud_client, "_dpapi_unprotect", return_value=""):
+            self.assertEqual(cloud_client.server_url(), cloud_client.DEFAULT_SERVER_URL)
+            account = cloud_client._read_cloud_account()
+
+        self.assertEqual(account["server"], cloud_client.DEFAULT_SERVER_URL)
+        repaired_account = json.loads(account_path.read_text(encoding="utf-8"))
+        self.assertEqual(repaired_account["server"], cloud_client.DEFAULT_SERVER_URL)
+        self.assertEqual(repaired_account["token_protected"], "keep-this-ciphertext")
+
+        config_path.write_text(
+            json.dumps({"server_url": "http://127.0.0.1:18080"}), encoding="utf-8"
+        )
+        with patch.object(cloud_client, "cloud_config_path", return_value=config_path), patch.dict(
+            cloud_client.os.environ, {"ALBUM_ALLOW_INSECURE_LOCALHOST": "1"}
+        ):
+            self.assertEqual(cloud_client.server_url(), "http://127.0.0.1:18080")
+
+    def test_legacy_logged_in_account_backfills_stable_id_without_relogin(self):
+        legacy = {
+            "username": "desktop-user",
+            "server": cloud_client.DEFAULT_SERVER_URL,
+            "token": "ordinary-account-token",
+            "desktop_sync_token": "machine-bound-sync-token",
+        }
+        persisted = []
+        with patch.object(
+            cloud_client, "_read_cloud_account", return_value=dict(legacy)
+        ), patch.object(
+            cloud_client,
+            "_get_json_auth",
+            return_value={
+                "ok": True,
+                "account": {"id": 38, "username": "desktop-user"},
+            },
+        ) as request_me, patch.object(
+            cloud_client,
+            "_write_cloud_account",
+            side_effect=lambda value: persisted.append(dict(value)),
+        ):
+            repaired = cloud_client._repair_legacy_account_identity(legacy)
+
+        self.assertEqual(repaired["account_id"], "38")
+        self.assertEqual(repaired["token"], "ordinary-account-token")
+        self.assertEqual(repaired["desktop_sync_token"], "machine-bound-sync-token")
+        self.assertEqual(persisted[-1]["account_id"], "38")
+        request_me.assert_called_once_with(
+            f"{cloud_client.DEFAULT_SERVER_URL}/api/me", "ordinary-account-token"
+        )
 
 
 if __name__ == "__main__":

@@ -26,9 +26,11 @@ CLOUD_CONFIG_NAME = "cloud_config.json"
 CLOUD_ACCOUNT_NAME = "cloud_account.json"
 PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
 ERROR_QUEUE_NAME = "client_error_queue.json"
-DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"
+DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTPS 域名
+LEGACY_SERVER_HOSTS = {"47.95.221.66"}
+LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260825-2.65"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260828-2.69"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -72,6 +74,20 @@ def _validate_outbound_url(value: str, *, base_only: bool = False) -> str:
     if base_only and (parts.query or parts.fragment or parts.path not in {"", "/"}):
         raise ValueError("云服务器基础地址不能包含路径、参数或片段")
     return raw.rstrip("/") if base_only else raw
+
+
+def _normalize_server_base(value: str) -> str:
+    """迁移旧公网地址，同时保留显式允许的本机联调地址。"""
+    raw = str(value or "").strip().rstrip("/")
+    parts = urllib.parse.urlsplit(raw)
+    hostname = str(parts.hostname or "").lower().rstrip(".")
+    if hostname in LEGACY_SERVER_HOSTS:
+        return DEFAULT_SERVER_URL
+    if parts.scheme == "http" and hostname in LOCAL_SERVER_HOSTS and _allow_insecure_localhost():
+        return raw
+    if parts.scheme == "https" and hostname and not parts.username and not parts.password:
+        return raw
+    return DEFAULT_SERVER_URL
 
 
 class _NoCredentialRedirect(urllib.request.HTTPRedirectHandler):
@@ -128,11 +144,22 @@ def error_queue_path() -> Path:
 
 def server_url() -> str:
     cfg = _read_json(cloud_config_path()) or {}
-    return str(
+    configured = str(
         cfg.get("server_url")
         or os.environ.get("ALBUM_CLOUD_URL")
         or DEFAULT_SERVER_URL
     ).rstrip("/")
+    normalized = _normalize_server_base(configured)
+    # 旧版保存过 HTTP/HTTPS 公网 IP；统一迁移到备案域名，不触碰业务数据。
+    if normalized != configured:
+        if cfg.get("server_url"):
+            repaired = dict(cfg)
+            repaired["server_url"] = normalized
+            try:
+                _write_json(cloud_config_path(), repaired)
+            except OSError:
+                pass
+    return normalized
 
 
 def _read_json(path: Path):
@@ -246,6 +273,17 @@ def _read_cloud_account() -> dict:
         account["desktop_sync_token"] = _dpapi_unprotect(sync_protected)
     elif legacy_sync_token:
         account["desktop_sync_token"] = legacy_sync_token
+    stored_server = str(stored.get("server") or "").strip().rstrip("/")
+    normalized_server = _normalize_server_base(stored_server or server_url())
+    account["server"] = normalized_server
+    if stored_server and normalized_server != stored_server:
+        # 直接改写原始持久化字典，避免 DPAPI 临时解密失败时丢失密文令牌。
+        repaired = dict(stored)
+        repaired["server"] = normalized_server
+        try:
+            _write_json(cloud_account_path(), repaired)
+        except OSError:
+            pass
     # 自动把旧版明文令牌迁移到 DPAPI，不影响现有登录状态。
     if account.get("token") and os.name == "nt" and stored.get("token"):
         try:
@@ -734,6 +772,46 @@ def _get_json_auth(url: str, token: str = ""):
 # 移动端 / 桌面端影像同步 API v1
 
 _DESKTOP_SYNC_TOKEN_REFRESH_LOCK = threading.Lock()
+_LEGACY_ACCOUNT_IDENTITY_LOCK = threading.Lock()
+
+
+def _repair_legacy_account_identity(account: dict) -> dict:
+    """用现有普通账号令牌从 /api/me 无感补齐旧版缺失的 account_id。"""
+    current = dict(account or {})
+    if str(current.get("account_id") or "").strip():
+        return current
+    token = str(current.get("token") or "")
+    if not token:
+        return current
+    with _LEGACY_ACCOUNT_IDENTITY_LOCK:
+        # 其它同步线程可能已经完成修复，优先使用磁盘上的新值。
+        latest = _read_cloud_account()
+        if str(latest.get("account_id") or "").strip():
+            return latest
+        token = str(latest.get("token") or token)
+        try:
+            base = _validate_outbound_url(
+                str(latest.get("server") or current.get("server") or server_url()),
+                base_only=True,
+            )
+        except ValueError:
+            return latest or current
+        result = _get_json_auth(f"{base}/api/me", token)
+        server_account = result.get("account") if isinstance(result, dict) else None
+        if not isinstance(server_account, dict):
+            return latest or current
+        account_id = str(server_account.get("id") or "").strip()
+        if not account_id:
+            return latest or current
+        repaired = dict(latest or current)
+        repaired["account_id"] = account_id
+        repaired["username"] = str(
+            server_account.get("username") or repaired.get("username") or ""
+        ).strip()
+        repaired["server"] = base
+        repaired.setdefault("auth_generation", secrets.token_hex(16))
+        _write_cloud_account(repaired)
+        return repaired
 
 
 def _refresh_desktop_sync_token() -> str:
@@ -764,14 +842,15 @@ def _cloud_auth_context():
     account = _read_cloud_account()
     if not account:
         return None, None, {"ok": False, "logged_in": False, "error": "未登录云账号"}
+    account = _repair_legacy_account_identity(account)
     account_id = str(account.get("account_id") or "").strip()
     if not account_id:
         return None, None, {
             "ok": False,
             "logged_in": True,
-            "code": "account_identity_required",
-            "error": "本机云账号记录缺少稳定账号编号，请退出后重新登录",
-            "retryable": False,
+            "code": "account_identity_pending",
+            "error": "正在联网确认账号编号，请保持联网后重试",
+            "retryable": True,
         }
     try:
         base = _validate_outbound_url(
@@ -806,6 +885,7 @@ def desktop_sync_identity() -> str:
     account = _read_cloud_account()
     if not account:
         return ""
+    account = _repair_legacy_account_identity(account)
     account_id = str(account.get("account_id") or "").strip()
     if not account_id:
         return ""
@@ -817,8 +897,10 @@ def desktop_sync_identity() -> str:
 
 
 def desktop_sync_account_id() -> str:
-    """返回服务器不可变 account.id；旧账号文件必须重新登录后才可同步。"""
+    """返回服务器不可变 account.id；旧账号文件联网后会自动补齐。"""
     account = _read_cloud_account()
+    if account:
+        account = _repair_legacy_account_identity(account)
     return str(account.get("account_id") or "").strip()
 
 

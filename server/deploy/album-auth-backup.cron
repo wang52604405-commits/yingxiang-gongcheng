@@ -1,0 +1,2 @@
+# 每日 03:00 对生产 SQLite 做一致性备份；7 天本机保留避免 40GB 系统盘耗尽。
+0 3 * * * root ALBUM_BACKUP_RETENTION_DAYS=7 /bin/bash /opt/album-auth/server/deploy/backup.sh >> /var/log/album-auth-backup.log 2>&1

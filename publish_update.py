@@ -34,7 +34,9 @@ SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_UPDATES = "/var/www/updates"
 # 远程更新文件固定使用 ASCII 名称，避免 Windows scp 与 Linux shell 的中文路径编码不一致。
 REMOTE_EXE_NAME = "album-installer.exe"
-PUBLIC_UPDATE_BASE = os.environ.get("ALBUM_UPDATE_BASE", "http://47.95.221.66/update").rstrip("/")
+PUBLIC_UPDATE_BASE = os.environ.get(
+    "ALBUM_UPDATE_BASE", "https://api.shuiliyingxiang.cn/update"
+).rstrip("/")
 
 INSTALLER = build_all.INSTALLER  # 客户可发送安装包-Win10/发给客户/安装程序.exe
 

@@ -1,22 +1,39 @@
 [Unit]
 Description=工程影像管理平台 账号与授权中心
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
+Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/opt/album-auth
-Environment="ALBUM_SERVER_HOST=127.0.0.1"
-Environment="ALBUM_SERVER_PORT=8000"
-Environment="ALBUM_SERVER_DATA=/opt/album-auth/data"
-Environment="ALBUM_SERVER_PRIVATE_KEY=/etc/album-auth/private_key.pem"
-Environment="ALBUM_MOBILE_STORAGE_DIR=/opt/album-auth/data/mobile_objects"
-Environment="ALBUM_MOBILE_CHUNK_DIR=/opt/album-auth/data/mobile_chunks"
-EnvironmentFile=/etc/album-auth/server.env
+# 账号令牌、邮箱和微信密钥只从服务器上的受限文件读取。
+EnvironmentFile=/etc/album-auth/album-auth.env
 EnvironmentFile=-/etc/album-auth/mobile.env
 ExecStart=/opt/album-auth/venv/bin/gunicorn --no-control-socket --worker-class gthread -w 1 --threads 4 --timeout 300 -b 127.0.0.1:8000 "server.app:create_app()"
-Restart=always
+Restart=on-failure
 RestartSec=3
+TimeoutStartSec=45
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0027
+
+# systemd 沙箱：代码和系统目录只读，只允许写业务数据目录。
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/opt/album-auth/data
 
 [Install]
 WantedBy=multi-user.target

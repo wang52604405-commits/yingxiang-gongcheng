@@ -2,10 +2,11 @@ name: 微信开发者工具发布分支
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/wechat-miniapp-v1
-      - main
+  workflow_run:
+    workflows:
+      - 自动部署 5088 + 发布客户更新
+    types:
+      - completed
 
 permissions:
   contents: write
@@ -17,11 +18,17 @@ concurrency:
 jobs:
   publish:
     name: 编译并更新 codex/wechat-mp-release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: 拉取源代码
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: 安装 Node.js 20
         uses: actions/setup-node@v7
@@ -33,6 +40,12 @@ jobs:
       - name: 安装锁定依赖
         working-directory: miniprogram
         run: npm ci
+
+      - name: 类型检查与小程序回归
+        working-directory: miniprogram
+        run: |
+          npm run typecheck
+          npm test
 
       - name: 检查微信 AppID 配置
         id: appid
@@ -59,8 +72,8 @@ jobs:
       - name: 发布编译产物分支
         if: steps.appid.outputs.configured == 'true'
         env:
-          SOURCE_COMMIT: ${{ github.sha }}
-          SOURCE_REF: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SOURCE_REF: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
           set -euo pipefail
           release_dir="$(mktemp -d)"

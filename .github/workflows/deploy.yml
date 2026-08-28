@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   deploy:
+    needs: deploy-auth
     # 本机自托管 runner（登录时启动的计划任务，以 Administrator 账户运行），
     # 构建+签名+替换+重启+发布安装包都在本机完成，权限与手动操作一致
     runs-on: [self-hosted, windows, x64]
@@ -84,7 +85,7 @@ jobs:
   # 授权中心自动部署：仅当 server/** 代码变更时触发
   deploy-auth:
     runs-on: [self-hosted, windows, x64]
-    timeout-minutes: 10
+    timeout-minutes: 30
     env:
       HTTPS_PROXY: http://127.0.0.1:7897
       HTTP_PROXY: http://127.0.0.1:7897
@@ -99,16 +100,26 @@ jobs:
       - name: 准备临时服务器凭据
         shell: powershell
         env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
           SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          if (-not $env:SSH_KEY_B64) { throw "缺少服务器密钥 Secret" }
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布或服务器密钥 Secret" }
           $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
           New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
           $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
           [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
           icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
+
+      - name: 部署前运行完整回归与发布校验
+        shell: powershell
+        run: |
+          python -m unittest discover -s tests -v
+          python verify_release.py
 
       - name: 判断是否改动 server/
         id: check
