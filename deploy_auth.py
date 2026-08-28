@@ -35,6 +35,7 @@ DROPIN_TARGET = "/etc/systemd/system/album-auth.service.d/zz-mobile-v1.conf"
 DOMAIN_NGINX_TARGET = "/etc/nginx/sites-available/album-auth-domain"
 DOMAIN_NGINX_LINK = "/etc/nginx/sites-enabled/album-auth-domain"
 BACKUP_CRON_TARGET = "/etc/cron.d/album-auth-backup"
+MOBILE_ENV_PATH = "/etc/album-auth/mobile.env"
 _EXPECTED_ACCOUNTS_RAW = os.environ.get("ALBUM_EXPECTED_ACCOUNTS", "").strip()
 EXPECTED_ACCOUNTS = int(_EXPECTED_ACCOUNTS_RAW) if _EXPECTED_ACCOUNTS_RAW else None
 
@@ -161,6 +162,22 @@ def ssh_python(source: str, *args: str, check=True):
     return ssh(command, check=check)
 
 
+def require_mobile_environment() -> None:
+    """在任何生产写操作前确认正式微信配置存在，但绝不读取或回显值。"""
+    env_path = shlex.quote(MOBILE_ENV_PATH)
+    result = ssh(
+        f"test -s {env_path} && "
+        f"grep -Eq '^ALBUM_WECHAT_APP_ID=.+$' {env_path} && "
+        f"grep -Eq '^ALBUM_WECHAT_APP_SECRET=.+$' {env_path}",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "正式微信登录配置缺失或为空，已在修改生产环境前停止部署："
+            f"请安全配置 {MOBILE_ENV_PATH} 中的 AppID 和 AppSecret"
+        )
+
+
 def production_health(*, include_https: bool = False) -> tuple[bool, str]:
     """同时验证服务、nginx 和关键旧/新接口；不读取任何凭据。"""
     checks = {
@@ -211,6 +228,17 @@ def main() -> int:
     if not SSH_KEY.exists():
         print(f"[ERR] 缺 SSH 私钥: {SSH_KEY}")
         return 1
+    validator_source = REPO / "validate_mobile_migration.py"
+    dropin_source = REPO / "server" / "deploy" / "album-auth-mobile-v1.conf"
+    domain_nginx_source = REPO / "server" / "deploy" / "nginx-domain.conf"
+    if not validator_source.is_file() or not dropin_source.is_file() or not domain_nginx_source.is_file():
+        print("[ERR] 缺少迁移验证器、systemd drop-in 或正式域名 nginx 模板")
+        return 1
+
+    # 此处之前仅做本地文件检查；以下远程检查也是只读。任何 mkdir、备份、
+    # 依赖安装、服务或 nginx 变更都必须等微信密钥文件通过检查后才能发生。
+    require_mobile_environment()
+
     stamp = ssh("date +%Y%m%d-%H%M%S").stdout.strip()
     release_root = f"/opt/album-auth/releases/deploy-{stamp}"
     stage_server = f"{release_root}/server"
@@ -224,12 +252,6 @@ def main() -> int:
     stage_dropin = f"{stage_deploy}/album-auth-mobile-v1.conf"
     stage_domain_nginx = f"{stage_deploy}/nginx-domain.conf"
     stage_backup_cron = f"{stage_deploy}/album-auth-backup.cron"
-    validator_source = REPO / "validate_mobile_migration.py"
-    dropin_source = REPO / "server" / "deploy" / "album-auth-mobile-v1.conf"
-    domain_nginx_source = REPO / "server" / "deploy" / "nginx-domain.conf"
-    if not validator_source.is_file() or not dropin_source.is_file() or not domain_nginx_source.is_file():
-        print("[ERR] 缺少迁移验证器、systemd drop-in 或正式域名 nginx 模板")
-        return 1
 
     print("[1/9] 先备份线上代码并创建灰度目录")
     ssh(f"mkdir -p {stage_templates} {stage_deploy}")

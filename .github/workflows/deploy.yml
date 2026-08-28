@@ -14,6 +14,7 @@ concurrency:
 jobs:
   deploy:
     needs: deploy-auth
+    if: github.ref == 'refs/heads/main'
     # 本机自托管 runner（登录时启动的计划任务，以 Administrator 账户运行），
     # 构建+签名+替换+重启+发布安装包都在本机完成，权限与手动操作一致
     runs-on: [self-hosted, windows, x64]
@@ -84,6 +85,7 @@ jobs:
 
   # 授权中心自动部署：仅当 server/** 代码变更时触发
   deploy-auth:
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     env:
@@ -121,16 +123,25 @@ jobs:
           python -m unittest discover -s tests -v
           python verify_release.py
 
-      - name: 判断是否改动 server/
+      - name: 判断是否需要部署服务器
         id: check
         shell: powershell
         run: |
-          $changed = git diff --name-only HEAD^ HEAD 2>$null | Select-String '^server/'
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $changed = $true
+          } else {
+            $before = "${{ github.event.before }}"
+            if (-not $before -or $before -match '^0+$') {
+              $before = "HEAD^"
+            }
+            $changed = git diff --name-only $before $env:GITHUB_SHA 2>$null |
+              Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$)'
+          }
           if ($changed) {
-            Write-Host "server/ 有变更，执行授权中心部署"
+            Write-Host "服务器代码或部署器有变更，执行授权中心部署"
             Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=true"
           } else {
-            Write-Host "server/ 无变更，跳过授权中心部署"
+            Write-Host "服务器代码与部署器无变更，跳过授权中心部署"
             Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=false"
           }
 

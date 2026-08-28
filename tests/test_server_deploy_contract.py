@@ -7,6 +7,10 @@ import re
 import importlib.util
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import deploy_auth
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +43,62 @@ class ServerDeployContractTest(unittest.TestCase):
         )
         self.assertIn("EnvironmentFile=-/etc/album-auth/mobile.env", dropin)
         self.assertIn("EnvironmentFiles --value", deployer)
+
+    def test_production_deploy_requires_wechat_secrets_before_any_remote_write(self):
+        deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        env_path = "/etc/album-auth/mobile.env"
+        preflight_start = deployer.index("def require_mobile_environment()")
+        preflight_end = deployer.index("def production_health", preflight_start)
+        preflight = deployer[preflight_start:preflight_end]
+
+        self.assertIn(f'test -s {{env_path}}', preflight)
+        self.assertIn(
+            "grep -Eq '^ALBUM_WECHAT_APP_ID=.+$' {env_path}",
+            preflight,
+        )
+        self.assertIn(
+            "grep -Eq '^ALBUM_WECHAT_APP_SECRET=.+$' {env_path}",
+            preflight,
+        )
+        self.assertNotIn("cat ", preflight)
+        self.assertNotIn("source ", preflight)
+        self.assertNotIn("print(", preflight)
+
+        preflight_call = deployer.index("    require_mobile_environment()")
+        first_remote_write = deployer.index('    ssh(f"mkdir -p')
+        self.assertLess(preflight_call, first_remote_write)
+
+    def test_wechat_secret_preflight_is_silent_and_fails_closed(self):
+        expected_command = (
+            "test -s /etc/album-auth/mobile.env && "
+            "grep -Eq '^ALBUM_WECHAT_APP_ID=.+$' /etc/album-auth/mobile.env && "
+            "grep -Eq '^ALBUM_WECHAT_APP_SECRET=.+$' /etc/album-auth/mobile.env"
+        )
+        failed = SimpleNamespace(
+            returncode=1,
+            stdout="must-not-be-reported",
+            stderr="must-not-be-reported",
+        )
+        with patch.object(deploy_auth, "ssh", return_value=failed) as remote_check:
+            with self.assertRaises(SystemExit) as context:
+                deploy_auth.require_mobile_environment()
+
+        remote_check.assert_called_once_with(expected_command, check=False)
+        self.assertNotIn("must-not-be-reported", str(context.exception))
+
+        passed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(deploy_auth, "ssh", return_value=passed) as remote_check:
+            self.assertIsNone(deploy_auth.require_mobile_environment())
+        remote_check.assert_called_once_with(expected_command, check=False)
+
+    def test_github_deploy_checks_the_whole_push_for_server_changes(self):
+        workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("github.event.before", workflow)
+        self.assertIn("$env:GITHUB_SHA", workflow)
+        self.assertIn("deploy_auth\\.py", workflow)
+        self.assertNotIn("git diff --name-only HEAD^ HEAD", workflow)
 
     def test_nginx_https_keeps_legacy_http_api_without_redirect(self):
         http = self.read("nginx-http.conf")

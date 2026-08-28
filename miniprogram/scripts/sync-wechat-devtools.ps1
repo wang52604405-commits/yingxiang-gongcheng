@@ -42,6 +42,25 @@ function Test-WechatCliProfile {
   return [bool]$profile
 }
 
+function Invoke-WechatCliChecked {
+  param(
+    [string]$CliPath,
+    [string[]]$Arguments,
+    [string]$ActionName
+  )
+  $lines = @(& $CliPath @Arguments 2>&1)
+  $exitCode = $LASTEXITCODE
+  $text = ($lines | ForEach-Object { "$_" }) -join "`n"
+  $lines | ForEach-Object { Write-Host "$_" }
+  if (
+    $exitCode -ne 0 -or
+    $text -match '(?i)\[error\]|service port disabled|服务端口已关闭|upload failed|上传失败'
+  ) {
+    throw "$ActionName failed. Confirm DevTools -> Settings -> Security Settings -> Service Port is On."
+  }
+  return $text
+}
+
 if (-not (Test-Path -LiteralPath $ProjectPath)) {
   Write-Host "Preparing release directory: $ProjectPath"
   git clone --branch $Branch --single-branch $Repository $ProjectPath
@@ -78,16 +97,14 @@ if (-not (Test-WechatCliProfile)) {
   Start-WechatDevTools $cli
   Start-Sleep -Seconds 5
 }
-& $cli -o $ProjectPath
-if ($LASTEXITCODE -ne 0) {
-  Write-Warning 'WeChat DevTools CLI is not ready. Open DevTools -> Settings -> Security Settings -> Service Port, enable it once, then run this script again.'
-  exit 0
-}
+Invoke-WechatCliChecked $cli @(
+  'open', '--project', $ProjectPath, '--lang', 'zh'
+) 'Opening WeChat DevTools' | Out-Null
 
 if ($Upload) {
   Write-Host "Uploading WeChat development version: $Version"
-  & $cli upload --project $ProjectPath --version $Version --desc $Description --lang zh
-  if ($LASTEXITCODE -ne 0) {
-    throw 'WeChat development version upload failed.'
-  }
+  Invoke-WechatCliChecked $cli @(
+    'upload', '--project', $ProjectPath,
+    '--version', $Version, '--desc', $Description, '--lang', 'zh'
+  ) 'Uploading WeChat development version' | Out-Null
 }
