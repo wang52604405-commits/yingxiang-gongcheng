@@ -17,20 +17,23 @@ describe('账号命名空间', () => {
     clearBootstrapView()
   })
 
-  it('工程选择、目的地和上传预设按 account.id 隔离', () => {
+  it('工程选择、采集目的地、图库筛选和上传预设按 account.id 隔离', () => {
     selectionStorage.setOwner('A')
     selectionStorage.setProject({ id: 'project-a', code: 'A', name: '甲工程' })
     selectionStorage.setDestination({ scope: 'engineering', assignment: { unit_code: 'A-001', unit_name: '甲单元' } })
+    selectionStorage.setLibraryFilter({ scope: 'engineering', assignment: { unit_code: 'A-002', unit_name: '甲筛选单元' } })
     selectionStorage.setUploadPreset({ scope: 'engineering', category: 'construction', mode: 'direct' })
 
     selectionStorage.setOwner('B')
     expect(selectionStorage.getProject().id).not.toBe('project-a')
     expect(selectionStorage.getDestination()).toBeNull()
+    expect(selectionStorage.getLibraryFilter()).toBeNull()
     selectionStorage.setProject({ id: 'project-b', code: 'B', name: '乙工程' })
 
     selectionStorage.setOwner('A')
     expect(selectionStorage.getProject().id).toBe('project-a')
     expect(selectionStorage.getDestination()?.assignment.unit_code).toBe('A-001')
+    expect(selectionStorage.getLibraryFilter()?.assignment.unit_code).toBe('A-002')
     expect(selectionStorage.getUploadPreset()).toMatchObject({ category: 'construction', mode: 'direct' })
   })
 
@@ -56,15 +59,36 @@ describe('账号命名空间', () => {
     selectionStorage.setOwner('A')
     selectionStorage.setProject({ id: 'project-a', code: 'A', name: '甲工程' })
     selectionStorage.setDestination({ scope: 'engineering', assignment: { unit_code: 'A-001', unit_name: '甲单元' } })
+    selectionStorage.setLibraryFilter({ scope: 'engineering', assignment: { unit_code: 'A-002', unit_name: '甲筛选单元' } })
     selectionStorage.setUploadPreset({ scope: 'engineering', category: 'supervision', mode: 'direct' })
 
     selectionStorage.setProject({ id: 'project-a', code: 'A', name: '甲工程（已刷新）' })
     expect(selectionStorage.getDestination()?.assignment.unit_code).toBe('A-001')
+    expect(selectionStorage.getLibraryFilter()?.assignment.unit_code).toBe('A-002')
     expect(selectionStorage.getUploadPreset()).toMatchObject({ category: 'supervision', mode: 'direct' })
 
     selectionStorage.setProject({ id: 'project-b', code: 'B', name: '乙工程' })
     expect(selectionStorage.getDestination()).toBeNull()
+    expect(selectionStorage.getLibraryFilter()).toBeNull()
     expect(selectionStorage.getUploadPreset()).toEqual({})
+  })
+
+  it('旧批次归档修复使用独立工程目的地，不覆盖当前采集与图库筛选', () => {
+    selectionStorage.setOwner('A')
+    selectionStorage.setProject({ id: 'project-current', code: 'NOW', name: '当前工程' })
+    selectionStorage.setDestination({ scope: 'engineering', assignment: { unit_code: 'NOW-001', unit_name: '当前采集单元' } })
+    selectionStorage.setLibraryFilter({ scope: 'engineering', assignment: { unit_code: 'NOW-002', unit_name: '当前图库筛选' } })
+    selectionStorage.setConfirmDestination({
+      scope: 'engineering',
+      project_id: 'project-old',
+      project_name: '旧工程',
+      assignment: { unit_code: 'OLD-001', unit_name: '旧批次单元' },
+    })
+
+    expect(selectionStorage.getConfirmDestination('project-old')?.assignment.unit_code).toBe('OLD-001')
+    expect(selectionStorage.getConfirmDestination('project-current')).toBeNull()
+    expect(selectionStorage.getDestination()?.assignment.unit_code).toBe('NOW-001')
+    expect(selectionStorage.getLibraryFilter()?.assignment.unit_code).toBe('NOW-002')
   })
 
   it('账号数据刷新时保留仍存在的已选工程，避免各 Tab 跳回服务端默认工程', () => {

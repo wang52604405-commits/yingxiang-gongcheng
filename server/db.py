@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS mobile_batches (
     scope           TEXT NOT NULL,
     category        TEXT NOT NULL DEFAULT '',
     mode            TEXT NOT NULL,
+    transfer_profile TEXT NOT NULL DEFAULT '',
     assignment_json TEXT NOT NULL DEFAULT '{}',
     requirement_code TEXT NOT NULL DEFAULT '',
     requirement_name TEXT NOT NULL DEFAULT '',
@@ -467,6 +468,7 @@ MOBILE_EXTRA_COLUMNS = {
     "mobile_batches": {
         "project_owner_account_id": "INTEGER NOT NULL DEFAULT 0",
         "target_machine_id": "TEXT NOT NULL DEFAULT ''",
+        "transfer_profile": "TEXT NOT NULL DEFAULT ''",
         "requirement_code": "TEXT NOT NULL DEFAULT ''",
         "requirement_name": "TEXT NOT NULL DEFAULT ''",
     },

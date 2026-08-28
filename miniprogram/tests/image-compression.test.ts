@@ -5,7 +5,9 @@ import {
   parseJpegExif,
   persistOriginalSource,
   persistPreparedPreview,
+  persistPreparedTransfer,
   preparePreview,
+  prepareTransferImage,
   type CompressionAdapter,
 } from '@/services/image-compression'
 
@@ -81,6 +83,84 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
     await expect(persistPreparedPreview(prepared, adapter)).rejects.toThrow('超过 100KB')
     expect(remove).toHaveBeenCalledWith('/user/preview.jpg')
     expect(remove).not.toHaveBeenCalledWith('/user/original.jpg')
+  })
+
+  it('PNG 原片转换为 JPEG 归档图，恰好 1MiB 可保存而多一字节会删除并拒绝', async () => {
+    const sizes = new Map<string, number>()
+    const remove = vi.fn(async (_path: string) => undefined)
+    const adapter: CompressionAdapter = {
+      getImageInfo: async () => ({ path: '/user/source.png', width: 4_000, height: 3_000, orientation: 1, type: 'png' }),
+      renderJpeg: async (_path, dimensions, quality) => {
+        const path = `/tmp/${dimensions.width}-${quality}.jpg`
+        sizes.set(path, quality === 90 ? 1_048_576 : quality * 10_000)
+        return path
+      },
+      getFileSize: async (path) => sizes.get(path) ?? 1_048_576,
+      persist: async () => '/user/archive.jpg',
+      remove,
+    }
+    const prepared = await prepareTransferImage('/user/source.png', '现场照片.png', adapter)
+    expect(prepared).toMatchObject({
+      transferFilename: '现场照片.jpg',
+      transferSize: 1_048_576,
+      transferWidth: 2_560,
+      transferHeight: 1_920,
+    })
+    await expect(persistPreparedTransfer(prepared, adapter)).resolves.toMatchObject({
+      transferPath: '/user/archive.jpg',
+      transferSize: 1_048_576,
+    })
+
+    const oversized: CompressionAdapter = {
+      ...adapter,
+      getFileSize: async (path) => path === '/user/archive.jpg' ? 1_048_577 : (sizes.get(path) ?? 1_048_576),
+    }
+    await expect(persistPreparedTransfer(prepared, oversized)).rejects.toThrow('超过 1MB')
+    expect(remove).toHaveBeenCalledWith('/user/archive.jpg')
+  })
+
+  it('质量搜索只保留最终 JPEG 候选，其余临时图立即清理', async () => {
+    const rendered: string[] = []
+    const remove = vi.fn(async (_path: string) => undefined)
+    const adapter: CompressionAdapter = {
+      getImageInfo: async () => ({ path: '/user/source.jpg', width: 1_000, height: 800, orientation: 1, type: 'jpg' }),
+      renderJpeg: async (_path, dimensions, quality) => {
+        const path = `/tmp/${dimensions.width}-${quality}.jpg`
+        rendered.push(path)
+        return path
+      },
+      getFileSize: async (path) => Number(path.match(/-(\d+)\.jpg$/)?.[1] || 0) * 2_000,
+      persist: async (path) => path,
+      remove,
+    }
+
+    const prepared = await preparePreview('/user/source.jpg', 'source.jpg', '2026-08-25T01:41:00Z', adapter)
+    const discarded = rendered.filter((path) => path !== prepared.previewTempPath)
+    expect(discarded.length).toBeGreaterThan(0)
+    expect(remove.mock.calls.map(([path]) => path).sort()).toEqual([...new Set(discarded)].sort())
+    expect(remove).not.toHaveBeenCalledWith(prepared.previewTempPath)
+    expect(remove).not.toHaveBeenCalledWith('/user/source.jpg')
+  })
+
+  it('缩尺寸仍无法达标时清理每一轮临时 JPEG，且保留源图', async () => {
+    const rendered: string[] = []
+    const remove = vi.fn(async (_path: string) => undefined)
+    const adapter: CompressionAdapter = {
+      getImageInfo: async () => ({ path: '/user/complex.png', width: 4_000, height: 3_000, orientation: 1, type: 'png' }),
+      renderJpeg: async (_path, dimensions, quality) => {
+        const path = `/tmp/${dimensions.width}-${dimensions.height}-${quality}.jpg`
+        rendered.push(path)
+        return path
+      },
+      getFileSize: async () => 1_048_577,
+      persist: async (path) => path,
+      remove,
+    }
+
+    await expect(prepareTransferImage('/user/complex.png', 'complex.png', adapter)).rejects.toThrow('无法生成 1MB 以内')
+    expect(rendered.length).toBeGreaterThan(1)
+    expect(remove.mock.calls.map(([path]) => path).sort()).toEqual([...new Set(rendered)].sort())
+    expect(remove).not.toHaveBeenCalledWith('/user/complex.png')
   })
 
   it('服务器生成的预览再次校验不超过 100KB 后才持久保存', async () => {

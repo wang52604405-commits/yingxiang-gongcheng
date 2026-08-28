@@ -141,6 +141,7 @@ def write_remote_version(new_version: str, note: str) -> None:
         "changelog": [item.strip() for item in note.splitlines() if item.strip()],
         "sha256": hashlib.sha256(INSTALLER.read_bytes()).hexdigest(),
         "size": INSTALLER.stat().st_size,
+        "mandatory": True,
     }
     print(f"[version.json] 将更新为 {new_version}，note: {note!r}")
     if DRY_RUN:

@@ -26,7 +26,7 @@ function showPrivacy() {
 }
 
 function confirmSignOut() {
-  uni.showModal({ title: '切换账号？', content: '将返回账号登录页；未上传原图仍保留在原账号队列中。', success: ({ confirm }) => { if (confirm) signOut() } })
+  uni.showModal({ title: '切换账号？', content: '将返回账号登录页；未上传影像仍保留在原账号队列中。', success: ({ confirm }) => { if (confirm) signOut() } })
 }
 
 function openMembers() {

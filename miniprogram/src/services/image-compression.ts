@@ -1,10 +1,13 @@
 import {
   MAX_JPEG_QUALITY,
   MAX_PREVIEW_BYTES,
+  MAX_TRANSFER_BYTES,
   MIN_JPEG_QUALITY,
   fitWithinMaxEdge,
   isPreviewWithinLimit,
+  isTransferWithinLimit,
   shrinkDimensions,
+  TRANSFER_INITIAL_MAX_EDGE,
   type Dimensions,
 } from './queue-policy'
 import { readFilePrefix } from './sha256'
@@ -47,6 +50,18 @@ export interface PreparedPreview {
 
 export interface PersistedPreview extends Omit<PreparedPreview, 'previewTempPath'> {
   previewPath: string
+}
+
+export interface PreparedTransfer {
+  transferTempPath: string
+  transferSize: number
+  transferWidth: number
+  transferHeight: number
+  transferFilename: string
+}
+
+export interface PersistedTransfer extends Omit<PreparedTransfer, 'transferTempPath'> {
+  transferPath: string
 }
 
 export interface CompressionAdapter {
@@ -278,35 +293,62 @@ export function getSourceFileSize(sourcePath: string, adapter: CompressionAdapte
   return adapter.getFileSize(sourcePath)
 }
 
+async function cleanupGeneratedJpegs(paths: Set<string>, keepPath: string, sourcePath: string, adapter: CompressionAdapter): Promise<void> {
+  for (const path of paths) {
+    if (!path || path === keepPath || path === sourcePath) continue
+    try {
+      await adapter.remove?.(path)
+    } catch {
+      // 临时文件清理不能覆盖原始压缩结果或错误。
+    }
+  }
+}
+
 async function bestJpegAtDimensions(
   sourcePath: string,
   dimensions: Dimensions,
   adapter: CompressionAdapter,
+  maxBytes = MAX_PREVIEW_BYTES,
 ): Promise<{ path: string; size: number; quality: number } | null> {
-  const minimumPath = await adapter.renderJpeg(sourcePath, dimensions, MIN_JPEG_QUALITY)
-  const minimumSize = await adapter.getFileSize(minimumPath)
-  if (!isPreviewWithinLimit(minimumSize)) return null
+  const generated = new Set<string>()
+  let keepPath = ''
+  try {
+    const minimumPath = await adapter.renderJpeg(sourcePath, dimensions, MIN_JPEG_QUALITY)
+    generated.add(minimumPath)
+    const minimumSize = await adapter.getFileSize(minimumPath)
+    if (!(Number.isFinite(minimumSize) && minimumSize > 0 && minimumSize <= maxBytes)) return null
 
-  let best = { path: minimumPath, size: minimumSize, quality: MIN_JPEG_QUALITY }
-  let low = MIN_JPEG_QUALITY + 1
-  let high = MAX_JPEG_QUALITY
-  while (low <= high) {
-    const quality = Math.floor((low + high) / 2)
-    const path = await adapter.renderJpeg(sourcePath, dimensions, quality)
-    const size = await adapter.getFileSize(path)
-    if (isPreviewWithinLimit(size)) {
-      best = { path, size, quality }
-      low = quality + 1
-    } else {
-      high = quality - 1
+    let best = { path: minimumPath, size: minimumSize, quality: MIN_JPEG_QUALITY }
+    let low = MIN_JPEG_QUALITY + 1
+    let high = MAX_JPEG_QUALITY
+    while (low <= high) {
+      const quality = Math.floor((low + high) / 2)
+      const path = await adapter.renderJpeg(sourcePath, dimensions, quality)
+      generated.add(path)
+      const size = await adapter.getFileSize(path)
+      if (Number.isFinite(size) && size > 0 && size <= maxBytes) {
+        best = { path, size, quality }
+        low = quality + 1
+      } else {
+        high = quality - 1
+      }
     }
+    keepPath = best.path
+    return best
+  } finally {
+    await cleanupGeneratedJpegs(generated, keepPath, sourcePath, adapter)
   }
-  return best
 }
 
 function sourceFilename(sourcePath: string): string {
   const cleanPath = sourcePath.replace(/\\/g, '/').split('?')[0]
   return cleanPath.split('/').pop() || `photo-${Date.now()}`
+}
+
+function jpegFilename(originalFilename: string): string {
+  const filename = sourceFilename(originalFilename)
+  const stem = filename.replace(/\.[^.]*$/, '') || `photo-${Date.now()}`
+  return `${stem}.jpg`
 }
 
 function originalIdentity(originalFilename: string, type = ''): { filename: string; mimeType: SupportedOriginalMimeType } {
@@ -362,6 +404,55 @@ export async function persistOriginalSource(
     throw Object.assign(new Error('原图已保存，但文件大小校验失败'), { originalPath, originalFilename, originalSize })
   }
   return { originalPath, originalSize, originalFilename }
+}
+
+export async function prepareTransferImage(
+  originalPath: string,
+  originalFilename: string,
+  adapter: CompressionAdapter = wechatCompressionAdapter,
+): Promise<PreparedTransfer> {
+  const info = await adapter.getImageInfo(originalPath)
+  if (!info.width || !info.height) throw new Error('无法读取照片尺寸')
+  let dimensions = fitWithinMaxEdge(info.width, info.height, TRANSFER_INITIAL_MAX_EDGE)
+  for (let round = 0; round < 24; round += 1) {
+    const candidate = await bestJpegAtDimensions(info.path || originalPath, dimensions, adapter, MAX_TRANSFER_BYTES)
+    if (candidate) {
+      if (!isTransferWithinLimit(candidate.size)) throw new Error('归档图超过 1MB，已停止上传')
+      return {
+        transferTempPath: candidate.path,
+        transferSize: candidate.size,
+        transferWidth: dimensions.width,
+        transferHeight: dimensions.height,
+        transferFilename: jpegFilename(originalFilename),
+      }
+    }
+    const next = shrinkDimensions(dimensions)
+    if (next.width === dimensions.width && next.height === dimensions.height) break
+    dimensions = next
+  }
+  throw new Error('照片内容过于复杂，无法生成 1MB 以内的归档图')
+}
+
+export async function persistPreparedTransfer(
+  prepared: PreparedTransfer,
+  adapter: CompressionAdapter = wechatCompressionAdapter,
+): Promise<PersistedTransfer> {
+  let transferPath = ''
+  try {
+    transferPath = await adapter.persist(prepared.transferTempPath)
+    const transferSize = await adapter.getFileSize(transferPath)
+    if (!isTransferWithinLimit(transferSize)) throw new Error('保存后的归档图超过 1MB，已停止上传')
+    return {
+      transferPath,
+      transferSize,
+      transferWidth: prepared.transferWidth,
+      transferHeight: prepared.transferHeight,
+      transferFilename: prepared.transferFilename,
+    }
+  } catch (error) {
+    if (transferPath) await adapter.remove?.(transferPath)
+    throw error
+  }
 }
 
 export async function preparePreview(

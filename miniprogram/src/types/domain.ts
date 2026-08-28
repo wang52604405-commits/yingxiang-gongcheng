@@ -2,6 +2,7 @@ export type Scope = 'engineering' | 'other'
 export type PhotoCategory = 'construction' | 'supervision'
 export type UploadMode = 'direct' | 'auto'
 export type PhotoCaptureSource = 'camera' | 'album'
+export type TransferProfile = 'jpeg_1m'
 export type ProjectAccessRole = 'owner' | 'admin' | 'capturer' | 'viewer'
 
 export type PhotoStatus =
@@ -101,19 +102,26 @@ export interface ProjectNode {
 }
 
 export interface Assignment {
+  unit_project_code?: string
+  unit_project_name?: string
+  part_code?: string
+  part_name?: string
   unit_code?: string
   unit_name?: string
   process_name?: string
+  process_required?: boolean
   other_node_code?: string
   other_node_name?: string
 }
 
 export interface UploadDraft {
   project_id: string
+  project_name?: string
   scope: Scope
   category?: PhotoCategory
   mode: UploadMode
   capture_source?: PhotoCaptureSource
+  transfer_profile?: TransferProfile
   assignment?: Assignment
   requirement?: CaptureRequirementRef
 }
@@ -128,6 +136,12 @@ export interface LocalPhoto {
   original_sha256: string
   original_filename: string
   original_mime_type: 'image/jpeg' | 'image/png' | ''
+  transfer_path?: string
+  transfer_size?: number
+  transfer_sha256?: string
+  transfer_filename?: string
+  transfer_width?: number
+  transfer_height?: number
   preview_path: string
   preview_size: number
   preview_sha256: string
@@ -172,6 +186,10 @@ export interface LocalBatch {
   client_batch_id: string
   remote_batch_id?: string
   draft: UploadDraft
+  archive_info_sync_pending?: boolean
+  archive_info_sync_error?: string
+  archive_info_sync_failure_code?: string
+  archive_info_sync_retryable?: boolean
   photo_uuids: string[]
   committed: boolean
   analyzed: boolean
@@ -197,6 +215,8 @@ export interface CloudPhoto {
   photo_uuid: string
   title: string
   photo_date: string
+  project_id?: string
+  project_name?: string
   photographer?: string
   uploaded_by?: string
   photographer_account_id?: string
@@ -204,6 +224,10 @@ export interface CloudPhoto {
   capture_source?: PhotoCaptureSource
   scope: Scope
   category?: PhotoCategory
+  unit_project_code?: string
+  unit_project_name?: string
+  part_code?: string
+  part_name?: string
   unit_code?: string
   unit_name?: string
   process_name?: string

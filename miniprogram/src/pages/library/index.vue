@@ -19,7 +19,7 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const nextCursor = ref('')
 const totalCount = ref(0)
-const selectedDestination = ref(selectionStorage.getDestination())
+const selectedDestination = ref(selectionStorage.getLibraryFilter())
 const uniApi = uni
 let requestVersion = 0
 
@@ -81,10 +81,16 @@ function chooseDestination() {
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=library` })
 }
 
+function clearDestination() {
+  selectionStorage.clearLibraryFilter()
+  selectedDestination.value = null
+  void loadPhotos()
+}
+
 onShow(() => {
   syncTabBar(1)
   project.value = selectionStorage.getProject()
-  selectedDestination.value = selectionStorage.getDestination()
+  selectedDestination.value = selectionStorage.getLibraryFilter()
   void loadPhotos()
 })
 onPullDownRefresh(() => loadPhotos(true))
@@ -101,10 +107,13 @@ onReachBottom(() => { void loadPhotos(false) })
         <button class="segment-button pressable" :class="{ active: scope === 'engineering' }" @tap="changeScope('engineering')">工程影像</button>
         <button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button>
       </view>
+      <view class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '全部工程部位' : '全部其它影像' }}</text></view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '选择单元' : '选择目录' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
+      <button v-if="selectedDestination?.scope === scope" class="clear-filter pressable" @tap="clearDestination">查看全部</button>
+      </view>
       <view v-if="scope === 'engineering'" class="segment category-segment">
         <button class="segment-button pressable" :class="{ active: category === 'construction' }" @tap="changeCategory('construction')">施工影像</button>
         <button class="segment-button pressable" :class="{ active: category === 'supervision' }" @tap="changeCategory('supervision')">监理影像</button>
@@ -138,7 +147,9 @@ onReachBottom(() => { void loadPhotos(false) })
 <style scoped>
 .library-controls { margin-top: var(--space-lg); padding: 12rpx; }
 .library-segment { margin: 0; }
-.path-card { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 88rpx; margin: 8rpx 0; padding: 0 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
+.path-row { display: flex; align-items: center; gap: 8rpx; margin: 8rpx 0; }
+.path-card { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 0 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
+.clear-filter { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 40px; padding: 0 14rpx; color: var(--primary-strong); font-size: 22rpx; }
 .path-copy { display: flex; align-items: center; min-width: 0; gap: 14rpx; color: var(--primary-strong); }
 .path-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; color: var(--muted); }

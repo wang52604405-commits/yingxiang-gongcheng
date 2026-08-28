@@ -5,12 +5,13 @@ import type { CreateBatchPayload } from '@/api/contracts'
 import type { Assignment, LocalBatch, LocalPhoto, PhotoStatus, UploadDraft } from '@/types/domain'
 import { createUuid } from './ids'
 import { hashFile } from './sha256'
-import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedPreview, preparePreview } from './image-compression'
-import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_UPLOAD_CONCURRENCY, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
+import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedPreview, persistPreparedTransfer, preparePreview, prepareTransferImage } from './image-compression'
+import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_TRANSFER_BYTES, MAX_UPLOAD_CONCURRENCY, isTransferWithinLimit, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
 import { canTransition, recoverInterruptedStatus } from './photo-state'
 import { notifyAuthExpired } from './auth-expiry-coordinator'
 import { queueFileStore } from './queue-storage'
 import { UploadPausedError, uploadPhotoInChunks } from './chunk-upload'
+import { archiveInfoMessage, isArchiveInfoComplete } from './archive-info'
 
 interface QueueState {
   ownerAccountId: string
@@ -101,7 +102,16 @@ function isAuthExpired(error: unknown): error is ApiError {
 
 function isProjectAccessRevoked(error: unknown): error is ApiError {
   if (!(error instanceof ApiError)) return false
-  return ['project_access_revoked', 'project_permission_denied', 'project_access_denied', 'project_not_found'].includes(String(error.code || '').toLowerCase())
+  return error.statusCode === 403
+    || ['project_access_revoked', 'project_permission_denied', 'project_access_denied', 'project_not_found'].includes(String(error.code || '').toLowerCase())
+}
+
+function hasPermanentArchiveInfoFailure(batch: LocalBatch | undefined): boolean {
+  return Boolean(
+    batch
+    && batch.archive_info_sync_retryable === false
+    && batch.archive_info_sync_failure_code,
+  )
 }
 
 function errorMessage(error: unknown, fallback = '处理失败'): string {
@@ -176,7 +186,7 @@ function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, p
   if (!isCurrentOwner(photo.owner_account_id)) return
   photo.retry_from = retryFrom
   photo.status = 'failed'
-  const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；原图仍保存在本机' : errorMessage(error)
+  const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；1MB 归档图仍保存在本机' : errorMessage(error)
   photo.error = preparation ? `原图已安全保存；${message}` : message
   photo.failure_code = isAuthExpired(error) ? 'AUTH_EXPIRED' : error instanceof ApiError ? error.code : undefined
   photo.retryable = isProjectAccessRevoked(error) ? false : isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
@@ -198,10 +208,63 @@ async function cleanupOriginal(photo: LocalPhoto): Promise<void> {
   queueFileStore.clearOriginalWal(photo.owner_account_id, photo.photo_uuid)
 }
 
+async function cleanupTransfer(photo: LocalPhoto): Promise<void> {
+  if (!isCurrentOwner(photo.owner_account_id) || !photo.transfer_path) return
+  const removed = await removeSavedFile(photo.transfer_path)
+  if (!isCurrentOwner(photo.owner_account_id) || !removed) return
+  photo.transfer_path = ''
+  persist(photo.owner_account_id)
+}
+
+function markArchiveInfoAccessRevoked(batch: LocalBatch, photos: LocalPhoto[], error: unknown): void {
+  const owner = batch.owner_account_id
+  if (!isCurrentOwner(owner)) return
+  const failureCode = error instanceof ApiError ? error.code : 'project_access_revoked'
+  batch.archive_info_sync_pending = undefined
+  batch.archive_info_sync_error = '已无此工程采集权限；已停止自动同步，服务器照片和本机预览均已保留'
+  batch.archive_info_sync_failure_code = failureCode
+  batch.archive_info_sync_retryable = false
+  photos.filter((photo) => ['local_ready', 'server_saved'].includes(photo.status)).forEach((photo) => {
+    const retryFrom = photo.status === 'server_saved' ? 'server_saved' : 'local_ready'
+    markFailed(photo, error, retryFrom)
+    photo.error = photo.status === 'failed' && retryFrom === 'server_saved'
+      ? '已无此工程采集权限；服务器照片和本机100KB预览均已保留'
+      : '已无此工程采集权限；本机1MB归档图和100KB预览均已保留'
+    photo.failure_code = failureCode
+    photo.retryable = false
+    photo.updated_at = now()
+  })
+  persist(owner)
+}
+
+function markArchiveInfoRequired(photo: LocalPhoto, draft: UploadDraft): void {
+  markFailed(photo, new Error(`${archiveInfoMessage(draft)}；1MB 归档图仍保存在本机`), 'local_ready')
+  photo.failure_code = 'ARCHIVE_INFO_REQUIRED'
+  photo.retryable = false
+  persist(photo.owner_account_id)
+}
+
+function hasValidTransfer(photo: LocalPhoto): boolean {
+  return Boolean(
+    photo.transfer_path
+    && photo.transfer_sha256
+    && photo.transfer_filename
+    && isTransferWithinLimit(Number(photo.transfer_size || 0)),
+  )
+}
+
+function markTransferInvalid(photo: LocalPhoto): void {
+  markFailed(photo, new Error('1MB 归档图不完整或超过限制；已停止提交，现有影像仍保存在本机'), 'local_ready')
+  photo.failure_code = 'TRANSFER_FILE_INVALID'
+  photo.retryable = false
+  persist(photo.owner_account_id)
+}
+
 async function markDesktopImported(photo: LocalPhoto): Promise<void> {
   if (!isCurrentOwner(photo.owner_account_id)) return
   if (photo.status !== 'desktop_imported') setStatus(photo, 'desktop_imported', !canTransition(photo.status, 'desktop_imported'))
   await cleanupOriginal(photo)
+  await cleanupTransfer(photo)
 }
 
 function getNetworkType(): Promise<boolean> {
@@ -239,6 +302,12 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
     original_sha256: '',
     original_filename: original.originalFilename,
     original_mime_type: '',
+    transfer_path: '',
+    transfer_size: 0,
+    transfer_sha256: '',
+    transfer_filename: '',
+    transfer_width: 0,
+    transfer_height: 0,
     preview_path: '',
     preview_size: 0,
     preview_sha256: '',
@@ -277,32 +346,43 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
       photo.original_mime_type = inspected.originalMimeType
       persist(owner)
     }
-    if (!photo.preview_path) {
-      try {
-        const prepared = await preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at)
-        if (!isCurrentOwner(owner, generation)) return false
-        const saved = await persistPreparedPreview(prepared)
-        if (!isCurrentOwner(owner, generation)) {
-          await removeSavedFile(saved.previewPath)
-          return false
-        }
-        photo.preview_path = saved.previewPath
-        photo.preview_size = saved.previewSize
-        photo.preview_width = saved.previewWidth
-        photo.preview_height = saved.previewHeight
-        photo.preview_recovery_pending = false
-        photo.preview_error = undefined
-        persist(owner)
-      } catch (error) {
-        // 本机压缩能力不应阻断原图中转；服务器会从原图生成严格不超过 100KB 的 JPEG。
-        photo.preview_recovery_pending = true
-        photo.preview_error = errorMessage(error, '本机预览生成失败，将从服务器恢复')
-        persist(owner)
-      }
-    }
-    if (!photo.original_sha256) {
-      photo.original_sha256 = await hashFile(photo.original_path)
+    if (!photo.transfer_path) {
+      const prepared = await prepareTransferImage(photo.original_path, photo.original_filename)
       if (!isCurrentOwner(owner, generation)) return false
+      const saved = await persistPreparedTransfer(prepared)
+      if (!isCurrentOwner(owner, generation)) {
+        await removeSavedFile(saved.transferPath)
+        return false
+      }
+      photo.transfer_path = saved.transferPath
+      photo.transfer_size = saved.transferSize
+      photo.transfer_filename = saved.transferFilename
+      photo.transfer_width = saved.transferWidth
+      photo.transfer_height = saved.transferHeight
+      persist(owner)
+    }
+    if (!isTransferWithinLimit(Number(photo.transfer_size || 0))) {
+      throw new Error('归档图超过 1MB，已停止上传')
+    }
+    if (!photo.transfer_sha256) {
+      photo.transfer_sha256 = await hashFile(photo.transfer_path)
+      if (!isCurrentOwner(owner, generation)) return false
+      persist(owner)
+    }
+    if (!photo.preview_path) {
+      const prepared = await preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at)
+      if (!isCurrentOwner(owner, generation)) return false
+      const saved = await persistPreparedPreview(prepared)
+      if (!isCurrentOwner(owner, generation)) {
+        await removeSavedFile(saved.previewPath)
+        return false
+      }
+      photo.preview_path = saved.previewPath
+      photo.preview_size = saved.previewSize
+      photo.preview_width = saved.previewWidth
+      photo.preview_height = saved.previewHeight
+      photo.preview_recovery_pending = false
+      photo.preview_error = undefined
       persist(owner)
     }
     if (photo.preview_path && !photo.preview_sha256) {
@@ -312,6 +392,7 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
     }
     photo.preparation_pending = false
     setStatus(photo, 'local_ready', true)
+    await cleanupOriginal(photo)
     return true
   } catch (error) {
     markFailed(photo, error, 'local_ready', true)
@@ -376,10 +457,13 @@ async function tryRecoverServerPreview(photo: LocalPhoto, generation: number): P
 async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: number): Promise<void> {
   const owner = batch.owner_account_id
   if (!isCurrentOwner(owner, generation) || !state.online || photo.status !== 'local_ready' || !isAutomaticRetryDue(photo)) return
-  if (!photo.original_path || !photo.original_sha256 || !photo.original_mime_type) {
-    markFailed(photo, new Error('本机原图信息不完整，请先恢复照片'), 'local_ready', true)
+  if (!hasValidTransfer(photo)) {
+    markTransferInvalid(photo)
     return
   }
+  const transferPath = photo.transfer_path!
+  const transferSha256 = photo.transfer_sha256!
+  const transferFilename = photo.transfer_filename!
   try {
     beginAutomaticRetryAttempt(photo)
     setStatus(photo, 'uploading')
@@ -389,20 +473,21 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       photo_uuid: photo.photo_uuid,
       client_captured_at: photo.client_captured_at,
       orientation: photo.orientation,
-      width: photo.width,
-      height: photo.height,
-      sha256: photo.original_sha256,
-      original_size_bytes: photo.original_size,
-      original_filename: photo.original_filename,
-      original_mime_type: photo.original_mime_type,
+      width: Number(photo.transfer_width || photo.width),
+      height: Number(photo.transfer_height || photo.height),
+      sha256: transferSha256,
+      original_size_bytes: Number(photo.transfer_size),
+      original_filename: transferFilename,
+      original_mime_type: 'image/jpeg' as const,
       title: photo.title,
       photo_date: photo.photo_date,
       capture_source: photo.draft.capture_source,
+      transfer_profile: 'jpeg_1m' as const,
     }
-    if (!requiresChunkedUpload(photo.original_size)) {
+    if (!requiresChunkedUpload(Number(photo.transfer_size))) {
       photo.upload_mode = 'direct'
       persist(owner)
-      await mobileApi.uploadPhoto(batch.remote_batch_id!, photo.original_path, metadata, (progress) => {
+      await mobileApi.uploadPhoto(batch.remote_batch_id!, transferPath, metadata, (progress) => {
         if (isCurrentOwner(owner, generation)) photo.progress = progress
       })
     } else {
@@ -410,7 +495,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       persist(owner)
       await uploadPhotoInChunks({
         batchId: batch.remote_batch_id!,
-        filePath: photo.original_path,
+        filePath: transferPath,
         metadata,
         previousUploadedChunks: photo.uploaded_chunks,
         shouldContinue: () => isCurrentOwner(owner, generation) && state.online && state.foreground,
@@ -432,7 +517,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     photo.server_saved_at = now()
     setStatus(photo, 'server_saved')
     await tryRecoverServerPreview(photo, generation)
-    await cleanupOriginal(photo)
+    await cleanupTransfer(photo)
   } catch (error) {
     if (!isCurrentOwner(owner, generation)) return
     if (!state.online || error instanceof UploadPausedError) {
@@ -462,6 +547,7 @@ async function applyRemoteStatus(photo: LocalPhoto, remoteStatus: string): Promi
   if (targetRank >= 1) {
     await tryRecoverServerPreview(photo, ownerGeneration)
     await cleanupOriginal(photo)
+    await cleanupTransfer(photo)
   }
 }
 
@@ -488,7 +574,7 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
       local.match_candidates = remote.match_candidates || local.match_candidates
       if (remote.title) local.title = remote.title
       if (remote.photo_date) local.photo_date = remote.photo_date
-      await applyRemoteStatus(local, remote.status)
+      if (!hasPermanentArchiveInfoFailure(batch)) await applyRemoteStatus(local, remote.status)
     }
     if (localPhotos.every((photo) => ['needs_review', 'desktop_pending', 'desktop_imported'].includes(photo.status))) batch.analyzed = batch.draft.mode === 'auto' || batch.analyzed
     if (localPhotos.every((photo) => ['desktop_pending', 'desktop_imported'].includes(photo.status))) batch.committed = true
@@ -499,11 +585,59 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
   }
 }
 
+async function syncPendingArchiveInfo(batch: LocalBatch, photos: LocalPhoto[], generation: number): Promise<boolean> {
+  if (!batch.archive_info_sync_pending) return true
+  const owner = batch.owner_account_id
+  if (!isCurrentOwner(owner, generation)) return false
+  if (!batch.remote_batch_id) {
+    batch.archive_info_sync_pending = undefined
+    persist(owner)
+    return true
+  }
+  if (!batch.draft.assignment || !isArchiveInfoComplete(batch.draft)) return false
+  const retryPhotos = photos.filter((photo) => ['local_ready', 'server_saved'].includes(photo.status))
+  if (retryPhotos.some((photo) => !isAutomaticRetryDue(photo))) return false
+  try {
+    retryPhotos.forEach(beginAutomaticRetryAttempt)
+    persist(owner)
+    await mobileApi.updateBatchArchiveInfo(batch.remote_batch_id, batch.draft.assignment)
+    if (!isCurrentOwner(owner, generation)) return false
+    batch.archive_info_sync_pending = undefined
+    batch.archive_info_sync_error = undefined
+    batch.archive_info_sync_failure_code = undefined
+    batch.archive_info_sync_retryable = undefined
+    persist(owner)
+    return true
+  } catch (error) {
+    if (!isCurrentOwner(owner, generation)) return false
+    if (isProjectAccessRevoked(error)) {
+      markArchiveInfoAccessRevoked(batch, photos, error)
+      return false
+    }
+    retryPhotos.forEach((photo) => {
+      const retryFrom = photo.status === 'server_saved' ? 'server_saved' : 'local_ready'
+      if (!scheduleAutomaticRetry(photo, error, retryFrom) && photo.status === 'local_ready') markFailed(photo, error, retryFrom)
+    })
+    persist(owner)
+    if (isAuthExpired(error)) void notifyAuthExpired(owner)
+    return false
+  }
+}
+
 async function processBatch(batch: LocalBatch, generation: number): Promise<void> {
   const owner = batch.owner_account_id
   if (!isCurrentOwner(owner, generation)) return
+  if (hasPermanentArchiveInfoFailure(batch)) return
   const photos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
-  const uploadable = photos.filter((photo) => photo.status === 'local_ready' && isAutomaticRetryDue(photo))
+  if (!await syncPendingArchiveInfo(batch, photos, generation)) return
+  const ready = photos.filter((photo) => photo.status === 'local_ready' && isAutomaticRetryDue(photo))
+  const invalidTransfers = ready.filter((photo) => !hasValidTransfer(photo))
+  invalidTransfers.forEach(markTransferInvalid)
+  const uploadable = ready.filter((photo) => hasValidTransfer(photo))
+  if (uploadable.length && !isArchiveInfoComplete(batch.draft)) {
+    uploadable.forEach((photo) => markArchiveInfoRequired(photo, batch.draft))
+    return
+  }
   if (!batch.remote_batch_id && !uploadable.length) return
   if (!batch.remote_batch_id) {
     const payload: CreateBatchPayload = {
@@ -513,7 +647,8 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       category: batch.draft.category,
       mode: batch.draft.mode,
       capture_source: batch.draft.capture_source,
-      assignment: batch.draft.mode === 'direct' ? batch.draft.assignment : undefined,
+      transfer_profile: batch.draft.transfer_profile || 'jpeg_1m',
+      assignment: batch.draft.assignment,
       requirement: batch.draft.requirement,
     }
     try {
@@ -615,6 +750,7 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
     for (const photo of state.photos.filter((item) => REMOTE_STATUS_RANK[item.status])) {
       await tryRecoverServerPreview(photo, generation)
       await cleanupOriginal(photo)
+      await cleanupTransfer(photo)
     }
   } finally {
     if (isCurrentOwner(owner, generation)) state.running = false
@@ -637,12 +773,24 @@ function hydrate(): void {
   const stored = queueFileStore.load(owner)
   const storedPhotos = stored?.owner_account_id === owner && Array.isArray(stored.photos) ? stored.photos : []
   const storedBatches = stored?.owner_account_id === owner && Array.isArray(stored.batches) ? stored.batches : []
-  state.photos.splice(0, state.photos.length, ...storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => ({
-    ...photo,
-    status: recoverInterruptedStatus(photo.status),
-    progress: photo.status === 'uploading' ? 0 : photo.progress,
+  state.photos.splice(0, state.photos.length, ...storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
+    const recoveredStatus = recoverInterruptedStatus(photo.status)
+    const needsTransferMigration = Boolean(photo.original_path && !photo.transfer_path && (
+      ['local_ready', 'uploading'].includes(photo.status)
+      || (photo.status === 'failed' && ['local_ready', 'uploading'].includes(photo.retry_from || 'local_ready'))
+    ))
+    return {
+      ...photo,
+      draft: { ...photo.draft, transfer_profile: photo.draft.transfer_profile || 'jpeg_1m' },
+      status: recoveredStatus,
+      progress: photo.status === 'uploading' ? 0 : photo.progress,
+      preparation_pending: photo.preparation_pending || needsTransferMigration,
+    }
+  }))
+  state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => ({
+    ...batch,
+    draft: { ...batch.draft, transfer_profile: batch.draft.transfer_profile || 'jpeg_1m' },
   })))
-  state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner))
   state.hydrated = true
   try { persist(owner) } catch { /* WAL 和上一有效槽仍是可靠恢复源，不能阻断启动。 */ }
   registerNetworkListener()
@@ -697,7 +845,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       const sourceSize = await getSourceFileSize(sourcePaths[index])
       if (sourceSize > MAX_ORIGINAL_BYTES) throw new Error('单张原图不能超过 50MB，请选择较小的 JPEG 或 PNG')
       if (!Number.isFinite(sourceSize) || sourceSize <= 0) throw new Error('原图文件为空或无法读取')
-      if (queueBytes.value + sourceSize + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) throw new Error('本机影像将超过 160MB，请联网完成原图中转后再继续拍摄')
+      if (queueBytes.value + sourceSize + MAX_TRANSFER_BYTES + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) throw new Error('本机影像将超过 160MB，请联网完成传输后再继续拍摄')
       state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在安全保存第 ${index + 1} 张原图` }
       const photoUuid = createUuid()
       const filename = sourcePaths[index].replace(/\\/g, '/').split('/').pop() || 'photo'
@@ -730,7 +878,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       photo.original_filename = original.originalFilename
       state.photos.unshift(photo)
       persist(owner)
-      if (original.originalSize > MAX_ORIGINAL_BYTES || queueBytes.value + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) {
+      if (original.originalSize > MAX_ORIGINAL_BYTES || queueBytes.value + MAX_TRANSFER_BYTES + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) {
         photo.error = original.originalSize > MAX_ORIGINAL_BYTES
           ? '原图已安全保存，但实际文件超过 50MB，不能上传'
           : '原图已安全保存，但本机影像已达到 160MB'
@@ -739,7 +887,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
         persist(owner)
         throw new Error(photo.error)
       }
-      state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在生成第 ${index + 1} 张本机预览` }
+      state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在准备第 ${index + 1} 张影像` }
       await completePreparation(photo, generation)
       if (queueBytes.value > MAX_QUEUE_BYTES) throw new Error('本机影像超过 160MB；当前原图和预览均已保留，请先联网中转')
     }
@@ -795,9 +943,96 @@ function retryTarget(photo: LocalPhoto): PhotoStatus {
   return automaticRetryTarget(photo.retry_from || 'local_ready')
 }
 
+function canManuallyRetry(photoUuid: string): boolean {
+  const photo = state.photos.find((item) => item.photo_uuid === photoUuid)
+  if (!photo || photo.status !== 'failed' || !isCurrentOwner(photo.owner_account_id)) return false
+  if (photo.retryable !== false) return true
+  const batch = state.batches.find((item) => item.client_batch_id === photo.client_batch_id)
+  return Boolean(batch && hasPermanentArchiveInfoFailure(batch)
+    && photo.failure_code === batch.archive_info_sync_failure_code
+  )
+}
+
+function clearPermanentArchiveInfoFailure(batch: LocalBatch): void {
+  const failureCode = batch.archive_info_sync_failure_code
+  batch.archive_info_sync_pending = batch.remote_batch_id ? true : undefined
+  batch.archive_info_sync_error = undefined
+  batch.archive_info_sync_failure_code = undefined
+  batch.archive_info_sync_retryable = undefined
+  state.photos.filter((photo) => (
+    batch.photo_uuids.includes(photo.photo_uuid)
+    && photo.status === 'failed'
+    && photo.failure_code === failureCode
+  )).forEach((photo) => {
+    photo.status = retryTarget(photo)
+    photo.retry_from = undefined
+    photo.progress = photo.status === 'local_ready' ? 0 : 100
+    photo.error = undefined
+    photo.failure_code = undefined
+    photo.retryable = undefined
+    photo.auto_retry_pending = undefined
+    photo.auto_retry_attempts = undefined
+    photo.next_retry_at = undefined
+    photo.updated_at = now()
+  })
+}
+
+function completeArchiveInfo(clientBatchId: string, projectName: string, assignment: Assignment): void {
+  const batch = state.batches.find((item) => item.client_batch_id === clientBatchId)
+  if (!batch || !isCurrentOwner(batch.owner_account_id)) throw new Error('本机队列中没有找到这批照片')
+  const hadPermanentArchiveInfoFailure = hasPermanentArchiveInfoFailure(batch)
+  const permanentFailureCode = batch.archive_info_sync_failure_code
+  batch.draft = {
+    ...batch.draft,
+    project_name: String(projectName || batch.draft.project_name || ''),
+    transfer_profile: 'jpeg_1m',
+    assignment: { ...assignment },
+  }
+  if (!isArchiveInfoComplete(batch.draft)) throw new Error(archiveInfoMessage(batch.draft))
+  const batchPhotos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
+  const repairedPhotos = batchPhotos.filter((photo) => photo.status === 'failed' && (
+    photo.failure_code === 'ARCHIVE_INFO_REQUIRED'
+    || (hadPermanentArchiveInfoFailure && photo.failure_code === permanentFailureCode)
+  ))
+  batch.archive_info_sync_pending = batch.remote_batch_id ? true : undefined
+  batch.archive_info_sync_error = undefined
+  batch.archive_info_sync_failure_code = undefined
+  batch.archive_info_sync_retryable = undefined
+  if (repairedPhotos.length && batch.draft.mode === 'direct') batch.committed = false
+  if (repairedPhotos.length && batch.draft.mode === 'auto') {
+    batch.analyzed = false
+    batch.analysis_requested = false
+    batch.analysis_job_id = undefined
+  }
+  batchPhotos.forEach((photo) => {
+    photo.draft = JSON.parse(JSON.stringify(batch.draft))
+    if (repairedPhotos.includes(photo)) {
+      photo.status = photo.failure_code === 'ARCHIVE_INFO_REQUIRED' ? 'local_ready' : retryTarget(photo)
+      photo.retry_from = undefined
+      photo.progress = 0
+      photo.error = undefined
+      photo.failure_code = undefined
+      photo.retryable = undefined
+      photo.auto_retry_pending = undefined
+      photo.auto_retry_attempts = undefined
+      photo.next_retry_at = undefined
+      photo.updated_at = now()
+    }
+  })
+  persist(batch.owner_account_id)
+  void resume('manual')
+}
+
 async function retry(photoUuid: string): Promise<void> {
   const photo = state.photos.find((item) => item.photo_uuid === photoUuid)
-  if (!photo || photo.status !== 'failed' || photo.retryable === false || !isCurrentOwner(photo.owner_account_id)) return
+  if (!photo || !canManuallyRetry(photoUuid)) return
+  const batch = state.batches.find((item) => item.client_batch_id === photo.client_batch_id)
+  if (batch && hasPermanentArchiveInfoFailure(batch)) {
+    clearPermanentArchiveInfoFailure(batch)
+    persist(photo.owner_account_id)
+    await resume('manual')
+    return
+  }
   if (photo.preparation_pending) {
     await completePreparation(photo)
   } else {
@@ -869,6 +1104,8 @@ export const queueRuntime = {
   enqueue,
   resume,
   confirmBatch,
+  completeArchiveInfo,
+  canManuallyRetry,
   retry,
   retryAll,
   recoverAuthFailures,

@@ -3,31 +3,50 @@ import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
+import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
 import type { Assignment } from '@/types/domain'
+import { isArchiveInfoComplete, resolveDraftProject } from '@/services/archive-info'
 
 const clientBatchId = ref('')
 const submitting = ref(false)
 const selections = reactive<Record<string, Assignment>>({})
+const batchProjectName = ref('')
 const batch = computed(() => queueRuntime.state.batches.find((item) => item.client_batch_id === clientBatchId.value))
 const photos = computed(() => queueRuntime.state.photos.filter((photo) => photo.client_batch_id === clientBatchId.value))
-const readyToConfirm = computed(() => photos.value.length > 0 && photos.value.every((photo) => photo.status === 'needs_review' && Boolean(selections[photo.photo_uuid]?.unit_code || selections[photo.photo_uuid]?.other_node_code)))
+const batchProjectId = computed(() => String(batch.value?.draft.project_id || ''))
+const archiveRepair = computed(() => photos.value.some((photo) => photo.status === 'failed' && photo.failure_code === 'ARCHIVE_INFO_REQUIRED'))
+const readyToConfirm = computed(() => photos.value.length > 0 && photos.value.every((photo) => {
+  const statusReady = archiveRepair.value
+    ? ((photo.status === 'failed' && photo.failure_code === 'ARCHIVE_INFO_REQUIRED') || ['server_saved', 'analyzing', 'needs_review', 'desktop_pending'].includes(photo.status))
+    : photo.status === 'needs_review'
+  const draft = { ...photo.draft, project_name: batch.value?.draft.project_name || batchProjectName.value, assignment: selections[photo.photo_uuid] }
+  return statusReady && isArchiveInfoComplete(draft)
+}))
 const processing = computed(() => photos.value.some((photo) => ['local_ready', 'uploading', 'server_saved', 'analyzing'].includes(photo.status)))
 
 watch(photos, (items) => {
-  const manual = selectionStorage.getDestination()
+  const manual = selectionStorage.getConfirmDestination(batchProjectId.value)
   items.forEach((photo) => {
     if (selections[photo.photo_uuid]) return
     const candidate = photo.match_candidates?.[0]
+    const baseline = photo.draft.assignment
     if (candidate) {
-      selections[photo.photo_uuid] = {
-        unit_code: candidate.unit_code,
-        unit_name: candidate.unit_name,
-        process_name: candidate.process_name,
-        other_node_code: candidate.other_node_code,
-        other_node_name: candidate.other_node_name,
-      }
+      selections[photo.photo_uuid] = baseline && (
+        candidate.unit_code === baseline.unit_code || candidate.other_node_code === baseline.other_node_code
+      ) ? {
+          ...baseline,
+          process_name: candidate.process_name || baseline.process_name,
+        } : {
+          unit_code: candidate.unit_code,
+          unit_name: candidate.unit_name,
+          process_name: candidate.process_name,
+          other_node_code: candidate.other_node_code,
+          other_node_name: candidate.other_node_name,
+        }
+    } else if (baseline) {
+      selections[photo.photo_uuid] = { ...baseline }
     } else if (manual?.scope === photo.draft.scope) {
       selections[photo.photo_uuid] = { ...manual.assignment }
     }
@@ -35,18 +54,47 @@ watch(photos, (items) => {
 }, { immediate: true, deep: true })
 
 function chooseManual() {
-  uni.navigateTo({ url: `/pages/destination/select?scope=${batch.value?.draft.scope || 'engineering'}&return=confirm` })
+  const currentBatch = batch.value
+  if (!currentBatch?.draft.project_id) {
+    uni.showToast({ title: '未找到这批照片所属工程', icon: 'none' })
+    return
+  }
+  uni.navigateTo({ url: `/pages/destination/select?scope=${currentBatch.draft.scope}&return=confirm&project_id=${encodeURIComponent(currentBatch.draft.project_id)}` })
 }
 
 function applyManualSelection() {
-  const manual = selectionStorage.getDestination()
+  const manual = selectionStorage.getConfirmDestination(batchProjectId.value)
   if (!manual || manual.scope !== batch.value?.draft.scope) return
+  if (manual.project_name) batchProjectName.value = String(manual.project_name)
   photos.value.forEach((photo) => { selections[photo.photo_uuid] = { ...manual.assignment } })
+}
+
+async function resolveBatchProjectName() {
+  const currentBatch = batch.value
+  if (!currentBatch) return
+  const storedName = String(currentBatch.draft.project_name || '').trim()
+  if (storedName) {
+    batchProjectName.value = storedName
+    return
+  }
+  try {
+    const response = await mobileApi.projects()
+    const project = resolveDraftProject(
+      response.projects,
+      currentBatch.draft.project_id,
+      currentBatch.owner_account_id || selectionStorage.getOwner(),
+    )
+    batchProjectName.value = String(project?.name || '')
+  } catch {
+    batchProjectName.value = ''
+  }
 }
 
 async function refresh() {
   await queueRuntime.resume('manual')
-  if (photos.value.some((photo) => photo.status === 'failed')) uni.showToast({ title: '部分照片处理失败，请到队列重试', icon: 'none' })
+  if (photos.value.some((photo) => photo.status === 'failed' && photo.failure_code !== 'ARCHIVE_INFO_REQUIRED')) {
+    uni.showToast({ title: '部分照片处理失败，请到队列重试', icon: 'none' })
+  }
 }
 
 async function confirm() {
@@ -56,6 +104,14 @@ async function confirm() {
   }
   submitting.value = true
   try {
+    if (archiveRepair.value) {
+      const assignment = selections[photos.value[0].photo_uuid]
+      queueRuntime.completeArchiveInfo(clientBatchId.value, batchProjectName.value, assignment)
+      const syncPending = Boolean(batch.value?.archive_info_sync_pending)
+      uni.showToast({ title: syncPending ? '信息已保存，联网后继续' : '信息已补齐，开始上传', icon: syncPending ? 'none' : 'success' })
+      setTimeout(() => uni.switchTab({ url: '/pages/queue/index' }), 450)
+      return
+    }
     await queueRuntime.confirmBatch(clientBatchId.value, photos.value.map((photo) => ({
       photo_uuid: photo.photo_uuid,
       assignment: selections[photo.photo_uuid],
@@ -74,14 +130,18 @@ async function confirm() {
 onLoad((query) => {
   clientBatchId.value = String(query?.batch || '')
   queueRuntime.hydrate()
+  void resolveBatchProjectName()
   void refresh()
 })
-onShow(applyManualSelection)
+onShow(() => {
+  applyManualSelection()
+  if (!batchProjectName.value) void resolveBatchProjectName()
+})
 </script>
 
 <template>
   <view class="page-shell no-tabs confirm-page">
-    <PageHeader title="确认归档位置" />
+    <PageHeader :title="archiveRepair ? '完善归档信息' : '确认归档位置'" />
 
     <view v-if="processing" class="processing-bar"><view class="processing-status"><text class="notice-dot" /><text>上传识别中</text></view><button class="refresh-button pressable" @tap="refresh">刷新</button></view>
 
@@ -97,7 +157,7 @@ onShow(applyManualSelection)
       </view>
     </view>
 
-    <view v-if="photos.length" class="confirm-actions"><button class="secondary-button pressable" @tap="chooseManual">更改位置</button><button class="primary-button pressable" :disabled="!readyToConfirm || submitting" @tap="confirm">{{ submitting ? '提交中…' : '确认归档' }}</button></view>
+    <view v-if="photos.length" class="confirm-actions"><button class="secondary-button pressable" @tap="chooseManual">更改位置</button><button class="primary-button pressable" :disabled="!readyToConfirm || submitting" @tap="confirm">{{ submitting ? '提交中…' : archiveRepair ? '保存并上传' : '确认归档' }}</button></view>
 
     <LoadingOverlay :visible="submitting" message="正在保存归档信息" />
   </view>

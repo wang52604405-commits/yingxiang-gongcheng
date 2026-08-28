@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   uploadPhotoInChunks: vi.fn(),
   getSourceFileSize: vi.fn(),
   inspectOriginalSource: vi.fn(),
+  prepareTransferImage: vi.fn(),
+  persistPreparedTransfer: vi.fn(),
   preparePreview: vi.fn(),
   persistPreparedPreview: vi.fn(),
   downloadServerPreview: vi.fn(),
@@ -20,11 +22,14 @@ const mocks = vi.hoisted(() => ({
   analyzeBatch: vi.fn(),
   commitBatch: vi.fn(),
   assignBatch: vi.fn(),
+  updateBatchArchiveInfo: vi.fn(),
 }))
 
 vi.mock('@/services/image-compression', () => ({
   getSourceFileSize: mocks.getSourceFileSize,
   inspectOriginalSource: mocks.inspectOriginalSource,
+  prepareTransferImage: mocks.prepareTransferImage,
+  persistPreparedTransfer: mocks.persistPreparedTransfer,
   preparePreview: mocks.preparePreview,
   persistPreparedPreview: mocks.persistPreparedPreview,
   downloadServerPreview: mocks.downloadServerPreview,
@@ -48,14 +53,26 @@ vi.mock('@/api/mobile', () => ({ mobileApi: {
   analyzeBatch: mocks.analyzeBatch,
   commitBatch: mocks.commitBatch,
   assignBatch: mocks.assignBatch,
+  updateBatchArchiveInfo: mocks.updateBatchArchiveInfo,
 } }))
 
 const draft: UploadDraft = {
-  project_id: 'YNLQ',
+  project_id: '32:YNLQ',
+  project_name: '邯郸市永年区洺河龙泉缓洪工程',
   scope: 'engineering',
   category: 'construction',
   mode: 'direct',
-  assignment: { unit_code: 'YNLQ-DY-001', unit_name: '进口段', process_name: '钢筋安装' },
+  transfer_profile: 'jpeg_1m',
+  assignment: {
+    unit_project_code: 'YNLQ-DW-001',
+    unit_project_name: '拦河闸单位工程',
+    part_code: 'YNLQ-FB-001',
+    part_name: '进口段分部工程',
+    unit_code: 'YNLQ-DY-001',
+    unit_name: '进口段',
+    process_name: '钢筋安装',
+    process_required: true,
+  },
 }
 
 function installPlatform(storage: Map<string, any>, online: boolean, unlink = vi.fn()) {
@@ -91,6 +108,16 @@ function preparedPreview() {
   }
 }
 
+function preparedTransfer() {
+  return {
+    transferTempPath: '/tmp/transfer.jpg',
+    transferSize: 900_000,
+    transferWidth: 2_560,
+    transferHeight: 1_920,
+    transferFilename: '32.jpg',
+  }
+}
+
 function localPhoto(owner: string, id: string): LocalPhoto {
   return {
     owner_account_id: owner,
@@ -102,6 +129,12 @@ function localPhoto(owner: string, id: string): LocalPhoto {
     original_sha256: 'b'.repeat(64),
     original_filename: `${owner}.jpg`,
     original_mime_type: 'image/jpeg',
+    transfer_path: `/user/${owner}-transfer.jpg`,
+    transfer_size: 900_000,
+    transfer_sha256: 'd'.repeat(64),
+    transfer_filename: `${owner}.jpg`,
+    transfer_width: 2_560,
+    transfer_height: 1_920,
     preview_path: `/user/${owner}-preview.jpg`,
     preview_size: 90_000,
     preview_sha256: 'c'.repeat(64),
@@ -139,6 +172,8 @@ describe('原图优先落盘与账号隔离队列', () => {
     vi.resetModules()
     Object.values(mocks).forEach((mock) => mock.mockReset())
     mocks.preparePreview.mockResolvedValue(preparedPreview())
+    mocks.prepareTransferImage.mockResolvedValue(preparedTransfer())
+    mocks.persistPreparedTransfer.mockResolvedValue({ ...preparedTransfer(), transferPath: '/user/transfer.jpg' })
     mocks.inspectOriginalSource.mockResolvedValue({
       originalMimeType: 'image/jpeg',
       width: 4_000,
@@ -149,7 +184,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     mocks.getSourceFileSize.mockResolvedValue(8_000_000)
     mocks.persistPreparedPreview.mockResolvedValue({ ...preparedPreview(), previewPath: '/user/preview.jpg' })
     mocks.downloadServerPreview.mockResolvedValue({ previewPath: '/user/server-preview.jpg', previewSize: 88_000 })
-    mocks.hashFile.mockResolvedValueOnce('a'.repeat(64)).mockResolvedValueOnce('c'.repeat(64))
+    mocks.hashFile.mockResolvedValueOnce('d'.repeat(64)).mockResolvedValueOnce('c'.repeat(64))
   })
 
   it('批量第 N 张失败时，第一张原图已写恢复记录且仍属于先落盘批次', async () => {
@@ -165,10 +200,10 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches).toHaveLength(1)
     expect(queueRuntime.state.photos).toHaveLength(1)
     expect(queueRuntime.state.batches[0].photo_uuids).toEqual([queueRuntime.state.photos[0].photo_uuid])
-    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '/user/original-1.jpg', preview_path: '/user/preview.jpg' })
+    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '', transfer_path: '/user/transfer.jpg', preview_path: '/user/preview.jpg' })
   })
 
-  it('本机预览生成失败时保留原图并继续进入可上传状态', async () => {
+  it('本机预览生成失败时保留暂存原图和 1MiB 归档图等待恢复', async () => {
     const storage = new Map<string, any>()
     const unlink = installPlatform(storage, false)
     mocks.stageOriginal.mockResolvedValue({ originalPath: '/user/only-original.jpg', originalSize: 9_000_000, originalFilename: 'camera.jpg' })
@@ -179,16 +214,16 @@ describe('原图优先落盘与账号隔离队列', () => {
     await queueRuntime.enqueue(['/tmp/camera.jpg'], draft)
     expect(queueRuntime.state.photos[0]).toMatchObject({
       original_path: '/user/only-original.jpg',
+      transfer_path: '/user/transfer.jpg',
       preview_path: '',
-      status: 'local_ready',
-      preparation_pending: false,
-      preview_recovery_pending: true,
+      status: 'failed',
+      preparation_pending: true,
     })
-    expect(queueRuntime.state.photos[0].preview_error).toContain('预览生成失败')
+    expect(queueRuntime.state.photos[0].error).toContain('预览生成失败')
     expect(unlink).not.toHaveBeenCalledWith('/user/only-original.jpg')
   })
 
-  it('已保存原图可在重试时越过本机压缩故障，并从服务器取回 100KB 预览', async () => {
+  it('暂存原图可在重试时补齐 100KB 预览，准备完成后才删除大图', async () => {
     const photo = localPhoto('32', 'preview-recovery')
     photo.status = 'failed'
     photo.retry_from = 'local_ready'
@@ -206,25 +241,63 @@ describe('原图优先落盘与账号隔离队列', () => {
       { owner_account_id: '32', photos: [photo], batches: [batch] },
     ]])
     const unlink = installPlatform(storage, true)
-    mocks.preparePreview.mockRejectedValue({ errMsg: 'canvasToTempFilePath:fail' })
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'preview-batch' })
     mocks.uploadPhoto.mockResolvedValue({ ok: true, photo: { status: 'server_saved' } })
-    mocks.photo.mockResolvedValue({ ok: true, photo: { download_url: 'https://api.example.test/preview' } })
     mocks.commitBatch.mockResolvedValue({ ok: true })
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.retry('preview-recovery')
     await vi.waitFor(() => expect(queueRuntime.state.photos[0]?.status).toBe('desktop_pending'))
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('preview-batch', '/user/32-original.jpg', expect.any(Object), expect.any(Function))
-    expect(mocks.downloadServerPreview).toHaveBeenCalledWith('https://api.example.test/preview')
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('preview-batch', '/user/32-transfer.jpg', expect.any(Object), expect.any(Function))
+    expect(mocks.persistPreparedPreview).toHaveBeenCalled()
+    expect(mocks.downloadServerPreview).not.toHaveBeenCalled()
     expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
     expect(queueRuntime.state.photos[0]).toMatchObject({
       original_path: '',
-      preview_path: '/user/server-preview.jpg',
-      preview_size: 88_000,
+      preview_path: '/user/preview.jpg',
+      preview_size: 90_000,
       preview_recovery_pending: false,
     })
+  })
+
+  it('旧队列只有原图时自动迁移为 1MB JPEG 归档图，且不伪造相册来源', async () => {
+    const photo = localPhoto('32', 'legacy-original-only')
+    photo.status = 'uploading'
+    photo.remote_batch_id = undefined
+    photo.draft = { ...draft, capture_source: undefined, transfer_profile: undefined }
+    delete photo.transfer_path
+    delete photo.transfer_size
+    delete photo.transfer_sha256
+    delete photo.transfer_filename
+    delete photo.transfer_width
+    delete photo.transfer_height
+    const batch = localBatch(photo)
+    batch.remote_batch_id = undefined
+    batch.committed = false
+    batch.draft = photo.draft
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, false)
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('manual')
+
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      original_path: '',
+      transfer_path: '/user/transfer.jpg',
+      transfer_size: 900_000,
+      preparation_pending: false,
+    })
+    expect(queueRuntime.state.photos[0].draft).toMatchObject({ transfer_profile: 'jpeg_1m' })
+    expect(queueRuntime.state.photos[0].draft.capture_source).toBeUndefined()
+    expect(queueRuntime.state.batches[0].draft.capture_source).toBeUndefined()
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(mocks.createBatch).not.toHaveBeenCalled()
   })
 
   it('159.9MB 队列加新原图会在复制前拒绝，且不生成恢复记录', async () => {
@@ -249,7 +322,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches).toHaveLength(0)
   })
 
-  it('电脑已归档时只释放原图，100KB 本机预览继续保留', async () => {
+  it('电脑已归档时释放暂存原图和 1MiB 归档图，100KB 本机预览继续保留', async () => {
     const photo = localPhoto('32', 'photo-32')
     const batch = localBatch(photo)
     const storage = new Map<string, any>([[
@@ -263,8 +336,9 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
     expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).toHaveBeenCalledWith('/user/32-transfer.jpg')
     expect(unlink).not.toHaveBeenCalledWith('/user/32-preview.jpg')
-    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_imported', original_path: '', original_removed: true, preview_path: '/user/32-preview.jpg' })
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_imported', original_path: '', original_removed: true, transfer_path: '', preview_path: '/user/32-preview.jpg' })
     expect(queueRuntime.queueBytes.value).toBe(90_000)
     await queueRuntime.resume('manual')
     expect(mocks.batch).toHaveBeenCalledTimes(1)
@@ -316,7 +390,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.photo).not.toHaveBeenCalled()
   })
 
-  it('上传只发送原图路径，server_saved 后立即释放原图但保留预览', async () => {
+  it('上传只发送 JPEG 传输图，server_saved 后立即释放传输图但保留预览', async () => {
     const photo = localPhoto('32', 'photo-upload')
     photo.status = 'local_ready'
     photo.remote_batch_id = undefined
@@ -336,23 +410,24 @@ describe('原图优先落盘与账号隔离队列', () => {
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-original.jpg', expect.objectContaining({
-      sha256: 'b'.repeat(64),
-      original_size_bytes: 3_000_000,
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-transfer.jpg', expect.objectContaining({
+      sha256: 'd'.repeat(64),
+      original_size_bytes: 900_000,
       original_filename: '32.jpg',
       original_mime_type: 'image/jpeg',
+      transfer_profile: 'jpeg_1m',
     }), expect.any(Function))
     const metadata = mocks.uploadPhoto.mock.calls[0][2]
     expect(metadata).not.toHaveProperty('preview_sha256')
-    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).toHaveBeenCalledWith('/user/32-transfer.jpg')
     expect(unlink).not.toHaveBeenCalledWith('/user/32-preview.jpg')
-    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', original_path: '', preview_path: '/user/32-preview.jpg' })
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', transfer_path: '', preview_path: '/user/32-preview.jpg' })
   })
 
-  it('超过 4MiB 的原图不调用 uploadFile，改走可持久化的 4MiB 分片路径', async () => {
+  it('传输图超过 1MiB 时不调用任何上传接口', async () => {
     const photo = localPhoto('32', 'photo-large')
     photo.status = 'local_ready'
-    photo.original_size = 5 * 1024 * 1024
+    photo.transfer_size = 1024 * 1024 + 1
     photo.remote_batch_id = undefined
     const batch = localBatch(photo)
     batch.remote_batch_id = undefined
@@ -363,28 +438,20 @@ describe('原图优先落盘与账号隔离队列', () => {
     ]])
     installPlatform(storage, true)
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'large-batch' })
-    mocks.commitBatch.mockResolvedValue({ ok: true })
-    mocks.uploadPhotoInChunks.mockImplementation(async (options: any) => {
-      options.onCheckpoint({ uploadId: 'upload-large', chunkSize: 4 * 1024 * 1024, totalChunks: 2, uploadedChunks: [0, 1] })
-      options.onProgress(100)
-      return { ok: true }
-    })
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
+    expect(mocks.createBatch).not.toHaveBeenCalled()
     expect(mocks.uploadPhoto).not.toHaveBeenCalled()
-    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
-      batchId: 'large-batch',
-      filePath: '/user/32-original.jpg',
-      metadata: expect.objectContaining({ photo_uuid: 'photo-large', original_size_bytes: 5 * 1024 * 1024 }),
-    }))
+    expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
     expect(queueRuntime.state.photos[0]).toMatchObject({
-      upload_mode: 'chunked',
-      chunk_upload_id: 'upload-large',
-      uploaded_chunks: [0, 1],
-      status: 'desktop_pending',
+      status: 'failed',
+      retryable: false,
+      failure_code: 'TRANSFER_FILE_INVALID',
+      transfer_path: '/user/32-transfer.jpg',
     })
+    expect(queueRuntime.state.photos[0].error).toContain('超过限制')
   })
 
   it('可重试的上传网络错误回到待上传，并按退避时间自动续传', async () => {
@@ -468,6 +535,128 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.state.photos[0].next_retry_at = '2000-01-01T00:00:00.000Z'
     await queueRuntime.resume('manual')
     expect(mocks.commitBatch).toHaveBeenCalledTimes(2)
+    expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')
+  })
+
+  it('混合批次可在旧工程补齐信息；远端批次先 PATCH 再继续上传', async () => {
+    const saved = localPhoto('32', 'already-server-saved')
+    saved.status = 'server_saved'
+    saved.original_path = ''
+    saved.transfer_path = ''
+    saved.draft = { ...draft, project_id: '32:OLD', project_name: undefined, assignment: undefined }
+    const repair = localPhoto('32', 'archive-info-required')
+    repair.status = 'failed'
+    repair.failure_code = 'ARCHIVE_INFO_REQUIRED'
+    repair.retry_from = 'local_ready'
+    repair.retryable = false
+    repair.draft = { ...saved.draft }
+    const batch = localBatch(repair)
+    batch.photo_uuids = [saved.photo_uuid, repair.photo_uuid]
+    batch.draft = { ...saved.draft }
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [saved, repair], batches: [batch] },
+    ]])
+    installPlatform(storage, false)
+    mocks.batch.mockResolvedValue({
+      ok: true,
+      batch_id: '18',
+      status: 'server_saved',
+      photos: [{ photo_uuid: saved.photo_uuid, status: 'server_saved' }],
+    })
+    mocks.updateBatchArchiveInfo.mockResolvedValue({ ok: true })
+    mocks.uploadPhoto.mockResolvedValue({ ok: true, photo: { status: 'server_saved' } })
+    mocks.commitBatch.mockResolvedValue({ ok: true })
+    const completedAssignment = { ...draft.assignment! }
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    queueRuntime.completeArchiveInfo(batch.client_batch_id, '旧工程精确名称', completedAssignment)
+    await vi.waitFor(() => expect(queueRuntime.state.running).toBe(false))
+
+    expect(queueRuntime.state.batches[0]).toMatchObject({
+      archive_info_sync_pending: true,
+      draft: { project_id: '32:OLD', project_name: '旧工程精确名称', assignment: completedAssignment },
+    })
+    expect(queueRuntime.state.photos.find((photo) => photo.photo_uuid === saved.photo_uuid)?.status).toBe('server_saved')
+    expect(queueRuntime.state.photos.find((photo) => photo.photo_uuid === repair.photo_uuid)?.status).toBe('local_ready')
+    expect(mocks.updateBatchArchiveInfo).not.toHaveBeenCalled()
+    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
+
+    ;(globalThis as any).uni.getNetworkType = ({ success }: any) => success({ networkType: 'wifi' })
+    await queueRuntime.resume('network-restored')
+
+    expect(mocks.updateBatchArchiveInfo).toHaveBeenCalledWith('18', completedAssignment)
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('18', '/user/32-transfer.jpg', expect.objectContaining({ photo_uuid: repair.photo_uuid }), expect.any(Function))
+    expect(mocks.updateBatchArchiveInfo.mock.invocationCallOrder[0]).toBeLessThan(mocks.uploadPhoto.mock.invocationCallOrder[0])
+    expect(queueRuntime.state.batches[0]).toMatchObject({ committed: true })
+    expect(queueRuntime.state.batches[0].archive_info_sync_pending).toBeUndefined()
+    expect(queueRuntime.state.photos.map((photo) => photo.status)).toEqual(['desktop_pending', 'desktop_pending'])
+  })
+
+  it('已上传批次补归档信息遇永久403后停止 PATCH 循环并保留100KB本机预览', async () => {
+    const saved = localPhoto('32', 'archive-sync-revoked')
+    saved.status = 'server_saved'
+    saved.original_path = ''
+    saved.original_removed = true
+    saved.transfer_path = ''
+    saved.transfer_size = 0
+    saved.transfer_sha256 = ''
+    saved.transfer_filename = ''
+    saved.preview_path = '/user/32-preview.jpg'
+    saved.preview_size = 90_000
+    const batch = localBatch(saved)
+    batch.archive_info_sync_pending = true
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [saved], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, true)
+    mocks.batch.mockResolvedValue({
+      ok: true,
+      batch_id: '18',
+      status: 'server_saved',
+      photos: [{ photo_uuid: saved.photo_uuid, status: 'server_saved' }],
+    })
+    const { ApiError } = await import('@/api/client')
+    mocks.updateBatchArchiveInfo.mockRejectedValue(new ApiError('已无工程采集权限', 'project_access_revoked', false, 403))
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('network-restored')
+
+    expect(mocks.updateBatchArchiveInfo).toHaveBeenCalledTimes(1)
+    expect(queueRuntime.state.batches[0]).toMatchObject({
+      archive_info_sync_error: '已无此工程采集权限；已停止自动同步，服务器照片和本机预览均已保留',
+      archive_info_sync_failure_code: 'project_access_revoked',
+      archive_info_sync_retryable: false,
+    })
+    expect(queueRuntime.state.batches[0].archive_info_sync_pending).toBeUndefined()
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'failed',
+      retry_from: 'server_saved',
+      retryable: false,
+      failure_code: 'project_access_revoked',
+      preview_path: '/user/32-preview.jpg',
+      preview_size: 90_000,
+      error: '已无此工程采集权限；服务器照片和本机100KB预览均已保留',
+    })
+    expect(unlink).not.toHaveBeenCalledWith('/user/32-preview.jpg')
+
+    await queueRuntime.resume('manual')
+    await queueRuntime.resume('network-restored')
+    expect(mocks.updateBatchArchiveInfo).toHaveBeenCalledTimes(1)
+    expect(mocks.commitBatch).not.toHaveBeenCalled()
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'failed', retryable: false })
+
+    mocks.updateBatchArchiveInfo.mockResolvedValueOnce({ ok: true })
+    mocks.commitBatch.mockResolvedValueOnce({ ok: true })
+    await queueRuntime.retry(saved.photo_uuid)
+    expect(mocks.updateBatchArchiveInfo).toHaveBeenCalledTimes(2)
+    expect(mocks.commitBatch).toHaveBeenCalledTimes(1)
+    expect(queueRuntime.state.batches[0].archive_info_sync_failure_code).toBeUndefined()
     expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')
   })
 
@@ -590,12 +779,11 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches[0].analyzed).toBe(true)
   })
 
-  it('大图分片遇到 401 后重验同账号，并用同一 UUID 继续服务器断点', async () => {
-    const photo = localPhoto('32', 'large-auth-uuid')
+  it('恰好 1MiB 的 JPEG 归档图可直传，超过边界才拒绝', async () => {
+    const photo = localPhoto('32', 'one-mib-photo')
     photo.status = 'local_ready'
-    photo.original_size = 16 * 1024 * 1024
+    photo.transfer_size = 1024 * 1024
     photo.remote_batch_id = undefined
-    photo.uploaded_chunks = [0]
     const batch = localBatch(photo)
     batch.remote_batch_id = undefined
     batch.committed = false
@@ -604,30 +792,20 @@ describe('原图优先落盘与账号隔离队列', () => {
       { owner_account_id: '32', photos: [photo], batches: [batch] },
     ]])
     installPlatform(storage, true)
-    mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'large-auth-batch' })
+    mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'one-mib-batch' })
+    mocks.uploadPhoto.mockResolvedValue({ ok: true, photo: { status: 'server_saved' } })
     mocks.commitBatch.mockResolvedValue({ ok: true })
 
-    const { ApiError } = await import('@/api/client')
-    mocks.uploadPhotoInChunks
-      .mockRejectedValueOnce(new ApiError('登录已过期', 'AUTH_EXPIRED', false, 401))
-      .mockImplementationOnce(async (options: any) => {
-        options.onCheckpoint({ uploadId: 'same-upload', chunkSize: 4 * 1024 * 1024, totalChunks: 4, uploadedChunks: [0, 1, 2, 3] })
-        return { ok: true }
-      })
     const { queueRuntime } = await import('@/services/queue-runtime')
-    const { registerAuthExpiredHandler } = await import('@/services/auth-expiry-coordinator')
-    registerAuthExpiredHandler(async (owner) => {
-      queueRuntime.clearOwner()
-      queueRuntime.setOwner(owner)
-      queueRuntime.recoverAuthFailures()
-      await queueRuntime.resume('manual')
-    })
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
-    await vi.waitFor(() => expect(queueRuntime.state.photos[0]?.status).toBe('desktop_pending'))
-    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledTimes(2)
-    expect(mocks.uploadPhotoInChunks.mock.calls.map((call) => call[0].metadata.photo_uuid)).toEqual(['large-auth-uuid', 'large-auth-uuid'])
-    expect(mocks.uploadPhotoInChunks.mock.calls[1][0].previousUploadedChunks).toEqual([0])
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('one-mib-batch', '/user/32-transfer.jpg', expect.objectContaining({
+      photo_uuid: 'one-mib-photo',
+      original_size_bytes: 1024 * 1024,
+      transfer_profile: 'jpeg_1m',
+    }), expect.any(Function))
+    expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
+    expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')
   })
 
   it('切换账号只切换视图和上传命名空间，不混看也不删除上一账号队列', async () => {
@@ -649,7 +827,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(unlink).not.toHaveBeenCalled()
   })
 
-  it('成员被移除后停止自动重试且保留本机原图', async () => {
+  it('成员被移除后停止自动重试且保留本机 1MiB 归档图', async () => {
     const photo = localPhoto('32', 'revoked-photo')
     photo.status = 'local_ready'
     photo.remote_batch_id = undefined
@@ -672,8 +850,8 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'failed',
       retryable: false,
-      original_path: '/user/32-original.jpg',
-      error: '已无此工程采集权限；原图仍保存在本机',
+      transfer_path: '/user/32-transfer.jpg',
+      error: '已无此工程采集权限；1MB 归档图仍保存在本机',
     })
     expect(unlink).not.toHaveBeenCalled()
   })

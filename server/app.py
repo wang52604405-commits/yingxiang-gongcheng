@@ -1001,6 +1001,7 @@ def create_app():
             "sha256": str(info.get("sha256") or ""),
             "size": int(info.get("size") or 0),
             "has_update": has_update,
+            "mandatory": bool(info.get("mandatory", True)) if has_update else False,
         })
 
     @app.post("/api/admin/version")
@@ -1018,6 +1019,7 @@ def create_app():
             "download_url": str(data.get("download_url") or "").strip(),
             "sha256": str(data.get("sha256") or "").strip().lower(),
             "size": max(0, int(data.get("size") or 0)),
+            "mandatory": bool(data.get("mandatory", True)),
         }
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         import json as _json

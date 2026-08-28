@@ -1,14 +1,11 @@
 ﻿import os
-import hashlib
 import json
 import re
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
-import urllib.parse
 import urllib.request
 import winreg
 import webbrowser
@@ -28,7 +25,7 @@ except Exception:  # pragma: no cover - 托盘不可用时退化为静默
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260829-2.71"
+APP_VERSION = "A20260829-2.72"
 UPDATE_URL = "https://api.shuiliyingxiang.cn/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -124,42 +121,57 @@ def listener_pid(port=PORT):
     return 0
 
 
-def process_name(pid):
-    """Read a process image name without depending on an extra package."""
+def process_executable_path(pid):
+    """读取进程完整可执行路径，用于在终止前校验它确属当前安装目录。"""
     if not pid or os.name != "nt":
-        return ""
+        return None
     try:
-        output = subprocess.check_output(
-            ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
-            text=True,
-            encoding="mbcs",
-            errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        ).strip()
-        if output and not output.startswith("INFO:"):
-            return output.split(",", 1)[0].strip('"')
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return ""
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return None
+        try:
+            buffer = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buffer))
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                return None
+            return Path(buffer.value).resolve()
+        finally:
+            kernel32.CloseHandle(handle)
+    except (OSError, ValueError):
+        return None
 
 
 def terminate_stale_server():
-    """Stop an old copy of our server occupying the reserved port.
-
-    5088 是应用专属端口，只要监听它的进程属于本应用（打包版 album_server.exe
-    或开发版 python/pythonw 启动）就强制释放，避免更新时端口未停止导致覆盖失败。
-    """
+    """只停止当前安装目录里的旧 album_server；其它端口占用者绝不处理。"""
     pid = listener_pid()
     if not pid:
         return False
-    name = process_name(pid).lower()
-    # 只处理本应用的监听进程：打包版 album_server，源码版 python/pythonw
-    allowed = {SERVER_EXE_NAME.lower(), "python.exe", "pythonw.exe"}
-    if name not in allowed:
+    executable = process_executable_path(pid)
+    expected_dir = app_dir().resolve()
+    if (
+        executable is None
+        or executable.name.lower() != SERVER_EXE_NAME.lower()
+        or executable.parent.resolve() != expected_dir
+    ):
         return False
     try:
         subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            ["taskkill", "/PID", str(pid), "/F"],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -230,7 +242,6 @@ def build_update_command(target, install_dir):
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
-        "/CLOSEAPPLICATIONS",
     ]
     directory = Path(install_dir).expanduser()
     if directory.is_absolute():
@@ -306,73 +317,8 @@ def ensure_server(data_dir):
 
 
 def download_update(url, new_ver, expected_sha256="", expected_size=0, install_dir="", on_progress=None):
-    """后台下载并静默安装更新。返回 (ok, message)。
-
-    支持断点续传（服务器需支持 Range）与进度回调；下载中断时保留临时文件供下次续传。
-    """
-    target = Path(tempfile.gettempdir()) / f"{APP_TITLE}-更新-{new_ver}.exe"
-    digest = hashlib.sha256()
-    try:
-        # 已下载的字节与已有摘要（断点续传时累计）
-        existing = target.stat().st_size if target.exists() else 0
-        if existing:
-            with open(target, "rb") as fh:
-                for block in iter(lambda: fh.read(65536), b""):
-                    digest.update(block)
-            target_size = existing
-        else:
-            target_size = 0
-
-        safe_url = urllib.parse.quote(url, safe=":/?&=%.@#")
-        req = urllib.request.Request(safe_url)
-        if target_size:
-            req.add_header("Range", f"bytes={target_size}-")
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            total = int(resp.headers.get("Content-Length") or 0)
-            # 206=部分内容(续传)，200=整包。续传时 total 是剩余字节
-            if resp.status == 206:
-                total = target_size + total
-            elif resp.status == 200 and target_size:
-                # 服务器不支持 Range，整包重写（丢弃已下部分）
-                target.unlink(missing_ok=True)
-                target_size = 0
-                digest = hashlib.sha256()
-                total = int(resp.headers.get("Content-Length") or 0)
-            elif total == 0 and expected_size:
-                total = expected_size
-            mode = "ab" if (resp.status == 206 and target_size) else "wb"
-            done = target_size
-            with open(target, mode) as f:
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    digest.update(chunk)
-                    done += len(chunk)
-                    if on_progress:
-                        on_progress(done, total)
-        size_done = target.stat().st_size if target.exists() else done
-        if expected_size and size_done != expected_size:
-            target.unlink(missing_ok=True)
-            return False, "安装包大小校验失败，已取消"
-        if expected_sha256 and digest.hexdigest().lower() != expected_sha256.lower():
-            target.unlink(missing_ok=True)
-            return False, "安装包完整性校验失败，已取消"
-    except Exception as exc:
-        # 中断时保留已下载的临时文件，供下次断点续传
-        return False, f"下载失败：{friendly_error(exc)}"
-
-    command = build_update_command(target, install_dir or app_dir())
-
-    # 更新前先释放本应用占用的 5088 端口，避免安装程序覆盖文件时被旧服务阻塞。
-    # CloseApplications 对无窗口 album_server.exe 不可靠，这里主动强杀监听者。
-    terminate_stale_server()
-
-    # 用独立进程启动安装器，让更新过程脱离本进程，安装完成由 Inno 静默接管重开。
-    subprocess.Popen(command, cwd=str(Path(target).resolve().parent),
-                     creationflags=subprocess.CREATE_NO_WINDOW)
-    return True, "更新已开始，安装完成后软件自动生效"
+    """旧兼容入口已停用；所有更新统一由本地页面的安全状态机处理。"""
+    return False, "请打开软件页面完成更新"
 
 
 class TrayApp:
@@ -417,24 +363,16 @@ class TrayApp:
         open_local_browser(self.local_url)
 
     def check_update(self):
-        remote_ver, url, note, sha256, size = fetch_remote_version()
-        if not remote_ver or _ver_tuple(remote_ver) <= _ver_tuple(APP_VERSION):
-            self.notify("当前已是最新版本")
+        # 托盘不再维护第二套下载/安装链路，避免重复下载以及旧逻辑按端口结束进程。
+        # 页面会立即检查更新，并统一使用 app.py 的后台状态机与精确进程边界。
+        if not is_port_open() and not ensure_server(self.data_dir):
+            self.notify("服务启动失败，请稍后重试")
             return
-        def _on_progress(done, total):
-            try:
-                if total:
-                    cur = f"{done * 100 // total}%"
-                else:
-                    cur = f"{round(done / 1048576)} MB"
-                self.notify(f"正在下载更新… {cur}", title=f"更新 {remote_ver}")
-            except Exception:
-                pass
-        def fetch():
-            ok, msg = download_update(url, remote_ver, sha256, size, self.base, on_progress=_on_progress)
-            self.notify(msg)
-        threading.Thread(target=fetch, daemon=True).start()
-        self.notify(f"发现新版本 {remote_ver}，开始下载更新...")
+        if not local_server_version():
+            self.notify("本地端口被其它程序占用，无法打开更新页面")
+            return
+        open_local_browser(f"{self.local_url}/?check_update=1")
+        self.notify("已打开更新页面")
 
     def setup_tray(self):
         if not _HAS_TRAY or pystray is None:

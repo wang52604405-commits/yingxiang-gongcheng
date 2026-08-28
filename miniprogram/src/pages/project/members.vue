@@ -65,7 +65,7 @@ async function changeMember(member: ProjectMember) {
   uni.showActionSheet({ itemList: items, success: async ({ tapIndex }) => {
     if (changing.value) return
     if (tapIndex === roles.length) {
-      uni.showModal({ title: `移除${member.display_name}？`, content: '移除后对方将不能继续查看或上传该工程。', confirmColor: '#ff6b66', success: async ({ confirm }) => {
+      uni.showModal({ title: `移除${member.display_name || member.username || '成员'}？`, content: '移除后对方将不能继续查看或上传该工程。', confirmColor: '#ff6b66', success: async ({ confirm }) => {
         if (!confirm) return
         changing.value = true
         try {

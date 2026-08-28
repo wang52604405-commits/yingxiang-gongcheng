@@ -57,11 +57,18 @@ export function normalizeCandidate(raw: any): MatchCandidate {
 export function normalizeCloudPhoto(raw: any): CloudPhoto {
   if (!raw || typeof raw !== 'object' || !raw.photo_uuid) throw new Error('服务器照片数据格式不正确')
   const assignment = raw.assignment && typeof raw.assignment === 'object' ? raw.assignment : {}
+  const project = raw.project && typeof raw.project === 'object' ? raw.project : {}
+  const match = raw.match && typeof raw.match === 'object' ? raw.match : {}
+  const matchedHierarchy = Array.isArray(match.candidates)
+    ? match.candidates.find((candidate: any) => String(candidate?.unit_code || candidate?.project_code || '') === String(raw.unit_code || assignment.unit_code || match.unit_code || '')) || {}
+    : {}
   const downloadUrl = normalizeMediaUrl(raw.download_url)
   const imageUrl = normalizeMediaUrl(raw.image_url) || downloadUrl
   const thumbUrl = normalizeMediaUrl(raw.thumb_url) || downloadUrl
   return {
     photo_uuid: String(raw.photo_uuid),
+    project_id: String(raw.project_ref || raw.project_id || project.id || project.project_id || ''),
+    project_name: String(raw.project_name || project.name || project.project_name || ''),
     title: String(raw.title || '现场工程影像'),
     photo_date: String(raw.photo_date || '').slice(0, 10),
     photographer: String(raw.photographer || ''),
@@ -71,6 +78,10 @@ export function normalizeCloudPhoto(raw: any): CloudPhoto {
     capture_source: raw.capture_source === 'album' ? 'album' : raw.capture_source === 'camera' ? 'camera' : undefined,
     scope: raw.scope === 'other' ? 'other' : 'engineering',
     category: raw.category === 'supervision' ? 'supervision' : raw.scope === 'other' ? undefined : 'construction',
+    unit_project_code: String(raw.unit_project_code || assignment.unit_project_code || matchedHierarchy.unit_project_code || ''),
+    unit_project_name: String(raw.unit_project_name || assignment.unit_project_name || matchedHierarchy.unit_project_name || ''),
+    part_code: String(raw.part_code || assignment.part_code || matchedHierarchy.part_code || ''),
+    part_name: String(raw.part_name || assignment.part_name || matchedHierarchy.part_name || ''),
     unit_code: String(raw.unit_code || assignment.unit_code || ''),
     unit_name: String(raw.unit_name || assignment.unit_name || raw.match?.project_name || ''),
     process_name: String(raw.process_name || assignment.process_name || ''),

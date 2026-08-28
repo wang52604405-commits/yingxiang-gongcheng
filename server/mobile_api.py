@@ -53,6 +53,7 @@ MANAGE_MEMBER_ROLES = {"owner", "admin"}
 INVITABLE_ROLES = {"admin", "capturer", "viewer"}
 PROJECT_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60
 PROJECT_INVITE_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+JPEG_1M_TRANSFER_PROFILE = "jpeg_1m"
 _PHOTO_UPLOAD_LOCKS = {}
 _PHOTO_UPLOAD_LOCKS_GUARD = threading.Lock()
 _CHUNK_SESSION_LOCKS = {}
@@ -234,6 +235,21 @@ def _project_permissions(role: str) -> dict:
     }
 
 
+def _transfer_profile(*values) -> str:
+    """解析新版传输契约；空值专门保留给升级前已落盘的旧队列。"""
+
+    profile = ""
+    for value in values:
+        profile = _safe_text(value, 40).lower()
+        if profile:
+            break
+    if not profile:
+        return ""
+    if profile != JPEG_1M_TRANSFER_PROFILE:
+        raise ApiProblem("invalid_transfer_profile", "影像传输规格不受支持")
+    return profile
+
+
 def _machine_id(value) -> str:
     return _safe_text(value, 160).upper()
 
@@ -349,9 +365,11 @@ def _assignment_from_row(row) -> dict:
     return _json(dict(row).get("assignment_json"), {})
 
 
-def _photo_payload(row, download_url="") -> dict:
+def _photo_payload(row, download_url="", *, conn=None) -> dict:
     item = dict(row)
     assignment = _json(item.pop("assignment_json", "{}"), {})
+    if conn is not None:
+        assignment = _hydrate_assignment(conn, item, assignment)
     match = _json(item.pop("match_json", "{}"), {})
     preview_sha = item.get("preview_sha256") or item["sha256"]
     preview_size = int(item.get("preview_size_bytes") or item["size_bytes"])
@@ -362,6 +380,17 @@ def _photo_payload(row, download_url="") -> dict:
     )
     local_project_id = item["project_id"]
     project_ref = _project_ref(owner_account_id, local_project_id)
+    project_code = item.get("project_code", "")
+    project_name = item.get("project_name", "")
+    if conn is not None and (not project_code or not project_name):
+        project_row = conn.execute(
+            "SELECT project_code, project_name FROM cloud_engineering_projects "
+            "WHERE account_id = ? AND project_id = ?",
+            (owner_account_id, local_project_id),
+        ).fetchone()
+        if project_row:
+            project_code = project_row["project_code"]
+            project_name = project_row["project_name"]
     payload = {
         "cursor": int(item["id"]),
         "photo_uuid": item["photo_uuid"],
@@ -370,13 +399,38 @@ def _photo_payload(row, download_url="") -> dict:
         "project_ref": project_ref,
         "local_project_id": local_project_id,
         "owner_account_id": owner_account_id,
+        "project_code": project_code,
+        "project_name": project_name,
         "source": item["source"],
         "scope": item["scope"],
         "category": item["category"],
         "assignment": assignment,
+        "hierarchy": {
+            "contract_code": assignment.get("contract_code", ""),
+            "contract_name": assignment.get("contract_name", ""),
+            "unit_project_code": assignment.get("unit_project_code", ""),
+            "unit_project_name": assignment.get("unit_project_name", ""),
+            "part_code": assignment.get("part_code", ""),
+            "part_name": assignment.get("part_name", ""),
+            "unit_code": assignment.get("unit_code", ""),
+            "unit_name": assignment.get("unit_name", ""),
+            "process_code": assignment.get("process_code", ""),
+            "process_name": assignment.get("process_name", ""),
+            "other_node_code": assignment.get("other_node_code", ""),
+            "other_node_name": assignment.get("other_node_name", ""),
+        },
+        "contract_code": assignment.get("contract_code", ""),
+        "contract_name": assignment.get("contract_name", ""),
+        "unit_project_code": assignment.get("unit_project_code", ""),
+        "unit_project_name": assignment.get("unit_project_name", ""),
+        "part_code": assignment.get("part_code", ""),
+        "part_name": assignment.get("part_name", ""),
         "unit_code": assignment.get("unit_code", ""),
+        "unit_name": assignment.get("unit_name", ""),
+        "process_code": assignment.get("process_code", ""),
         "process_name": assignment.get("process_name", ""),
         "other_node_code": assignment.get("other_node_code", ""),
+        "other_node_name": assignment.get("other_node_name", ""),
         "requirement": (
             {
                 "template_code": item.get("requirement_code", ""),
@@ -421,8 +475,17 @@ def _photo_payload(row, download_url="") -> dict:
         "created_at": item["created_at"],
         "updated_at": item["updated_at"],
         "desktop_imported_at": item["desktop_imported_at"],
+        "local_project_code": item.get("local_project_code", ""),
+        "local_photo_id": item.get("local_photo_id", ""),
         "deleted_at": item.get("deleted_at", ""),
         "original_cleanup_status": item.get("original_cleanup_status", ""),
+        "archive": {
+            "status": item["status"],
+            "target_machine_id": item.get("target_machine_id", ""),
+            "desktop_imported_at": item["desktop_imported_at"],
+            "local_project_code": item.get("local_project_code", ""),
+            "local_photo_id": item.get("local_photo_id", ""),
+        },
     }
     if download_url:
         payload["download_url"] = download_url
@@ -577,41 +640,247 @@ def _exchange_wechat_code(code: str, app_id: str) -> dict:
     return {"openid": str(payload["openid"]), "unionid": str(payload.get("unionid") or "")}
 
 
-def _validate_assignment(conn, account_id: int, project_id: str, scope: str, assignment) -> dict:
-    assignment = assignment if isinstance(assignment, dict) else {}
-    if scope == "engineering":
-        unit_code = _safe_text(assignment.get("unit_code"), 160)
-        process_name = _safe_text(assignment.get("process_name"), 200)
-        if not unit_code:
+def _assignment_node(
+    conn,
+    account_id: int,
+    project_id: str,
+    scope: str,
+    node_code: str,
+    node_type: str = "",
+    *,
+    active_only: bool,
+):
+    clauses = [
+        "account_id = ?",
+        "project_id = ?",
+        "scope = ?",
+        "node_code = ?",
+    ]
+    params = [account_id, project_id, scope, node_code]
+    if node_type:
+        clauses.append("node_type = ?")
+        params.append(node_type)
+    if active_only:
+        clauses.append("active = 1")
+    return conn.execute(
+        "SELECT * FROM cloud_units WHERE " + " AND ".join(clauses), params
+    ).fetchone()
+
+
+def _engineering_assignment(
+    conn,
+    account_id: int,
+    project_id: str,
+    assignment: dict,
+    *,
+    active_only: bool,
+    strict: bool,
+    require_process: bool = False,
+) -> dict | None:
+    unit_code = _safe_text(assignment.get("unit_code"), 160)
+    if not unit_code:
+        if strict:
             raise ApiProblem("assignment_required", "请选择单元工程")
-        unit = conn.execute(
+        return None
+    unit = _assignment_node(
+        conn,
+        account_id,
+        project_id,
+        "engineering",
+        unit_code,
+        "unit",
+        active_only=active_only,
+    )
+    if not unit:
+        if strict:
+            raise ApiProblem("unit_not_found", "单元工程不存在或已停用", 404)
+        return None
+
+    part = _assignment_node(
+        conn,
+        account_id,
+        project_id,
+        "engineering",
+        unit["parent_code"],
+        "part",
+        active_only=active_only,
+    )
+    unit_project = (
+        _assignment_node(
+            conn,
+            account_id,
+            project_id,
+            "engineering",
+            part["parent_code"],
+            "unit_project",
+            active_only=active_only,
+        )
+        if part
+        else None
+    )
+    contract = (
+        _assignment_node(
+            conn,
+            account_id,
+            project_id,
+            "engineering",
+            unit_project["parent_code"],
+            "contract",
+            active_only=active_only,
+        )
+        if unit_project
+        else None
+    )
+    if strict and (not part or not unit_project or not contract):
+        raise ApiProblem(
+            "unit_hierarchy_incomplete",
+            "该单元工程缺少合同、单位工程或分部工程层级，请先从电脑重新同步",
+            409,
+        )
+
+    process_code = _safe_text(assignment.get("process_code"), 160)
+    process_name = _safe_text(assignment.get("process_name"), 200)
+    process = None
+    if process_code:
+        process = _assignment_node(
+            conn,
+            account_id,
+            project_id,
+            "engineering",
+            process_code,
+            "process",
+            active_only=active_only,
+        )
+        if process and process["parent_code"] != unit_code:
+            process = None
+    elif process_name:
+        active_clause = "AND active = 1 " if active_only else ""
+        process = conn.execute(
+            "SELECT * FROM cloud_units WHERE account_id = ? AND project_id = ? "
+            "AND scope = 'engineering' AND node_type = 'process' AND parent_code = ? "
+            "AND name = ? " + active_clause + "ORDER BY id LIMIT 1",
+            (account_id, project_id, unit_code, process_name),
+        ).fetchone()
+    if (process_code or process_name) and not process:
+        if strict:
+            raise ApiProblem("process_not_found", "工序不存在或已停用", 404)
+        # 旧记录展示时，无法从工程树确认的工序不是可信补全值。返回空值，
+        # 由 hydrate 的非空合并保留照片原有历史文本。
+        process_code = ""
+        process_name = ""
+    elif process:
+        process_code = process["node_code"]
+        process_name = process["name"]
+    if strict and require_process and not process:
+        active_process = conn.execute(
             "SELECT 1 FROM cloud_units WHERE account_id = ? AND project_id = ? "
-            "AND scope = 'engineering' AND node_type = 'unit' AND node_code = ? AND active = 1",
+            "AND scope = 'engineering' AND node_type = 'process' "
+            "AND parent_code = ? AND active = 1 LIMIT 1",
             (account_id, project_id, unit_code),
         ).fetchone()
-        if not unit:
-            raise ApiProblem("unit_not_found", "单元工程不存在或已停用", 404)
-        if process_name:
-            process = conn.execute(
-                "SELECT 1 FROM cloud_units WHERE account_id = ? AND project_id = ? "
-                "AND scope = 'engineering' AND node_type = 'process' AND parent_code = ? "
-                "AND name = ? AND active = 1",
-                (account_id, project_id, unit_code, process_name),
-            ).fetchone()
-            if not process:
-                raise ApiProblem("process_not_found", "工序不存在或已停用", 404)
-        return {"unit_code": unit_code, "process_name": process_name}
+        if active_process:
+            raise ApiProblem("process_required", "该单元工程必须选择工序")
+
+    def code(row):
+        return row["node_code"] if row else ""
+
+    def name(row):
+        return row["name"] if row else ""
+
+    return {
+        "contract_code": code(contract),
+        "contract_name": name(contract),
+        "unit_project_code": code(unit_project),
+        "unit_project_name": name(unit_project),
+        "part_code": code(part),
+        "part_name": name(part),
+        "unit_code": unit["node_code"],
+        "unit_name": unit["name"],
+        "process_code": process_code,
+        "process_name": process_name,
+    }
+
+
+def _hydrate_assignment(conn, row, assignment: dict) -> dict:
+    """为旧照片按服务器工程树补齐可信名称；树缺失时保留历史 JSON。"""
+
+    item = dict(row)
+    assignment = dict(assignment or {})
+    owner_account_id = int(
+        item.get("project_owner_account_id") or item.get("account_id") or 0
+    )
+    if item.get("scope") == "engineering":
+        resolved = _engineering_assignment(
+            conn,
+            owner_account_id,
+            item.get("project_id", ""),
+            assignment,
+            active_only=False,
+            strict=False,
+        )
+        if not resolved:
+            return assignment
+        # 工程树可能只同步了单元而缺少部分祖先。仅让非空、已解析字段覆盖，
+        # 避免用解析失败产生的空字符串抹掉旧照片已有的合同/单位/分部名称。
+        trusted = {key: value for key, value in resolved.items() if value}
+        return {**assignment, **trusted}
+    other_node_code = _safe_text(assignment.get("other_node_code"), 160)
+    if not other_node_code:
+        return assignment
+    node = _assignment_node(
+        conn,
+        owner_account_id,
+        item.get("project_id", ""),
+        "other",
+        other_node_code,
+        active_only=False,
+    )
+    if not node:
+        return assignment
+    return {
+        **assignment,
+        "other_node_code": node["node_code"],
+        "other_node_name": node["name"],
+    }
+
+
+def _validate_assignment(
+    conn,
+    account_id: int,
+    project_id: str,
+    scope: str,
+    assignment,
+    *,
+    require_process: bool = False,
+) -> dict:
+    assignment = assignment if isinstance(assignment, dict) else {}
+    if scope == "engineering":
+        return _engineering_assignment(
+            conn,
+            account_id,
+            project_id,
+            assignment,
+            active_only=True,
+            strict=True,
+            require_process=require_process,
+        )
     other_node_code = _safe_text(assignment.get("other_node_code"), 160)
     if not other_node_code:
         raise ApiProblem("assignment_required", "请选择其它影像目录")
-    node = conn.execute(
-        "SELECT 1 FROM cloud_units WHERE account_id = ? AND project_id = ? "
-        "AND scope = 'other' AND node_code = ? AND active = 1",
-        (account_id, project_id, other_node_code),
-    ).fetchone()
+    node = _assignment_node(
+        conn,
+        account_id,
+        project_id,
+        "other",
+        other_node_code,
+        active_only=True,
+    )
     if not node:
         raise ApiProblem("other_node_not_found", "其它影像目录不存在或已停用", 404)
-    return {"other_node_code": other_node_code}
+    return {
+        "other_node_code": node["node_code"],
+        "other_node_name": node["name"],
+    }
 
 
 def _read_image_upload(
@@ -622,6 +891,7 @@ def _read_image_upload(
     max_pixels: int,
     max_edge: int,
     preview_only: bool = False,
+    require_jpeg: bool = False,
 ):
     if not file_storage:
         raise ApiProblem("file_required", "缺少图片文件")
@@ -671,6 +941,11 @@ def _read_image_upload(
     if preview_only and not is_jpeg:
         stream.close()
         raise ApiProblem("preview_jpeg_required", "电脑端查看副本必须是 JPEG", 415)
+    if require_jpeg and not is_jpeg:
+        stream.close()
+        raise ApiProblem(
+            "archive_jpeg_required", "新版归档影像必须是 JPEG", 415
+        )
     if not preview_only and not (is_jpeg or is_png):
         stream.close()
         raise ApiProblem(
@@ -1149,12 +1424,23 @@ def register_mobile_api(
             row, original=False, viewer_account_id=viewer_account_id
         )
 
+    def hydrated_photo_payload(row, viewer_account_id=0) -> dict:
+        payload_conn = db.connect()
+        try:
+            return _photo_payload(
+                row,
+                preview_download_url(row, viewer_account_id),
+                conn=payload_conn,
+            )
+        finally:
+            payload_conn.close()
+
     def original_download_url(row) -> str:
         return signed_download_url(row, original=True)
 
-    def desktop_photo_payload(row) -> dict:
+    def desktop_photo_payload(conn, row) -> dict:
         item = dict(row)
-        payload = _photo_payload(row)
+        payload = _photo_payload(row, conn=conn)
         payload["project_ref"] = _project_ref(
             int(item.get("project_owner_account_id") or item["account_id"]),
             item["project_id"],
@@ -1200,7 +1486,9 @@ def register_mobile_api(
             status_counts[photo["status"]] = status_counts.get(photo["status"], 0) + 1
             photo_items.append(
                 _photo_payload(
-                    photo, preview_download_url(photo, batch["account_id"])
+                    photo,
+                    preview_download_url(photo, batch["account_id"]),
+                    conn=conn,
                 )
             )
         return {
@@ -1214,6 +1502,7 @@ def register_mobile_api(
             "scope": batch["scope"],
             "category": batch["category"],
             "mode": batch["mode"],
+            "transfer_profile": batch.get("transfer_profile", ""),
             "target_machine_id": batch.get("target_machine_id", ""),
             "assignment": _json(batch["assignment_json"], {}),
             "requirement": (
@@ -1250,9 +1539,19 @@ def register_mobile_api(
         title, photo_date, client_captured_at, orientation, source, batch_id,
         file_storage, claimed_sha, claimed_size="", target_machine_id="",
         original_filename="", photographer="", uploaded_by="", upload_max_bytes=None,
-        project_owner_account_id=0, capture_source=""
+        project_owner_account_id=0, capture_source="", transfer_profile=""
     ):
         is_mobile_original = source == "mobile"
+        normalized_transfer_profile = (
+            _transfer_profile(transfer_profile) if is_mobile_original else ""
+        )
+        mobile_upload_max_bytes = int(
+            upload_max_bytes or config.MOBILE_MAX_ORIGINAL_BYTES
+        )
+        if normalized_transfer_profile == JPEG_1M_TRANSFER_PROFILE:
+            mobile_upload_max_bytes = min(
+                mobile_upload_max_bytes, config.MOBILE_JPEG_1M_MAX_BYTES
+            )
         owner_account_id = int(project_owner_account_id or current_user["id"])
         actor_name = _safe_text(
             current_user.get("display_name") or current_user.get("username") or "",
@@ -1278,7 +1577,7 @@ def register_mobile_api(
             file_storage,
             claimed_sha,
             max_bytes=(
-                int(upload_max_bytes or config.MOBILE_MAX_ORIGINAL_BYTES)
+                mobile_upload_max_bytes
                 if is_mobile_original
                 else config.MOBILE_PREVIEW_MAX_BYTES
             ),
@@ -1293,6 +1592,10 @@ def register_mobile_api(
                 else config.MOBILE_PREVIEW_MAX_EDGE
             ),
             preview_only=not is_mobile_original,
+            require_jpeg=(
+                is_mobile_original
+                and normalized_transfer_profile == JPEG_1M_TRANSFER_PROFILE
+            ),
         )
         try:
             if str(claimed_size or "").strip():
@@ -1429,8 +1732,13 @@ def register_mobile_api(
                             project_id,
                             scope,
                             assignment,
+                            require_process=(
+                                normalized_transfer_profile
+                                == JPEG_1M_TRANSFER_PROFILE
+                            ),
                         )
                         if assignment
+                        or normalized_transfer_profile == JPEG_1M_TRANSFER_PROFILE
                         else {}
                     )
                 finally:
@@ -1480,7 +1788,8 @@ def register_mobile_api(
                     if is_mobile_original:
                         current_batch = conn.execute(
                             "SELECT project_owner_account_id, project_id, target_machine_id, "
-                            "status, requirement_code, requirement_name FROM mobile_batches "
+                            "scope, category, transfer_profile, assignment_json, status, "
+                            "requirement_code, requirement_name FROM mobile_batches "
                             "WHERE id = ? AND account_id = ?",
                             (batch_id, current_user["id"]),
                         ).fetchone()
@@ -1490,6 +1799,8 @@ def register_mobile_api(
                             != owner_account_id
                             or current_batch["project_id"] != project_id
                             or _machine_id(current_batch["target_machine_id"]) != target
+                            or current_batch["scope"] != scope
+                            or current_batch["category"] != category
                         ):
                             raise ApiProblem(
                                 "batch_target_conflict",
@@ -1497,8 +1808,54 @@ def register_mobile_api(
                                 409,
                             )
                         _require_batch_uploadable(current_batch["status"])
+                        project_for(
+                            conn,
+                            current_user["id"],
+                            _project_ref(owner_account_id, project_id),
+                            CAPTURE_ROLES,
+                        )
                         _require_active_machine(
                             conn, owner_account_id, target
+                        )
+                        current_transfer_profile = _transfer_profile(
+                            current_batch["transfer_profile"],
+                            normalized_transfer_profile,
+                        )
+                        if current_transfer_profile == JPEG_1M_TRANSFER_PROFILE:
+                            if uploaded["mime_type"] != "image/jpeg":
+                                raise ApiProblem(
+                                    "archive_jpeg_required",
+                                    "归档传输图必须为 JPEG 格式",
+                                    415,
+                                )
+                            if uploaded["size_bytes"] > config.MOBILE_JPEG_1M_MAX_BYTES:
+                                raise ApiProblem(
+                                    "original_too_large",
+                                    "图片不能超过 1MB",
+                                    413,
+                                )
+                        current_assignment = _json(
+                            current_batch["assignment_json"], {}
+                        )
+                        # 对象存储 I/O 期间 PATCH archive-info 可能已经补齐层级。
+                        # 最终写事务必须采用当前批次 assignment，不能让迟到上传
+                        # 以 I/O 前的旧快照落库；反向顺序则由 PATCH 同步已有照片。
+                        normalized_assignment = (
+                            _validate_assignment(
+                                conn,
+                                owner_account_id,
+                                project_id,
+                                scope,
+                                current_assignment,
+                                require_process=(
+                                    current_transfer_profile
+                                    == JPEG_1M_TRANSFER_PROFILE
+                                ),
+                            )
+                            if current_assignment
+                            or current_transfer_profile
+                            == JPEG_1M_TRANSFER_PROFILE
+                            else {}
                         )
                         requirement_code = str(current_batch["requirement_code"] or "")
                         requirement_name = str(current_batch["requirement_name"] or "")
@@ -1656,6 +2013,16 @@ def register_mobile_api(
                 else None
             ),
         }
+
+    def comparable_chunk_metadata(value) -> dict:
+        """把升级前缺少 profile 的会话与新版显式空 profile 视为同一请求。"""
+
+        metadata = dict(_json(value, {}))
+        metadata["transfer_profile"] = _transfer_profile(
+            metadata.pop("transfer_profile", ""),
+            metadata.pop("compression_profile", ""),
+        )
+        return metadata
 
     def cleanup_chunk_session_files(account_id: int, session_id: int) -> bool:
         """清理分片目录并持久记录结果，失败时留给后续清扫重试。"""
@@ -1931,7 +2298,9 @@ def register_mobile_api(
             },
             "recent_uploads": [
                 _photo_payload(
-                    row, preview_download_url(row, current_user["id"])
+                    row,
+                    preview_download_url(row, current_user["id"]),
+                    conn=conn,
                 )
                 for row in recent
             ],
@@ -1945,6 +2314,14 @@ def register_mobile_api(
                 "chunk_max_reserved_per_account": config.MOBILE_CHUNK_MAX_RESERVED_PER_ACCOUNT,
                 "preview_mime_type": "image/jpeg",
                 "preview_max_bytes": config.MOBILE_PREVIEW_MAX_BYTES,
+                "preferred_transfer_profile": JPEG_1M_TRANSFER_PROFILE,
+                "transfer_profiles": {
+                    JPEG_1M_TRANSFER_PROFILE: {
+                        "mime_type": "image/jpeg",
+                        "max_bytes": config.MOBILE_JPEG_1M_MAX_BYTES,
+                        "direct_upload": True,
+                    }
+                },
             },
             "desktop_binding_required": any(
                 not item.get("desktop_machine_id") for item in project_items
@@ -2684,7 +3061,9 @@ def register_mobile_api(
                     "ok": True,
                     "photos": [
                         _photo_payload(
-                            row, preview_download_url(row, current["id"])
+                            row,
+                            preview_download_url(row, current["id"]),
+                            conn=conn,
                         )
                         for row in page
                     ],
@@ -2736,7 +3115,9 @@ def register_mobile_api(
                 {
                     "ok": True,
                     "photo": _photo_payload(
-                        row, preview_download_url(row, current["id"])
+                        row,
+                        preview_download_url(row, current["id"]),
+                        conn=conn,
                     ),
                 }
             )
@@ -2874,6 +3255,9 @@ def register_mobile_api(
         scope = _safe_text(data.get("scope"), 20)
         category = _safe_text(data.get("category"), 20)
         mode = _safe_text(data.get("mode"), 20)
+        transfer_profile = _transfer_profile(
+            data.get("transfer_profile"), data.get("compression_profile")
+        )
         if scope not in SCOPES:
             raise ApiProblem("invalid_scope", "影像范围无效")
         if mode not in MODES:
@@ -2898,9 +3282,19 @@ def register_mobile_api(
                     409,
                 )
             assignment = data.get("assignment") if isinstance(data.get("assignment"), dict) else {}
-            if mode == "direct":
+            require_complete_assignment = (
+                mode == "direct" or transfer_profile == JPEG_1M_TRANSFER_PROFILE
+            )
+            if require_complete_assignment:
                 assignment = _validate_assignment(
-                    conn, project_owner_account_id, project_id, scope, assignment
+                    conn,
+                    project_owner_account_id,
+                    project_id,
+                    scope,
+                    assignment,
+                    require_process=(
+                        transfer_profile == JPEG_1M_TRANSFER_PROFILE
+                    ),
                 )
             elif assignment:
                 assignment = _validate_assignment(
@@ -2929,6 +3323,7 @@ def register_mobile_api(
                     and existing["scope"] == scope
                     and existing["category"] == category
                     and existing["mode"] == mode
+                    and existing["transfer_profile"] == transfer_profile
                     and _json(existing["assignment_json"], {}) == assignment
                     and existing["requirement_code"]
                     == requirement.get("template_code", "")
@@ -2961,12 +3356,13 @@ def register_mobile_api(
             cur = conn.execute(
                 "INSERT INTO mobile_batches (account_id, client_batch_id, "
                 "project_owner_account_id, project_id, scope, "
-                "category, mode, assignment_json, requirement_code, requirement_name, "
+                "category, mode, transfer_profile, assignment_json, "
+                "requirement_code, requirement_name, "
                 "target_machine_id, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local_ready', ?, ?)",
                 (
                     current["id"], client_batch_id, project_owner_account_id,
-                    project_id, scope, category, mode,
+                    project_id, scope, category, mode, transfer_profile,
                     _dumps(assignment), requirement.get("template_code", ""),
                     requirement.get("photo_requirement_name", ""), target_machine_id,
                     timestamp, timestamp,
@@ -3016,6 +3412,86 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.patch("/api/mobile/v1/batches/<int:batch_id>/archive-info")
+    def update_batch_archive_info(batch_id):
+        """补齐已创建批次的可信归档层级，并同步尚未投递的已有照片。"""
+
+        current = user()
+        data = json_body()
+        assignment = data.get("assignment")
+        if not isinstance(assignment, dict):
+            raise ApiProblem("invalid_assignment", "归档信息格式不正确")
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            batch = batch_for(
+                conn, current["id"], batch_id, require_capture=True
+            )
+            if batch["status"] in {"desktop_pending", "desktop_imported"}:
+                raise ApiProblem(
+                    "batch_committed", "批次已提交电脑归档，不能再修改归档信息", 409
+                )
+            if batch["status"] == "analyzing":
+                raise ApiProblem(
+                    "batch_analyzing", "批次正在自动识别，请稍后再修改归档信息", 409
+                )
+            normalized = _validate_assignment(
+                conn,
+                int(batch["project_owner_account_id"] or batch["account_id"]),
+                batch["project_id"],
+                batch["scope"],
+                assignment,
+                require_process=(
+                    batch.get("transfer_profile", "")
+                    == JPEG_1M_TRANSFER_PROFILE
+                ),
+            )
+            photo_rows = conn.execute(
+                "SELECT id, assignment_json FROM cloud_photos "
+                "WHERE account_id = ? AND batch_id = ? "
+                "AND status NOT IN ('desktop_pending', 'desktop_imported')",
+                (current["id"], batch_id),
+            ).fetchall()
+            batch_changed = _json(batch["assignment_json"], {}) != normalized
+            changed_photo_ids = [
+                int(photo["id"])
+                for photo in photo_rows
+                if _json(photo["assignment_json"], {}) != normalized
+            ]
+            changed = batch_changed or bool(changed_photo_ids)
+            if changed:
+                timestamp = now()
+                encoded = _dumps(normalized)
+                if batch_changed:
+                    conn.execute(
+                        "UPDATE mobile_batches SET assignment_json = ?, updated_at = ? "
+                        "WHERE id = ? AND account_id = ?",
+                        (encoded, timestamp, batch_id, current["id"]),
+                    )
+                if changed_photo_ids:
+                    conn.executemany(
+                        "UPDATE cloud_photos SET assignment_json = ?, updated_at = ? "
+                        "WHERE id = ? AND account_id = ? "
+                        "AND status NOT IN ('desktop_pending', 'desktop_imported')",
+                        (
+                            (encoded, timestamp, photo_id, current["id"])
+                            for photo_id in changed_photo_ids
+                        ),
+                    )
+                conn.commit()
+            else:
+                conn.rollback()
+            row = batch_for(conn, current["id"], batch_id, require_capture=True)
+            return jsonify(
+                {
+                    "ok": True,
+                    "idempotent": not changed,
+                    "batch": batch_payload(conn, row),
+                }
+            )
+        finally:
+            conn.close()
+
     @blueprint.post("/api/mobile/v1/batches/<int:batch_id>/photos")
     def upload_batch_photo(batch_id):
         current = user()
@@ -3054,14 +3530,17 @@ def register_mobile_api(
             project_owner_account_id=batch.get("project_owner_account_id")
             or batch["account_id"],
             capture_source=request.form.get("capture_source", ""),
+            transfer_profile=_transfer_profile(
+                request.form.get("transfer_profile"),
+                request.form.get("compression_profile"),
+                batch.get("transfer_profile", ""),
+            ),
         )
         return jsonify(
             {
                 "ok": True,
                 "idempotent": idempotent,
-                "photo": _photo_payload(
-                    row, preview_download_url(row, current["id"])
-                ),
+                "photo": hydrated_photo_payload(row, current["id"]),
             }
         ), (200 if idempotent else 201)
 
@@ -3078,8 +3557,9 @@ def register_mobile_api(
             "original_size_bytes",
             1,
         )
-        if total_size > config.MOBILE_MAX_ORIGINAL_BYTES:
-            raise ApiProblem("original_too_large", "原图不能超过 50MB", 413)
+        requested_transfer_profile = _transfer_profile(
+            data.get("transfer_profile"), data.get("compression_profile")
+        )
         chunk_size = _strict_integer(
             data.get("chunk_size_bytes"), "chunk_size_bytes", 1
         )
@@ -3113,6 +3593,7 @@ def register_mobile_api(
                 in {"camera", "album"}
                 else ""
             ),
+            "transfer_profile": requested_transfer_profile,
         }
         expire_chunk_sessions()
         with _chunk_session_lock(current["id"], photo_uuid):
@@ -3124,6 +3605,24 @@ def register_mobile_api(
                     conn, current["id"], batch_id, require_capture=True
                 )
                 _require_batch_uploadable(batch["status"])
+                transfer_profile = _transfer_profile(
+                    requested_transfer_profile,
+                    batch.get("transfer_profile", ""),
+                )
+                transfer_max_bytes = (
+                    config.MOBILE_JPEG_1M_MAX_BYTES
+                    if transfer_profile == JPEG_1M_TRANSFER_PROFILE
+                    else config.MOBILE_MAX_ORIGINAL_BYTES
+                )
+                if total_size > transfer_max_bytes:
+                    raise ApiProblem(
+                        "original_too_large",
+                        "新版归档 JPEG 不能超过 1MB"
+                        if transfer_profile == JPEG_1M_TRANSFER_PROFILE
+                        else "原图不能超过 50MB",
+                        413,
+                    )
+                metadata["transfer_profile"] = transfer_profile
                 owner_account_id = int(
                     batch.get("project_owner_account_id") or batch["account_id"]
                 )
@@ -3206,6 +3705,7 @@ def register_mobile_api(
                             "photo": _photo_payload(
                                 existing_photo,
                                 preview_download_url(existing_photo, current["id"]),
+                                conn=conn,
                             ),
                         }
                     )
@@ -3225,7 +3725,8 @@ def register_mobile_api(
                         and int(existing["chunk_size_bytes"]) == chunk_size
                         and int(existing["total_chunks"]) == total_chunks
                         and existing["original_filename"] == original_filename
-                        and _json(existing["metadata_json"], {}) == metadata
+                        and comparable_chunk_metadata(existing["metadata_json"])
+                        == comparable_chunk_metadata(metadata)
                     )
                     if not same_request:
                         raise ApiProblem(
@@ -3262,6 +3763,7 @@ def register_mobile_api(
                                 "photo": _photo_payload(
                                     matching,
                                     preview_download_url(matching, current["id"]),
+                                    conn=conn,
                                 ),
                             }
                         )
@@ -3749,6 +4251,7 @@ def register_mobile_api(
                             "photo": _photo_payload(
                                 existing_photo,
                                 preview_download_url(existing_photo, current["id"]),
+                                conn=conn,
                             ),
                             "upload": chunk_upload_payload(conn, row),
                         }
@@ -3858,6 +4361,7 @@ def register_mobile_api(
                             or current["id"]
                         ),
                         capture_source=metadata.get("capture_source", ""),
+                        transfer_profile=metadata.get("transfer_profile", ""),
                     )
                     photo_inserted = True
                 except ApiProblem as exc:
@@ -3915,9 +4419,7 @@ def register_mobile_api(
                     {
                         "ok": True,
                         "idempotent": False,
-                        "photo": _photo_payload(
-                            photo, preview_download_url(photo, current["id"])
-                        ),
+                        "photo": hydrated_photo_payload(photo, current["id"]),
                         "upload": upload_payload,
                     }
                 ), 201
@@ -4569,6 +5071,10 @@ def register_mobile_api(
                     batch["project_id"],
                     batch["scope"],
                     target,
+                    require_process=(
+                        batch.get("transfer_profile", "")
+                        == JPEG_1M_TRANSFER_PROFILE
+                    ),
                 )
                 conn.execute(
                     "UPDATE cloud_photos SET assignment_json = ?, title = ?, photo_date = ?, "
@@ -4642,6 +5148,10 @@ def register_mobile_api(
                     ),
                     batch["project_id"], batch["scope"],
                     _json(photo["assignment_json"], {}),
+                    require_process=(
+                        batch.get("transfer_profile", "")
+                        == JPEG_1M_TRANSFER_PROFILE
+                    ),
                 )
                 conn.execute(
                     "UPDATE cloud_photos SET assignment_json = ?, status = 'desktop_pending', "
@@ -5257,7 +5767,7 @@ def register_mobile_api(
             return jsonify(
                 {
                     "ok": True,
-                    "items": [desktop_photo_payload(row) for row in page],
+                    "items": [desktop_photo_payload(conn, row) for row in page],
                     "next_cursor": str(page[-1]["id"]) if len(rows) > limit and page else "",
                     "desktop_machine_id": desktop_machine_id,
                     "original_max_bytes": config.MOBILE_MAX_ORIGINAL_BYTES,
@@ -5576,9 +6086,7 @@ def register_mobile_api(
             {
                 "ok": True,
                 "idempotent": idempotent,
-                "photo": _photo_payload(
-                    row, preview_download_url(row, current["id"])
-                ),
+                "photo": hydrated_photo_payload(row, current["id"]),
             }
         ), (200 if idempotent else 201)
 

@@ -1,4 +1,4 @@
-import type { Assignment, CaptureRequirementRef, PhotoCaptureSource, PhotoCategory, Scope, UploadMode } from '@/types/domain'
+import type { Assignment, CaptureRequirementRef, PhotoCaptureSource, PhotoCategory, Scope, TransferProfile, UploadMode } from '@/types/domain'
 
 export interface CreateBatchPayload {
   client_batch_id: string
@@ -7,6 +7,7 @@ export interface CreateBatchPayload {
   category?: PhotoCategory
   mode: UploadMode
   capture_source?: PhotoCaptureSource
+  transfer_profile?: TransferProfile
   assignment?: Assignment
   requirement?: CaptureRequirementRef
 }
@@ -24,6 +25,7 @@ export interface PhotoUploadMetadata {
   title: string
   photo_date: string
   capture_source?: PhotoCaptureSource
+  transfer_profile?: TransferProfile
 }
 
 export interface ChunkUploadInitPayload extends Omit<PhotoUploadMetadata, 'original_mime_type'> {
@@ -56,6 +58,7 @@ export function buildChunkUploadInit(metadata: PhotoUploadMetadata, chunkSizeByt
     title: metadata.title,
     photo_date: metadata.photo_date,
     ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),
+    ...(metadata.transfer_profile ? { transfer_profile: metadata.transfer_profile } : {}),
     chunk_size_bytes: chunkSizeBytes,
     total_chunks: Math.ceil(metadata.original_size_bytes / chunkSizeBytes),
   }
@@ -70,6 +73,7 @@ export function normalizeBatchPayload(payload: CreateBatchPayload): CreateBatchP
   }
   if (payload.scope === 'engineering' && payload.category) normalized.category = payload.category
   if (payload.capture_source) normalized.capture_source = payload.capture_source
+  if (payload.transfer_profile) normalized.transfer_profile = payload.transfer_profile
   if (payload.assignment && Object.values(payload.assignment).some(Boolean)) normalized.assignment = { ...payload.assignment }
   if (payload.scope === 'engineering' && payload.requirement?.template_code) normalized.requirement = { ...payload.requirement }
   return normalized
@@ -89,6 +93,7 @@ export function buildPhotoUploadForm(metadata: PhotoUploadMetadata): Record<stri
     title: metadata.title,
     photo_date: metadata.photo_date,
     ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),
+    ...(metadata.transfer_profile ? { transfer_profile: metadata.transfer_profile } : {}),
   }
 }
 

@@ -1,4 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
+    const UPDATE_INSTALL_WATCHDOG_MS = 12 * 60 * 1000;
     const state = {
       dashboard: {},
       projectInfo: {},
@@ -58,6 +59,15 @@ const $ = (selector) => document.querySelector(selector);
       projectMembersLoading: false,
       projectMembersError: "",
       latestProjectInvite: null,
+      update: {
+        manifest: null,
+        checkPromise: null,
+        pollTimer: null,
+        pollFailures: 0,
+        lastActiveState: "checking",
+        installingSince: 0,
+        reloadScheduled: false
+      },
       auth: { user: null }
     };
 
@@ -1664,29 +1674,226 @@ const $ = (selector) => document.querySelector(selector);
       renderAuth();
     }
 
-    async function checkForUpdate(manual = false) {
-      const data = await apiJson("/api/cloud/check-update");
-      if (!data.ok) {
-        if (manual) showNotice(data.error || "检查更新失败（服务器未部署或不可达）", true);
-        return;
+    function formatUpdateBytes(value) {
+      const bytes = Math.max(0, Number(value || 0));
+      if (bytes < 1024) return `${Math.round(bytes)} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function openUpdateOverlay(mode = "mandatory") {
+      const overlay = $("#updateOverlay");
+      if (!overlay) return;
+      const wasOpen = overlay.classList.contains("open");
+      overlay.classList.add("open");
+      overlay.dataset.mode = mode;
+      overlay.setAttribute("aria-hidden", "false");
+      document.body.classList.toggle("update-required", mode === "mandatory");
+      Array.from(document.body.children).forEach((node) => {
+        if (node !== overlay && node.tagName !== "SCRIPT") node.inert = true;
+      });
+      if (!wasOpen) overlay.querySelector(".update-panel")?.focus({ preventScroll: true });
+    }
+
+    function closeDevelopmentUpdate() {
+      const overlay = $("#updateOverlay");
+      if (!overlay || overlay.dataset.mode !== "development") return;
+      overlay.classList.remove("open");
+      overlay.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("update-required");
+      Array.from(document.body.children).forEach((node) => {
+        if (node !== overlay && node.tagName !== "SCRIPT") node.inert = false;
+      });
+    }
+
+    function renderDevelopmentUpdate(manifest) {
+      state.update.manifest = manifest;
+      openUpdateOverlay("development");
+      const overlay = $("#updateOverlay");
+      overlay.dataset.state = "unsupported";
+      $("#updateRequiredLabel").textContent = "源码调试模式";
+      $("#updateTitle").textContent = "新版本仅支持安装版更新";
+      $("#updateVersion").textContent = `${manifest.current_version || "当前源码"} → ${manifest.latest_version}`;
+      $("#updateMessage").textContent = "这里不会锁定开发页面。需要验证更新时，请下载安装版。";
+      $("#updateError").hidden = true;
+      $("#updateRetryActions").hidden = true;
+      $("#updateDevActions").hidden = false;
+      $("#downloadUpdateLink").href = manifest.manual_download_url || "/api/cloud/download-update";
+      $("#updateFootnote").textContent = "继续调试不会触发下载、退出进程或安装。";
+    }
+
+    function renderUpdateStatus(status = {}) {
+      const manifest = state.update.manifest || {};
+      const overlay = $("#updateOverlay");
+      if (!overlay) return;
+      const updateState = String(status.state || "checking");
+      if (updateState === "installing" && !state.update.installingSince) {
+        state.update.installingSince = Date.now();
+      } else if (updateState !== "installing") {
+        state.update.installingSince = 0;
       }
-      if (!data.has_update || !data.latest_version) {
-        if (manual) showNotice("当前已是最新版本。");
-        return;
+      if (["checking", "downloading", "verifying", "installing", "installed"].includes(updateState)) {
+        state.update.lastActiveState = updateState;
       }
-      // 有新版本：自动下载并静默安装（本机服务），安装后重启软件生效
-      const changelog = (data.changelog || []).join("\n");
-      const fixes = (data.fixes || []).join("\n");
-      const detail = `发现新版本 ${data.latest_version}\n\n【更新内容】\n${changelog || "（无）"}\n\n是否立即下载并安装新版本？安装完成后请重启软件。`;
-      const go = confirm(detail);
-      if (go) {
-        apiJson("/api/cloud/apply-update", { method: "POST" }).then((r) => {
-          if (r && r.ok) {
-            showNotice(r.message || "已开始安装，请安装完成后重启软件。");
-          } else {
-            showNotice((r && r.error) || "自动更新失败", true);
+      overlay.dataset.state = updateState;
+      openUpdateOverlay("mandatory");
+      $("#updateRequiredLabel").textContent = "必须更新";
+      const currentVersion = status.current_version || manifest.current_version || $("#appVersionBadge")?.textContent || "当前版本";
+      const latestVersion = status.latest_version || manifest.latest_version || "新版本";
+      $("#updateVersion").textContent = `${currentVersion} → ${latestVersion}`;
+
+      const titles = {
+        checking: "正在准备新版本",
+        downloading: "正在下载更新",
+        verifying: "正在校验安装包",
+        installing: "正在安装新版本",
+        installed: "更新完成",
+        failed: "更新没有完成"
+      };
+      $("#updateTitle").textContent = titles[updateState] || "正在更新";
+      $("#updateMessage").textContent = status.message || (updateState === "installing"
+        ? "正在关闭旧版本并安装，软件随后会自动重启。"
+        : "更新会自动完成，请保持软件开启。");
+
+      const total = Math.max(0, Number(status.total_bytes || manifest.size || 0));
+      const done = Math.max(0, Math.min(total || Number.MAX_SAFE_INTEGER, Number(status.downloaded_bytes || 0)));
+      const percent = total ? Math.max(0, Math.min(100, Math.floor(done * 100 / total))) : Math.max(0, Math.min(100, Number(status.percent || 0)));
+      $("#updateProgressFill").style.transform = `scaleX(${percent / 100})`;
+      $("#updateProgress").setAttribute("aria-valuenow", String(percent));
+      $("#updatePercent").textContent = `${percent}%`;
+      $("#updateBytes").textContent = total ? `${formatUpdateBytes(done)} / ${formatUpdateBytes(total)}` : (done ? formatUpdateBytes(done) : "等待下载");
+
+      const visibleStage = updateState === "failed" ? state.update.lastActiveState : updateState;
+      const stageRanks = { checking: 0, downloading: 1, verifying: 2, installing: 3, installed: 4 };
+      const activeRank = stageRanks[visibleStage] || 0;
+      document.querySelectorAll("[data-update-stage]").forEach((node, index) => {
+        const rank = index + 1;
+        node.classList.toggle("complete", activeRank > rank);
+        node.classList.toggle("active", activeRank === rank || updateState === "installed");
+      });
+
+      const errorBox = $("#updateError");
+      const errorMessage = String(status.error || "");
+      errorBox.hidden = !errorMessage;
+      errorBox.textContent = errorMessage;
+      $("#updateRetryActions").hidden = !(updateState === "failed" && status.retryable !== false);
+      $("#updateDevActions").hidden = true;
+      $("#updateFootnote").textContent = updateState === "failed"
+        ? "工程资料未受影响。请检查网络后重新下载。"
+        : "下载完成后软件会自动重启，工程资料不会受影响。";
+
+      if (updateState === "installed" && !state.update.reloadScheduled) {
+        state.update.reloadScheduled = true;
+        window.setTimeout(() => window.location.reload(), 1200);
+      }
+    }
+
+    function stopUpdatePolling() {
+      if (state.update.pollTimer) window.clearTimeout(state.update.pollTimer);
+      state.update.pollTimer = null;
+    }
+
+    async function pollUpdateStatus() {
+      stopUpdatePolling();
+      try {
+        const status = await apiJson("/api/cloud/update-status");
+        state.update.pollFailures = 0;
+        renderUpdateStatus(status);
+        if (["failed", "installed", "idle"].includes(String(status.state || ""))) return;
+        state.update.pollTimer = window.setTimeout(pollUpdateStatus, 700);
+      } catch (_error) {
+        state.update.pollFailures += 1;
+        const installing = $("#updateOverlay")?.dataset.state === "installing";
+        if (installing) {
+          const installWait = Date.now() - Number(state.update.installingSince || Date.now());
+          if (installWait >= UPDATE_INSTALL_WATCHDOG_MS) {
+            renderUpdateStatus({
+              state: "failed",
+              latest_version: state.update.manifest?.latest_version || "",
+              error: "安装等待超时。请先手动打开软件；若仍是旧版本，请重新下载。",
+              message: "新版本未能自动启动",
+              retryable: true
+            });
+            return;
           }
-        }).catch((error) => showNotice(error.message || "自动更新失败", true));
+          $("#updateMessage").textContent = "安装正在继续，等待新版本启动…";
+          state.update.pollTimer = window.setTimeout(pollUpdateStatus, 1500);
+          return;
+        }
+        if (state.update.pollFailures < 4) {
+          state.update.pollTimer = window.setTimeout(pollUpdateStatus, 1000);
+          return;
+        }
+        renderUpdateStatus({
+          state: "failed",
+          latest_version: state.update.manifest?.latest_version || "",
+          error: "暂时无法读取更新进度，请检查网络后重新下载。",
+          message: "更新进度读取失败",
+          retryable: true
+        });
+      }
+    }
+
+    async function startMandatoryUpdate() {
+      stopUpdatePolling();
+      state.update.pollFailures = 0;
+      renderUpdateStatus({
+        state: "checking",
+        current_version: state.update.manifest?.current_version || "",
+        latest_version: state.update.manifest?.latest_version || "",
+        total_bytes: state.update.manifest?.size || 0,
+        message: "正在读取更新信息…"
+      });
+      try {
+        const accepted = await apiJson("/api/cloud/apply-update", { method: "POST" });
+        renderUpdateStatus(accepted);
+        state.update.pollTimer = window.setTimeout(pollUpdateStatus, 250);
+      } catch (error) {
+        renderUpdateStatus({
+          state: "failed",
+          latest_version: state.update.manifest?.latest_version || "",
+          total_bytes: state.update.manifest?.size || 0,
+          error: error.message || "无法开始更新，请重新下载。",
+          message: "更新启动失败",
+          retryable: true
+        });
+      }
+    }
+
+    async function checkForUpdate(manual = false) {
+      if (state.update.checkPromise) return state.update.checkPromise;
+      state.update.checkPromise = (async () => {
+        const data = await apiJson("/api/cloud/check-update");
+        if (!data.has_update || !data.latest_version) {
+          if (manual) showNotice("当前已是最新版本。");
+          return;
+        }
+        state.update.manifest = data;
+        if (!data.auto_update_supported) {
+          renderDevelopmentUpdate(data);
+          return;
+        }
+
+        openUpdateOverlay("mandatory");
+        let existing = null;
+        try {
+          existing = await apiJson(data.update_status_url || "/api/cloud/update-status");
+        } catch (_error) {}
+        if (existing && existing.latest_version === data.latest_version && existing.state === "failed") {
+          renderUpdateStatus(existing);
+          return;
+        }
+        if (existing && existing.latest_version === data.latest_version && ["checking", "downloading", "verifying", "installing"].includes(existing.state)) {
+          renderUpdateStatus(existing);
+          state.update.pollTimer = window.setTimeout(pollUpdateStatus, 250);
+          return;
+        }
+        await startMandatoryUpdate();
+      })();
+      try {
+        await state.update.checkPromise;
+      } finally {
+        state.update.checkPromise = null;
       }
     }
 
@@ -4195,6 +4402,8 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#setupPageBtn").addEventListener("click", () => window.open("/setup", "_blank"));
     $("#checkUpdateBtn").addEventListener("click", () => checkForUpdate(true).catch((error) => showNotice(error.message, true)));
+    $("#retryUpdateBtn").addEventListener("click", () => startMandatoryUpdate());
+    $("#dismissDevUpdateBtn").addEventListener("click", closeDevelopmentUpdate);
     $("#machineIdBtn").addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#gateMachineIdBtn")?.addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#closeMachineIdBtn").addEventListener("click", closeMachineIdModal);
@@ -4816,8 +5025,11 @@ const $ = (selector) => document.querySelector(selector);
 
     setView("overview");
     const startupUnitCode = routeUnitCode();
-    // 启动后静默检查更新（有新版本才提示）
-    setTimeout(() => checkForUpdate(false).catch(() => {}), 5000);
+    // 托盘“检查更新”带参数时立即检查；正常启动延迟 5 秒，避免抢占首屏请求。
+    const updateRequested = new URLSearchParams(window.location.search).get("check_update") === "1";
+    setTimeout(() => checkForUpdate(updateRequested).catch((error) => {
+      if (updateRequested) showNotice(error.message || "检查更新失败", true);
+    }), updateRequested ? 0 : 5000);
     loadBootstrap({ skipOtherImages: true }).then(() => {
       if (!state.auth.user) return;
       if (startupUnitCode) {

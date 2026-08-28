@@ -113,6 +113,9 @@ MOBILE_MAX_ORIGINAL_EDGE = max(
 )
 MOBILE_PREVIEW_MAX_BYTES = 102400
 MOBILE_PREVIEW_MAX_EDGE = 1920
+# 新版小程序把“送往归档电脑的正式 JPEG”压到 1MiB；旧队列不声明
+# transfer_profile 时仍沿用上面的原图兼容上限，避免升级时卡住已保存照片。
+MOBILE_JPEG_1M_MAX_BYTES = 1024 * 1024
 # 兼容共享识别模块及旧调用点；该值现在只代表永久云预览，而非手机原图。
 MOBILE_MAX_IMAGE_BYTES = MOBILE_PREVIEW_MAX_BYTES
 MOBILE_MAX_IMAGE_EDGE = MOBILE_PREVIEW_MAX_EDGE

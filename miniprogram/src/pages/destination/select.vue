@@ -5,19 +5,39 @@ import PageHeader from '@/components/PageHeader.vue'
 import UiIcon from '@/components/UiIcon.vue'
 import { mobileApi } from '@/api/mobile'
 import { selectionStorage } from '@/stores/selection'
-import type { ProjectNode, Scope } from '@/types/domain'
+import type { Assignment, ProjectNode, Scope } from '@/types/domain'
 
 const scope = ref<Scope>('engineering')
 const keyword = ref('')
 const loading = ref(true)
 const roots = ref<ProjectNode[]>([])
-const selectedNode = ref<ProjectNode | null>(null)
+const selectedNode = ref<SelectableNode | null>(null)
+const returnTarget = ref('capture')
+const targetProjectId = ref('')
+const targetProjectName = ref('')
 
-function flatten(nodes: ProjectNode[], parents: string[] = []): Array<ProjectNode & { pathLabel: string }> {
+type SelectableNode = ProjectNode & { pathLabel: string; assignment: Assignment }
+
+function flatten(nodes: ProjectNode[], ancestors: ProjectNode[] = []): SelectableNode[] {
   return nodes.flatMap((node) => {
-    const path = [...parents, node.name]
-    const current = { ...node, pathLabel: parents.slice(-2).join(' / ') }
-    return [current, ...flatten(node.children || [], path)]
+    const unitProject = [...ancestors].reverse().find((item) => item.type === 'unit_project')
+    const part = [...ancestors].reverse().find((item) => item.type === 'part')
+    const current: SelectableNode = {
+      ...node,
+      pathLabel: ancestors.slice(-2).map((item) => item.name).join(' / '),
+      assignment: node.type === 'unit'
+        ? {
+            unit_project_code: unitProject?.code,
+            unit_project_name: unitProject?.name,
+            part_code: part?.code,
+            part_name: part?.name,
+            unit_code: node.code,
+            unit_name: node.name,
+            process_required: Boolean(node.processes?.length),
+          }
+        : { other_node_code: node.code, other_node_name: node.name },
+    }
+    return [current, ...flatten(node.children || [], [...ancestors, node])]
   })
 }
 
@@ -35,9 +55,12 @@ const selectable = computed(() => {
 async function loadTree() {
   loading.value = true
   try {
-    const project = selectionStorage.getProject()
-    if (!project.id) throw new Error('请先选择或加入工程')
-    const response = scope.value === 'engineering' ? await mobileApi.projectTree(project.id) : await mobileApi.otherTree(project.id)
+    const activeProject = selectionStorage.getProject()
+    const projectId = returnTarget.value === 'confirm' ? targetProjectId.value : String(activeProject.id || '')
+    if (!projectId) throw new Error('请先选择或加入工程')
+    const response = scope.value === 'engineering' ? await mobileApi.projectTree(projectId) : await mobileApi.otherTree(projectId)
+    targetProjectId.value = projectId
+    targetProjectName.value = String(response.project?.name || '')
     roots.value = response.nodes || []
   } catch (error) {
     uni.showModal({ title: '工程层级读取失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false })
@@ -46,32 +69,44 @@ async function loadTree() {
   }
 }
 
-function chooseNode(node: ProjectNode) {
+function chooseNode(node: SelectableNode) {
   selectedNode.value = node
-  if (scope.value === 'other') saveSelection()
+  if (returnTarget.value === 'library' || scope.value === 'other' || !node.processes?.length) saveSelection()
 }
 
 function saveSelection(processName = '') {
   const node = selectedNode.value
   if (!node) return
-  selectionStorage.setDestination({
+  const assignment: Assignment = scope.value === 'engineering'
+    ? { ...node.assignment, process_name: processName }
+    : { other_node_code: node.code, other_node_name: node.name }
+  const value = {
     scope: scope.value,
-    assignment: scope.value === 'engineering'
-      ? { unit_code: node.code, unit_name: node.name, process_name: processName }
-      : { other_node_code: node.code, other_node_name: node.name },
-  })
+    assignment,
+  }
+  if (returnTarget.value === 'library') selectionStorage.setLibraryFilter(value)
+  else if (returnTarget.value === 'confirm') {
+    if (!targetProjectId.value) return
+    selectionStorage.setConfirmDestination({
+      ...value,
+      project_id: targetProjectId.value,
+      project_name: targetProjectName.value,
+    })
+  } else selectionStorage.setDestination(value)
   uni.navigateBack()
 }
 
 onLoad((query) => {
   scope.value = query?.scope === 'other' ? 'other' : 'engineering'
+  returnTarget.value = String(query?.return || 'capture')
+  targetProjectId.value = returnTarget.value === 'confirm' ? String(query?.project_id || '') : ''
   void loadTree()
 })
 </script>
 
 <template>
-  <view class="page-shell no-tabs destination-page" :class="{ 'has-process-sheet': scope === 'engineering' && selectedNode }">
-    <PageHeader :title="scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
+  <view class="page-shell no-tabs destination-page" :class="{ 'has-process-sheet': scope === 'engineering' && selectedNode && selectedNode.processes?.length && returnTarget !== 'library' }">
+    <PageHeader :title="returnTarget === 'library' && scope === 'engineering' ? '选择单元' : scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
     <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="搜索名称或编码" placeholder-class="input-placeholder" /></view>
 
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
@@ -83,12 +118,11 @@ onLoad((query) => {
     </view>
     <view v-else class="empty-state"><view class="empty-symbol"><UiIcon name="search" :size="27" /></view><text class="empty-title">{{ scope === 'engineering' ? '未找到相关部位' : '未找到相关目录' }}</text></view>
 
-    <view v-if="scope === 'engineering' && selectedNode" class="process-sheet">
+    <view v-if="scope === 'engineering' && selectedNode && selectedNode.processes?.length && returnTarget !== 'library'" class="process-sheet">
       <view class="sheet-handle" />
       <view class="process-head"><text class="process-title">选择工序</text><text class="process-unit">{{ selectedNode.name }}</text></view>
       <scroll-view scroll-x class="process-scroll">
         <view class="process-row">
-          <button class="process-chip pressable" @tap="saveSelection('')">不选工序</button>
           <button v-for="process in selectedNode.processes || []" :key="process" class="process-chip pressable" @tap="saveSelection(process)">{{ process }}</button>
         </view>
       </scroll-view>

@@ -7361,3 +7361,183 @@
       border: 0;
     }
     .guide-pop button:hover { opacity: .92; }
+
+    /* 强制更新：安装版发现新版本后固定占据窗口，直到完成或明确失败。 */
+    body.update-required { overflow: hidden; }
+    .update-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30000;
+      display: none;
+      place-items: center;
+      padding: 20px;
+      background: rgba(9, 24, 38, .72);
+      backdrop-filter: blur(8px);
+    }
+    .update-overlay.open { display: grid; }
+    .update-panel {
+      width: min(460px, 100%);
+      padding: 30px;
+      border: 1px solid rgba(255, 255, 255, .78);
+      border-radius: 18px;
+      color: #172033;
+      background: #fff;
+      box-shadow: 0 28px 80px rgba(4, 20, 34, .32);
+      text-align: center;
+    }
+    .update-mark {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 12px;
+      border-radius: 16px;
+      color: #fff;
+      background: linear-gradient(145deg, #0d7097, #13a59a);
+      box-shadow: 0 12px 30px rgba(13, 112, 151, .24);
+    }
+    .update-mark-arrow {
+      font-size: 29px;
+      font-weight: 900;
+      line-height: 1;
+    }
+    .update-overlay[data-state="checking"] .update-mark-arrow,
+    .update-overlay[data-state="downloading"] .update-mark-arrow {
+      animation: update-arrow-pulse 900ms linear infinite;
+    }
+    @keyframes update-arrow-pulse {
+      50% { transform: translateY(4px); opacity: .72; }
+    }
+    .update-required-label {
+      display: inline-flex;
+      padding: 4px 10px;
+      border-radius: 999px;
+      color: #075985;
+      background: #e0f2fe;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .update-panel h2 {
+      margin: 12px 0 4px;
+      color: #10263a;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+    .update-version {
+      margin: 0;
+      color: #39708f;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .update-message {
+      min-height: 24px;
+      margin: 18px 0 10px;
+      color: #40556a;
+      line-height: 1.55;
+    }
+    .update-progress {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e6eef4;
+    }
+    .update-progress > span {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #0d7097, #13a59a);
+      transform: scaleX(0);
+      transform-origin: left center;
+      transition: transform 160ms linear;
+    }
+    .update-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+      color: #64788b;
+      font-size: 13px;
+    }
+    .update-progress-meta strong { color: #0d7097; }
+    .update-stages {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 18px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .update-stages li {
+      padding-top: 9px;
+      border-top: 3px solid #dce6ed;
+      color: #8493a1;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .update-stages li.active,
+    .update-stages li.complete {
+      border-color: #13a59a;
+      color: #0d6f79;
+    }
+    .update-error {
+      margin-top: 16px;
+      padding: 11px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      color: #991b1b;
+      background: #fff1f2;
+      font-size: 14px;
+      line-height: 1.5;
+      text-align: left;
+    }
+    .update-actions {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .update-actions[hidden] { display: none; }
+    .update-actions button,
+    .update-actions .button-link {
+      min-width: 122px;
+      padding: 10px 16px;
+      border: 1px solid var(--primary);
+      border-radius: 9px;
+      color: #fff;
+      background: var(--primary);
+      text-align: center;
+      text-decoration: none;
+      font-weight: 800;
+      transition: transform 140ms var(--ease-out), background-color 160ms ease;
+    }
+    .update-actions .button-link:active { transform: scale(.97); }
+    @media (hover: hover) and (pointer: fine) {
+      .update-actions .button-link:hover { background: var(--top-dark); }
+    }
+    .update-footnote {
+      margin: 18px 0 0;
+      color: #7b8a98;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .update-overlay[data-state="failed"] .update-mark { background: #b42318; }
+    .update-overlay[data-state="installed"] .update-mark { background: #15803d; }
+    .update-overlay[data-mode="development"] {
+      background: rgba(9, 24, 38, .5);
+    }
+    .update-overlay[data-mode="development"] .update-progress,
+    .update-overlay[data-mode="development"] .update-progress-meta,
+    .update-overlay[data-mode="development"] .update-stages {
+      display: none;
+    }
+    @media (max-width: 560px) {
+      .update-overlay { padding: 12px; }
+      .update-panel { padding: 24px 18px; border-radius: 14px; }
+      .update-panel h2 { font-size: 21px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .update-mark-arrow { animation: none !important; }
+      .update-progress > span { transition: opacity 120ms ease; }
+    }

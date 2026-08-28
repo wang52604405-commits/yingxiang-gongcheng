@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260829-2.71"
+APP_VERSION = "A20260829-2.72"
 APP_REG_KEY = r"Software\工程影像管理平台"
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\工程影像管理平台"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -25,6 +25,13 @@ def default_install_dir():
 
 
 def default_data_dir():
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APP_REG_KEY) as key:
+            existing, _value_type = winreg.QueryValueEx(key, "DataDir")
+        if str(existing or "").strip():
+            return Path(str(existing)).expanduser()
+    except OSError:
+        pass
     return Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / APP_TITLE / "data"
 
 
@@ -50,8 +57,59 @@ def is_win10_or_newer():
     return version.major >= 10
 
 
-def run_hidden(command):
-    return subprocess.run(command, check=False, creationflags=subprocess.CREATE_NO_WINDOW)
+def run_hidden(command, env=None):
+    return subprocess.run(
+        command,
+        check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        env=env,
+    )
+
+
+def stop_installed_app_processes(target_dir):
+    """只关闭目标目录里的本应用；其它程序占用 5088 时拒绝安装。"""
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$target = [IO.Path]::GetFullPath($env:ALBUM_UPDATE_INSTALL_DIR).TrimEnd([char[]]'\/')
+$allowed = @('album_server.exe', '工程影像管理平台.exe')
+function Is-Ours($process) {
+  try {
+    $executable = [string]$process.ExecutablePath
+    if (-not $executable) { return $false }
+    $full = [IO.Path]::GetFullPath($executable)
+    $name = [IO.Path]::GetFileName($full)
+    $directory = [IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/')
+    return (($allowed -contains $name) -and [string]::Equals($directory, $target, [StringComparison]::OrdinalIgnoreCase))
+  } catch { return $false }
+}
+$ours = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { Is-Ours $_ })
+$ours | ForEach-Object { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 500
+if (@(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { Is-Ours $_ }).Count -ne 0) { exit 24 }
+$listenerPids = @(Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+foreach ($listenerPid in $listenerPids) {
+  $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$listenerPid) -ErrorAction SilentlyContinue
+  if (-not $owner -or -not (Is-Ours $owner)) { exit 23 }
+}
+$listenerPids | ForEach-Object { Stop-Process -Id ([int]$_) -Force -ErrorAction SilentlyContinue }
+exit 0
+"""
+    environment = os.environ.copy()
+    environment["ALBUM_UPDATE_INSTALL_DIR"] = str(Path(target_dir).resolve())
+    result = run_hidden(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        env=environment,
+    )
+    return int(result.returncode)
 
 
 def write_reg_value(root, subkey, name, value, value_type=winreg.REG_SZ):
@@ -93,7 +151,7 @@ def write_uninstall_script(target_dir):
     script = f"""
 $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
-$InstallDir = '{ps_quote(target_dir)}'
+$InstallDir = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([char[]]'\/')
 $DataDir = (Get-ItemProperty -Path 'HKCU:\\{APP_REG_KEY}' -Name 'DataDir' -ErrorAction SilentlyContinue).DataDir
 $DesktopNames = @('{APP_TITLE}.lnk')
 $choice = [System.Windows.Forms.MessageBox]::Show(
@@ -103,7 +161,14 @@ $choice = [System.Windows.Forms.MessageBox]::Show(
   [System.Windows.Forms.MessageBoxIcon]::Question
 )
 if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {{ exit 0 }}
-Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -like "$InstallDir\\*" }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
+$AllowedNames = @('{SERVER_EXE_NAME}', '{DESKTOP_EXE_NAME}')
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{
+  try {{
+    $Executable = [IO.Path]::GetFullPath([string]$_.ExecutablePath)
+    $Directory = [IO.Path]::GetDirectoryName($Executable).TrimEnd([char[]]'\/')
+    ($AllowedNames -contains [IO.Path]::GetFileName($Executable)) -and [string]::Equals($Directory, $InstallDir, [StringComparison]::OrdinalIgnoreCase)
+  }} catch {{ $false }}
+}} | ForEach-Object {{ Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue }}
 foreach ($desktop in @([Environment]::GetFolderPath('Desktop'), "$env:USERPROFILE\\桌面")) {{
   foreach ($name in $DesktopNames) {{
     Remove-Item -LiteralPath (Join-Path $desktop $name) -Force -ErrorAction SilentlyContinue
@@ -355,6 +420,13 @@ class Installer:
             return
 
         try:
+            stop_code = stop_installed_app_processes(target)
+            if stop_code == 23:
+                raise RuntimeError("端口 5088 正被其它程序占用。为避免误关程序，请先关闭占用程序后重试。")
+            if stop_code == 24:
+                raise RuntimeError("旧版本未能安全退出，请关闭工程影像管理平台后重试。")
+            if stop_code != 0:
+                raise RuntimeError("无法安全检查旧版本进程，安装已停止。")
             self.status.set("正在复制程序文件...")
             self.progress.configure(value=35)
             self.root.update_idletasks()

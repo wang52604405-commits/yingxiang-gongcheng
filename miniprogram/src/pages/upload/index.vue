@@ -11,6 +11,7 @@ import { selectionStorage } from '@/stores/selection'
 import type { CaptureRequirementRef, PhotoCategory, Scope, UploadDraft, UploadMode } from '@/types/domain'
 import { formatBytes } from '@/utils/format'
 import { canCaptureProject, capturePermissionMessage } from '@/services/project-membership'
+import { archiveInfoIssues, isArchiveInfoComplete } from '@/services/archive-info'
 
 const project = ref(selectionStorage.getProject())
 const scope = ref<Scope>('engineering')
@@ -30,9 +31,25 @@ const destinationLabel = computed(() => {
   const assignment = destination.value?.scope === scope.value ? destination.value.assignment : undefined
   return assignment?.unit_name || assignment?.other_node_name || (scope.value === 'engineering' ? '选择工程部位' : '选择其它影像目录')
 })
-const canSubmit = computed(() => canCaptureProject(project.value) && Boolean(pickedPaths.value.length) && !choosing.value && !submitting.value && (mode.value === 'auto' || destination.value?.scope === scope.value))
+const archiveDraft = computed<UploadDraft>(() => ({
+  project_id: project.value.id,
+  project_name: project.value.name,
+  scope: scope.value,
+  category: scope.value === 'engineering' ? category.value : undefined,
+  mode: mode.value,
+  capture_source: source.value,
+  transfer_profile: 'jpeg_1m',
+  assignment: destination.value?.scope === scope.value ? destination.value.assignment : undefined,
+  requirement: scope.value === 'engineering' && category.value === 'construction' ? requirement.value || undefined : undefined,
+}))
+const missingArchiveInfo = computed(() => archiveInfoIssues(archiveDraft.value))
+const canSubmit = computed(() => canCaptureProject(project.value) && Boolean(pickedPaths.value.length) && !choosing.value && !submitting.value)
 const sourceLabel = computed(() => source.value === 'camera' ? '现场拍照' : '手机相册')
-const submitLabel = computed(() => submitting.value ? '正在保存…' : pickedPaths.value.length ? `确认采集 ${pickedPaths.value.length} 张` : '请先选择照片')
+const submitLabel = computed(() => submitting.value
+  ? '正在保存…'
+  : pickedPaths.value.length
+    ? missingArchiveInfo.value.length ? '完善归档信息' : `确认采集 ${pickedPaths.value.length} 张`
+    : '请先选择照片')
 const progressText = computed(() => {
   const progress = queueRuntime.state.prepareProgress
   return progress.total ? `${progress.current} / ${progress.total}` : ''
@@ -108,23 +125,19 @@ async function submitCapture() {
     return
   }
   if (!pickedPaths.value.length) { await reselectMedia(); return }
-  if (mode.value === 'direct' && destination.value?.scope !== scope.value) {
-    uni.showToast({ title: '请先选择工程部位', icon: 'none' })
+  if (!isArchiveInfoComplete(archiveDraft.value)) {
+    const labels = missingArchiveInfo.value.map((issue) => issue.label).join('、')
+    uni.showModal({
+      title: '完善归档信息',
+      content: `还需选择：${labels}`,
+      confirmText: '去选择',
+      success: ({ confirm }) => { if (confirm) chooseDestination() },
+    })
     return
   }
   submitting.value = true
   try {
-    const draft: UploadDraft = {
-      project_id: project.value.id,
-      scope: scope.value,
-      category: scope.value === 'engineering' ? category.value : undefined,
-      mode: mode.value,
-      capture_source: source.value,
-      assignment: mode.value === 'direct' ? destination.value?.assignment : undefined,
-      requirement: scope.value === 'engineering' && category.value === 'construction'
-        ? requirement.value || undefined
-        : undefined,
-    }
+    const draft: UploadDraft = archiveDraft.value
     const batch = await queueRuntime.enqueue([...pickedPaths.value], draft)
     pickedPaths.value = []
     if (mode.value === 'auto') {
@@ -208,15 +221,24 @@ onShow(() => {
           <button class="segment-button pressable" :class="{ active: mode === 'auto' }" @tap="changeMode('auto')">自动匹配</button>
         </view>
       </view>
-      <button v-if="mode === 'direct'" class="destination-card pressable" @tap="chooseDestination">
-        <view class="destination-copy"><text class="destination-title">{{ destinationLabel }}</text><text v-if="destination?.scope === scope" class="destination-code">{{ destination.assignment.unit_code || destination.assignment.other_node_code }}<template v-if="destination.assignment.process_name"> · {{ destination.assignment.process_name }}</template></text></view>
+      <button class="destination-card pressable" @tap="chooseDestination">
+        <view class="destination-copy"><text class="destination-title">{{ destinationLabel }}</text><text class="destination-code">{{ destination?.scope === scope ? '更改归档位置' : scope === 'engineering' ? '选择单位、分部、单元和工序' : '选择目录' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
-      <view v-else class="destination-card automatic"><text class="destination-title">上传后自动匹配</text><text class="status-chip">需确认</text></view>
+      <view class="archive-summary">
+        <view class="archive-row"><text>工程</text><text>{{ project.name }}</text></view>
+        <view v-if="scope === 'engineering'" class="archive-row"><text>类别</text><text>{{ category === 'supervision' ? '监理影像' : '施工影像' }}</text></view>
+        <view v-if="scope === 'engineering'" class="archive-row" :class="{ missing: !destination?.assignment.unit_project_name }"><text>单位工程</text><text>{{ destination?.scope === scope ? destination.assignment.unit_project_name || '待选择' : '待选择' }}</text></view>
+        <view v-if="scope === 'engineering'" class="archive-row" :class="{ missing: !destination?.assignment.part_name }"><text>分部工程</text><text>{{ destination?.scope === scope ? destination.assignment.part_name || '待选择' : '待选择' }}</text></view>
+        <view v-if="scope === 'engineering'" class="archive-row" :class="{ missing: !destination?.assignment.unit_name }"><text>单元工程</text><text>{{ destination?.scope === scope ? destination.assignment.unit_name || '待选择' : '待选择' }}</text></view>
+        <view v-if="scope === 'engineering' && destination?.scope === scope && (destination.assignment.process_required || destination.assignment.process_name)" class="archive-row" :class="{ missing: destination.assignment.process_required && !destination.assignment.process_name }"><text>工序</text><text>{{ destination.assignment.process_name || '待选择' }}</text></view>
+        <view v-if="scope === 'other'" class="archive-row" :class="{ missing: !destination?.assignment.other_node_name }"><text>目录</text><text>{{ destination?.scope === scope ? destination.assignment.other_node_name || '待选择' : '待选择' }}</text></view>
+      </view>
+      <text v-if="mode === 'auto'" class="auto-note">归档位置先确定，上传后再辅助识别。</text>
     </view>
     <view v-if="queueRuntime.queueBytes.value > 0" class="queue-status"><view class="queue-copy"><text>本机待上传</text><text>{{ formatBytes(queueRuntime.queueBytes.value) }} / 160MB</text></view><view class="usage-track"><view class="usage-fill" :style="{ transform: `scaleX(${queueRuntime.queueUsagePercent.value / 100})` }" /></view></view>
     <button class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button>
-    <LoadingOverlay :visible="queueRuntime.state.preparing || choosing" :message="queueRuntime.state.preparing ? (queueRuntime.state.prepareProgress.message || '正在保存原图') : `正在打开${sourceLabel}`" :progress="progressText" />
+    <LoadingOverlay :visible="queueRuntime.state.preparing || choosing" :message="queueRuntime.state.preparing ? (queueRuntime.state.prepareProgress.message || '正在准备影像') : `正在打开${sourceLabel}`" :progress="progressText" />
   </view>
 </template>
 
@@ -240,6 +262,13 @@ onShow(() => {
 .destination-title { display: block; overflow: hidden; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .destination-code { display: block; margin-top: 5rpx; color: var(--primary-strong); font-size: 20rpx; }
 .path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; margin-left: 16rpx; color: var(--muted); }
+.archive-summary { overflow: hidden; margin-top: 12rpx; border: 1rpx solid var(--line); border-radius: 18rpx; background: rgba(255, 255, 255, 0.015); }
+.archive-row { display: grid; grid-template-columns: 126rpx minmax(0, 1fr); gap: 18rpx; padding: 15rpx 18rpx; border-bottom: 1rpx solid var(--line); font-size: 22rpx; line-height: 1.45; }
+.archive-row:last-child { border-bottom: 0; }
+.archive-row > text:first-child { color: var(--muted); }
+.archive-row > text:last-child { overflow: hidden; color: var(--text); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.archive-row.missing > text:last-child { color: var(--warning); }
+.auto-note { display: block; margin-top: 12rpx; color: var(--muted); font-size: 21rpx; }
 .queue-status { margin-top: 26rpx; }
 .queue-copy { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 21rpx; }
 .usage-track { height: 8rpx; margin-top: 10rpx; overflow: hidden; border-radius: 999rpx; background: var(--surface-2); }

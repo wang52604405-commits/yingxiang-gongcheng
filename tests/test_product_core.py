@@ -27,7 +27,7 @@ class DesktopUpdateCommandTest(unittest.TestCase):
         # 导致“文件夹名称不能包含下列任何字符”更新失败（v2.62 修复后契约）。
         self.assertIn("/DIR=" + str(install_dir.resolve()), command)
         self.assertFalse(any('"/DIR=' in arg for arg in command), "参数内不应内嵌引号")
-        self.assertIn("/CLOSEAPPLICATIONS", command)
+        self.assertNotIn("/CLOSEAPPLICATIONS", command)
 
 
 class VersionAssetSafetyTest(unittest.TestCase):
@@ -213,6 +213,7 @@ class ServerProductContractTest(unittest.TestCase):
         )
         update = self.client.get("/api/check-update?current=A20260809-2.26").get_json()
         self.assertTrue(update["has_update"])
+        self.assertTrue(update["mandatory"])
         self.assertEqual(update["sha256"], "a" * 64)
         self.assertEqual(update["size"], 123456)
 

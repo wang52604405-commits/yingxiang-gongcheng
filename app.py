@@ -7,9 +7,14 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
+import time
 import traceback
+import urllib.parse
+import urllib.request
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -5042,88 +5047,603 @@ def api_cloud_invite_status():
     return jsonify(cloud_client.invite_status())
 
 
+class DesktopUpdateError(RuntimeError):
+    """可安全展示给用户的更新错误；消息中不得包含本机路径或下载地址。"""
+
+
+UPDATE_ACTIVE_STATES = {"checking", "downloading", "verifying", "installing"}
+UPDATE_PUBLIC_FIELDS = {
+    "state",
+    "job_id",
+    "mandatory",
+    "current_version",
+    "latest_version",
+    "downloaded_bytes",
+    "total_bytes",
+    "percent",
+    "message",
+    "error",
+    "retryable",
+    "updated_at",
+}
+
+
+UPDATE_HELPER_SCRIPT = r'''param(
+    [Parameter(Mandatory = $true)][string]$InstallerPath,
+    [Parameter(Mandatory = $true)][string]$InstallDir,
+    [Parameter(Mandatory = $true)][string]$StatusPath,
+    [Parameter(Mandatory = $true)][string]$JobId,
+    [Parameter(Mandatory = $true)][string]$CurrentVersion,
+    [Parameter(Mandatory = $true)][string]$LatestVersion,
+    [Parameter(Mandatory = $true)][long]$PackageSize,
+    [Parameter(Mandatory = $true)][int]$ServerPid
+)
+$ErrorActionPreference = 'Stop'
+$allowedNames = @('album_server.exe', '工程影像管理平台.exe')
+$installFull = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([char[]]'\/')
+$installerFull = [System.IO.Path]::GetFullPath($InstallerPath)
+
+function Write-UpdateStatus([string]$StateName, [string]$Message, [string]$PublicError, [bool]$Retryable) {
+    try {
+        $payload = @{
+            state = $StateName
+            job_id = $JobId
+            mandatory = $true
+            current_version = $CurrentVersion
+            latest_version = $LatestVersion
+            downloaded_bytes = $PackageSize
+            total_bytes = $PackageSize
+            percent = 100
+            message = $Message
+            error = $PublicError
+            retryable = $Retryable
+            updated_at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } | ConvertTo-Json -Compress
+        $statusDirectory = [System.IO.Path]::GetDirectoryName($StatusPath)
+        [System.IO.Directory]::CreateDirectory($statusDirectory) | Out-Null
+        $statusTemp = $StatusPath + '.helper.tmp'
+        [System.IO.File]::WriteAllText($statusTemp, $payload, (New-Object System.Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $statusTemp -Destination $StatusPath -Force
+    } catch { }
+}
+
+function Get-InstalledAppProcesses {
+    $matches = @()
+    foreach ($process in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
+        try {
+            $executable = [string]$process.ExecutablePath
+            if (-not $executable) { continue }
+            $name = [System.IO.Path]::GetFileName($executable)
+            if ($allowedNames -notcontains $name) { continue }
+            $directory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($executable)).TrimEnd([char[]]'\/')
+            if ([string]::Equals($directory, $installFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $matches += $process
+            }
+        } catch { }
+    }
+    return $matches
+}
+
+try {
+    if (-not [System.IO.File]::Exists($installerFull) -or
+        -not [string]::Equals([System.IO.Path]::GetExtension($installerFull), '.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw '安装包不存在或格式不正确'
+    }
+    $currentServer = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $ServerPid) -ErrorAction SilentlyContinue
+    if (-not $currentServer -or @($currentServer | Where-Object {
+        $candidate = $_
+        @(Get-InstalledAppProcesses | Where-Object { $_.ProcessId -eq $candidate.ProcessId }).Count -eq 1
+    }).Count -ne 1) {
+        throw '无法确认当前服务进程，安装已停止'
+    }
+
+    Start-Sleep -Milliseconds 800
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $running = @(Get-InstalledAppProcesses)
+        if ($running.Count -eq 0) { break }
+        foreach ($process in $running) {
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    if (@(Get-InstalledAppProcesses).Count -ne 0) {
+        throw '旧版本仍在运行，请关闭软件后重新下载'
+    }
+
+    & $installerFull '/VERYSILENT' '/SUPPRESSMSGBOXES' '/NORESTART' ("/DIR=" + $installFull)
+    $installerExit = [int]$LASTEXITCODE
+    if ($installerExit -ne 0) {
+        throw ("安装程序未能完成（退出码 " + $installerExit + "）")
+    }
+    Write-UpdateStatus 'installed' '更新完成，正在打开新版本…' '' $false
+    exit 0
+} catch {
+    $publicMessage = [string]$_.Exception.Message
+    if (-not $publicMessage -or $publicMessage.Contains($installFull) -or $publicMessage.Contains($installerFull)) {
+        $publicMessage = '安装未能完成，请重新下载后再试'
+    }
+    Write-UpdateStatus 'failed' '更新失败' $publicMessage $true
+    try {
+        $launcher = Join-Path $installFull '工程影像管理平台.exe'
+        if ([System.IO.File]::Exists($launcher)) {
+            Start-Process -FilePath $launcher -WorkingDirectory $installFull -WindowStyle Hidden
+        }
+    } catch { }
+    exit 1
+}
+'''
+
+
+class DesktopUpdateManager:
+    """单进程更新协调器：后台下载、校验，再交给脱离服务进程的 helper 安装。"""
+
+    def __init__(self, status_path=None):
+        default_status_path = (
+            Path(tempfile.gettempdir()).resolve()
+            / "工程影像管理平台更新"
+            / "status.json"
+        )
+        self.status_path = Path(status_path or default_status_path)
+        self.lock = threading.Lock()
+        self.worker = None
+        self._last_persist = 0.0
+        self._status = self._default_status()
+        self._refresh_from_disk()
+
+    @staticmethod
+    def _default_status():
+        return {
+            "state": "idle",
+            "job_id": "",
+            "mandatory": False,
+            "current_version": str(cloud_client.APP_VERSION),
+            "latest_version": "",
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "percent": 0,
+            "message": "",
+            "error": "",
+            "retryable": False,
+            "updated_at": 0,
+        }
+
+    def _read_status_file(self):
+        try:
+            payload = json.loads(self.status_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                return None
+            return {key: payload.get(key) for key in UPDATE_PUBLIC_FIELDS if key in payload}
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _refresh_from_disk(self):
+        stored = self._read_status_file()
+        if not stored:
+            return
+        stored_job = str(stored.get("job_id") or "")
+        current_job = str(self._status.get("job_id") or "")
+        stored_time = int(stored.get("updated_at") or 0)
+        current_time = int(self._status.get("updated_at") or 0)
+        stored_current_version = str(stored.get("current_version") or "")
+        running_version = str(cloud_client.APP_VERSION)
+        if stored_current_version and stored_current_version != running_version:
+            completed_upgrade = str(stored.get("latest_version") or "") == running_version
+            self._status = self._default_status()
+            if completed_upgrade:
+                self._status.update({
+                    "state": "installed",
+                    "current_version": running_version,
+                    "latest_version": running_version,
+                    "downloaded_bytes": int(stored.get("total_bytes") or 0),
+                    "total_bytes": int(stored.get("total_bytes") or 0),
+                    "percent": 100,
+                    "message": "更新完成，正在打开新版本…",
+                    "updated_at": int(time.time() * 1000),
+                })
+            self._persist_locked(force=True)
+            return
+        if (not current_job or stored_job == current_job) and stored_time >= current_time:
+            self._status.update(stored)
+        worker_alive = bool(self.worker and self.worker.is_alive())
+        age_ms = int(time.time() * 1000) - int(self._status.get("updated_at") or 0)
+        interrupted_download = self._status.get("state") in {"checking", "downloading", "verifying"}
+        expired_install = self._status.get("state") == "installing" and age_ms > 15 * 60 * 1000
+        if not worker_alive and (interrupted_download or expired_install):
+            self._status.update({
+                "state": "failed",
+                "message": "上次更新已中断",
+                "error": "上次更新未能完成，请重新下载",
+                "retryable": True,
+                "updated_at": int(time.time() * 1000),
+            })
+            self._persist_locked(force=True)
+
+    def _persist_locked(self, force=False):
+        now = time.monotonic()
+        if not force and now - self._last_persist < 0.75:
+            return
+        self._last_persist = now
+        try:
+            self.status_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self.status_path.with_name(self.status_path.name + ".tmp")
+            temp_path.write_text(
+                json.dumps(self._status, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            temp_path.replace(self.status_path)
+        except OSError:
+            pass
+
+    def _set(self, job_id, *, force_persist=False, **changes):
+        with self.lock:
+            if job_id and self._status.get("job_id") != job_id:
+                return False
+            self._status.update(changes)
+            total = max(0, int(self._status.get("total_bytes") or 0))
+            done = max(0, int(self._status.get("downloaded_bytes") or 0))
+            self._status["percent"] = min(100, int(done * 100 / total)) if total else 0
+            self._status["updated_at"] = int(time.time() * 1000)
+            self._persist_locked(force=force_persist)
+            return True
+
+    def public_status(self):
+        with self.lock:
+            self._refresh_from_disk()
+            payload = {key: self._status.get(key) for key in UPDATE_PUBLIC_FIELDS}
+        payload["ok"] = True
+        payload["supported"] = bool(getattr(sys, "frozen", False))
+        return payload
+
+    def start(self):
+        with self.lock:
+            self._refresh_from_disk()
+            if self._status.get("state") in UPDATE_ACTIVE_STATES:
+                payload = {key: self._status.get(key) for key in UPDATE_PUBLIC_FIELDS}
+                payload.update({"ok": True, "supported": True, "started": False})
+                return payload
+            job_id = uuid.uuid4().hex
+            self._status = {
+                **self._default_status(),
+                "state": "checking",
+                "job_id": job_id,
+                "mandatory": True,
+                "message": "正在读取更新信息…",
+                "updated_at": int(time.time() * 1000),
+            }
+            self._persist_locked(force=True)
+            worker = threading.Thread(
+                target=self._run,
+                args=(job_id,),
+                name="desktop-update-worker",
+                daemon=True,
+            )
+            self.worker = worker
+            worker.start()
+            payload = {key: self._status.get(key) for key in UPDATE_PUBLIC_FIELDS}
+        payload.update({"ok": True, "supported": True, "started": True})
+        return payload
+
+    @staticmethod
+    def _validate_manifest(result):
+        if not isinstance(result, dict) or not result.get("ok"):
+            raise DesktopUpdateError("无法连接更新服务器，请检查网络后重新下载")
+        if not result.get("has_update"):
+            raise DesktopUpdateError("当前已是最新版本")
+        latest_version = str(result.get("latest_version") or "").strip()
+        if not re.fullmatch(r"A\d{8}-\d+\.\d+", latest_version):
+            raise DesktopUpdateError("更新信息中的版本号无效，请联系管理员")
+        sha256 = str(result.get("sha256") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise DesktopUpdateError("更新信息缺少有效的完整性校验值，请联系管理员")
+        try:
+            size = int(result.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size <= 0 or size > 2 * 1024 * 1024 * 1024:
+            raise DesktopUpdateError("更新信息缺少有效的安装包大小，请联系管理员")
+        url = str(result.get("download_url") or "").strip()
+        parts = urllib.parse.urlsplit(url)
+        if (
+            parts.scheme.lower() != "https"
+            or not parts.hostname
+            or parts.username
+            or parts.password
+            or any(ord(char) < 32 for char in url)
+        ):
+            raise DesktopUpdateError("更新下载地址无效，请联系管理员")
+        return {
+            "version": latest_version,
+            "sha256": sha256,
+            "size": size,
+            "url": url,
+        }
+
+    @staticmethod
+    def _hash_file(path):
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().lower()
+
+    def _download_package(self, job_id, manifest):
+        update_dir = Path(tempfile.gettempdir()).resolve() / "工程影像管理平台更新"
+        update_dir.mkdir(parents=True, exist_ok=True)
+        target = update_dir / f"album-update-{manifest['sha256'][:16]}.exe"
+        partial = target.with_suffix(".exe.part")
+        expected_size = manifest["size"]
+        expected_sha256 = manifest["sha256"]
+
+        if target.exists():
+            if target.stat().st_size == expected_size and self._hash_file(target) == expected_sha256:
+                self._set(
+                    job_id,
+                    downloaded_bytes=expected_size,
+                    total_bytes=expected_size,
+                    message="安装包已下载，正在校验…",
+                    force_persist=True,
+                )
+                return target
+            target.unlink(missing_ok=True)
+
+        existing = partial.stat().st_size if partial.exists() else 0
+        if existing > expected_size:
+            partial.unlink(missing_ok=True)
+            existing = 0
+        digest = hashlib.sha256()
+        if existing:
+            with open(partial, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if existing == expected_size:
+                if digest.hexdigest().lower() == expected_sha256:
+                    partial.replace(target)
+                    self._set(
+                        job_id,
+                        state="verifying",
+                        downloaded_bytes=expected_size,
+                        total_bytes=expected_size,
+                        message="下载完成，正在校验安装包…",
+                        force_persist=True,
+                    )
+                    return target
+                partial.unlink(missing_ok=True)
+                existing = 0
+                digest = hashlib.sha256()
+
+        headers = {"User-Agent": "album-updater/2.0", "Accept-Encoding": "identity"}
+        if existing:
+            headers["Range"] = f"bytes={existing}-"
+        request_obj = urllib.request.Request(manifest["url"], headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request_obj, timeout=60) as response:
+                final_url = str(getattr(response, "geturl", lambda: manifest["url"])() or manifest["url"])
+                final_parts = urllib.parse.urlsplit(final_url)
+                if final_parts.scheme.lower() != "https" or not final_parts.hostname or final_parts.username or final_parts.password:
+                    raise DesktopUpdateError("更新服务器返回了不安全的下载地址，请联系管理员")
+                status_code = int(getattr(response, "status", 200) or 200)
+                if existing and status_code == 206:
+                    content_range = str(response.headers.get("Content-Range") or "")
+                    match = re.match(r"bytes\s+(\d+)-", content_range, re.IGNORECASE)
+                    if not match or int(match.group(1)) != existing:
+                        raise DesktopUpdateError("更新服务器未正确返回续传内容，请重新下载")
+                    mode = "ab"
+                    done = existing
+                else:
+                    mode = "wb"
+                    done = 0
+                    digest = hashlib.sha256()
+                self._set(
+                    job_id,
+                    state="downloading",
+                    downloaded_bytes=done,
+                    total_bytes=expected_size,
+                    message="正在下载安装包…",
+                    force_persist=True,
+                )
+                with open(partial, mode) as output:
+                    while True:
+                        chunk = response.read(128 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        digest.update(chunk)
+                        done += len(chunk)
+                        if done > expected_size:
+                            raise DesktopUpdateError("安装包大小与发布信息不一致，请重新下载")
+                        self._set(
+                            job_id,
+                            downloaded_bytes=done,
+                            total_bytes=expected_size,
+                            message="正在下载安装包…",
+                        )
+                    output.flush()
+                    os.fsync(output.fileno())
+        except DesktopUpdateError:
+            partial.unlink(missing_ok=True)
+            raise
+        except OSError as exc:
+            message = "系统临时目录不可写，请检查磁盘空间和权限后重试"
+            if not isinstance(exc, PermissionError):
+                message = "下载安装包失败，请检查网络和磁盘空间后重新下载"
+            raise DesktopUpdateError(message) from None
+        except Exception:
+            raise DesktopUpdateError("下载安装包失败，请检查网络后重新下载") from None
+
+        size = partial.stat().st_size if partial.exists() else 0
+        self._set(
+            job_id,
+            state="verifying",
+            downloaded_bytes=size,
+            total_bytes=expected_size,
+            message="下载完成，正在校验安装包…",
+            force_persist=True,
+        )
+        if size != expected_size:
+            partial.unlink(missing_ok=True)
+            raise DesktopUpdateError("安装包大小校验失败，请重新下载")
+        if digest.hexdigest().lower() != expected_sha256:
+            partial.unlink(missing_ok=True)
+            raise DesktopUpdateError("安装包完整性校验失败，请重新下载")
+        partial.replace(target)
+        return target
+
+    def _launch_installer(self, job_id, manifest, installer):
+        install_dir = Path(sys.executable).resolve().parent
+        system_root = Path(os.environ.get("SystemRoot") or r"C:\Windows").resolve()
+        powershell = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        if not powershell.is_file():
+            raise DesktopUpdateError("系统缺少更新所需组件，请重新安装最新版")
+        helper_path = installer.parent / f"album-update-helper-{job_id}.ps1"
+        helper_path.write_text(UPDATE_HELPER_SCRIPT, encoding="utf-8-sig")
+        command = [
+            str(powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(helper_path),
+            "-InstallerPath",
+            str(installer.resolve()),
+            "-InstallDir",
+            str(install_dir),
+            "-StatusPath",
+            str(self.status_path.resolve()),
+            "-JobId",
+            job_id,
+            "-CurrentVersion",
+            str(cloud_client.APP_VERSION),
+            "-LatestVersion",
+            manifest["version"],
+            "-PackageSize",
+            str(manifest["size"]),
+            "-ServerPid",
+            str(os.getpid()),
+        ]
+        creation_flags = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+        subprocess.Popen(
+            command,
+            cwd=str(installer.parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creation_flags,
+        )
+
+    def _run(self, job_id):
+        try:
+            manifest = self._validate_manifest(cloud_client.check_update())
+            self._set(
+                job_id,
+                latest_version=manifest["version"],
+                total_bytes=manifest["size"],
+                message="正在准备下载…",
+                force_persist=True,
+            )
+            installer = self._download_package(job_id, manifest)
+            self._set(
+                job_id,
+                state="installing",
+                downloaded_bytes=manifest["size"],
+                total_bytes=manifest["size"],
+                message="校验通过，正在关闭旧版本并安装…",
+                error="",
+                retryable=False,
+                force_persist=True,
+            )
+            self._launch_installer(job_id, manifest, installer)
+        except DesktopUpdateError as exc:
+            self._set(
+                job_id,
+                state="failed",
+                message="更新失败",
+                error=str(exc),
+                retryable=True,
+                force_persist=True,
+            )
+        except Exception:
+            self._set(
+                job_id,
+                state="failed",
+                message="更新失败",
+                error="更新过程中发生异常，请重新下载",
+                retryable=True,
+                force_persist=True,
+            )
+            try:
+                cloud_client.report_error("desktop_update", "后台更新任务发生未预期异常")
+            except Exception:
+                pass
+
+
+_desktop_update_manager = None
+_desktop_update_manager_lock = threading.Lock()
+
+
+def desktop_update_manager():
+    global _desktop_update_manager
+    with _desktop_update_manager_lock:
+        if _desktop_update_manager is None:
+            _desktop_update_manager = DesktopUpdateManager()
+        return _desktop_update_manager
+
+
 @app.route("/api/cloud/check-update")
 def api_cloud_check_update():
-    return jsonify(cloud_client.check_update())
+    result = cloud_client.check_update()
+    result = dict(result) if isinstance(result, dict) else {"ok": False, "error": "检查更新失败"}
+    has_update = bool(result.get("has_update"))
+    result["mandatory"] = bool(result.get("mandatory", True)) if has_update else False
+    result["auto_update_supported"] = bool(getattr(sys, "frozen", False))
+    result["update_status_url"] = "/api/cloud/update-status"
+    result["apply_update_url"] = "/api/cloud/apply-update"
+    if has_update and not result["auto_update_supported"]:
+        result["manual_download_url"] = "/api/cloud/download-update"
+    return jsonify(result)
+
+
+@app.route("/api/cloud/update-status")
+def api_cloud_update_status():
+    return jsonify(desktop_update_manager().public_status())
 
 
 @app.route("/api/cloud/download-update")
 def api_cloud_download_update():
-    """跳转到服务器下载最新安装包。"""
-    import urllib.parse
-
+    """源码调试模式可走浏览器下载；安装版使用后台自动更新。"""
     result = cloud_client.check_update()
-    url = result.get("download_url") or ""
-    if not url or not result.get("has_update"):
-        return jsonify({"ok": False, "error": "当前已是最新版本"}), 400
+    result = result if isinstance(result, dict) else {}
+    url = str(result.get("download_url") or "")
+    parts = urllib.parse.urlsplit(url)
+    if (
+        not result.get("has_update")
+        or parts.scheme.lower() != "https"
+        or not parts.hostname
+        or parts.username
+        or parts.password
+    ):
+        return jsonify({"ok": False, "error": "当前没有可下载的有效更新"}), 400
     return redirect(url)
 
 
 @app.route("/api/cloud/apply-update", methods=["POST"])
 def api_cloud_apply_update():
-    """下载最新安装包并静默安装（本机服务有权限）。安装完成后自动启动新版本。"""
+    """立即受理更新；下载、校验、退出旧进程和安装均由后台任务完成。"""
     if not getattr(sys, "frozen", False):
-        return jsonify({"ok": False, "error": "仅安装版支持自动更新"}), 400
-    try:
-        result = cloud_client.check_update()
-        url = result.get("download_url") or ""
-        if not url or not result.get("has_update"):
-            return jsonify({"ok": False, "error": "当前已是最新版本"}), 400
-        expected_sha256 = str(result.get("sha256") or "").lower()
-        expected_size = int(result.get("size") or 0)
-        import urllib.request
-        install_dir = Path(sys.executable).resolve().parent
-        installer = install_dir / "album-update-installer.exe"
-        if installer.exists():
-            try:
-                installer.unlink()
-            except OSError:
-                pass
-        # 下载安装包（含完整性校验，避免装到损坏/不完整文件）
-        req = urllib.request.Request(url, headers={"User-Agent": "album-updater/1.0"})
-        digest = hashlib.sha256()
-        with urllib.request.urlopen(req, timeout=300) as resp, open(installer, "wb") as out:
-            while True:
-                chunk = resp.read(64 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                digest.update(chunk)
-        size = installer.stat().st_size if installer.exists() else 0
-        if size == 0:
-            return jsonify({"ok": False, "error": "安装包下载失败（文件为空），请重试"}), 500
-        if expected_size and size != expected_size:
-            return jsonify({"ok": False, "error": f"安装包大小校验失败（应为 {expected_size}，实际 {size}），请重试"}), 500
-        if expected_sha256 and digest.hexdigest().lower() != expected_sha256:
-            return jsonify({"ok": False, "error": "安装包完整性校验失败，请重新下载"}), 500
-
-        # 先返回响应，再由后台延迟启动安装（安装器会关闭本服务进程，不能阻塞等待）
-        def _launch_install():
-            try:
-                cmd = [
-                    str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-                    "/CLOSEAPPLICATIONS", f"/DIR={install_dir}",
-                ]
-                proc = subprocess.Popen(
-                    cmd,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-                )
-                code = proc.wait(timeout=600)
-                if code != 0:
-                    cloud_client.report_error(
-                        "update_install",
-                        f"安装程序退出码 {code}，安装目录 {install_dir}",
-                    )
-            except Exception as exc:
-                try:
-                    cloud_client.report_error("update_install", str(exc))
-                except Exception:
-                    pass
-
-        threading.Timer(2.0, _launch_install).start()
-        return jsonify({"ok": True, "message": "安装包已校验并开始安装，完成后将自动启动新版本；若长时间未自动启动，请打开安装目录手动运行安装程序"})
-    except Exception as exc:
-        return json_error(str(exc), 500)
+        return jsonify({
+            "ok": False,
+            "supported": False,
+            "error": "源码调试模式不执行自动安装，请下载正式安装版后测试",
+            "manual_download_url": "/api/cloud/download-update",
+        }), 409
+    status = desktop_update_manager().start()
+    return jsonify(status), 202
 
 
 @app.route("/api/cloud/logout", methods=["POST"])

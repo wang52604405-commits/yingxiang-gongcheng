@@ -1,4 +1,4 @@
-import type { BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectAccessRole, ProjectInvite, ProjectMember, ProjectNode, ProjectSummary } from '@/types/domain'
+import type { Assignment, BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectAccessRole, ProjectInvite, ProjectMember, ProjectNode, ProjectSummary } from '@/types/domain'
 import { apiBinaryRequest, apiRequest, apiUploadPhoto } from './client'
 import { buildChunkUploadInit, normalizeBatchPayload, type ChunkUploadState, type CreateBatchPayload, type PhotoUploadMetadata } from './contracts'
 import { normalizeBatch, normalizeCloudPhoto, normalizeProject, normalizeTreeNode, type NormalizedBatch } from './normalize'
@@ -200,6 +200,10 @@ export const mobileApi = {
   assignBatch: async (batchId: string, assignments: Array<Record<string, unknown>>) => {
     const raw = await apiRequest<any>('PATCH', `/batches/${encodeURIComponent(batchId)}/assignments`, { assignments })
     return { ok: true as const, batch: normalizeBatch(raw.batch) }
+  },
+  updateBatchArchiveInfo: async (batchId: string, assignment: Assignment) => {
+    const raw = await apiRequest<any>('PATCH', `/batches/${encodeURIComponent(batchId)}/archive-info`, { assignment })
+    return { ok: true as const, batch: raw.batch ? normalizeBatch(raw.batch) : undefined }
   },
   commitBatch: async (batchId: string) => {
     const raw = await apiRequest<any>('POST', `/batches/${encodeURIComponent(batchId)}/commit`, {})

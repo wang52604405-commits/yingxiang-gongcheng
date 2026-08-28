@@ -9,16 +9,33 @@ describe('移动端 API v1 契约', () => {
   it('批次与照片重复提交保持同一幂等主键', () => {
     const payload = normalizeBatchPayload({
       client_batch_id: '11111111-1111-4111-8111-111111111111',
-      project_id: 'YNLQ',
+      project_id: '32:YNLQ',
       scope: 'engineering',
       category: 'construction',
       mode: 'direct',
-      assignment: { unit_code: 'YNLQ-DY-001', process_name: '钢筋安装' },
+      capture_source: 'camera',
+      transfer_profile: 'jpeg_1m',
+      assignment: {
+        unit_project_code: 'YNLQ-DW-001',
+        unit_project_name: '拦河闸单位工程',
+        part_code: 'YNLQ-FB-001',
+        part_name: '进口段分部工程',
+        unit_code: 'YNLQ-DY-001',
+        unit_name: '进口段单元工程',
+        process_name: '钢筋安装',
+        process_required: true,
+      },
       requirement: {
         template_code: 'FJ-JG-001',
         photo_requirement_name: '钢筋安装隐蔽验收',
         required_type: 'required',
       },
+    })
+    expect(payload).toMatchObject({
+      project_id: '32:YNLQ',
+      capture_source: 'camera',
+      transfer_profile: 'jpeg_1m',
+      assignment: { unit_project_code: 'YNLQ-DW-001', part_code: 'YNLQ-FB-001', unit_code: 'YNLQ-DY-001', process_name: '钢筋安装' },
     })
     expect(payload.requirement).toMatchObject({ template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' })
     expect(batchIdempotencyKey(payload)).toBe('batch:11111111-1111-4111-8111-111111111111')
@@ -29,11 +46,13 @@ describe('移动端 API v1 契约', () => {
       width: 1_632,
       height: 1_224,
       sha256: 'a'.repeat(64),
-      original_size_bytes: 8_321_440,
-      original_filename: 'IMG_20260825.png',
-      original_mime_type: 'image/png' as const,
+      original_size_bytes: 1_048_576,
+      original_filename: 'IMG_20260825.jpg',
+      original_mime_type: 'image/jpeg' as const,
       title: '钢筋安装检查',
       photo_date: '2026-08-25',
+      capture_source: 'camera' as const,
+      transfer_profile: 'jpeg_1m' as const,
     }
     expect(photoIdempotencyKey(metadata)).toBe('photo:22222222-2222-4222-8222-222222222222')
     expect(buildPhotoUploadForm(metadata)).toEqual({
@@ -43,11 +62,13 @@ describe('移动端 API v1 契约', () => {
       width: '1632',
       height: '1224',
       sha256: metadata.sha256,
-      original_size_bytes: '8321440',
-      original_filename: 'IMG_20260825.png',
-      original_mime_type: 'image/png',
+      original_size_bytes: '1048576',
+      original_filename: 'IMG_20260825.jpg',
+      original_mime_type: 'image/jpeg',
       title: '钢筋安装检查',
       photo_date: '2026-08-25',
+      capture_source: 'camera',
+      transfer_profile: 'jpeg_1m',
     })
     expect(buildPhotoUploadForm(metadata)).not.toHaveProperty('preview_sha256')
     expect(buildPhotoUploadForm(metadata)).not.toHaveProperty('preview_size')
@@ -57,13 +78,15 @@ describe('移动端 API v1 契约', () => {
       original_size_bytes: metadata.original_size_bytes,
       original_filename: metadata.original_filename,
       chunk_size_bytes: 4 * 1024 * 1024,
-      total_chunks: 2,
+      total_chunks: 1,
       client_captured_at: metadata.client_captured_at,
       orientation: 6,
       width: 1_632,
       height: 1_224,
       title: '钢筋安装检查',
       photo_date: '2026-08-25',
+      capture_source: 'camera',
+      transfer_profile: 'jpeg_1m',
     })
     expect(buildChunkUploadInit(metadata, 4 * 1024 * 1024)).not.toHaveProperty('original_mime_type')
   })
@@ -132,26 +155,29 @@ describe('移动端 API v1 契约', () => {
     expect(photo.thumb_url).toBe(signed)
   })
 
-  it('4MiB 内直传使用微信单请求安全超时，弱网重试仍复用同一 UUID', async () => {
+  it('1MB 归档 JPEG 直传使用微信单请求安全超时并携带传输规格', async () => {
     const uploadFile = vi.fn((options: any) => {
       options.success({ statusCode: 200, data: '{"ok":true}' })
       return { onProgressUpdate: vi.fn() }
     })
     ;(globalThis as any).uni = { getStorageSync: () => 'token', uploadFile }
-    await apiUploadPhoto('18', '/user/original.png', {
+    await apiUploadPhoto('18', '/user/archive.jpg', {
       photo_uuid: 'photo-timeout',
       client_captured_at: '2026-08-25T01:00:00Z',
       orientation: 1,
       width: 4_000,
       height: 3_000,
       sha256: 'd'.repeat(64),
-      original_size_bytes: 3 * 1024 * 1024,
-      original_filename: 'original.png',
-      original_mime_type: 'image/png',
+      original_size_bytes: 1_048_576,
+      original_filename: 'archive.jpg',
+      original_mime_type: 'image/jpeg',
       title: '',
       photo_date: '2026-08-25',
+      capture_source: 'camera',
+      transfer_profile: 'jpeg_1m',
     })
-    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/user/original.png', name: 'file', timeout: 55_000 }))
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/user/archive.jpg', name: 'file', timeout: 55_000 }))
     expect(uploadFile.mock.calls[0][0].formData.photo_uuid).toBe('photo-timeout')
+    expect(uploadFile.mock.calls[0][0].formData.transfer_profile).toBe('jpeg_1m')
   })
 })

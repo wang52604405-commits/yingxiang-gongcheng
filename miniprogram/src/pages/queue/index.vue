@@ -11,6 +11,7 @@ import { formatBytes } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
 const photos = computed(() => queueRuntime.state.photos.filter((photo) => photo.status !== 'desktop_imported'))
+const retryableFailures = computed(() => photos.value.filter((photo) => photo.status === 'failed' && photo.retryable !== false).length)
 const uniApi = uni
 
 function openConfirm(clientBatchId: string) {
@@ -18,11 +19,14 @@ function openConfirm(clientBatchId: string) {
 }
 
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
-  if (photo.original_path) {
-    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览由服务器恢复'
-    return `原图 ${formatBytes(photo.original_size)}${preview}`
+  if (photo.transfer_path) {
+    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览待恢复'
+    return `待传图 ${formatBytes(Number(photo.transfer_size || 0))}${preview}`
   }
-  if (!photo.preview_path) return '原图已上传 · 预览自动恢复中'
+  if (photo.original_path) {
+    return `原始照片已保存 · 正在生成传输图`
+  }
+  if (!photo.preview_path) return '归档图已上传 · 预览自动恢复中'
   return `预览 ${formatBytes(photo.preview_size)}`
 }
 
@@ -44,11 +48,11 @@ onShow(() => {
 
     <view v-if="!queueRuntime.state.online" class="network-card offline">
       <view class="network-symbol" />
-      <text class="network-title">离线，原图已保存在本机</text>
+      <text class="network-title">离线，待传图已保存在本机</text>
     </view>
 
-    <view v-if="queueRuntime.failedCount.value" class="retry-bar">
-      <text>{{ queueRuntime.failedCount.value }} 张需要重试</text>
+    <view v-if="retryableFailures" class="retry-bar">
+      <text>{{ retryableFailures }} 张需要重试</text>
       <button class="pressable" @tap="queueRuntime.retryAll">全部重试</button>
     </view>
 
@@ -62,8 +66,9 @@ onShow(() => {
           <text class="queue-storage">{{ storageLabel(photo) }}</text>
           <view v-if="photo.status === 'uploading'" class="progress-track"><view class="progress-fill" :style="{ transform: `scaleX(${photo.progress / 100})` }" /></view>
           <text v-if="photo.error" class="error-copy">{{ photo.error }}</text>
-          <view v-if="(photo.status === 'failed' && photo.retryable !== false) || photo.status === 'needs_review'" class="queue-actions">
-            <button v-if="photo.status === 'failed' && photo.retryable !== false" class="mini-action pressable" @tap="queueRuntime.retry(photo.photo_uuid)">重试</button>
+          <view v-if="photo.failure_code === 'ARCHIVE_INFO_REQUIRED' || queueRuntime.canManuallyRetry(photo.photo_uuid) || photo.status === 'needs_review'" class="queue-actions">
+            <button v-if="photo.failure_code === 'ARCHIVE_INFO_REQUIRED'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">完善信息</button>
+            <button v-if="queueRuntime.canManuallyRetry(photo.photo_uuid)" class="mini-action pressable" @tap="queueRuntime.retry(photo.photo_uuid)">{{ photo.retryable === false ? '权限恢复后重试' : '重试' }}</button>
             <button v-if="photo.status === 'needs_review'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">确认</button>
           </view>
         </view>

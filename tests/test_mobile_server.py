@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import sqlite3
 import ast
@@ -169,6 +170,7 @@ class MobileServerContractTest(unittest.TestCase):
         revision=7,
         requirements=None,
         legacy_photo_uuids=None,
+        processes=None,
     ):
         # 大多数测试传账号登录令牌以表示租户；新桌面契约
         # 实际上传必须换成与请求机器一致的 desktop_sync_token。
@@ -207,7 +209,11 @@ class MobileServerContractTest(unittest.TestCase):
                                             "internal_project_code": "LOCAL-001",
                                             "name": "左岸连接堤",
                                             "division_type": "unit",
-                                            "processes": ["土方填筑"],
+                                            "processes": (
+                                                ["土方填筑"]
+                                                if processes is None
+                                                else list(processes)
+                                            ),
                                         }
                                     ],
                                 }
@@ -257,23 +263,36 @@ class MobileServerContractTest(unittest.TestCase):
         return stream.getvalue()
 
     def _create_batch(
-        self, token, mode="direct", scope="engineering", project_id="default"
+        self,
+        token,
+        mode="direct",
+        scope="engineering",
+        project_id="default",
+        transfer_profile=None,
     ):
         assignment = (
-            {"unit_code": "YNLQ-001-01-001", "process_name": ""}
+            {
+                "unit_code": "YNLQ-001-01-001",
+                "process_name": (
+                    "土方填筑" if transfer_profile == "jpeg_1m" else ""
+                ),
+            }
             if scope == "engineering"
             else {"other_node_code": "OTHER-SITE"}
         )
+        payload = {
+            "client_batch_id": str(uuid.uuid4()),
+            "project_id": project_id,
+            "scope": scope,
+            "category": "construction" if scope == "engineering" else "",
+            "mode": mode,
+            "assignment": assignment if mode == "direct" else {},
+        }
+        if transfer_profile is not None:
+            payload["transfer_profile"] = transfer_profile
         response = self.client.post(
             "/api/mobile/v1/batches",
-            json={
-                "client_batch_id": str(uuid.uuid4()),
-                "project_id": project_id,
-                "scope": scope,
-                "category": "construction" if scope == "engineering" else "",
-                "mode": mode,
-                "assignment": assignment if mode == "direct" else {},
-            },
+            json=payload,
             headers=self._headers(token),
         )
         self.assertEqual(response.status_code, 201, response.get_json())
@@ -290,6 +309,7 @@ class MobileServerContractTest(unittest.TestCase):
         original_size_bytes=None,
         original_filename=None,
         capture_source=None,
+        transfer_profile=None,
     ):
         fields = {
             "file": (io.BytesIO(content), filename),
@@ -308,6 +328,8 @@ class MobileServerContractTest(unittest.TestCase):
         }
         if capture_source is not None:
             fields["capture_source"] = capture_source
+        if transfer_profile is not None:
+            fields["transfer_profile"] = transfer_profile
         return self.client.post(
             f"/api/mobile/v1/batches/{batch_id}/photos",
             data=fields,
@@ -395,23 +417,27 @@ class MobileServerContractTest(unittest.TestCase):
         chunk_size,
         sha=None,
         filename="分片原图.jpg",
+        transfer_profile=None,
     ):
+        payload = {
+            "photo_uuid": photo_uuid,
+            "sha256": sha or hashlib.sha256(content).hexdigest(),
+            "original_size_bytes": len(content),
+            "original_filename": filename,
+            "chunk_size_bytes": chunk_size,
+            "total_chunks": (len(content) + chunk_size - 1) // chunk_size,
+            "client_captured_at": "2026-08-25T01:02:03Z",
+            "orientation": 1,
+            "width": 640,
+            "height": 480,
+            "title": "分片现场影像",
+            "photo_date": "2026-08-25",
+        }
+        if transfer_profile is not None:
+            payload["transfer_profile"] = transfer_profile
         return self.client.post(
             f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/init",
-            json={
-                "photo_uuid": photo_uuid,
-                "sha256": sha or hashlib.sha256(content).hexdigest(),
-                "original_size_bytes": len(content),
-                "original_filename": filename,
-                "chunk_size_bytes": chunk_size,
-                "total_chunks": (len(content) + chunk_size - 1) // chunk_size,
-                "client_captured_at": "2026-08-25T01:02:03Z",
-                "orientation": 1,
-                "width": 640,
-                "height": 480,
-                "title": "分片现场影像",
-                "photo_date": "2026-08-25",
-            },
+            json=payload,
             headers=self._headers(token),
         )
 
@@ -1591,6 +1617,89 @@ class MobileServerContractTest(unittest.TestCase):
             "提交先完成时，迟到上传不得留孤儿对象",
         )
 
+    def test_archive_info_patch_wins_over_direct_upload_in_object_storage(self):
+        from server.mobile_storage import LocalObjectStorage
+
+        project_id = "upload-archive-info-race"
+        self._snapshot(
+            self.token_a,
+            "归档信息竞态工程",
+            project_id=project_id,
+            processes=["土方填筑", "钢筋安装"],
+        )
+        batch_id = self._create_batch(
+            self.token_a,
+            project_id=project_id,
+            transfer_profile="jpeg_1m",
+        )
+        photo_uuid = str(uuid.uuid4())
+        content = self._jpeg((83, 103, 123), size=(1200, 900))
+        entered_storage = threading.Event()
+        release_storage = threading.Event()
+        real_put_stream = LocalObjectStorage.put_stream
+
+        def delayed_put_stream(instance, key, stream, size_bytes, content_type):
+            entered_storage.set()
+            if not release_storage.wait(5):
+                raise AssertionError("测试未及时释放对象写入")
+            return real_put_stream(instance, key, stream, size_bytes, content_type)
+
+        def late_upload():
+            with self.app.test_client() as client:
+                return client.post(
+                    f"/api/mobile/v1/batches/{batch_id}/photos",
+                    data={
+                        "file": (io.BytesIO(content), "归档竞态.jpg"),
+                        "photo_uuid": photo_uuid,
+                        "orientation": "1",
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "original_size_bytes": str(len(content)),
+                        "original_filename": "归档竞态.jpg",
+                        "transfer_profile": "jpeg_1m",
+                    },
+                    headers=self._headers(self.token_a),
+                    content_type="multipart/form-data",
+                )
+
+        replacement = {
+            "unit_code": "YNLQ-001-01-001",
+            "process_name": "钢筋安装",
+        }
+        with patch(
+            "server.mobile_storage.LocalObjectStorage.put_stream",
+            new=delayed_put_stream,
+        ), ThreadPoolExecutor(max_workers=1) as pool:
+            late_future = pool.submit(late_upload)
+            self.assertTrue(entered_storage.wait(3))
+            patched = self.client.patch(
+                f"/api/mobile/v1/batches/{batch_id}/archive-info",
+                json={"assignment": replacement},
+                headers=self._headers(self.token_a),
+            )
+            self.assertEqual(patched.status_code, 200, patched.get_json())
+            self.assertEqual(
+                patched.get_json()["batch"]["assignment"]["process_name"],
+                "钢筋安装",
+            )
+            release_storage.set()
+            uploaded = late_future.result(timeout=5)
+
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        self.assertEqual(
+            uploaded.get_json()["photo"]["assignment"]["process_name"],
+            "钢筋安装",
+        )
+        detail = self.client.get(
+            f"/api/mobile/v1/batches/{batch_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        batch = detail.get_json()["batch"]
+        self.assertEqual(batch["assignment"]["process_name"], "钢筋安装")
+        self.assertEqual(
+            batch["photos"][0]["assignment"], batch["assignment"]
+        )
+
     def test_wechat_auth_is_rate_limited(self):
         from server import app as server_app
 
@@ -2343,6 +2452,7 @@ class MobileServerContractTest(unittest.TestCase):
 
     def test_legacy_cloud_photo_schema_migrates_without_losing_existing_rows(self):
         legacy_column_lines = (
+            "    transfer_profile TEXT NOT NULL DEFAULT '',\n",
             "    photographer         TEXT NOT NULL DEFAULT '',\n",
             "    uploaded_by          TEXT NOT NULL DEFAULT '',\n",
             "    deleted_at           TEXT NOT NULL DEFAULT '',\n",
@@ -2404,6 +2514,7 @@ class MobileServerContractTest(unittest.TestCase):
                     }
                     self.assertTrue(expected_columns.issubset(photo_columns))
                     self.assertTrue(expected_columns.isdisjoint(batch_columns))
+                    self.assertIn("transfer_profile", batch_columns)
                     row = migrated.execute(
                         "SELECT photo_uuid, size_bytes, photographer, uploaded_by, "
                         "deleted_at, deleted_by_machine_id FROM cloud_photos "
@@ -2420,6 +2531,624 @@ class MobileServerContractTest(unittest.TestCase):
                     migrated.close()
             finally:
                 self.db.config.DB_PATH = original_db_path
+
+    def test_assignment_uses_trusted_full_hierarchy_and_hydrates_legacy_photos(self):
+        project_id = f"hierarchy-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "完整归档层级测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        batch_response = self.client.post(
+            "/api/mobile/v1/batches",
+            json={
+                "client_batch_id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "scope": "engineering",
+                "category": "construction",
+                "mode": "direct",
+                "assignment": {
+                    "contract_code": "FORGED-CONTRACT",
+                    "contract_name": "客户端伪造合同",
+                    "part_name": "客户端伪造分部",
+                    "unit_code": "YNLQ-001-01-001",
+                    "unit_name": "客户端伪造单元",
+                    "process_name": "土方填筑",
+                },
+            },
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(batch_response.status_code, 201, batch_response.get_json())
+        batch = batch_response.get_json()["batch"]
+        assignment = batch["assignment"]
+        self.assertEqual(
+            assignment,
+            {
+                "contract_code": "YNLQ-C",
+                "contract_name": "洺河龙泉缓洪工程",
+                "unit_project_code": "YNLQ-U",
+                "unit_project_name": "龙泉河单位工程",
+                "part_code": "YNLQ-P",
+                "part_name": "左岸连接工程",
+                "unit_code": "YNLQ-001-01-001",
+                "unit_name": "左岸连接堤",
+                "process_code": assignment["process_code"],
+                "process_name": "土方填筑",
+            },
+        )
+        self.assertTrue(assignment["process_code"])
+
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            batch["batch_id"],
+            photo_uuid,
+            self._jpeg((50, 105, 135)),
+            filename="完整层级.jpg",
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        uploaded_photo = uploaded.get_json()["photo"]
+        self.assertEqual(uploaded_photo["assignment"], assignment)
+        self.assertEqual(uploaded_photo["hierarchy"]["unit_name"], "左岸连接堤")
+        self.assertEqual(uploaded_photo["project_name"], "完整归档层级测试工程")
+        self.assertEqual(
+            uploaded_photo["archive"]["target_machine_id"], "MACHINE-A"
+        )
+
+        # 模拟旧照片只保存 unit_code/process_name；详情与图库读取时仍由服务端树补齐。
+        conn = self.db.connect()
+        try:
+            conn.execute(
+                "UPDATE cloud_photos SET assignment_json = ? WHERE photo_uuid = ?",
+                (
+                    '{"unit_code":"YNLQ-001-01-001",'
+                    '"process_name":"土方填筑"}',
+                    photo_uuid,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}?project_id={project_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        detail_photo = detail.get_json()["photo"]
+        self.assertEqual(detail_photo["contract_name"], "洺河龙泉缓洪工程")
+        self.assertEqual(detail_photo["unit_project_name"], "龙泉河单位工程")
+        self.assertEqual(detail_photo["part_name"], "左岸连接工程")
+        self.assertEqual(detail_photo["unit_name"], "左岸连接堤")
+        self.assertEqual(detail_photo["process_name"], "土方填筑")
+
+        gallery = self.client.get(
+            "/api/mobile/v1/photos",
+            query_string={
+                "project_id": project_id,
+                "scope": "engineering",
+                "unit_code": "YNLQ-001-01-001",
+            },
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(gallery.status_code, 200, gallery.get_json())
+        self.assertEqual(gallery.get_json()["total"], 1)
+        self.assertEqual(gallery.get_json()["photos"][0]["photo_uuid"], photo_uuid)
+        self.assertEqual(
+            gallery.get_json()["photos"][0]["hierarchy"]["part_name"],
+            "左岸连接工程",
+        )
+
+        other_batch = self._create_batch(
+            self.token_a, scope="other", project_id=project_id
+        )
+        other_photo_uuid = str(uuid.uuid4())
+        other_uploaded = self._upload(
+            self.token_a,
+            other_batch,
+            other_photo_uuid,
+            self._jpeg((75, 115, 145)),
+            filename="其它影像.jpg",
+        )
+        self.assertEqual(other_uploaded.status_code, 201, other_uploaded.get_json())
+        self.assertEqual(
+            other_uploaded.get_json()["photo"]["other_node_name"], "现场记录"
+        )
+
+    def test_jpeg_1m_transfer_profile_is_batch_bound_and_legacy_uploads_remain_valid(self):
+        from server import config
+
+        batch_id = self._create_batch(
+            self.token_a, transfer_profile="jpeg_1m"
+        )
+        batch_detail = self.client.get(
+            f"/api/mobile/v1/batches/{batch_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(batch_detail.status_code, 200, batch_detail.get_json())
+        self.assertEqual(
+            batch_detail.get_json()["batch"]["transfer_profile"], "jpeg_1m"
+        )
+
+        jpeg_content = self._jpeg((32, 82, 122))
+        jpeg_uuid = str(uuid.uuid4())
+        # 单图表单故意不重复 profile：服务器必须从批次继承新规格。
+        accepted = self._upload(
+            self.token_a,
+            batch_id,
+            jpeg_uuid,
+            jpeg_content,
+            filename="一兆归档.jpg",
+        )
+        self.assertEqual(accepted.status_code, 201, accepted.get_json())
+        self.assertLessEqual(accepted.get_json()["photo"]["size_bytes"], 102400)
+        conn = self.db.connect()
+        try:
+            stored = conn.execute(
+                "SELECT original_mime_type, original_size_bytes, original_sha256 "
+                "FROM cloud_photos WHERE photo_uuid = ?",
+                (jpeg_uuid,),
+            ).fetchone()
+            self.assertEqual(stored["original_mime_type"], "image/jpeg")
+            self.assertEqual(stored["original_size_bytes"], len(jpeg_content))
+            self.assertEqual(
+                stored["original_sha256"], hashlib.sha256(jpeg_content).hexdigest()
+            )
+        finally:
+            conn.close()
+
+        exact_boundary = jpeg_content + b"x" * (
+            config.MOBILE_JPEG_1M_MAX_BYTES - len(jpeg_content)
+        )
+        exact_uuid = str(uuid.uuid4())
+        accepted_boundary = self._upload(
+            self.token_a,
+            batch_id,
+            exact_uuid,
+            exact_boundary,
+            filename="恰好一兆.jpg",
+        )
+        self.assertEqual(
+            accepted_boundary.status_code, 201, accepted_boundary.get_json()
+        )
+        conn = self.db.connect()
+        try:
+            exact_stored_size = conn.execute(
+                "SELECT original_size_bytes FROM cloud_photos WHERE photo_uuid = ?",
+                (exact_uuid,),
+            ).fetchone()["original_size_bytes"]
+            self.assertEqual(
+                exact_stored_size, config.MOBILE_JPEG_1M_MAX_BYTES
+            )
+        finally:
+            conn.close()
+
+        exact_chunk_uuid = str(uuid.uuid4())
+        accepted_chunk_boundary = self._chunk_init(
+            self.token_a,
+            batch_id,
+            exact_chunk_uuid,
+            exact_boundary,
+            chunk_size=config.MOBILE_CHUNK_BYTES,
+        )
+        self.assertEqual(
+            accepted_chunk_boundary.status_code,
+            201,
+            accepted_chunk_boundary.get_json(),
+        )
+        aborted_chunk_boundary = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/"
+            f"{exact_chunk_uuid}/abort",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(
+            aborted_chunk_boundary.status_code,
+            200,
+            aborted_chunk_boundary.get_json(),
+        )
+
+        png_content = self._png((32, 82, 122, 190))
+        rejected_png = self._upload(
+            self.token_a,
+            batch_id,
+            str(uuid.uuid4()),
+            png_content,
+            filename="不得上传.png",
+        )
+        self.assertEqual(rejected_png.status_code, 415, rejected_png.get_json())
+        self.assertEqual(rejected_png.get_json()["code"], "archive_jpeg_required")
+
+        oversized = jpeg_content + b"x" * (
+            config.MOBILE_JPEG_1M_MAX_BYTES + 1 - len(jpeg_content)
+        )
+        rejected_large = self._upload(
+            self.token_a,
+            batch_id,
+            str(uuid.uuid4()),
+            oversized,
+            filename="超过一兆.jpg",
+        )
+        self.assertEqual(rejected_large.status_code, 413, rejected_large.get_json())
+        self.assertEqual(rejected_large.get_json()["code"], "original_too_large")
+
+        rejected_chunk = self._chunk_init(
+            self.token_a,
+            batch_id,
+            str(uuid.uuid4()),
+            oversized,
+            chunk_size=config.MOBILE_CHUNK_BYTES,
+        )
+        self.assertEqual(rejected_chunk.status_code, 413, rejected_chunk.get_json())
+        self.assertEqual(rejected_chunk.get_json()["code"], "original_too_large")
+
+        legacy_batch = self._create_batch(self.token_a)
+        legacy_png = self._upload(
+            self.token_a,
+            legacy_batch,
+            str(uuid.uuid4()),
+            png_content,
+            filename="旧队列继续上传.png",
+        )
+        self.assertEqual(legacy_png.status_code, 201, legacy_png.get_json())
+        conn = self.db.connect()
+        try:
+            legacy_stored = conn.execute(
+                "SELECT original_mime_type FROM cloud_photos WHERE photo_uuid = ?",
+                (legacy_png.get_json()["photo"]["photo_uuid"],),
+            ).fetchone()
+            self.assertEqual(legacy_stored["original_mime_type"], "image/png")
+        finally:
+            conn.close()
+
+        invalid_profile = self.client.post(
+            "/api/mobile/v1/batches",
+            json={
+                "client_batch_id": str(uuid.uuid4()),
+                "project_id": "default",
+                "scope": "engineering",
+                "category": "construction",
+                "mode": "direct",
+                "assignment": {"unit_code": "YNLQ-001-01-001"},
+                "transfer_profile": "jpeg_2m",
+            },
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(invalid_profile.status_code, 400, invalid_profile.get_json())
+        self.assertEqual(invalid_profile.get_json()["code"], "invalid_transfer_profile")
+
+    def test_jpeg_1m_batches_require_assignment_and_active_process(self):
+        project_id = f"jpeg-assignment-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "新版完整归档门槛工程",
+            project_id=project_id,
+            revision=1,
+        )
+
+        def create(mode, assignment, *, target_project_id=project_id, profile="jpeg_1m"):
+            payload = {
+                "client_batch_id": str(uuid.uuid4()),
+                "project_id": target_project_id,
+                "scope": "engineering",
+                "category": "construction",
+                "mode": mode,
+                "assignment": assignment,
+            }
+            if profile is not None:
+                payload["transfer_profile"] = profile
+            return self.client.post(
+                "/api/mobile/v1/batches",
+                json=payload,
+                headers=self._headers(self.token_a),
+            )
+
+        for mode in ("direct", "auto"):
+            missing_assignment = create(mode, {})
+            self.assertEqual(
+                missing_assignment.status_code, 400, missing_assignment.get_json()
+            )
+            self.assertEqual(
+                missing_assignment.get_json()["code"], "assignment_required"
+            )
+
+            missing_process = create(
+                mode,
+                {"unit_code": "YNLQ-001-01-001", "process_name": ""},
+            )
+            self.assertEqual(
+                missing_process.status_code, 400, missing_process.get_json()
+            )
+            self.assertEqual(missing_process.get_json()["code"], "process_required")
+
+            accepted = create(
+                mode,
+                {
+                    "unit_code": "YNLQ-001-01-001",
+                    "process_name": "土方填筑",
+                },
+            )
+            self.assertEqual(accepted.status_code, 201, accepted.get_json())
+            assignment = accepted.get_json()["batch"]["assignment"]
+            self.assertEqual(assignment["contract_name"], "洺河龙泉缓洪工程")
+            self.assertEqual(assignment["unit_project_name"], "龙泉河单位工程")
+            self.assertEqual(assignment["part_name"], "左岸连接工程")
+            self.assertEqual(assignment["unit_name"], "左岸连接堤")
+            self.assertTrue(assignment["process_code"])
+            self.assertEqual(assignment["process_name"], "土方填筑")
+
+        # 升级前无 profile 的自动批次继续允许空 assignment，避免旧队列失效。
+        legacy_auto = create("auto", {}, profile=None)
+        self.assertEqual(legacy_auto.status_code, 201, legacy_auto.get_json())
+        self.assertEqual(legacy_auto.get_json()["batch"]["assignment"], {})
+
+        # 树中保留已停用工序时不应误判为必选；只看当前 active 子节点。
+        no_process_project = f"jpeg-no-process-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "无有效工序工程",
+            project_id=no_process_project,
+            revision=1,
+        )
+        self._snapshot(
+            self.desktop_token_a,
+            "无有效工序工程",
+            project_id=no_process_project,
+            revision=2,
+            processes=[],
+        )
+        no_process = create(
+            "auto",
+            {"unit_code": "YNLQ-001-01-001", "process_name": ""},
+            target_project_id=no_process_project,
+        )
+        self.assertEqual(no_process.status_code, 201, no_process.get_json())
+        self.assertEqual(
+            no_process.get_json()["batch"]["assignment"]["process_code"], ""
+        )
+        self.assertEqual(
+            no_process.get_json()["batch"]["assignment"]["process_name"], ""
+        )
+
+    def test_chunk_init_normalizes_legacy_missing_empty_transfer_profile(self):
+        from server import config
+
+        batch_id = self._create_batch(self.token_a)
+        content = self._jpeg((62, 91, 124))
+        photo_uuid = str(uuid.uuid4())
+        first = self._chunk_init(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            content,
+            chunk_size=config.MOBILE_CHUNK_BYTES,
+        )
+        self.assertEqual(first.status_code, 201, first.get_json())
+        conn = self.db.connect()
+        try:
+            row = conn.execute(
+                "SELECT id, metadata_json FROM mobile_upload_sessions "
+                "WHERE account_id = (SELECT id FROM accounts WHERE username = 'tenant_a') "
+                "AND batch_id = ? AND photo_uuid = ?",
+                (batch_id, photo_uuid),
+            ).fetchone()
+            metadata = json.loads(row["metadata_json"])
+            metadata.pop("transfer_profile", None)
+            conn.execute(
+                "UPDATE mobile_upload_sessions SET metadata_json = ? WHERE id = ?",
+                (
+                    json.dumps(
+                        metadata, ensure_ascii=False, separators=(",", ":")
+                    ),
+                    row["id"],
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        retried = self._chunk_init(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            content,
+            chunk_size=config.MOBILE_CHUNK_BYTES,
+            transfer_profile="",
+        )
+        self.assertEqual(retried.status_code, 200, retried.get_json())
+        self.assertTrue(retried.get_json()["idempotent"])
+        self.assertEqual(retried.get_json()["upload"]["status"], "active")
+        aborted = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/{photo_uuid}/abort",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(aborted.status_code, 200, aborted.get_json())
+
+    def test_hydrate_preserves_history_when_engineering_ancestors_are_missing(self):
+        project_id = f"partial-hierarchy-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "旧照片部分层级工程",
+            project_id=project_id,
+            revision=1,
+        )
+        batch_id = self._create_batch(self.token_a, project_id=project_id)
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            self._jpeg((83, 101, 127)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        historical = {
+            "contract_code": "HISTORY-C",
+            "contract_name": "历史合同名称",
+            "unit_project_code": "HISTORY-U",
+            "unit_project_name": "历史单位工程名称",
+            "part_code": "HISTORY-P",
+            "part_name": "历史分部名称",
+            "unit_code": "YNLQ-001-01-001",
+            "unit_name": "历史单元名称",
+            "process_name": "土方填筑",
+        }
+        conn = self.db.connect()
+        try:
+            account_id = conn.execute(
+                "SELECT id FROM accounts WHERE username = 'tenant_a'"
+            ).fetchone()["id"]
+            conn.execute(
+                "UPDATE cloud_photos SET assignment_json = ? WHERE photo_uuid = ?",
+                (
+                    json.dumps(
+                        historical, ensure_ascii=False, separators=(",", ":")
+                    ),
+                    photo_uuid,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM cloud_units WHERE account_id = ? AND project_id = ? "
+                "AND node_code = 'YNLQ-P'",
+                (account_id, project_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}?project_id={project_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        assignment = detail.get_json()["photo"]["assignment"]
+        self.assertEqual(assignment["contract_name"], "历史合同名称")
+        self.assertEqual(assignment["unit_project_name"], "历史单位工程名称")
+        self.assertEqual(assignment["part_name"], "历史分部名称")
+        self.assertEqual(assignment["unit_name"], "左岸连接堤")
+        self.assertEqual(assignment["process_name"], "土方填筑")
+
+    def test_archive_info_patch_updates_existing_batch_and_photos_idempotently(self):
+        project_id = f"archive-patch-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "旧远端批次补归档工程",
+            project_id=project_id,
+            revision=1,
+        )
+        batch_id = self._create_batch(
+            self.token_a, mode="auto", project_id=project_id
+        )
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            self._jpeg((93, 121, 142)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        self.assertEqual(uploaded.get_json()["photo"]["assignment"], {})
+
+        # 模拟旧版本已创建的 jpeg_1m 远端批次：批次和已有照片都尚未补归档。
+        conn = self.db.connect()
+        try:
+            conn.execute(
+                "UPDATE mobile_batches SET transfer_profile = 'jpeg_1m' WHERE id = ?",
+                (batch_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        requested_assignment = {
+            "contract_name": "客户端旧名称不会被信任",
+            "unit_code": "YNLQ-001-01-001",
+            "process_name": "土方填筑",
+        }
+        endpoint = f"/api/mobile/v1/batches/{batch_id}/archive-info"
+        patched = self.client.patch(
+            endpoint,
+            json={"assignment": requested_assignment},
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(patched.status_code, 200, patched.get_json())
+        self.assertFalse(patched.get_json()["idempotent"])
+        batch = patched.get_json()["batch"]
+        assignment = batch["assignment"]
+        self.assertEqual(assignment["contract_name"], "洺河龙泉缓洪工程")
+        self.assertEqual(assignment["unit_project_name"], "龙泉河单位工程")
+        self.assertEqual(assignment["part_name"], "左岸连接工程")
+        self.assertEqual(assignment["unit_name"], "左岸连接堤")
+        self.assertTrue(assignment["process_code"])
+        self.assertEqual(assignment["process_name"], "土方填筑")
+        self.assertEqual(batch["photos"][0]["assignment"], assignment)
+
+        conn = self.db.connect()
+        try:
+            before_retry = conn.execute(
+                "SELECT b.updated_at AS batch_updated_at, p.updated_at AS photo_updated_at, "
+                "b.assignment_json AS batch_assignment, p.assignment_json AS photo_assignment "
+                "FROM mobile_batches b JOIN cloud_photos p ON p.batch_id = b.id "
+                "AND p.account_id = b.account_id WHERE b.id = ? AND p.photo_uuid = ?",
+                (batch_id, photo_uuid),
+            ).fetchone()
+            self.assertEqual(
+                json.loads(before_retry["batch_assignment"]), assignment
+            )
+            self.assertEqual(
+                json.loads(before_retry["photo_assignment"]), assignment
+            )
+        finally:
+            conn.close()
+
+        retried = self.client.patch(
+            endpoint,
+            json={"assignment": requested_assignment},
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(retried.status_code, 200, retried.get_json())
+        self.assertTrue(retried.get_json()["idempotent"])
+        conn = self.db.connect()
+        try:
+            after_retry = conn.execute(
+                "SELECT b.updated_at AS batch_updated_at, p.updated_at AS photo_updated_at "
+                "FROM mobile_batches b JOIN cloud_photos p ON p.batch_id = b.id "
+                "AND p.account_id = b.account_id WHERE b.id = ? AND p.photo_uuid = ?",
+                (batch_id, photo_uuid),
+            ).fetchone()
+            self.assertEqual(
+                after_retry["batch_updated_at"], before_retry["batch_updated_at"]
+            )
+            self.assertEqual(
+                after_retry["photo_updated_at"], before_retry["photo_updated_at"]
+            )
+        finally:
+            conn.close()
+
+        missing_process = self.client.patch(
+            endpoint,
+            json={
+                "assignment": {
+                    "unit_code": "YNLQ-001-01-001",
+                    "process_name": "",
+                }
+            },
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(missing_process.status_code, 400, missing_process.get_json())
+        self.assertEqual(missing_process.get_json()["code"], "process_required")
+
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/commit",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+        rejected_terminal = self.client.patch(
+            endpoint,
+            json={"assignment": requested_assignment},
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(
+            rejected_terminal.status_code, 409, rejected_terminal.get_json()
+        )
+        self.assertEqual(rejected_terminal.get_json()["code"], "batch_committed")
 
     def test_mobile_upload_records_authenticated_account_as_photographer(self):
         batch_id = self._create_batch(self.token_a)
@@ -2615,6 +3344,19 @@ class MobileServerContractTest(unittest.TestCase):
             headers=self._headers(self.desktop_token_a),
         )
         self.assertEqual(downgraded.status_code, 200, downgraded.get_json())
+        denied_archive_info = self.client.patch(
+            f"/api/mobile/v1/batches/{batch_id}/archive-info",
+            json={
+                "assignment": {
+                    "unit_code": "YNLQ-001-01-001",
+                    "process_name": "",
+                }
+            },
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(
+            denied_archive_info.status_code, 403, denied_archive_info.get_json()
+        )
         denied_batch = self.client.post(
             "/api/mobile/v1/batches",
             json={
