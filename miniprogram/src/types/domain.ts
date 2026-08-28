@@ -13,6 +13,7 @@ export type PhotoStatus =
   | 'needs_review'
   | 'desktop_pending'
   | 'desktop_imported'
+  | 'local_deleted'
   | 'failed'
 
 export interface Account {
@@ -169,6 +170,7 @@ export interface LocalPhoto {
   original_removed?: boolean
   server_saved_at?: string
   deleted_at?: string
+  local_deleted_at?: string
   preparation_pending?: boolean
   preview_recovery_pending?: boolean
   preview_error?: string

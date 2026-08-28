@@ -109,7 +109,7 @@ function persist(owner = state.ownerAccountId): void {
   if (!isCurrentOwner(owner)) return
   queueFileStore.persistSnapshot(owner, JSON.parse(JSON.stringify(state.photos)), JSON.parse(JSON.stringify(state.batches)))
   try {
-    uni.setStorageSync(`engineering-image:queue-count:v3:${owner}`, state.photos.filter((photo) => photo.status !== 'desktop_imported').length)
+    uni.setStorageSync(`engineering-image:queue-count:v3:${owner}`, state.photos.filter((photo) => !['desktop_imported', 'local_deleted'].includes(photo.status)).length)
     uni.setStorageSync('engineering-image:active-queue-owner:v3', owner)
   } catch { /* 徽标是可丢缓存；文件分片才是队列权威数据。 */ }
 }
@@ -671,6 +671,7 @@ const REMOTE_STATUS_RANK: Partial<Record<PhotoStatus, number>> = {
 }
 
 async function applyRemoteStatus(photo: LocalPhoto, remoteStatus: string): Promise<void> {
+  if (photo.status === 'local_deleted') return
   if (!(remoteStatus in REMOTE_STATUS_RANK)) return
   const target = remoteStatus as PhotoStatus
   const currentRank = REMOTE_STATUS_RANK[photo.status] || 0
@@ -709,8 +710,8 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
       if (remote.photo_date) local.photo_date = remote.photo_date
       if (!hasPermanentArchiveInfoFailure(batch)) await applyRemoteStatus(local, remote.status)
     }
-    if (localPhotos.every((photo) => ['needs_review', 'desktop_pending', 'desktop_imported'].includes(photo.status))) batch.analyzed = batch.draft.mode === 'auto' || batch.analyzed
-    if (localPhotos.every((photo) => ['desktop_pending', 'desktop_imported'].includes(photo.status))) batch.committed = true
+    if (localPhotos.every((photo) => ['needs_review', 'desktop_pending', 'desktop_imported', 'local_deleted'].includes(photo.status))) batch.analyzed = batch.draft.mode === 'auto' || batch.analyzed
+    if (localPhotos.every((photo) => ['desktop_pending', 'desktop_imported', 'local_deleted'].includes(photo.status))) batch.committed = true
     persist(owner)
   } catch (error) {
     // 状态刷新是尽力而为；绝不把服务器已保存的照片降级。
@@ -860,7 +861,7 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
     for (const batch of [...state.batches]) {
       if (!isCurrentOwner(owner, generation) || !state.online) break
       const batchPhotos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
-      if (batchPhotos.length && batchPhotos.every((photo) => photo.status === 'desktop_imported')) continue
+      if (batchPhotos.length && batchPhotos.every((photo) => ['desktop_imported', 'local_deleted'].includes(photo.status))) continue
       try {
         await refreshRemoteBatch(batch, generation)
         await processBatch(batch, generation)
@@ -1212,6 +1213,43 @@ async function retryAll(): Promise<void> {
   for (const photo of state.photos.filter((item) => item.status === 'failed' && item.retryable !== false)) await retry(photo.photo_uuid)
 }
 
+async function deleteFailed(photoUuid: string): Promise<void> {
+  const photo = state.photos.find((item) => item.photo_uuid === photoUuid)
+  if (!photo || !isCurrentOwner(photo.owner_account_id)) throw new Error('本机队列中没有找到这张照片')
+  if (photo.status !== 'failed') throw new Error('只有处理失败的照片可以从本机删除')
+
+  const paths = [photo.original_path, photo.transfer_path, photo.preview_path].filter((path): path is string => Boolean(path))
+  const removed = await Promise.all(paths.map((path) => removeSavedFile(path)))
+  if (removed.some((ok) => !ok)) throw new Error('本机暂存文件删除失败，请稍后重试')
+
+  photo.original_path = ''
+  photo.original_size = 0
+  photo.original_sha256 = ''
+  photo.original_filename = ''
+  photo.original_mime_type = ''
+  photo.original_removed = true
+  photo.transfer_path = ''
+  photo.transfer_size = 0
+  photo.transfer_sha256 = ''
+  photo.transfer_filename = ''
+  photo.transfer_width = 0
+  photo.transfer_height = 0
+  photo.preview_path = ''
+  photo.preview_size = 0
+  photo.preview_sha256 = ''
+  photo.preview_width = 0
+  photo.preview_height = 0
+  photo.preparation_pending = false
+  photo.preview_recovery_pending = false
+  photo.preview_error = undefined
+  photo.preview_retry_attempts = undefined
+  photo.preview_next_retry_at = undefined
+  photo.local_deleted_at = now()
+  setStatus(photo, 'local_deleted')
+  queueFileStore.clearOriginalWal(photo.owner_account_id, photo.photo_uuid)
+  persist(photo.owner_account_id)
+}
+
 function recoverAuthFailures(): void {
   state.photos.filter((photo) => photo.status === 'failed' && photo.failure_code === 'AUTH_EXPIRED').forEach((photo) => {
     photo.status = retryTarget(photo)
@@ -1242,7 +1280,7 @@ function stopForegroundPolling(): void {
 }
 
 export const queueBytes = computed(() => retainedQueueBytes(state.photos))
-export const pendingCount = computed(() => state.photos.filter((photo) => photo.status !== 'desktop_imported').length)
+export const pendingCount = computed(() => state.photos.filter((photo) => !['desktop_imported', 'local_deleted'].includes(photo.status)).length)
 export const failedCount = computed(() => state.photos.filter((photo) => photo.status === 'failed').length)
 export const queueUsagePercent = computed(() => Math.min(100, Math.round((queueBytes.value / MAX_QUEUE_BYTES) * 100)))
 
@@ -1258,6 +1296,7 @@ export const queueRuntime = {
   canManuallyRetry,
   retry,
   retryAll,
+  deleteFailed,
   recoverAuthFailures,
   startForegroundPolling,
   stopForegroundPolling,

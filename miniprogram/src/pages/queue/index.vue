@@ -10,12 +10,35 @@ import { selectionStorage } from '@/stores/selection'
 import { formatBytes } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
-const photos = computed(() => queueRuntime.state.photos.filter((photo) => photo.status !== 'desktop_imported'))
+const photos = computed(() => queueRuntime.state.photos.filter((photo) => !['desktop_imported', 'local_deleted'].includes(photo.status)))
 const retryableFailures = computed(() => photos.value.filter((photo) => photo.status === 'failed' && photo.retryable !== false).length)
 const uniApi = uni
+const deletingPhotoId = ref('')
 
 function openConfirm(clientBatchId: string) {
   uni.navigateTo({ url: `/pages/upload/confirm?batch=${clientBatchId}` })
+}
+
+function requestDelete(photo: (typeof queueRuntime.state.photos)[number]) {
+  if (deletingPhotoId.value) return
+  uni.showModal({
+    title: '删除失败照片？',
+    content: '会删除手机本机的原图、传输图和预览图，无法恢复；服务器已经保存的照片不会删除。',
+    confirmText: '删除',
+    confirmColor: '#ff6b66',
+    success: async ({ confirm }) => {
+      if (!confirm) return
+      deletingPhotoId.value = photo.photo_uuid
+      try {
+        await queueRuntime.deleteFailed(photo.photo_uuid)
+        uni.showToast({ title: '已从本机删除', icon: 'success' })
+      } catch (error) {
+        uni.showModal({ title: '删除失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false })
+      } finally {
+        deletingPhotoId.value = ''
+      }
+    },
+  })
 }
 
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
@@ -66,10 +89,11 @@ onShow(() => {
           <text class="queue-storage">{{ storageLabel(photo) }}</text>
           <view v-if="photo.status === 'uploading'" class="progress-track"><view class="progress-fill" :style="{ transform: `scaleX(${photo.progress / 100})` }" /></view>
           <text v-if="photo.error" class="error-copy">{{ photo.error }}</text>
-          <view v-if="photo.failure_code === 'ARCHIVE_INFO_REQUIRED' || queueRuntime.canManuallyRetry(photo.photo_uuid) || photo.status === 'needs_review'" class="queue-actions">
+          <view v-if="photo.status === 'failed' || photo.status === 'needs_review'" class="queue-actions">
             <button v-if="photo.failure_code === 'ARCHIVE_INFO_REQUIRED'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">完善信息</button>
             <button v-if="queueRuntime.canManuallyRetry(photo.photo_uuid)" class="mini-action pressable" @tap="queueRuntime.retry(photo.photo_uuid)">{{ photo.retryable === false ? '权限恢复后重试' : '重试' }}</button>
             <button v-if="photo.status === 'needs_review'" class="mini-action confirm pressable" @tap="openConfirm(photo.client_batch_id)">确认</button>
+            <button v-if="photo.status === 'failed'" class="mini-action delete pressable" :disabled="Boolean(deletingPhotoId)" :loading="deletingPhotoId === photo.photo_uuid" @tap="requestDelete(photo)">删除</button>
           </view>
         </view>
       </view>
@@ -109,4 +133,5 @@ onShow(() => {
 .queue-actions { display: flex; justify-content: flex-end; gap: 10rpx; margin-top: 14rpx; }
 .mini-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 22rpx; border-radius: 15rpx; color: #fff; background: var(--danger); font-size: 23rpx; line-height: 1.25; text-align: center; }
 .mini-action.confirm { color: #041a1a; background: var(--primary-strong); }
+.mini-action.delete { border: 1rpx solid rgba(255, 107, 102, 0.58); color: var(--danger); background: rgba(255, 107, 102, 0.08); }
 </style>

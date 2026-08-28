@@ -8,7 +8,8 @@ export const PHOTO_TRANSITIONS: Record<PhotoStatus, readonly PhotoStatus[]> = {
   needs_review: ['desktop_pending', 'failed'],
   desktop_pending: ['desktop_imported', 'failed'],
   desktop_imported: [],
-  failed: ['local_ready', 'uploading', 'server_saved', 'analyzing', 'needs_review', 'desktop_pending'],
+  local_deleted: [],
+  failed: ['local_ready', 'uploading', 'server_saved', 'analyzing', 'needs_review', 'desktop_pending', 'local_deleted'],
 }
 
 export function canTransition(from: PhotoStatus, to: PhotoStatus): boolean {
@@ -32,5 +33,6 @@ export const STATUS_LABELS: Record<PhotoStatus, string> = {
   needs_review: '待确认',
   desktop_pending: '待归档',
   desktop_imported: '已归档',
+  local_deleted: '已删除',
   failed: '处理失败',
 }

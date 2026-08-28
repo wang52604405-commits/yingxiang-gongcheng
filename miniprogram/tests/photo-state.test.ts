@@ -9,6 +9,7 @@ describe('照片状态机', () => {
     expect(canTransition('analyzing', 'needs_review')).toBe(true)
     expect(canTransition('needs_review', 'desktop_pending')).toBe(true)
     expect(canTransition('desktop_pending', 'desktop_imported')).toBe(true)
+    expect(canTransition('failed', 'local_deleted')).toBe(true)
     expect(() => transitionPhoto('local_ready', 'desktop_imported')).toThrow('非法照片状态变化')
   })
 

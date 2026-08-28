@@ -223,6 +223,38 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(unlink).not.toHaveBeenCalledWith('/user/only-original.jpg')
   })
 
+  it('处理失败的照片可只从本机删除，并清理原图、传输图和预览图', async () => {
+    const photo = localPhoto('32', 'failed-delete')
+    photo.status = 'failed'
+    photo.retry_from = 'local_ready'
+    photo.retryable = true
+    const batch = localBatch(photo)
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, false)
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.deleteFailed(photo.photo_uuid)
+
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).toHaveBeenCalledWith('/user/32-transfer.jpg')
+    expect(unlink).toHaveBeenCalledWith('/user/32-preview.jpg')
+    expect(mocks.clearOriginalWal).toHaveBeenCalledWith('32', photo.photo_uuid)
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_deleted',
+      original_path: '',
+      transfer_path: '',
+      preview_path: '',
+    })
+    expect(queueRuntime.pendingCount.value).toBe(0)
+
+    await queueRuntime.resume('manual')
+    expect(mocks.createBatch).not.toHaveBeenCalled()
+  })
+
   it('暂存原图可在重试时补齐 100KB 预览，准备完成后才删除大图', async () => {
     const photo = localPhoto('32', 'preview-recovery')
     photo.status = 'failed'

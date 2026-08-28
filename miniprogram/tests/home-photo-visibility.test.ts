@@ -26,6 +26,7 @@ describe('工作台本地影像可见性', () => {
   it('服务器最近列表为空时，本地兜底不回显已归档记录', () => {
     const photos = [
       localPhoto('deleted-on-desktop', 'desktop_imported'),
+      localPhoto('deleted-on-phone', 'local_deleted'),
       localPhoto('waiting-upload', 'local_ready'),
       localPhoto('server-saved', 'server_saved'),
     ]
@@ -36,12 +37,13 @@ describe('工作台本地影像可见性', () => {
   it('今日采集排除已归档本地记录，但保留云端影像并按 UUID 去重', () => {
     const local = [
       localPhoto('deleted-on-desktop', 'desktop_imported'),
+      localPhoto('deleted-on-phone', 'local_deleted'),
       localPhoto('same-photo', 'server_saved'),
       localPhoto('yesterday', 'local_ready', '2026-08-27T23:00:00'),
     ]
     const cloud = [cloudPhoto('same-photo'), cloudPhoto('cloud-only')]
 
     expect(countTodayCaptures(cloud, local, '2026-08-28T12:00:00')).toBe(2)
-    expect(countTodayCaptures([], [local[0]], '2026-08-28T12:00:00')).toBe(0)
+    expect(countTodayCaptures([], [local[0], local[1]], '2026-08-28T12:00:00')).toBe(0)
   })
 })

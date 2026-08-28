@@ -8,7 +8,7 @@ export function localDayKey(value?: string): string {
 }
 
 export function visibleLocalHomePhotos(photos: LocalPhoto[], limit = 3): LocalPhoto[] {
-  return photos.filter((photo) => photo.status !== 'desktop_imported').slice(0, limit)
+  return photos.filter((photo) => !['desktop_imported', 'local_deleted'].includes(photo.status)).slice(0, limit)
 }
 
 export function countTodayCaptures(cloudPhotos: CloudPhoto[], localPhotos: LocalPhoto[], today: string): number {
@@ -23,7 +23,7 @@ export function countTodayCaptures(cloudPhotos: CloudPhoto[], localPhotos: Local
   })
   localPhotos.forEach((photo) => {
     if (
-      photo.status !== 'desktop_imported'
+      !['desktop_imported', 'local_deleted'].includes(photo.status)
       && !cloudIds.has(photo.photo_uuid)
       && localDayKey(photo.client_captured_at || photo.created_at) === todayKey
     ) count += 1
