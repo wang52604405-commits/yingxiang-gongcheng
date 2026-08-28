@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260828-2.69.css">
+  <link rel="stylesheet" href="/assets/app-A20260828-2.70.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -57,15 +57,18 @@
       <div class="top-batch-actions" aria-label="批量打印">
         <select id="engineeringProjectSelect" class="project-select" title="当前工程"></select>
         <div class="project-import-wrap">
-          <button class="top-quick-btn" type="button" id="projectImportMenuBtn">一键导入项目划分</button>
-          <div class="project-import-menu" id="projectImportMenu">
-            <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载模板</button>
+          <button class="top-quick-btn" type="button" id="projectImportMenuBtn" aria-expanded="false" aria-controls="projectImportMenu">项目划分 ▾</button>
+          <div class="project-import-menu" id="projectImportMenu" aria-hidden="true">
+            <div class="project-import-menu-head">
+              <strong>导入项目划分</strong>
+              <span>首次使用请先下载 Excel 模板，填写后再选择文件导入。</span>
+            </div>
+            <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载项目划分模板（Excel）</button>
             <label class="file-tool">
-              <span class="file-label" id="importFileLabel">选择文件</span>
+              <span class="file-label" id="importFileLabel">选择项目划分文件导入</span>
               <input id="importFile" type="file" accept=".xls,.xlsx,.xlsm,.csv">
             </label>
-            <button type="submit" form="importForm">导入表格</button>
-            <button class="danger-tool" type="button" id="clearProjectsBtn">删除划分</button>
+            <button class="danger-tool" type="button" id="clearProjectsBtn">删除当前项目划分</button>
           </div>
         </div>
       </div>
@@ -522,12 +525,12 @@
                   <label>纸张方向<select id="printSetupLayout"><option value="landscape">A4 横版</option><option value="portrait">A4 竖版</option></select></label>
                   <label>每页照片数量<input id="printSetupPageSize" type="number" min="1" max="12" step="1" value="4"></label>
                   <label>照片规格<select id="printSetupPreset"><option value="4inch">4寸 10.2×7.6cm</option><option value="5inch" selected>5寸 12.7×8.9cm</option><option value="6inch">6寸 15.2×10.2cm</option><option value="custom">自定义尺寸</option></select></label>
-                  <label>图片填充<select id="printSetupImageFit"><option value="cover">铺满裁切</option><option value="contain">完整显示（可留白）</option></select></label>
+                  <label>图片填充<select id="printSetupImageFit"><option value="contain" selected>完整显示（可留白）</option><option value="cover">铺满裁切</option></select></label>
                   <label>照片宽度(cm)<input id="printSetupPhotoWidth" type="number" min="1" max="30" step="0.1" value="12.7"></label>
                   <label>照片高度(cm)<input id="printSetupPhotoHeight" type="number" min="1" max="30" step="0.1" value="8.9"></label>
                   <label>文字标签位置<select id="printSetupCaptionPosition"><option value="bottom" selected>照片下方</option><option value="top">照片上方</option><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="hidden">不显示标签</option></select></label>
-                  <label>标签区域宽/高(mm)<input id="printSetupCaptionSize" type="number" min="4" max="60" step="1" value="7"></label>
-                  <label>标签字号(px)<input id="printSetupCaptionFont" type="number" min="5" max="14" step="0.1" value="7.2"></label>
+                  <label>标签区域宽/高(mm)<input id="printSetupCaptionSize" type="number" min="4" max="60" step="0.5" value="7.5"></label>
+                  <label>标签字号(px)<input id="printSetupCaptionFont" type="number" min="5" max="14" step="0.1" value="10"></label>
                   <label>上页边距(mm)<input id="printSetupMarginTop" type="number" min="0" max="30" step="1" value="6"></label>
                   <label>右页边距(mm)<input id="printSetupMarginRight" type="number" min="0" max="30" step="1" value="6"></label>
                   <label>下页边距(mm)<input id="printSetupMarginBottom" type="number" min="0" max="30" step="1" value="6"></label>
@@ -542,7 +545,7 @@
                   <label><input type="checkbox" value="id" data-print-caption-field checked>照片编号</label>
                   <label><input type="checkbox" value="project_name" data-print-caption-field>单元工程</label>
                   <label><input type="checkbox" value="photo_date" data-print-caption-field checked>拍摄日期</label>
-                  <label><input type="checkbox" value="photographer" data-print-caption-field>摄影人</label>
+                  <label><input type="checkbox" value="photographer" data-print-caption-field checked>摄影人</label>
                   <label><input type="checkbox" value="description" data-print-caption-field>描述</label>
                 </div>
               </div>
@@ -708,7 +711,7 @@
               <label>照片尺寸<select id="settingsPrintPhotoPresetInput" class="orientation-select"><option value="4inch">4寸（10.2×7.6cm）</option><option value="5inch">5寸（12.7×8.9cm）</option><option value="6inch">6寸（15.2×10.2cm）</option><option value="custom">自定义尺寸</option></select></label>
               <label>照片宽度(厘米)<input id="settingsPrintPhotoWidthInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
               <label>照片高度(厘米)<input id="settingsPrintPhotoHeightInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
-              <label>照片说明字号<input id="settingsPrintCaptionFontSizeInput" type="number" min="5" max="14" step="0.1" placeholder="7.2"></label>
+              <label>照片说明字号<input id="settingsPrintCaptionFontSizeInput" type="number" min="5" max="14" step="0.1" placeholder="10"></label>
             </div>
             <p class="import-hint">选择 4寸、5寸或6寸后自动填写标准尺寸；选择“自定义尺寸”可自行输入宽高。版式和每页张数会按实际可用空间自动分页。</p>
           </section>
@@ -803,6 +806,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260828-2.69.js"></script>
+  <script defer src="/assets/app-A20260828-2.70.js"></script>
 </body>
 </html>

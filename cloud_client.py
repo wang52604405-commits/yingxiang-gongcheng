@@ -30,7 +30,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260828-2.69"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260828-2.70"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -896,6 +896,24 @@ def desktop_sync_identity() -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
+def desktop_sync_identity_for_account(account_id: str) -> str:
+    """为已归属工程计算稳定账号分区；不读取或返回任何登录令牌。"""
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return ""
+    account = _read_cloud_account()
+    if str(account.get("account_id") or "").strip() == account_id:
+        base = str(account.get("server") or server_url()).rstrip("/")
+    else:
+        base = str(server_url()).rstrip("/")
+    try:
+        base = _normalize_server_base(base)
+    except ValueError:
+        return ""
+    identity = "|".join([base, account_id])
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
 def desktop_sync_account_id() -> str:
     """返回服务器不可变 account.id；旧账号文件联网后会自动补齐。"""
     account = _read_cloud_account()
@@ -1007,6 +1025,25 @@ def desktop_ack_photo(
     quoted = urllib.parse.quote(str(photo_uuid or ""), safe="")
     return _cloud_api_json(
         f"/api/desktop/v1/photos/{quoted}/ack",
+        method="POST",
+        payload={
+            "local_project_code": str(local_project_code or ""),
+            "local_photo_id": str(local_photo_id or ""),
+            "desktop_machine_id": str(desktop_machine_id or ""),
+        },
+    )
+
+
+def desktop_delete_photo(
+    photo_uuid: str,
+    local_project_code: str,
+    local_photo_id: str,
+    desktop_machine_id: str = "",
+) -> dict:
+    """发送一条明确的本机照片删除事件；服务器仅做可恢复软删除。"""
+    quoted = urllib.parse.quote(str(photo_uuid or ""), safe="")
+    return _cloud_api_json(
+        f"/api/desktop/v1/photos/{quoted}/delete",
         method="POST",
         payload={
             "local_project_code": str(local_project_code or ""),

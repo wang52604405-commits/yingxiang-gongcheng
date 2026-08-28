@@ -119,14 +119,20 @@ export interface LocalPhoto {
   error?: string
   failure_code?: string
   retryable?: boolean
+  auto_retry_pending?: boolean
+  auto_retry_attempts?: number
+  next_retry_at?: string
   match_candidates?: MatchCandidate[]
   created_at: string
   updated_at: string
   original_removed?: boolean
   server_saved_at?: string
+  deleted_at?: string
   preparation_pending?: boolean
   preview_recovery_pending?: boolean
   preview_error?: string
+  preview_retry_attempts?: number
+  preview_next_retry_at?: string
   upload_mode?: 'direct' | 'chunked'
   upload_chunk_size?: number
   upload_total_chunks?: number
@@ -164,6 +170,8 @@ export interface CloudPhoto {
   photo_uuid: string
   title: string
   photo_date: string
+  photographer?: string
+  uploaded_by?: string
   scope: Scope
   category?: PhotoCategory
   unit_code?: string

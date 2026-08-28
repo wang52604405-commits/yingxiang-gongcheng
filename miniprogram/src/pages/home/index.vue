@@ -12,35 +12,16 @@ import type { CloudPhoto, ProjectSummary } from '@/types/domain'
 import { shortTime } from '@/utils/format'
 import { syncTabBar } from '@/services/navigation'
 import { STATUS_LABELS } from '@/services/photo-state'
+import { countTodayCaptures, visibleLocalHomePhotos } from '@/services/home-photo-visibility'
 
 const fallbackProject = ref<ProjectSummary>(selectionStorage.getProject())
 const project = computed(() => bootstrapState.currentProject || fallbackProject.value)
 const recent = computed<CloudPhoto[]>(() => bootstrapState.recentUploads)
 const loading = ref(false)
-const localRecent = computed(() => queueRuntime.state.photos.slice(0, 3))
+const localRecent = computed(() => visibleLocalHomePhotos(queueRuntime.state.photos))
 const uniApi = uni
 
-function localDayKey(value?: string): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-const todayKey = computed(() => localDayKey(new Date().toISOString()))
-const todayCaptureCount = computed(() => {
-  const cloudIds = new Set<string>()
-  let count = 0
-  recent.value.forEach((photo) => {
-    if (localDayKey(photo.captured_at || photo.created_at || photo.photo_date) === todayKey.value) {
-      cloudIds.add(photo.photo_uuid)
-      count += 1
-    }
-  })
-  queueRuntime.state.photos.forEach((photo) => {
-    if (!cloudIds.has(photo.photo_uuid) && localDayKey(photo.client_captured_at || photo.created_at) === todayKey.value) count += 1
-  })
-  return count
-})
+const todayCaptureCount = computed(() => countTodayCaptures(recent.value, queueRuntime.state.photos, new Date().toISOString()))
 const pendingCount = computed(() => queueRuntime.pendingCount.value)
 const requirementCount = computed(() => Number(project.value.requirement_count || 0))
 

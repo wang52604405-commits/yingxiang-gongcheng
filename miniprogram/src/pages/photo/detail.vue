@@ -51,6 +51,7 @@ onLoad((query) => {
       <view class="detail-card card">
         <view class="detail-row"><text>题名</text><text>{{ title }}</text></view>
         <view class="detail-row"><text>日期</text><text>{{ local?.photo_date || cloud?.photo_date }}</text></view>
+        <view v-if="cloud?.photographer || cloud?.uploaded_by" class="detail-row"><text>拍摄者</text><text>{{ cloud?.photographer || cloud?.uploaded_by }}</text></view>
         <view class="detail-row"><text>归档位置</text><text>{{ local?.draft.assignment?.unit_name || local?.draft.assignment?.other_node_name || cloud?.unit_name || cloud?.other_node_name || '待确认' }}</text></view>
         <view v-if="local?.draft.assignment?.process_name || cloud?.process_name" class="detail-row"><text>工序</text><text>{{ local?.draft.assignment?.process_name || cloud?.process_name }}</text></view>
         <view class="detail-row"><text>状态</text><text class="status-value">{{ status ? STATUS_LABELS[status] : '--' }}</text></view>

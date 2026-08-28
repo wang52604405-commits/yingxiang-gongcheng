@@ -59,6 +59,7 @@ describe('服务端分片 API 精确契约', () => {
     expect(chunk.url).toMatch(/\/batches\/18\/chunked-uploads\/photo-contract\/chunks\/0$/)
     expect(chunk.header['X-Chunk-SHA256']).toBe('b'.repeat(64))
     expect(finalize.url).toMatch(/\/batches\/18\/chunked-uploads\/photo-contract\/finalize$/)
+    expect(finalize.timeout).toBe(120_000)
     expect(finalize.data).toEqual({ sha256: metadata.sha256, original_size_bytes: metadata.original_size_bytes, total_chunks: 3 })
   })
 

@@ -98,7 +98,7 @@ function localPhoto(owner: string, id: string): LocalPhoto {
     client_batch_id: `batch-${owner}`,
     remote_batch_id: '18',
     original_path: `/user/${owner}-original.jpg`,
-    original_size: 8_000_000,
+    original_size: 3_000_000,
     original_sha256: 'b'.repeat(64),
     original_filename: `${owner}.jpg`,
     original_mime_type: 'image/jpeg',
@@ -266,6 +266,54 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(unlink).not.toHaveBeenCalledWith('/user/32-preview.jpg')
     expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_imported', original_path: '', original_removed: true, preview_path: '/user/32-preview.jpg' })
     expect(queueRuntime.queueBytes.value).toBe(90_000)
+    await queueRuntime.resume('manual')
+    expect(mocks.batch).toHaveBeenCalledTimes(1)
+  })
+
+  it('批次 ACK 返回删除 tombstone 时收敛本地队列，不下载预览也不再轮询', async () => {
+    const photo = localPhoto('32', 'deleted-ack-photo')
+    photo.status = 'desktop_pending'
+    photo.preview_path = ''
+    photo.preview_size = 0
+    photo.preview_sha256 = ''
+    photo.preview_recovery_pending = true
+    const batch = localBatch(photo)
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, true)
+    mocks.batch.mockResolvedValue({
+      ok: true,
+      batch_id: '18',
+      status: 'desktop_imported',
+      photos: [{
+        photo_uuid: photo.photo_uuid,
+        status: 'desktop_imported',
+        deleted_at: '2026-08-28T12:30:00Z',
+        match_candidates: [],
+      }],
+    })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'desktop_imported',
+      deleted_at: '2026-08-28T12:30:00Z',
+      original_path: '',
+      original_removed: true,
+      preview_recovery_pending: false,
+    })
+    expect(queueRuntime.pendingCount.value).toBe(0)
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(mocks.photo).not.toHaveBeenCalled()
+    expect(mocks.downloadServerPreview).not.toHaveBeenCalled()
+
+    await queueRuntime.resume('manual')
+    expect(mocks.batch).toHaveBeenCalledTimes(1)
+    expect(mocks.photo).not.toHaveBeenCalled()
   })
 
   it('上传只发送原图路径，server_saved 后立即释放原图但保留预览', async () => {
@@ -290,7 +338,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     await queueRuntime.resume('app-show')
     expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-original.jpg', expect.objectContaining({
       sha256: 'b'.repeat(64),
-      original_size_bytes: 8_000_000,
+      original_size_bytes: 3_000_000,
       original_filename: '32.jpg',
       original_mime_type: 'image/jpeg',
     }), expect.any(Function))
@@ -301,10 +349,10 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', original_path: '', preview_path: '/user/32-preview.jpg' })
   })
 
-  it('超过 8MiB 的原图不调用 uploadFile，改走可持久化的 4MiB 分片路径', async () => {
+  it('超过 4MiB 的原图不调用 uploadFile，改走可持久化的 4MiB 分片路径', async () => {
     const photo = localPhoto('32', 'photo-large')
     photo.status = 'local_ready'
-    photo.original_size = 12 * 1024 * 1024
+    photo.original_size = 5 * 1024 * 1024
     photo.remote_batch_id = undefined
     const batch = localBatch(photo)
     batch.remote_batch_id = undefined
@@ -317,7 +365,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'large-batch' })
     mocks.commitBatch.mockResolvedValue({ ok: true })
     mocks.uploadPhotoInChunks.mockImplementation(async (options: any) => {
-      options.onCheckpoint({ uploadId: 'upload-large', chunkSize: 4 * 1024 * 1024, totalChunks: 3, uploadedChunks: [0, 1, 2] })
+      options.onCheckpoint({ uploadId: 'upload-large', chunkSize: 4 * 1024 * 1024, totalChunks: 2, uploadedChunks: [0, 1] })
       options.onProgress(100)
       return { ok: true }
     })
@@ -329,13 +377,147 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
       batchId: 'large-batch',
       filePath: '/user/32-original.jpg',
-      metadata: expect.objectContaining({ photo_uuid: 'photo-large', original_size_bytes: 12 * 1024 * 1024 }),
+      metadata: expect.objectContaining({ photo_uuid: 'photo-large', original_size_bytes: 5 * 1024 * 1024 }),
     }))
     expect(queueRuntime.state.photos[0]).toMatchObject({
       upload_mode: 'chunked',
       chunk_upload_id: 'upload-large',
-      uploaded_chunks: [0, 1, 2],
+      uploaded_chunks: [0, 1],
       status: 'desktop_pending',
+    })
+  })
+
+  it('可重试的上传网络错误回到待上传，并按退避时间自动续传', async () => {
+    const photo = localPhoto('32', 'photo-network-retry')
+    photo.status = 'local_ready'
+    photo.progress = 0
+    const batch = localBatch(photo)
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    installPlatform(storage, true)
+    const { ApiError } = await import('@/api/client')
+    mocks.uploadPhoto
+      .mockRejectedValueOnce(new ApiError('上传超时', 'UPLOAD_INTERRUPTED', true))
+      .mockRejectedValueOnce(new ApiError('网关超时', 'HTTP_504', false, 504))
+      .mockResolvedValueOnce({ ok: true, photo: { status: 'server_saved' } })
+    mocks.commitBatch.mockResolvedValue({ ok: true })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      auto_retry_pending: true,
+      auto_retry_attempts: 1,
+      retryable: true,
+    })
+    expect(queueRuntime.state.photos[0].error).toContain('网络不稳定，将自动重试')
+    expect(Date.parse(queueRuntime.state.photos[0].next_retry_at || '')).toBeGreaterThan(Date.now())
+
+    await queueRuntime.resume('manual')
+    expect(mocks.uploadPhoto).toHaveBeenCalledTimes(1)
+
+    queueRuntime.state.photos[0].next_retry_at = '2000-01-01T00:00:00.000Z'
+    await queueRuntime.resume('manual')
+    expect(mocks.uploadPhoto).toHaveBeenCalledTimes(2)
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'local_ready', auto_retry_pending: true, auto_retry_attempts: 2 })
+    expect(Date.parse(queueRuntime.state.photos[0].next_retry_at || '')).toBeGreaterThanOrEqual(Date.now() + 59_000)
+
+    await queueRuntime.resume('manual')
+    expect(mocks.uploadPhoto).toHaveBeenCalledTimes(2)
+
+    queueRuntime.state.photos[0].next_retry_at = '2000-01-01T00:00:00.000Z'
+    await queueRuntime.resume('manual')
+    expect(mocks.uploadPhoto).toHaveBeenCalledTimes(3)
+    expect(mocks.uploadPhoto.mock.calls.map((call) => call[2].photo_uuid)).toEqual(['photo-network-retry', 'photo-network-retry', 'photo-network-retry'])
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', auto_retry_pending: undefined, next_retry_at: undefined })
+  })
+
+  it('原图已上服务器后遇到普通网络中断，保持 server_saved 并延时重试归档提交', async () => {
+    const photo = localPhoto('32', 'photo-commit-retry')
+    photo.status = 'server_saved'
+    photo.original_path = ''
+    photo.original_removed = true
+    const batch = localBatch(photo)
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    installPlatform(storage, true)
+    mocks.commitBatch
+      .mockRejectedValueOnce({ errMsg: 'request:fail socket closed' })
+      .mockResolvedValueOnce({ ok: true })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'server_saved',
+      retry_from: 'server_saved',
+      auto_retry_pending: true,
+    })
+    expect(queueRuntime.state.photos[0].error).toContain('网络不稳定，将自动重试')
+
+    await queueRuntime.resume('manual')
+    expect(mocks.commitBatch).toHaveBeenCalledTimes(1)
+
+    queueRuntime.state.photos[0].next_retry_at = '2000-01-01T00:00:00.000Z'
+    await queueRuntime.resume('manual')
+    expect(mocks.commitBatch).toHaveBeenCalledTimes(2)
+    expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')
+  })
+
+  it('服务器预览恢复失败后按退避时间重试，同一轮询不重复请求', async () => {
+    const photo = localPhoto('32', 'photo-preview-retry')
+    photo.status = 'server_saved'
+    photo.original_path = ''
+    photo.original_removed = true
+    photo.preview_path = ''
+    photo.preview_size = 0
+    photo.preview_sha256 = ''
+    const batch = localBatch(photo)
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    installPlatform(storage, true)
+    mocks.batch.mockResolvedValue({
+      ok: true,
+      batch_id: '18',
+      status: 'server_saved',
+      photos: [{ photo_uuid: photo.photo_uuid, status: 'server_saved' }],
+    })
+    const { ApiError } = await import('@/api/client')
+    mocks.photo
+      .mockRejectedValueOnce(new ApiError('预览服务暂时不可用', 'HTTP_503', false, 503))
+      .mockResolvedValueOnce({ ok: true, photo: { download_url: 'https://api.example.test/preview' } })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+    expect(mocks.photo).toHaveBeenCalledTimes(1)
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      preview_path: '',
+      preview_recovery_pending: true,
+      preview_retry_attempts: 1,
+    })
+    expect(Date.parse(queueRuntime.state.photos[0].preview_next_retry_at || '')).toBeGreaterThan(Date.now())
+
+    await queueRuntime.resume('manual')
+    expect(mocks.photo).toHaveBeenCalledTimes(1)
+
+    queueRuntime.state.photos[0].preview_next_retry_at = '2000-01-01T00:00:00.000Z'
+    await queueRuntime.resume('manual')
+    expect(mocks.photo).toHaveBeenCalledTimes(2)
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      preview_path: '/user/server-preview.jpg',
+      preview_recovery_pending: false,
+      preview_retry_attempts: undefined,
+      preview_next_retry_at: undefined,
     })
   })
 

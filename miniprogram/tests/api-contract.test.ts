@@ -86,12 +86,27 @@ describe('移动端 API v1 契约', () => {
     expect(normalized.photos[0].match_candidates[0].reasons).toEqual(['水印单元名称匹配'])
   })
 
+  it('批次详情保留电脑删除照片的 tombstone 时间', () => {
+    const normalized = normalizeBatch({
+      batch_id: 19,
+      status: 'desktop_imported',
+      photos: [{ photo_uuid: 'deleted-photo', status: 'desktop_imported', deleted_at: '2026-08-28T12:30:00Z' }],
+    })
+
+    expect(normalized.photos[0]).toMatchObject({
+      photo_uuid: 'deleted-photo',
+      deleted_at: '2026-08-28T12:30:00Z',
+    })
+  })
+
   it('按服务器 project_name/tree/download_url 字段转换为页面模型', () => {
     expect(normalizeProject({ project_id: 'YNLQ', project_code: 'YNLQ', project_name: '邯郸市永年区洺河龙泉缓洪工程', revision: 7 })).toMatchObject({ id: 'YNLQ', code: 'YNLQ', name: '邯郸市永年区洺河龙泉缓洪工程' })
     const node = normalizeTreeNode({ node_code: 'YNLQ-DY-001', node_type: 'unit', name: '进口段', children: [{ node_code: 'p1', node_type: 'process', name: '钢筋安装', children: [] }] })
     expect(node.processes).toEqual(['钢筋安装'])
     expect(node.children).toEqual([])
-    expect(normalizeCloudPhoto({ photo_uuid: 'p', title: '现场', photo_date: '2026-08-25', scope: 'engineering', category: 'construction', status: 'desktop_pending', assignment: { unit_code: 'YNLQ-DY-001' }, download_url: 'https://example.test/signed' }).image_url).toBe('https://example.test/signed')
+    const photo = normalizeCloudPhoto({ photo_uuid: 'p', title: '现场', photo_date: '2026-08-25', photographer: '张三', uploaded_by: 'zhangsan', scope: 'engineering', category: 'construction', status: 'desktop_pending', assignment: { unit_code: 'YNLQ-DY-001' }, download_url: 'https://example.test/signed' })
+    expect(photo.image_url).toBe('https://example.test/signed')
+    expect(photo).toMatchObject({ photographer: '张三', uploaded_by: 'zhangsan' })
     expect(normalizeCloudPhoto({ photo_uuid: 'p2', scope: 'engineering', status: 'desktop_pending', requirement: { template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' } }).requirement).toEqual({ template_code: 'FJ-JG-001', photo_requirement_name: '钢筋安装隐蔽验收' })
   })
 
@@ -117,7 +132,7 @@ describe('移动端 API v1 契约', () => {
     expect(photo.thumb_url).toBe(signed)
   })
 
-  it('8MiB 内直传使用微信单请求安全超时，弱网重试仍复用同一 UUID', async () => {
+  it('4MiB 内直传使用微信单请求安全超时，弱网重试仍复用同一 UUID', async () => {
     const uploadFile = vi.fn((options: any) => {
       options.success({ statusCode: 200, data: '{"ok":true}' })
       return { onProgressUpdate: vi.fn() }
@@ -130,7 +145,7 @@ describe('移动端 API v1 契约', () => {
       width: 4_000,
       height: 3_000,
       sha256: 'd'.repeat(64),
-      original_size_bytes: 7 * 1024 * 1024,
+      original_size_bytes: 3 * 1024 * 1024,
       original_filename: 'original.png',
       original_mime_type: 'image/png',
       title: '',

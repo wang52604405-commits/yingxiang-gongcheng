@@ -50,6 +50,8 @@ export function normalizeCloudPhoto(raw: any): CloudPhoto {
     photo_uuid: String(raw.photo_uuid),
     title: String(raw.title || '现场工程影像'),
     photo_date: String(raw.photo_date || '').slice(0, 10),
+    photographer: String(raw.photographer || ''),
+    uploaded_by: String(raw.uploaded_by || ''),
     scope: raw.scope === 'other' ? 'other' : 'engineering',
     category: raw.category === 'supervision' ? 'supervision' : raw.scope === 'other' ? undefined : 'construction',
     unit_code: String(raw.unit_code || assignment.unit_code || ''),
@@ -87,6 +89,7 @@ export function normalizeTreeNode(raw: any): ProjectNode {
 export interface NormalizedBatchPhoto {
   photo_uuid: string
   status: string
+  deleted_at?: string
   match_candidates: MatchCandidate[]
   error?: string
   title?: string
@@ -109,6 +112,7 @@ export function normalizeBatch(raw: any): NormalizedBatch {
     photos: Array.isArray(raw.photos) ? raw.photos.map((photo: any) => ({
       photo_uuid: String(photo.photo_uuid || ''),
       status: String(photo.status || ''),
+      deleted_at: photo.deleted_at ? String(photo.deleted_at) : undefined,
       match_candidates: Array.isArray(photo.match_candidates) ? photo.match_candidates.map(normalizeCandidate) : [],
       error: photo.error?.message ? String(photo.error.message) : undefined,
       title: photo.title ? String(photo.title) : undefined,

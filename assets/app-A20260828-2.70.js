@@ -1253,7 +1253,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#settingsPrintPhotoPresetInput").value = settings.print_photo_preset || "5inch";
       $("#settingsPrintPhotoWidthInput").value = settings.print_photo_width_cm || "";
       $("#settingsPrintPhotoHeightInput").value = settings.print_photo_height_cm || "";
-      $("#settingsPrintCaptionFontSizeInput").value = settings.print_caption_font_size || 7.2;
+      $("#settingsPrintCaptionFontSizeInput").value = settings.print_caption_font_size || 10;
       $("#settingsPrintCaptionPositionInput").value = settings.print_caption_position || "left";
       syncPrintPhotoPresetInputs();
       $("#settingsPhotoFieldsInput").value = (settings.photo_detail_fields || []).map((field) => `${field.label || ""}=${field.source === "custom" ? (field.value || "") : (field.source || "")}`).join("\n");
@@ -1352,7 +1352,7 @@ const $ = (selector) => document.querySelector(selector);
         print_photo_preset: $("#settingsPrintPhotoPresetInput").value,
         print_photo_width_cm: Number($("#settingsPrintPhotoWidthInput").value || 0),
         print_photo_height_cm: Number($("#settingsPrintPhotoHeightInput").value || 0),
-        print_caption_font_size: Number($("#settingsPrintCaptionFontSizeInput").value || 7.2),
+        print_caption_font_size: Number($("#settingsPrintCaptionFontSizeInput").value || 10),
         print_caption_position: $("#settingsPrintCaptionPositionInput").value,
         watermark_ocr_enabled: true,
         photo_detail_fields: photoFields,
@@ -2471,10 +2471,18 @@ const $ = (selector) => document.querySelector(selector);
       const orientation = normalizePhotoOrientation(photo.orientation);
       const photoId = String(photo.id || "");
       const isPrintSelected = Boolean(state.selectedPrintPhotos[printSelectionKey(key, photoId)]);
+      const title = String(photo.title || photo.original_name || photo.filename || photoId || "未命名照片").trim();
+      const date = displayPhotoDate(photo) || "日期未记录";
+      const photographer = String(photo.photographer || "").trim();
+      const uploader = String(photo.uploaded_by || "").trim();
+      const person = photographer
+        ? `拍摄者 ${photographer}`
+        : (uploader ? `上传者 ${uploader}` : "拍摄者未记录");
+      const idLabel = photoIdTail(photo) || photoId;
       return `
         <article class="photo is-${orientation}${isPrintSelected ? " is-selected" : ""}${isSelectMode ? " is-select-mode" : ""}" draggable="${isSelectMode ? "false" : "true"}" data-photo-id="${escapeHtml(photoId)}" data-category="${key}" data-section-key="${escapeHtml(sectionKey)}">
-          <button class="photo-preview-trigger" type="button" data-preview-src="${escapeHtml(photo.url || "")}" data-preview-title="${escapeHtml(photo.title || photo.id || photo.original_name || photo.filename || "照片")}">
-            <img src="${escapeHtml(photo.thumb_url || THUMB_PLACEHOLDER)}" loading="lazy" decoding="async" alt="${escapeHtml(photo.title || photo.original_name || photo.filename || "photo")}">
+          <button class="photo-preview-trigger" type="button" data-preview-src="${escapeHtml(photo.url || "")}" data-preview-title="${escapeHtml(title)}">
+            <img src="${escapeHtml(photo.thumb_url || THUMB_PLACEHOLDER)}" loading="lazy" decoding="async" alt="${escapeHtml(title)}">
           </button>
           <div class="photo-meta archive-info">
             <div class="photo-card-line">
@@ -2482,7 +2490,12 @@ const $ = (selector) => document.querySelector(selector);
                 <input type="checkbox" data-print-photo="${escapeHtml(photoId)}" data-category="${key}" ${isPrintSelected ? "checked" : ""}>
               </label>` : ""}
               <button class="photo-title-button" type="button" data-edit-photo="${escapeHtml(photo.id || "")}" data-category="${key}" title="点击修改照片信息">
-                <strong class="photo-card-title" title="${escapeHtml(photo.title || photo.original_name || photo.filename || photo.id || "-")}">${escapeHtml(photoShortLabel(photo) || photo.title || photo.original_name || photo.filename || "-")}</strong>
+                <strong class="photo-card-title" title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
+                <span class="photo-card-details" title="${escapeHtml(`${idLabel} · ${date} · ${person}`)}">
+                  <span class="photo-card-id">${escapeHtml(idLabel)}</span>
+                  <span>${escapeHtml(date)}</span>
+                  <span>${escapeHtml(person)}</span>
+                </span>
               </button>
             </div>
           </div>
@@ -3217,7 +3230,7 @@ const $ = (selector) => document.querySelector(selector);
       const currentPhoto = state.photos.find((item) => normalizePhotoCategory(item.category) === state.editingPhoto.category && String(item.id || "") === state.editingPhoto.photoId);
       const processName = $("#photoEditProcessInput") ? $("#photoEditProcessInput").value : (currentPhoto?.process_name || "");
       const processCode = "";
-      const orientation = normalizePhotoOrientation("landscape");
+      const orientation = normalizePhotoOrientation(currentPhoto?.orientation);
       const rotation = Number($("#photoEditRotationInput").value || 0);
       const description = $("#photoEditDescriptionInput").value.trim();
       if (!photoDate) {
@@ -4077,6 +4090,14 @@ const $ = (selector) => document.querySelector(selector);
     $("#topOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
     $("#constructionOverviewBtn")?.addEventListener("click", () => openOverview("construction"));
     $("#otherOverviewBtn")?.addEventListener("click", () => openOverview("other"));
+    function setProjectImportMenu(open) {
+      const menu = $("#projectImportMenu");
+      const button = $("#projectImportMenuBtn");
+      const isOpen = Boolean(open);
+      menu?.classList.toggle("open", isOpen);
+      menu?.setAttribute("aria-hidden", isOpen ? "false" : "true");
+      button?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    }
     function closeTopMenus(except) {
       const menus = {
         printMenu: $("#printMenu"),
@@ -4089,7 +4110,8 @@ const $ = (selector) => document.querySelector(selector);
       Object.entries(menus).forEach(([name, el]) => {
         if (!el) return;
         if (name === except) return;
-        el.classList.remove("open");
+        if (name === "projectImportMenu") setProjectImportMenu(false);
+        else el.classList.remove("open");
       });
       if (except !== "supportPanel") $("#supportPanel")?.setAttribute("aria-hidden", "true");
     }
@@ -4115,7 +4137,9 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#projectImportMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
-      $("#importFile").click();
+      const willOpen = !$("#projectImportMenu").classList.contains("open");
+      closeTopMenus("projectImportMenu");
+      setProjectImportMenu(willOpen);
     });
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".print-menu-wrap")) $("#printMenu")?.classList.remove("open");
@@ -4124,7 +4148,7 @@ const $ = (selector) => document.querySelector(selector);
         $("#actionsMenu").classList.remove("open");
       }
       if (!event.target.closest(".quick-menu-wrap")) $("#quickMenu")?.classList.remove("open");
-      if (!event.target.closest(".project-import-wrap")) $("#projectImportMenu").classList.remove("open");
+      if (!event.target.closest(".project-import-wrap")) setProjectImportMenu(false);
     });
     document.querySelectorAll("#settingsMenu button").forEach((button) => {
       button.addEventListener("click", () => $("#settingsMenu").classList.remove("open"));
@@ -4136,7 +4160,10 @@ const $ = (selector) => document.querySelector(selector);
       button.addEventListener("click", () => $("#quickMenu")?.classList.remove("open"));
     });
     document.querySelectorAll("#projectImportMenu button").forEach((button) => {
-      button.addEventListener("click", () => $("#projectImportMenu").classList.remove("open"));
+      button.addEventListener("click", () => setProjectImportMenu(false));
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") setProjectImportMenu(false);
     });
     document.querySelectorAll("[data-open-batch-print]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4308,7 +4335,7 @@ const $ = (selector) => document.querySelector(selector);
         const data = await apiJson("/api/import-projects", { method: "POST", body: form });
         await refreshAll();
         $("#importForm").reset();
-        $("#importFileLabel").textContent = "选择文件";
+        $("#importFileLabel").textContent = "选择项目划分文件导入";
         const result = data.result || {};
         showNotice(`自动转换导入完成：成功 ${result.created || 0} 个单元，跳过 ${result.skipped || 0} 行。`);
       } catch (error) {
@@ -4318,8 +4345,11 @@ const $ = (selector) => document.querySelector(selector);
 
     $("#importFile").addEventListener("change", () => {
       const file = $("#importFile").files[0];
-      $("#importFileLabel").textContent = file ? file.name : "选择文件";
-      if (file) $("#importForm").requestSubmit();
+      $("#importFileLabel").textContent = file ? file.name : "选择项目划分文件导入";
+      if (file) {
+        setProjectImportMenu(false);
+        $("#importForm").requestSubmit();
+      }
     });
 
     $("#downloadProjectTemplateBtn").addEventListener("click", () => {
@@ -4387,10 +4417,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
-      default: { style: "default", layout: "landscape", page_size: "4", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
-      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
-      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
-      single: { style: "single", layout: "landscape", page_size: "1", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7", caption_font_size: "7.2", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "cover", show_page_title: "1", caption_fields: "title,id,photo_date" },
+      default: { style: "default", layout: "landscape", page_size: "4", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      single: { style: "single", layout: "landscape", page_size: "1", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
       custom: null
     };
 
@@ -4434,17 +4464,17 @@ const $ = (selector) => document.querySelector(selector);
       $("#printSetupPhotoWidth").value = settings.print_photo_width_cm || 12.7;
       $("#printSetupPhotoHeight").value = settings.print_photo_height_cm || 8.9;
       $("#printSetupCaptionPosition").value = settings.print_caption_position || "bottom";
-      $("#printSetupCaptionSize").value = settings.print_caption_size_mm || 7;
-      $("#printSetupCaptionFont").value = settings.print_caption_font_size || 7.2;
+      $("#printSetupCaptionSize").value = settings.print_caption_size_mm || 7.5;
+      $("#printSetupCaptionFont").value = settings.print_caption_font_size || 10;
       $("#printSetupMarginTop").value = settings.print_margin_top_mm ?? 6;
       $("#printSetupMarginRight").value = settings.print_margin_right_mm ?? 6;
       $("#printSetupMarginBottom").value = settings.print_margin_bottom_mm ?? 6;
       $("#printSetupMarginLeft").value = settings.print_margin_left_mm ?? 6;
       $("#printSetupHorizontalGap").value = settings.print_horizontal_gap_mm ?? 2;
       $("#printSetupVerticalGap").value = settings.print_vertical_gap_mm ?? 2;
-      $("#printSetupImageFit").value = settings.print_image_fit || "cover";
+      $("#printSetupImageFit").value = settings.print_image_fit || "contain";
       $("#printSetupShowPageTitle").value = settings.print_show_page_title === false ? "0" : "1";
-      const fields = new Set(settings.print_caption_fields || ["title", "id", "photo_date"]);
+      const fields = new Set(settings.print_caption_fields || ["title", "id", "photo_date", "photographer"]);
       document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
       syncPrintSetupPreset();
     }
@@ -4474,8 +4504,8 @@ const $ = (selector) => document.querySelector(selector);
         photo_width_cm: $("#printSetupPhotoWidth").value || "12.7",
         photo_height_cm: $("#printSetupPhotoHeight").value || "8.9",
         caption_position: $("#printSetupCaptionPosition").value,
-        caption_size_mm: $("#printSetupCaptionSize").value || "7",
-        caption_font_size: $("#printSetupCaptionFont").value || "7.2",
+        caption_size_mm: $("#printSetupCaptionSize").value || "7.5",
+        caption_font_size: $("#printSetupCaptionFont").value || "10",
         margin_top_mm: $("#printSetupMarginTop").value || "0",
         margin_right_mm: $("#printSetupMarginRight").value || "0",
         margin_bottom_mm: $("#printSetupMarginBottom").value || "0",

@@ -39,6 +39,7 @@ const state = reactive<QueueState>({
 let networkListenerRegistered = false
 let ownerGeneration = 0
 let foregroundTimer: ReturnType<typeof setInterval> | null = null
+const AUTO_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000] as const
 
 function now(): string {
   return new Date().toISOString()
@@ -87,6 +88,9 @@ function setStatus(photo: LocalPhoto, next: PhotoStatus, force = false): void {
     photo.retryable = undefined
     photo.retry_from = undefined
     photo.failure_code = undefined
+    photo.auto_retry_pending = undefined
+    photo.next_retry_at = undefined
+    if (!['local_ready', 'uploading'].includes(next)) photo.auto_retry_attempts = undefined
   }
   persist(photo.owner_account_id)
 }
@@ -101,6 +105,68 @@ function errorMessage(error: unknown, fallback = '处理失败'): string {
   return fallback
 }
 
+function isTransientNetworkError(error: unknown): boolean {
+  if (isAuthExpired(error)) return false
+  if (error instanceof ApiError) {
+    const status = Number(error.statusCode || 0)
+    return error.retryable
+      || [408, 425, 429].includes(status)
+      || (status >= 500 && status <= 599)
+      || ['NETWORK_ERROR', 'UPLOAD_INTERRUPTED', 'REQUEST_TIMEOUT', 'TIMEOUT'].includes(error.code)
+  }
+  const message = errorMessage(error, '')
+  return /(network|timeout|timed out|request:fail|uploadfile:fail|connection|socket|网络|超时|断网|连接|中断)/i.test(message)
+}
+
+function automaticRetryTarget(retryFrom: PhotoStatus): PhotoStatus {
+  if (['local_ready', 'uploading'].includes(retryFrom)) return 'local_ready'
+  if (retryFrom === 'analyzing') return 'server_saved'
+  return retryFrom
+}
+
+function isAutomaticRetryDue(photo: LocalPhoto): boolean {
+  if (!photo.auto_retry_pending || !photo.next_retry_at) return true
+  const retryAt = Date.parse(photo.next_retry_at)
+  return !Number.isFinite(retryAt) || retryAt <= Date.now()
+}
+
+function isPreviewRecoveryDue(photo: LocalPhoto): boolean {
+  if (!photo.preview_next_retry_at) return true
+  const retryAt = Date.parse(photo.preview_next_retry_at)
+  return !Number.isFinite(retryAt) || retryAt <= Date.now()
+}
+
+function beginAutomaticRetryAttempt(photo: LocalPhoto): void {
+  if (!photo.auto_retry_pending) return
+  photo.auto_retry_pending = undefined
+  photo.next_retry_at = undefined
+  photo.error = undefined
+  photo.retryable = undefined
+  photo.retry_from = undefined
+  photo.failure_code = undefined
+  photo.updated_at = now()
+}
+
+function scheduleAutomaticRetry(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus): boolean {
+  if (!isCurrentOwner(photo.owner_account_id) || !isTransientNetworkError(error)) return false
+  const attempts = Math.max(0, Number(photo.auto_retry_attempts || 0)) + 1
+  const delay = AUTO_RETRY_DELAYS_MS[Math.min(attempts - 1, AUTO_RETRY_DELAYS_MS.length - 1)]
+  const waitText = delay < 60_000 ? `${Math.ceil(delay / 1_000)} 秒` : `${Math.ceil(delay / 60_000)} 分钟`
+  const target = automaticRetryTarget(retryFrom)
+  photo.status = target
+  photo.progress = target === 'local_ready' ? 0 : 100
+  photo.retry_from = retryFrom
+  photo.retryable = true
+  photo.failure_code = error instanceof ApiError ? error.code : 'NETWORK_ERROR'
+  photo.error = `网络不稳定，将自动重试（约 ${waitText} 后）`
+  photo.auto_retry_pending = true
+  photo.auto_retry_attempts = attempts
+  photo.next_retry_at = new Date(Date.now() + delay).toISOString()
+  photo.updated_at = now()
+  persist(photo.owner_account_id)
+  return true
+}
+
 function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, preparation = false): void {
   if (!isCurrentOwner(photo.owner_account_id)) return
   photo.retry_from = retryFrom
@@ -109,6 +175,9 @@ function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, p
   photo.error = preparation ? `原图已安全保存；${message}` : message
   photo.failure_code = isAuthExpired(error) ? 'AUTH_EXPIRED' : error instanceof ApiError ? error.code : undefined
   photo.retryable = isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
+  photo.auto_retry_pending = undefined
+  photo.auto_retry_attempts = undefined
+  photo.next_retry_at = undefined
   photo.preparation_pending = preparation
   photo.updated_at = now()
   persist(photo.owner_account_id)
@@ -274,6 +343,8 @@ async function recoverServerPreview(photo: LocalPhoto, generation: number): Prom
     photo.preview_height ||= photo.height
     photo.preview_recovery_pending = false
     photo.preview_error = undefined
+    photo.preview_retry_attempts = undefined
+    photo.preview_next_retry_at = undefined
     persist(owner)
   } catch (error) {
     if (savedPath) await removeSavedFile(savedPath)
@@ -282,25 +353,30 @@ async function recoverServerPreview(photo: LocalPhoto, generation: number): Prom
 }
 
 async function tryRecoverServerPreview(photo: LocalPhoto, generation: number): Promise<void> {
-  if (photo.preview_path || !isCurrentOwner(photo.owner_account_id, generation)) return
+  if (photo.deleted_at || photo.preview_path || !isCurrentOwner(photo.owner_account_id, generation) || !isPreviewRecoveryDue(photo)) return
   try {
     await recoverServerPreview(photo, generation)
   } catch (error) {
     if (!isCurrentOwner(photo.owner_account_id, generation)) return
+    const attempts = Math.max(0, Number(photo.preview_retry_attempts || 0)) + 1
+    const delay = AUTO_RETRY_DELAYS_MS[Math.min(attempts - 1, AUTO_RETRY_DELAYS_MS.length - 1)]
     photo.preview_recovery_pending = true
     photo.preview_error = errorMessage(error, '服务器预览稍后自动恢复')
+    photo.preview_retry_attempts = attempts
+    photo.preview_next_retry_at = new Date(Date.now() + delay).toISOString()
     persist(photo.owner_account_id)
   }
 }
 
 async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: number): Promise<void> {
   const owner = batch.owner_account_id
-  if (!isCurrentOwner(owner, generation) || !state.online || photo.status !== 'local_ready') return
+  if (!isCurrentOwner(owner, generation) || !state.online || photo.status !== 'local_ready' || !isAutomaticRetryDue(photo)) return
   if (!photo.original_path || !photo.original_sha256 || !photo.original_mime_type) {
     markFailed(photo, new Error('本机原图信息不完整，请先恢复照片'), 'local_ready', true)
     return
   }
   try {
+    beginAutomaticRetryAttempt(photo)
     setStatus(photo, 'uploading')
     photo.progress = 1
     persist(owner)
@@ -354,11 +430,10 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
   } catch (error) {
     if (!isCurrentOwner(owner, generation)) return
     if (!state.online || error instanceof UploadPausedError) {
-      photo.status = 'local_ready'
-      persist(owner)
+      setStatus(photo, 'local_ready')
       return
     }
-    markFailed(photo, error, 'uploading')
+    if (!scheduleAutomaticRetry(photo, error, 'uploading')) markFailed(photo, error, 'uploading')
     if (isAuthExpired(error)) void notifyAuthExpired(owner)
   }
 }
@@ -395,6 +470,15 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
     for (const remote of detail.photos) {
       const local = localPhotos.find((photo) => photo.photo_uuid === remote.photo_uuid)
       if (!local) continue
+      if (remote.deleted_at) {
+        local.deleted_at = remote.deleted_at
+        local.preview_recovery_pending = false
+        local.preview_error = undefined
+        local.preview_retry_attempts = undefined
+        local.preview_next_retry_at = undefined
+        await markDesktopImported(local)
+        continue
+      }
       local.match_candidates = remote.match_candidates || local.match_candidates
       if (remote.title) local.title = remote.title
       if (remote.photo_date) local.photo_date = remote.photo_date
@@ -413,7 +497,7 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
   const owner = batch.owner_account_id
   if (!isCurrentOwner(owner, generation)) return
   const photos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
-  const uploadable = photos.filter((photo) => photo.status === 'local_ready')
+  const uploadable = photos.filter((photo) => photo.status === 'local_ready' && isAutomaticRetryDue(photo))
   if (!batch.remote_batch_id && !uploadable.length) return
   if (!batch.remote_batch_id) {
     const payload: CreateBatchPayload = {
@@ -425,11 +509,21 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       assignment: batch.draft.mode === 'direct' ? batch.draft.assignment : undefined,
       requirement: batch.draft.requirement,
     }
-    const created = await mobileApi.createBatch(payload)
-    if (!isCurrentOwner(owner, generation)) return
-    batch.remote_batch_id = created.batch_id
-    photos.forEach((photo) => { photo.remote_batch_id = created.batch_id })
-    persist(owner)
+    try {
+      uploadable.forEach(beginAutomaticRetryAttempt)
+      persist(owner)
+      const created = await mobileApi.createBatch(payload)
+      if (!isCurrentOwner(owner, generation)) return
+      batch.remote_batch_id = created.batch_id
+      photos.forEach((photo) => { photo.remote_batch_id = created.batch_id })
+      persist(owner)
+    } catch (error) {
+      uploadable.forEach((photo) => {
+        if (!scheduleAutomaticRetry(photo, error, 'local_ready')) markFailed(photo, error, 'local_ready')
+      })
+      if (isAuthExpired(error)) void notifyAuthExpired(owner)
+      return
+    }
   }
   await runWithConcurrency(uploadable, MAX_UPLOAD_CONCURRENCY, (photo) => uploadOne(photo, batch, generation))
   if (!isCurrentOwner(owner, generation)) return
@@ -438,7 +532,11 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
 
   if (batch.draft.mode === 'auto' && !batch.analyzed && refreshed.some((photo) => ['server_saved', 'analyzing'].includes(photo.status))) {
     if (batch.analysis_requested) return
+    const serverSavedPhotos = refreshed.filter((photo) => photo.status === 'server_saved')
+    if (serverSavedPhotos.some((photo) => !isAutomaticRetryDue(photo))) return
     try {
+      serverSavedPhotos.forEach(beginAutomaticRetryAttempt)
+      persist(owner)
       const accepted = await mobileApi.analyzeBatch(batch.remote_batch_id!)
       if (!isCurrentOwner(owner, generation)) return
       batch.analysis_requested = true
@@ -446,21 +544,29 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => setStatus(photo, 'analyzing'))
       persist(owner)
     } catch (error) {
-      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => markFailed(photo, error, 'analyzing'))
+      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => {
+        if (!scheduleAutomaticRetry(photo, error, 'analyzing')) markFailed(photo, error, 'analyzing')
+      })
       if (isAuthExpired(error)) void notifyAuthExpired(owner)
     }
     return
   }
 
   if (batch.draft.mode === 'direct' && !batch.committed && refreshed.some((photo) => photo.status === 'server_saved')) {
+    const serverSavedPhotos = refreshed.filter((photo) => photo.status === 'server_saved')
+    if (serverSavedPhotos.some((photo) => !isAutomaticRetryDue(photo))) return
     try {
+      serverSavedPhotos.forEach(beginAutomaticRetryAttempt)
+      persist(owner)
       await mobileApi.commitBatch(batch.remote_batch_id!)
       if (!isCurrentOwner(owner, generation)) return
       refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => setStatus(photo, 'desktop_pending'))
       batch.committed = true
       persist(owner)
     } catch (error) {
-      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => markFailed(photo, error, 'server_saved'))
+      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => {
+        if (!scheduleAutomaticRetry(photo, error, 'server_saved')) markFailed(photo, error, 'server_saved')
+      })
       if (isAuthExpired(error)) void notifyAuthExpired(owner)
     }
   }
@@ -478,13 +584,21 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
   try {
     for (const batch of [...state.batches]) {
       if (!isCurrentOwner(owner, generation) || !state.online) break
+      const batchPhotos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
+      if (batchPhotos.length && batchPhotos.every((photo) => photo.status === 'desktop_imported')) continue
       try {
         await refreshRemoteBatch(batch, generation)
         await processBatch(batch, generation)
       } catch (error) {
         if (!isCurrentOwner(owner, generation)) break
-        state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid) && photo.status === 'local_ready')
-          .forEach((photo) => markFailed(photo, error, 'local_ready'))
+        state.photos.filter((photo) => (
+          batch.photo_uuids.includes(photo.photo_uuid)
+          && photo.status === 'local_ready'
+          && isAutomaticRetryDue(photo)
+        ))
+          .forEach((photo) => {
+            if (!scheduleAutomaticRetry(photo, error, 'local_ready')) markFailed(photo, error, 'local_ready')
+          })
         if (isAuthExpired(error)) {
           void notifyAuthExpired(owner)
           break
@@ -671,9 +785,7 @@ async function confirmBatch(clientBatchId: string, assignments: Array<{ photo_uu
 }
 
 function retryTarget(photo: LocalPhoto): PhotoStatus {
-  if (!photo.retry_from || ['local_ready', 'uploading'].includes(photo.retry_from)) return 'local_ready'
-  if (photo.retry_from === 'analyzing') return 'server_saved'
-  return photo.retry_from
+  return automaticRetryTarget(photo.retry_from || 'local_ready')
 }
 
 async function retry(photoUuid: string): Promise<void> {
@@ -695,6 +807,9 @@ async function retry(photoUuid: string): Promise<void> {
     photo.error = undefined
     photo.retryable = undefined
     photo.failure_code = undefined
+    photo.auto_retry_pending = undefined
+    photo.auto_retry_attempts = undefined
+    photo.next_retry_at = undefined
     photo.updated_at = now()
     persist(photo.owner_account_id)
   }
@@ -713,6 +828,9 @@ function recoverAuthFailures(): void {
     photo.error = undefined
     photo.retryable = undefined
     photo.failure_code = undefined
+    photo.auto_retry_pending = undefined
+    photo.auto_retry_attempts = undefined
+    photo.next_retry_at = undefined
     photo.updated_at = now()
   })
   persist()

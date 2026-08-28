@@ -119,10 +119,9 @@ sudo bash /opt/album-auth/server/deploy/rollback.sh \
 `nginx-domain.conf`。正式 API 域名固定为 `https://api.shuiliyingxiang.cn`，nginx 请求体
 上限为 52MiB（总原图硬上限 50MiB；直传端点硬上限 10MiB），上传链路的 nginx
 connect/read/send 超时为有限的 240 秒，gunicorn 为 300 秒。微信公众平台的
-request/uploadFile 合法域名填该 API 域名。downloadFile 除 API 域名外，
-还必须加入「永久预览 Bucket 实际返回的 HTTPS 主机或已绑定的预览
-自定义域名」；具体主机在 Bucket 创建后确认，此项是真机发布阻塞项。
-原图 Bucket 签名地址只供电脑端使用，不加入小程序合法域名。
+request、uploadFile、downloadFile 合法域名都填写该 API 域名。手机端 100KB
+预览统一经 API 同域代理读取私有 OSS，不再要求把 Bucket 主机加入小程序合法域名。
+原图 Bucket 签名地址只供电脑端使用，也不加入小程序合法域名。
 
 ### 完全隔离的 staging
 

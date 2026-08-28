@@ -331,6 +331,8 @@ def _photo_payload(row, download_url="") -> dict:
         "requirement_name": item.get("requirement_name", ""),
         "title": item["title"],
         "photo_date": item["photo_date"],
+        "photographer": item.get("photographer", ""),
+        "uploaded_by": item.get("uploaded_by", ""),
         "client_captured_at": item["client_captured_at"],
         "orientation": int(item["orientation"] or 1),
         "width": preview_width,
@@ -354,6 +356,7 @@ def _photo_payload(row, download_url="") -> dict:
         "created_at": item["created_at"],
         "updated_at": item["updated_at"],
         "desktop_imported_at": item["desktop_imported_at"],
+        "deleted_at": item.get("deleted_at", ""),
         "original_cleanup_status": item.get("original_cleanup_status", ""),
     }
     if download_url:
@@ -860,7 +863,10 @@ def register_mobile_api(
             endpoint = "mobile_api.local_photo_file"
         if not key:
             return ""
-        if storage.backend == "oss":
+        # 手机预览统一走 API 同域代理，微信后台只需配置
+        # api.shuiliyingxiang.cn；私有 OSS 主机不再成为小程序合法域名阻塞项。
+        # 原图只供电脑拉取，OSS 后端仍使用短时直签以避免服务器转发大文件。
+        if storage.backend == "oss" and original:
             try:
                 return storage.signed_url(key, config.MOBILE_DOWNLOAD_URL_TTL)
             except StorageError as exc:
@@ -970,9 +976,21 @@ def register_mobile_api(
         *, current_user, photo_uuid, project_id, scope, category, assignment,
         title, photo_date, client_captured_at, orientation, source, batch_id,
         file_storage, claimed_sha, claimed_size="", target_machine_id="",
-        original_filename="", upload_max_bytes=None
+        original_filename="", photographer="", uploaded_by="", upload_max_bytes=None
     ):
         is_mobile_original = source == "mobile"
+        actor_name = _safe_text(
+            current_user.get("display_name") or current_user.get("username") or "",
+            100,
+        )
+        resolved_photographer = (
+            actor_name if is_mobile_original else _safe_text(photographer, 100)
+        )
+        resolved_uploaded_by = (
+            actor_name
+            if is_mobile_original
+            else _safe_text(uploaded_by or actor_name, 100)
+        )
         uploaded = _read_image_upload(
             file_storage,
             claimed_sha,
@@ -1202,6 +1220,8 @@ def register_mobile_api(
                         "requirement_name": requirement_name,
                         "title": _safe_text(title, 200),
                         "photo_date": _photo_date(photo_date),
+                        "photographer": resolved_photographer,
+                        "uploaded_by": resolved_uploaded_by,
                         "client_captured_at": _safe_text(client_captured_at, 40),
                         "orientation": _integer(orientation, 1, 1, 8),
                         "width": uploaded["width"],
@@ -1233,7 +1253,7 @@ def register_mobile_api(
                     cur = conn.execute(
                         "INSERT INTO cloud_photos (account_id, batch_id, photo_uuid, project_id, "
                         "source, scope, category, assignment_json, requirement_code, "
-                        "requirement_name, title, photo_date, "
+                        "requirement_name, title, photo_date, photographer, uploaded_by, "
                         "client_captured_at, orientation, width, height, original_filename, "
                         "sha256, size_bytes, mime_type, storage_key, original_sha256, "
                         "original_size_bytes, original_mime_type, original_storage_key, "
@@ -1243,6 +1263,7 @@ def register_mobile_api(
                         "desktop_imported_at) VALUES (:account_id, :batch_id, :photo_uuid, "
                         ":project_id, :source, :scope, :category, :assignment_json, "
                         ":requirement_code, :requirement_name, :title, :photo_date, "
+                        ":photographer, :uploaded_by, "
                         ":client_captured_at, :orientation, :width, :height, "
                         ":original_filename, :sha256, :size_bytes, 'image/jpeg', :storage_key, "
                         ":original_sha256, :original_size_bytes, :original_mime_type, "
@@ -1525,7 +1546,7 @@ def register_mobile_api(
         ).fetchall()
         counts = conn.execute(
             "SELECT status, COUNT(*) AS total FROM cloud_photos WHERE account_id = ? "
-            "AND source = 'mobile' GROUP BY status",
+            "AND source = 'mobile' AND deleted_at = '' GROUP BY status",
             (current_user["id"],),
         ).fetchall()
         chunk_counts = conn.execute(
@@ -1541,7 +1562,8 @@ def register_mobile_api(
             (current_user["id"],),
         ).fetchall()
         recent = conn.execute(
-            "SELECT * FROM cloud_photos WHERE account_id = ? ORDER BY id DESC LIMIT 10",
+            "SELECT * FROM cloud_photos WHERE account_id = ? AND deleted_at = '' "
+            "ORDER BY id DESC LIMIT 10",
             (current_user["id"],),
         ).fetchall()
         project_items = [_project_payload(row) for row in projects]
@@ -1957,7 +1979,7 @@ def register_mobile_api(
         # 手机影像库是“最近查看”时间线：首屏从最新 ID 向旧记录翻页。
         # cursor=0/缺省均代表首屏；后续 cursor 是上一页末尾（最小）的 ID。
         # 桌面 inbox 仍使用独立的 id > cursor 正向增量语义。
-        clauses = ["account_id = ?", "project_id = ?"]
+        clauses = ["account_id = ?", "project_id = ?", "deleted_at = ''"]
         params = [current["id"], project_id]
         if scope:
             clauses.append("scope = ?")
@@ -2010,7 +2032,8 @@ def register_mobile_api(
         conn = db.connect()
         try:
             row = conn.execute(
-                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
+                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ? "
+                "AND deleted_at = ''",
                 (current["id"], photo_uuid),
             ).fetchone()
             if not row:
@@ -2021,8 +2044,6 @@ def register_mobile_api(
 
     @blueprint.get("/api/mobile/v1/files/<photo_uuid>")
     def local_photo_file(photo_uuid):
-        if not isinstance(storage, LocalObjectStorage):
-            raise ApiProblem("local_storage_disabled", "本地图片代理未启用", 404)
         photo_uuid = _uuid(photo_uuid, "photo_uuid")
         try:
             signed = ticket_serializer.loads(
@@ -2040,17 +2061,34 @@ def register_mobile_api(
         try:
             row = conn.execute(
                 "SELECT preview_storage_key, storage_key FROM cloud_photos "
-                "WHERE account_id = ? AND photo_uuid = ?",
+                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
                 (int(signed.get("account_id") or 0), photo_uuid),
             ).fetchone()
         finally:
             conn.close()
         if not row:
             raise ApiProblem("photo_not_found", "照片不存在", 404)
-        path = storage.path_for(row["preview_storage_key"] or row["storage_key"])
-        if not path.is_file():
-            raise ApiProblem("object_missing", "图片文件暂时不可用", 404, True)
-        return send_file(path, mimetype="image/jpeg", conditional=True, max_age=60)
+        key = row["preview_storage_key"] or row["storage_key"]
+        try:
+            if isinstance(storage, LocalObjectStorage):
+                path = storage.path_for(key)
+                if not path.is_file():
+                    raise ApiProblem("object_missing", "图片文件暂时不可用", 404, True)
+                return send_file(path, mimetype="image/jpeg", conditional=True, max_age=60)
+            raw = storage.get_bytes(key, config.MOBILE_PREVIEW_MAX_BYTES)
+        except ApiProblem:
+            raise
+        except StorageError as exc:
+            raise ApiProblem(
+                "object_unavailable", "图片文件暂时不可用，请稍后重试", 503, True
+            ) from exc
+        return send_file(
+            io.BytesIO(raw),
+            mimetype="image/jpeg",
+            conditional=True,
+            max_age=60,
+            download_name=f"{photo_uuid}.jpg",
+        )
 
     @blueprint.get("/api/desktop/v1/files/<photo_uuid>/original")
     def local_original_file(photo_uuid):
@@ -2082,7 +2120,7 @@ def register_mobile_api(
                 "SELECT original_storage_key, original_mime_type, storage_key, "
                 "target_machine_id, "
                 "original_cleanup_status FROM cloud_photos "
-                "WHERE account_id = ? AND photo_uuid = ?",
+                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
                 (int(signed.get("account_id") or 0), photo_uuid),
             ).fetchone()
         finally:
@@ -2287,8 +2325,6 @@ def register_mobile_api(
     )
     def init_chunk_upload(batch_id):
         current = user()
-        if rate_limited_fn and rate_limited_fn():
-            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
         data = json_body()
         photo_uuid = _uuid(data.get("photo_uuid"), "photo_uuid")
         original_sha = _sha256(data.get("sha256"), "sha256")
@@ -4110,7 +4146,7 @@ def register_mobile_api(
             params.extend((cursor, limit + 1))
             rows = conn.execute(
                 "SELECT * FROM cloud_photos WHERE account_id = ? AND source = 'mobile' "
-                "AND status = 'desktop_pending' " + machine_clause +
+                "AND status = 'desktop_pending' AND deleted_at = '' " + machine_clause +
                 "AND id > ? ORDER BY id LIMIT ?",
                 params,
             ).fetchall()
@@ -4123,6 +4159,127 @@ def register_mobile_api(
                     "desktop_machine_id": desktop_machine_id,
                     "original_max_bytes": config.MOBILE_MAX_ORIGINAL_BYTES,
                     "max_original_bytes": config.MOBILE_MAX_ORIGINAL_BYTES,
+                }
+            )
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/desktop/v1/photos/<photo_uuid>/delete")
+    def desktop_delete_photo(photo_uuid):
+        """接收桌面端明确的单照片删除事件，只写软删除标记。"""
+
+        current = user()
+        photo_uuid = _uuid(photo_uuid, "photo_uuid")
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        local_project_code = _safe_text(data.get("local_project_code"), 160)
+        local_photo_id = _safe_text(data.get("local_photo_id"), 160)
+
+        conn = db.connect()
+        try:
+            desktop_machine_id = _require_active_machine(
+                conn, current["id"], desktop_machine_id
+            )
+            conn.execute("BEGIN IMMEDIATE")
+            photo = conn.execute(
+                "SELECT * FROM cloud_photos WHERE account_id = ? AND photo_uuid = ?",
+                (current["id"], photo_uuid),
+            ).fetchone()
+            if not photo:
+                # 账号内不存在即视为已删除；不跨账号查询，避免泄露其它租户数据。
+                conn.commit()
+                return jsonify(
+                    {
+                        "ok": True,
+                        "idempotent": True,
+                        "photo_uuid": photo_uuid,
+                        "status": "deleted",
+                    }
+                )
+
+            target_machine_id = _machine_id(photo["target_machine_id"])
+            stored_project_code = _safe_text(photo["local_project_code"], 160)
+            stored_photo_id = _safe_text(photo["local_photo_id"], 160)
+            legacy_target = target_machine_id in {"", "DEFAULT"}
+            if legacy_target:
+                if (
+                    not local_project_code
+                    or not local_photo_id
+                    or local_project_code != stored_project_code
+                    or local_photo_id != stored_photo_id
+                ):
+                    raise ApiProblem(
+                        "legacy_photo_identity_mismatch",
+                        "旧照片必须同时匹配电脑端工程编号和照片编号",
+                        403,
+                    )
+            elif target_machine_id != desktop_machine_id:
+                raise ApiProblem(
+                    "wrong_desktop_machine", "该照片属于另一台工程电脑", 403
+                )
+
+            deleted_by_machine_id = _machine_id(photo["deleted_by_machine_id"])
+            if photo["deleted_at"]:
+                if deleted_by_machine_id != desktop_machine_id:
+                    raise ApiProblem(
+                        "wrong_desktop_machine", "该照片已由另一台工程电脑删除", 403
+                    )
+                conn.commit()
+                return jsonify(
+                    {
+                        "ok": True,
+                        "idempotent": True,
+                        "photo_uuid": photo_uuid,
+                        "status": "deleted",
+                        "deleted_at": photo["deleted_at"],
+                        "deleted_by_machine_id": desktop_machine_id,
+                    }
+                )
+
+            status = str(photo["status"] or "")
+            if status == "desktop_pending":
+                # 照片已经落到本机、但 ACK 尚未到达服务器时，桌面端必须携带
+                # 两个本地永久标识。若服务器已有其中任一标识，还必须逐项一致。
+                if not local_project_code or not local_photo_id:
+                    raise ApiProblem(
+                        "pending_photo_identity_required",
+                        "待归档照片删除必须携带电脑端工程编号和照片编号",
+                        409,
+                    )
+                if (
+                    (stored_project_code and stored_project_code != local_project_code)
+                    or (stored_photo_id and stored_photo_id != local_photo_id)
+                ):
+                    raise ApiProblem(
+                        "pending_photo_identity_mismatch",
+                        "电脑端工程编号或照片编号与服务器记录不一致",
+                        409,
+                    )
+            elif status != "desktop_imported":
+                raise ApiProblem(
+                    "photo_not_deletable",
+                    "照片尚未在该电脑落地，不能从手机影像库删除",
+                    409,
+                )
+
+            timestamp = now()
+            conn.execute(
+                "UPDATE cloud_photos SET deleted_at = ?, deleted_by_machine_id = ? "
+                "WHERE account_id = ? AND photo_uuid = ? AND deleted_at = ''",
+                (timestamp, desktop_machine_id, current["id"], photo_uuid),
+            )
+            conn.commit()
+            return jsonify(
+                {
+                    "ok": True,
+                    "idempotent": False,
+                    "photo_uuid": photo_uuid,
+                    "status": "deleted",
+                    "deleted_at": timestamp,
+                    "deleted_by_machine_id": desktop_machine_id,
                 }
             )
         finally:
@@ -4294,6 +4451,8 @@ def register_mobile_api(
             ),
             target_machine_id=desktop_machine_id,
             original_filename=request.form.get("original_filename", ""),
+            photographer=request.form.get("photographer", ""),
+            uploaded_by=request.form.get("uploaded_by", ""),
         )
         return jsonify(
             {

@@ -275,6 +275,122 @@ class DesktopSecurityContractTest(unittest.TestCase):
         with Image.open(io.BytesIO(raw_thumb)) as image:
             self.assertEqual(max(image.size), 720)
 
+    def test_delete_photo_enqueues_explicit_uuid_without_rolling_back_local_delete(self):
+        from PIL import Image
+        from unittest.mock import MagicMock
+        from werkzeug.datastructures import FileStorage
+        from werkzeug.security import generate_password_hash
+
+        with self.client.session_transaction() as session:
+            session["username"] = "删除同步验收员"
+
+        password = "DeleteRoute7286"
+        engineering_project = dict(self.desktop.current_engineering_project())
+        engineering_project["delete_password_hash"] = generate_password_hash(password)
+        engineering_project["cloud_owner_id"] = "account-delete-route"
+
+        def add_photo(project_code, filename):
+            self.desktop.manager.create_project(
+                project_code,
+                f"{project_code} 删除同步验收单元",
+                source_fields={"单元工程编码": project_code},
+            )
+            raw = io.BytesIO()
+            Image.new("RGB", (320, 240), (35, 120, 105)).save(raw, "JPEG", quality=90)
+            added = self.desktop.manager.add_photos(
+                project_code,
+                [FileStorage(stream=io.BytesIO(raw.getvalue()), filename=filename)],
+            )
+            stored = self.desktop.manager.get_project(project_code)["photos"][0]
+            target = self.desktop.manager._photos_dir(project_code) / stored["filename"]
+            return added[0], stored, target
+
+        # 有永久 UUID：本地文件与元数据先删除，再以捕获到的稳定标识精确入队。
+        project_code = "DELETE-UUID-ROUTE"
+        added, stored, target = add_photo(project_code, "uuid-delete.jpg")
+        photo_uuid = stored["photo_uuid"]
+        service = MagicMock()
+        service.enqueue_photo_delete.return_value = {"ok": True, "queued": True}
+        with patch.object(
+            self.desktop, "current_engineering_project", return_value=engineering_project
+        ), patch.object(
+            self.desktop, "desktop_mobile_sync_service", return_value=service
+        ):
+            response = self.client.post(
+                f"/api/delete-photo/{project_code}/{added['id']}",
+                json={"category": "construction", "safety_password": password},
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()["deleted"])
+        service.enqueue_photo_delete.assert_called_once_with(
+            photo_uuid,
+            project_code,
+            added["id"],
+            project_id=str(engineering_project["id"]),
+            cloud_account_id="account-delete-route",
+        )
+        self.assertFalse(target.exists())
+        self.assertFalse(self.desktop.manager.get_project(project_code)["photos"])
+
+        # 旧照片若还没有 UUID，只执行本地删除，绝不能凭目录或编号猜测云端对象。
+        missing_code = "DELETE-NO-UUID-ROUTE"
+        missing_added, missing_stored, missing_target = add_photo(
+            missing_code, "no-uuid-delete.jpg"
+        )
+        with self.desktop.manager._project_write_lock(missing_code):
+            data = self.desktop.manager.get_project(missing_code)
+            data["photos"][0].pop("photo_uuid", None)
+            self.desktop.manager._write_metadata(missing_code, data)
+        missing_service = MagicMock()
+        with patch.object(
+            self.desktop, "current_engineering_project", return_value=engineering_project
+        ), patch.object(
+            self.desktop, "desktop_mobile_sync_service", return_value=missing_service
+        ):
+            missing_response = self.client.post(
+                f"/api/delete-photo/{missing_code}/{missing_added['id']}",
+                json={"category": "construction", "safety_password": password},
+            )
+        self.assertEqual(missing_response.status_code, 200, missing_response.get_json())
+        self.assertTrue(missing_response.get_json()["deleted"])
+        self.assertEqual(
+            missing_response.get_json()["cloud_delete"]["code"], "photo_uuid_missing"
+        )
+        missing_service.enqueue_photo_delete.assert_not_called()
+        self.assertFalse(missing_target.exists())
+        self.assertFalse(self.desktop.manager.get_project(missing_code)["photos"])
+
+        # 入队异常只会留在响应状态中；已经完成的本地删除不能因此被回滚。
+        failure_code = "DELETE-QUEUE-FAIL-ROUTE"
+        failure_added, failure_stored, failure_target = add_photo(
+            failure_code, "queue-failure-delete.jpg"
+        )
+        failure_service = MagicMock()
+        failure_service.enqueue_photo_delete.side_effect = RuntimeError("queue unavailable")
+        with patch.object(
+            self.desktop, "current_engineering_project", return_value=engineering_project
+        ), patch.object(
+            self.desktop, "desktop_mobile_sync_service", return_value=failure_service
+        ):
+            failure_response = self.client.post(
+                f"/api/delete-photo/{failure_code}/{failure_added['id']}",
+                json={"category": "construction", "safety_password": password},
+            )
+        self.assertEqual(failure_response.status_code, 200, failure_response.get_json())
+        self.assertTrue(failure_response.get_json()["deleted"])
+        self.assertEqual(
+            failure_response.get_json()["cloud_delete"]["code"], "delete_queue_failed"
+        )
+        failure_service.enqueue_photo_delete.assert_called_once_with(
+            failure_stored["photo_uuid"],
+            failure_code,
+            failure_added["id"],
+            project_id=str(engineering_project["id"]),
+            cloud_account_id="account-delete-route",
+        )
+        self.assertFalse(failure_target.exists())
+        self.assertFalse(self.desktop.manager.get_project(failure_code)["photos"])
+
     def test_ocr_prefers_construction_content_and_free_export_has_no_watermark(self):
         lines = [
             "洺河龙泉缓洪工程",
@@ -433,6 +549,131 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn("文字标签位置", html)
         self.assertIn("printSetupMarginTop", html)
 
+    def test_project_division_menu_exposes_excel_template_and_import_on_narrow_screens(self):
+        from openpyxl import load_workbook
+
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("项目划分 ▾", html)
+        self.assertIn("下载项目划分模板（Excel）", html)
+        self.assertIn("选择项目划分文件导入", html)
+        self.assertIn('aria-controls="projectImportMenu"', html)
+
+        response = self.client.get("/api/project-template.xlsx")
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(io.BytesIO(response.data), read_only=True)
+        self.assertEqual(workbook.active.title, "项目划分")
+        headers = [cell.value for cell in next(workbook.active.iter_rows(max_row=1))]
+        self.assertIn("单元工程编码", headers)
+        workbook.close()
+        response.close()
+
+        script_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.js"))
+        script = script_path.read_text(encoding="utf-8")
+        self.assertIn("setProjectImportMenu(willOpen)", script)
+        self.assertNotIn('$("#projectImportMenuBtn").addEventListener("click", (event) => {\n      event.stopPropagation();\n      $("#importFile").click();', script)
+
+        styles_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.css"))
+        styles = styles_path.read_text(encoding="utf-8")
+        narrow_styles = styles[styles.rfind("@media (max-width: 760px)") :]
+        self.assertNotIn(".project-import-wrap,\n      .top-filter-group {\n        display: none", narrow_styles)
+
+    def test_print_defaults_show_complete_photo_and_readable_photographer_caption(self):
+        with self.desktop.app.test_request_context("/?style=default"):
+            settings = self.desktop.print_settings_from_request()
+        self.assertEqual(settings["print_image_fit"], "contain")
+        self.assertEqual(settings["print_caption_font_size"], 10.0)
+        self.assertEqual(settings["print_caption_size_mm"], 7.5)
+        self.assertIn("photographer", settings["print_caption_fields"])
+
+        with self.desktop.app.test_request_context("/?style=custom&image_fit=cover"):
+            custom = self.desktop.print_settings_from_request()
+        self.assertEqual(custom["print_image_fit"], "cover")
+
+        project = {"project_code": "PRINT-CHECK", "project_name": "打印验收单元"}
+        photos = self.desktop.enrich_print_photos(project, [{
+            "id": "PRINT-CHECK-SY001",
+            "title": "四边完整验收照片",
+            "photo_date": "2026-08-28",
+            "photographer": "张三",
+            "url": "/photos/PRINT-CHECK/sample.jpg",
+            "orientation": "portrait",
+            "rotation": 0,
+        }], settings)
+        pages = self.desktop.layout_fixed_photo_pages(
+            photos,
+            layout="landscape",
+            page_size=4,
+            photo_width_mm=127,
+            photo_height_mm=89,
+            print_settings=settings,
+        )
+        self.assertEqual(pages[0][0]["_rotate"], 90)
+        with self.desktop.app.test_request_context("/"):
+            rendered = self.desktop.render_template(
+                "print.html",
+                project=project,
+                photos=photos,
+                project_groups=[{"level": "", "pages": [{"unit_name": "打印验收单元", "items": pages[0]}]}],
+                category="construction",
+                category_label="施工单元影像",
+                print_layout="landscape",
+                print_page_size=4,
+                print_settings=settings,
+                watermark_text="",
+            )
+        self.assertIn("object-fit: contain", rendered)
+        self.assertIn("font-size: 10.0px", rendered)
+        self.assertIn('class="pr-90"', rendered)
+        self.assertIn("摄影者：张三", rendered)
+
+    def test_editing_photo_without_orientation_keeps_detected_portrait(self):
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        project = self.desktop.manager.create_project(
+            "PORTRAIT-EDIT-CHECK",
+            "竖图编辑验收单元",
+            source_fields={"单元工程编码": "PORTRAIT-EDIT-CHECK"},
+        )
+        source = io.BytesIO()
+        Image.new("RGB", (800, 1200), (80, 130, 170)).save(source, "JPEG", quality=90)
+        source.seek(0)
+        added = self.desktop.manager.add_photos(
+            project["project_code"],
+            [FileStorage(stream=source, filename="竖图.jpg")],
+            title="竖图",
+            photo_date="2026-08-28",
+        )
+        self.assertEqual(added[0]["orientation"], "portrait")
+
+        with self.client.session_transaction() as session:
+            session["username"] = "方向测试员"
+        response = self.client.patch(
+            f"/api/photos/{project['project_code']}/{added[0]['id']}",
+            json={
+                "title": "只改题名",
+                "photo_date": "2026-08-28",
+                "photographer": "方向测试员",
+                "description": "",
+                "process_name": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["photo"]["orientation"], "portrait")
+
+    def test_photo_cards_show_readable_date_and_photographer_or_uploader(self):
+        script_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.js"))
+        styles_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.css"))
+        script = script_path.read_text(encoding="utf-8")
+        styles = styles_path.read_text(encoding="utf-8")
+
+        self.assertIn('const person = photographer', script)
+        self.assertIn('`上传者 ${uploader}`', script)
+        self.assertIn('class="photo-card-details"', script)
+        self.assertIn(".photo-card-details", styles)
+        self.assertNotIn(".photo-card-title { font-size: 7.5px; }", styles)
+        self.assertNotIn(".photo-card-title { font-size: 9px; }", styles)
+
     def test_default_print_is_four_5inch_photos_and_upload_is_optimized(self):
         import hashlib
         import uuid
@@ -452,7 +693,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
             "print_horizontal_gap_mm": 2,
             "print_vertical_gap_mm": 2,
             "print_caption_position": "bottom",
-            "print_caption_size_mm": 7,
+            "print_caption_size_mm": 7.5,
             "print_show_page_title": True,
         }
         pages = self.desktop.layout_fixed_photo_pages(
@@ -466,6 +707,8 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(len(pages[0]), 4)
         self.assertTrue(all(item["_caption_position"] == "bottom" for item in pages[0]))
+        printable_height = 210 - settings["print_margin_top_mm"] - settings["print_margin_bottom_mm"] - 7
+        self.assertTrue(all(item["_top"] + item["_block_h"] <= printable_height for item in pages[0]))
 
         source = io.BytesIO()
         Image.effect_noise((4200, 2800), 48).convert("RGB").save(source, "JPEG", quality=100)

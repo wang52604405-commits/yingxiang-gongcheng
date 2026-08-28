@@ -12,19 +12,19 @@
 {% set photo_preset = print_settings.get("print_photo_preset", "5inch") %}
 {% set photo_width_cm = print_settings.get("print_photo_width_cm", 12.7) %}
 {% set photo_height_cm = print_settings.get("print_photo_height_cm", 8.9) %}
-{% set caption_font_size = print_settings.get("print_caption_font_size", 7.2) or 7.2 %}
+{% set caption_font_size = print_settings.get("print_caption_font_size", 10) or 10 %}
 {% set caption_position = print_settings.get("print_caption_position", "bottom") %}
 {% set margin_top = print_settings.get("print_margin_top_mm", 6) %}
 {% set margin_right = print_settings.get("print_margin_right_mm", 6) %}
 {% set margin_bottom = print_settings.get("print_margin_bottom_mm", 6) %}
 {% set margin_left = print_settings.get("print_margin_left_mm", 6) %}
 {% set show_page_title = print_settings.get("print_show_page_title", true) %}
-{% set image_fit = print_settings.get("print_image_fit", "cover") %}
+{% set image_fit = print_settings.get("print_image_fit", "contain") %}
 {% set paper_width = 210 if layout == "portrait" else 297 %}
 {% set paper_height = 297 if layout == "portrait" else 210 %}
 {% set content_width = paper_width - margin_left - margin_right %}
 {% set content_height = paper_height - margin_top - margin_bottom %}
-{% set title_height = 7.5 if show_page_title else 0 %}
+{% set title_height = 7 if show_page_title else 0 %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
 {% set has_books = has_project_groups and (project_groups|selectattr("level")|list|length > 0) %}
 {% set style_labels = {"default": "默认 2×2", "portrait2": "竖版 · 上下双图", "landscape2": "横版 · 左右双图", "single": "横版 · 大图单张"} %}
@@ -148,6 +148,8 @@
       width: 100%;
       height: 100%;
       object-fit: {{ image_fit }};
+      object-position: center;
+      image-orientation: from-image;
       display: block;
     }
     .photo-frame img.pr-90,
@@ -158,6 +160,7 @@
       width: var(--photo-h);
       height: var(--photo-w);
       object-fit: {{ image_fit }};
+      object-position: center;
       transform: translate(-50%, -50%) rotate(90deg);
     }
     .photo-frame img.pr-270 { transform: translate(-50%, -50%) rotate(270deg); }

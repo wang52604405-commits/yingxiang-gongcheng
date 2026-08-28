@@ -25,7 +25,13 @@ export const tokenStorage = {
   clear: () => uni.removeStorageSync(TOKEN_KEY),
 }
 
-export async function apiRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', path: string, data?: unknown, requiresAuth = true): Promise<T> {
+export async function apiRequest<T>(
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT',
+  path: string,
+  data?: unknown,
+  requiresAuth = true,
+  timeout = 20_000,
+): Promise<T> {
   if (API_MODE === 'mock') return runtimeRequest<T>(method, path, data)
   const token = tokenStorage.get()
   return new Promise<T>((resolve, reject) => {
@@ -38,7 +44,7 @@ export async function apiRequest<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', pa
         'Content-Type': 'application/json',
         ...(requiresAuth && token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      timeout: 20_000,
+      timeout,
       success: (response: UniApp.RequestSuccessCallbackResult) => {
         const body = response.data as (T & Partial<ApiErrorShape>) | undefined
         if (response.statusCode >= 200 && response.statusCode < 300 && body) {

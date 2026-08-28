@@ -155,18 +155,18 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_preset": "5inch",
     "print_photo_width_cm": 12.7,
     "print_photo_height_cm": 8.9,
-    "print_caption_font_size": 7.2,
+    "print_caption_font_size": 10.0,
     "print_caption_position": "bottom",
-    "print_caption_size_mm": 7.0,
+    "print_caption_size_mm": 7.5,
     "print_margin_top_mm": 6.0,
     "print_margin_right_mm": 6.0,
     "print_margin_bottom_mm": 6.0,
     "print_margin_left_mm": 6.0,
     "print_horizontal_gap_mm": 2.0,
     "print_vertical_gap_mm": 2.0,
-    "print_image_fit": "cover",
+    "print_image_fit": "contain",
     "print_show_page_title": True,
-    "print_caption_fields": ["title", "id", "photo_date"],
+    "print_caption_fields": ["title", "id", "photo_date", "photographer"],
     "watermark_ocr_enabled": True,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
@@ -714,12 +714,12 @@ def read_engineering_settings():
     settings["print_photo_width_cm"] = normalize_print_photo_size(settings.get("print_photo_width_cm", 0))
     settings["print_photo_height_cm"] = normalize_print_photo_size(settings.get("print_photo_height_cm", 0))
     try:
-        settings["print_caption_font_size"] = max(5, min(14, float(settings.get("print_caption_font_size", 7.2))))
+        settings["print_caption_font_size"] = max(5, min(14, float(settings.get("print_caption_font_size", 10.0))))
     except (TypeError, ValueError):
-        settings["print_caption_font_size"] = 7.2
+        settings["print_caption_font_size"] = 10.0
     settings["print_caption_position"] = settings.get("print_caption_position") if settings.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else "bottom"
     for field, default_value, minimum, maximum in [
-        ("print_caption_size_mm", 7.0, 4.0, 60.0),
+        ("print_caption_size_mm", 7.5, 4.0, 60.0),
         ("print_margin_top_mm", 6.0, 0.0, 30.0),
         ("print_margin_right_mm", 6.0, 0.0, 30.0),
         ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
@@ -731,12 +731,12 @@ def read_engineering_settings():
             settings[field] = max(minimum, min(maximum, float(settings.get(field, default_value))))
         except (TypeError, ValueError):
             settings[field] = default_value
-    settings["print_image_fit"] = settings.get("print_image_fit") if settings.get("print_image_fit") in {"cover", "contain"} else "cover"
+    settings["print_image_fit"] = settings.get("print_image_fit") if settings.get("print_image_fit") in {"cover", "contain"} else "contain"
     settings["print_show_page_title"] = bool(settings.get("print_show_page_title", True))
     allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
     caption_fields = settings.get("print_caption_fields")
     if not isinstance(caption_fields, list):
-        caption_fields = ["title", "id", "photo_date"]
+        caption_fields = ["title", "id", "photo_date", "photographer"]
     settings["print_caption_fields"] = [field for field in caption_fields if field in allowed_caption_fields]
     fields = settings.get("photo_detail_fields")
     if not isinstance(fields, list) or not fields:
@@ -770,12 +770,12 @@ def write_engineering_settings(payload):
     if current["print_photo_preset"] in preset_sizes:
         current["print_photo_width_cm"], current["print_photo_height_cm"] = preset_sizes[current["print_photo_preset"]]
     try:
-        current["print_caption_font_size"] = max(5, min(14, float(payload.get("print_caption_font_size", current.get("print_caption_font_size", 7.2)))))
+        current["print_caption_font_size"] = max(5, min(14, float(payload.get("print_caption_font_size", current.get("print_caption_font_size", 10.0)))))
     except (TypeError, ValueError) as exc:
         raise ValueError("照片说明字号必须是数字") from exc
     current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else current.get("print_caption_position", "bottom")
     for field, default_value, minimum, maximum in [
-        ("print_caption_size_mm", 7.0, 4.0, 60.0),
+        ("print_caption_size_mm", 7.5, 4.0, 60.0),
         ("print_margin_top_mm", 6.0, 0.0, 30.0),
         ("print_margin_right_mm", 6.0, 0.0, 30.0),
         ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
@@ -787,7 +787,7 @@ def write_engineering_settings(payload):
             current[field] = max(minimum, min(maximum, float(payload.get(field, current.get(field, default_value)))))
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{field} 必须是数字") from exc
-    current["print_image_fit"] = payload.get("print_image_fit") if payload.get("print_image_fit") in {"cover", "contain"} else current.get("print_image_fit", "cover")
+    current["print_image_fit"] = payload.get("print_image_fit") if payload.get("print_image_fit") in {"cover", "contain"} else current.get("print_image_fit", "contain")
     current["print_show_page_title"] = bool(payload.get("print_show_page_title", current.get("print_show_page_title", True)))
     if isinstance(payload.get("print_caption_fields"), list):
         allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
@@ -3252,17 +3252,17 @@ PRINT_STYLE_DEFAULTS = {
         "print_page_size": 4,
         "print_photo_preset": "5inch",
         "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.0,
-        "print_caption_font_size": 7.2,
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
         "print_margin_top_mm": 4.0,
         "print_margin_right_mm": 4.0,
         "print_margin_bottom_mm": 4.0,
         "print_margin_left_mm": 4.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 2.0,
-        "print_image_fit": "cover",
+        "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date"],
+        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
     },
     "portrait2": {
         "print_layout": "portrait",
@@ -3271,34 +3271,34 @@ PRINT_STYLE_DEFAULTS = {
         "print_photo_width_cm": 18.5,
         "print_photo_height_cm": 12.3,
         "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.0,
-        "print_caption_font_size": 7.2,
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
         "print_margin_top_mm": 12.0,
         "print_margin_right_mm": 12.0,
         "print_margin_bottom_mm": 12.0,
         "print_margin_left_mm": 12.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 4.0,
-        "print_image_fit": "cover",
+        "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date"],
+        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
     },
     "landscape2": {
         "print_layout": "landscape",
         "print_page_size": 2,
         "print_photo_preset": "5inch",
         "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.0,
-        "print_caption_font_size": 7.2,
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
         "print_margin_top_mm": 12.0,
         "print_margin_right_mm": 12.0,
         "print_margin_bottom_mm": 12.0,
         "print_margin_left_mm": 12.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 2.0,
-        "print_image_fit": "cover",
+        "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date"],
+        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
     },
     "single": {
         "print_layout": "landscape",
@@ -3307,17 +3307,17 @@ PRINT_STYLE_DEFAULTS = {
         "print_photo_width_cm": 26.0,
         "print_photo_height_cm": 17.2,
         "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.0,
-        "print_caption_font_size": 7.2,
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
         "print_margin_top_mm": 10.0,
         "print_margin_right_mm": 10.0,
         "print_margin_bottom_mm": 10.0,
         "print_margin_left_mm": 10.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 2.0,
-        "print_image_fit": "cover",
+        "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date"],
+        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
     },
 }
 
@@ -3347,21 +3347,21 @@ def print_settings_from_request():
 
     position = str(request.args.get("caption_position") or settings.get("print_caption_position") or "bottom")
     settings["print_caption_position"] = position if position in {"hidden", "left", "right", "top", "bottom"} else "bottom"
-    settings["print_caption_font_size"] = request_float("caption_font_size", settings.get("print_caption_font_size", 7.2), 5.0, 14.0)
-    settings["print_caption_size_mm"] = request_float("caption_size_mm", settings.get("print_caption_size_mm", 7.0), 4.0, 60.0)
+    settings["print_caption_font_size"] = request_float("caption_font_size", settings.get("print_caption_font_size", 10.0), 5.0, 14.0)
+    settings["print_caption_size_mm"] = request_float("caption_size_mm", settings.get("print_caption_size_mm", 7.5), 4.0, 60.0)
     for side in ("top", "right", "bottom", "left"):
         key = f"print_margin_{side}_mm"
         settings[key] = request_float(f"margin_{side}_mm", settings.get(key, 6.0), 0.0, 30.0)
     settings["print_horizontal_gap_mm"] = request_float("horizontal_gap_mm", settings.get("print_horizontal_gap_mm", 2.0), 0.0, 20.0)
     settings["print_vertical_gap_mm"] = request_float("vertical_gap_mm", settings.get("print_vertical_gap_mm", 2.0), 0.0, 20.0)
-    image_fit = str(request.args.get("image_fit") or settings.get("print_image_fit") or "cover")
-    settings["print_image_fit"] = image_fit if image_fit in {"cover", "contain"} else "cover"
+    image_fit = str(request.args.get("image_fit") or settings.get("print_image_fit") or "contain")
+    settings["print_image_fit"] = image_fit if image_fit in {"cover", "contain"} else "contain"
     show_page_title = str(request.args.get("show_page_title", "1" if settings.get("print_show_page_title", True) else "0")).lower()
     settings["print_show_page_title"] = show_page_title not in {"0", "false", "no", "off"}
     allowed_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
     raw_fields = request.args.get("caption_fields")
     if raw_fields is None:
-        fields = settings.get("print_caption_fields") or ["title", "id", "photo_date"]
+        fields = settings.get("print_caption_fields") or ["title", "id", "photo_date", "photographer"]
     else:
         fields = [item.strip() for item in str(raw_fields).split(",") if item.strip()]
     settings["print_caption_fields"] = [field for field in fields if field in allowed_fields]
@@ -3585,14 +3585,16 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
     horizontal_gap = float(settings.get("print_horizontal_gap_mm", PRINT_FIXED_GAP))
     vertical_gap = float(settings.get("print_vertical_gap_mm", PRINT_FIXED_GAP))
     caption_position = str(settings.get("print_caption_position") or "bottom")
-    caption_size = float(settings.get("print_caption_size_mm", 7.0))
+    caption_size = float(settings.get("print_caption_size_mm", 7.5))
     show_page_title = bool(settings.get("print_show_page_title", True))
     if layout == "portrait":
         paper_w, paper_h = 210.0, 297.0
     else:
         paper_w, paper_h = 297.0, 210.0
     page_w = max(20.0, paper_w - margin_left - margin_right)
-    title_h = 7.5 if show_page_title else 0.0
+    # 4 张 5 寸照片 + 7.5mm 说明区需要完整落在横向 A4 内；
+    # 7mm 标题区仍能容纳单元名称，同时避免底部说明被裁掉。
+    title_h = 7.0 if show_page_title else 0.0
     page_h = max(20.0, paper_h - margin_top - margin_bottom - title_h)
     single_line = page_size >= 4
     pages = []
@@ -6215,18 +6217,21 @@ def api_update_photo(project_code, photo_id):
         photo_date = str(data.get("photo_date") or "").strip()
         if not photo_date:
             return json_error("请填写照片日期", 400)
-        photo = manager.update_photo(
-            project_code,
-            photo_id,
-            title=data.get("title", ""),
-            photo_date=photo_date,
-            photographer=data.get("photographer", ""),
-            description=data.get("description", ""),
-            process_name=data.get("process_name", ""),
-            process_code=data.get("process_code", ""),
-            orientation=data.get("orientation", "landscape"),
-            rotation=data.get("rotation", 0),
-        )
+        updates = {
+            "title": data.get("title", ""),
+            "photo_date": photo_date,
+            "photographer": data.get("photographer", ""),
+            "description": data.get("description", ""),
+            "process_name": data.get("process_name", ""),
+            "process_code": data.get("process_code", ""),
+        }
+        # 编辑题名、日期等普通信息时，不得把已识别的竖图方向重置为横图。
+        # 老客户端可能不发送 orientation / rotation，因此仅在明确提供时更新。
+        if "orientation" in data:
+            updates["orientation"] = data.get("orientation")
+        if "rotation" in data:
+            updates["rotation"] = data.get("rotation")
+        photo = manager.update_photo(project_code, photo_id, **updates)
         return jsonify({"ok": True, "photo": photo, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc), 404)
@@ -6735,6 +6740,7 @@ def delete_photo(project_code, photo_id):
         payload = request.get_json(silent=True) or request.form
         ensure_engineering_delete_password(payload.get("safety_password", ""))
         category = manager._normalize_category(payload.get("category", "construction"))
+        delete_event = {}
         with manager._project_write_lock(project_code):
             data = manager.get_project(project_code)
             photos_dir = manager._photos_dir(project_code)
@@ -6743,6 +6749,11 @@ def delete_photo(project_code, photo_id):
             for photo in data.get("photos", []):
                 photo_category = manager._normalize_category(photo.get("category"))
                 if photo.get("id") == photo_id and photo_category == category:
+                    delete_event = {
+                        "photo_uuid": str(photo.get("photo_uuid") or "").strip(),
+                        "local_project_code": str(project_code or "").strip(),
+                        "local_photo_id": str(photo.get("id") or photo_id).strip(),
+                    }
                     target = photos_dir / photo.get("filename", "")
                     if target.exists():
                         target.unlink()
@@ -6760,7 +6771,36 @@ def delete_photo(project_code, photo_id):
             data["photos"] = kept
             manager._write_metadata(project_code, data)
             manager._renumber_after_change(project_code, data)
-        return jsonify({"ok": True, "deleted": deleted, "photos": manager.get_photos(project_code)})
+        cloud_delete = {
+            "ok": True,
+            "queued": False,
+            "code": "photo_uuid_missing" if deleted else "photo_not_found",
+        }
+        if deleted and delete_event.get("photo_uuid"):
+            # 云端删除使用本地动作捕获的永久 UUID，绝不再用目录清单差异猜测。
+            # 入队仅写本地同步状态；断网、登出或服务器故障都不回滚本地删除。
+            try:
+                engineering_project = current_engineering_project()
+                cloud_delete = desktop_mobile_sync_service().enqueue_photo_delete(
+                    delete_event["photo_uuid"],
+                    delete_event["local_project_code"],
+                    delete_event["local_photo_id"],
+                    project_id=str(engineering_project.get("id") or DEFAULT_ENGINEERING_PROJECT_ID),
+                    cloud_account_id=str(engineering_project.get("cloud_owner_id") or ""),
+                )
+            except Exception as exc:
+                cloud_delete = {
+                    "ok": False,
+                    "queued": False,
+                    "code": "delete_queue_failed",
+                    "error": str(exc)[:300],
+                }
+        return jsonify({
+            "ok": True,
+            "deleted": deleted,
+            "cloud_delete": cloud_delete,
+            "photos": manager.get_photos(project_code),
+        })
     except Exception as exc:
         return json_error(str(exc))
 

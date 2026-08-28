@@ -749,6 +749,8 @@ class DesktopMobileSync:
             state["ack_pending"] = {}
         if not isinstance(state.get("cleanup_pending"), dict):
             state["cleanup_pending"] = {}
+        if not isinstance(state.get("delete_pending"), dict):
+            state["delete_pending"] = {}
         # v1 初版只记录 cleanup_pending。它同样代表服务器尚未完成
         # ACK 全流程，升级后并入更通用的 ack_pending。
         for photo_uuid, local in state["cleanup_pending"].items():
@@ -783,11 +785,51 @@ class DesktopMobileSync:
         return {"version": 2, "active_identity": legacy_identity, "scopes": scopes}
 
     def _read_state(self) -> dict:
-        identity = self._state_identity()
+        return self._read_state_for_identity(self._state_identity())
+
+    def _read_state_for_identity(self, identity: str) -> dict:
+        identity = str(identity or "").strip()
         with self._state_lock:
             document = self._read_state_document_unlocked(identity)
             scope = document["scopes"].get(identity, {})
             return self._normalized_scope_state(scope, identity)
+
+    def _mutate_state_for_identity(self, identity: str, callback):
+        """在一个锁周期内修改指定账号+机器分区，避免网络线程覆盖删除事件。"""
+        identity = str(identity or "").strip()
+        if not identity:
+            raise ValueError("同步状态分区不能为空")
+        with self._state_lock:
+            document = self._read_state_document_unlocked(identity)
+            state = self._normalized_scope_state(
+                document.setdefault("scopes", {}).get(identity, {}), identity
+            )
+            result = callback(state)
+            state.pop("_scope_identity", None)
+            document["version"] = 2
+            document["active_identity"] = identity
+            document["scopes"][identity] = state
+            _atomic_write_json(self.state_path, document)
+            return result
+
+    def _state_identity_for_account(self, account_id: str) -> str:
+        """得到指定云账号在本机的确定分区；登出时也不落入 logged-out。"""
+        account_id = str(account_id or "").strip()
+        if not account_id:
+            return ""
+        current_account_id = self._cloud_account_id()
+        if current_account_id == account_id:
+            current = self._state_identity()
+            if not current.startswith("__logged_out__|"):
+                return current
+        reader = getattr(self.cloud, "desktop_sync_identity_for_account", None)
+        try:
+            account_identity = str(reader(account_id) or "").strip() if callable(reader) else ""
+        except Exception:
+            account_identity = ""
+        if not account_identity:
+            return ""
+        return f"{account_identity}|{self._desktop_machine_id() or 'unknown-machine'}"
 
     def _write_state(self, state: dict) -> None:
         supplied = dict(state or {})
@@ -796,6 +838,15 @@ class DesktopMobileSync:
         normalized.pop("_scope_identity", None)
         with self._state_lock:
             document = self._read_state_document_unlocked(identity)
+            # delete_pending 只允许通过 _mutate_state_for_identity 原子增删。
+            # 快照、收件箱等网络步骤常在请求前读取 state、请求后再写回；
+            # 若此间用户删除照片，旧副本绝不能覆盖刚持久化的删除事件。
+            persisted_scope = self._normalized_scope_state(
+                document.setdefault("scopes", {}).get(identity, {}), identity
+            )
+            normalized["delete_pending"] = dict(
+                persisted_scope.get("delete_pending") or {}
+            )
             document["version"] = 2
             document["active_identity"] = identity
             document.setdefault("scopes", {})[identity] = normalized
@@ -817,6 +868,10 @@ class DesktopMobileSync:
     def status(self) -> dict:
         state = self._read_state()
         ownership = self._project_ownership_status()
+        if not ownership.get("account_id") and ownership.get("owner_id"):
+            owner_identity = self._state_identity_for_account(ownership["owner_id"])
+            if owner_identity:
+                state = self._read_state_for_identity(owner_identity)
         return {
             "ok": True,
             "running": bool(self._thread and self._thread.is_alive()),
@@ -826,6 +881,7 @@ class DesktopMobileSync:
             "backfilled_count": len(state.get("backfilled") or {}),
             "ack_pending_count": len(state.get("ack_pending") or {}),
             "cleanup_pending_count": len(state.get("cleanup_pending") or {}),
+            "delete_pending_count": len(state.get("delete_pending") or {}),
             "last_result": dict(self.last_result),
             "project_ownership": ownership,
         }
@@ -883,6 +939,211 @@ class DesktopMobileSync:
             self._write_state(state)
             self._startup_snapshot_pending = False
         return result
+
+    def enqueue_photo_delete(
+        self,
+        photo_uuid: str,
+        local_project_code: str,
+        local_photo_id: str,
+        *,
+        project_id: str = "",
+        cloud_account_id: str = "",
+    ) -> dict:
+        """持久化一条明确删除事件；本地删除永不等待网络。"""
+        photo_uuid = _canonical_uuid(photo_uuid)
+        if not photo_uuid:
+            return {
+                "ok": True,
+                "queued": False,
+                "code": "photo_uuid_missing",
+                "message": "本地照片没有云端 UUID，不发送任何删除请求",
+            }
+        project = self.engineering_project_reader() or {}
+        owner_id = str(
+            cloud_account_id or project.get("cloud_owner_id") or ""
+        ).strip()
+        if not owner_id:
+            return {
+                "ok": True,
+                "queued": False,
+                "code": "project_owner_unclaimed",
+                "message": "工程尚未绑定云账号，删除仅在本机生效",
+            }
+        current_account_id = self._cloud_account_id()
+        if current_account_id and current_account_id != owner_id:
+            return {
+                "ok": True,
+                "queued": False,
+                "code": "project_owner_mismatch",
+                "message": "当前登录账号不是工程所属账号，未发送云端删除",
+            }
+        identity = self._state_identity_for_account(owner_id)
+        if not identity:
+            return {
+                "ok": True,
+                "queued": False,
+                "code": "account_partition_unavailable",
+                "message": "无法安全确定所属账号分区，未发送云端删除",
+            }
+        timestamp = datetime.now().isoformat(timespec="seconds")
+
+        def enqueue(state):
+            pending = state.setdefault("delete_pending", {})
+            previous = pending.get(photo_uuid) if isinstance(pending.get(photo_uuid), dict) else {}
+            ack_after_delete = bool(
+                previous.get("ack_after_delete")
+                or photo_uuid in state.setdefault("ack_pending", {})
+                or photo_uuid in state.setdefault("cleanup_pending", {})
+            )
+            event_id = str(previous.get("event_id") or uuid.uuid4())
+            pending[photo_uuid] = {
+                **previous,
+                "event_id": event_id,
+                "account_id": owner_id,
+                "project_id": str(project_id or project.get("id") or "default"),
+                "local_project_code": str(local_project_code or "").strip(),
+                "local_photo_id": str(local_photo_id or "").strip(),
+                "queued_at": str(previous.get("queued_at") or timestamp),
+                "updated_at": timestamp,
+                "attempts": int(previous.get("attempts") or 0),
+                "ack_after_delete": ack_after_delete,
+            }
+            # 本地照片已经明确删除，旧 ACK 再也无法通过文件校验；删除事件
+            # 接管该 UUID，避免 ACK 竞态永久占用 pending。
+            state.setdefault("ack_pending", {}).pop(photo_uuid, None)
+            state.setdefault("cleanup_pending", {}).pop(photo_uuid, None)
+            state["cloud_account_id"] = owner_id
+            return event_id, len(pending)
+
+        event_id, pending_count = self._mutate_state_for_identity(identity, enqueue)
+        wake_started = False
+        if current_account_id == owner_id:
+            try:
+                threading.Thread(
+                    target=self.run_once,
+                    name="desktop-mobile-delete-sync",
+                    daemon=True,
+                ).start()
+                wake_started = True
+            except Exception:
+                # 入队已持久化；线程创建失败时由固定周期继续重试。
+                wake_started = False
+        return {
+            "ok": True,
+            "queued": True,
+            "photo_uuid": photo_uuid,
+            "event_id": event_id,
+            "pending_count": pending_count,
+            "wake_started": wake_started,
+        }
+
+    def _handoff_ack_to_delete(self, photo_uuid: str, local: dict) -> bool:
+        """本地已删时由显式删除事件接管 ACK，避免再次校验已删除文件。"""
+        identity = self._state_identity()
+
+        def handoff(state):
+            entry = (state.get("delete_pending") or {}).get(photo_uuid)
+            if not isinstance(entry, dict):
+                return False
+            entry["ack_after_delete"] = True
+            entry["local_project_code"] = str(
+                entry.get("local_project_code") or local.get("project_code") or ""
+            )
+            entry["local_photo_id"] = str(
+                entry.get("local_photo_id") or local.get("photo_id") or ""
+            )
+            entry["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            state.setdefault("ack_pending", {}).pop(photo_uuid, None)
+            state.setdefault("cleanup_pending", {}).pop(photo_uuid, None)
+            return True
+
+        return bool(self._mutate_state_for_identity(identity, handoff))
+
+    def _sync_delete_pending(self) -> dict:
+        """逐条发送显式删除；失败只留队，不阻断快照、收件箱或回填。"""
+        identity = self._state_identity()
+        state = self._read_state_for_identity(identity)
+        items = list((state.get("delete_pending") or {}).items())
+        current_account_id = self._cloud_account_id()
+        attempted = 0
+        deleted = 0
+        failed = 0
+        last_error = ""
+        for photo_uuid, entry in items:
+            if not isinstance(entry, dict):
+                continue
+            event_id = str(entry.get("event_id") or "")
+            entry_account_id = str(entry.get("account_id") or "").strip()
+            if not current_account_id or entry_account_id != current_account_id:
+                result = {
+                    "ok": False,
+                    "error": "删除事件所属账号与当前登录账号不一致",
+                    "retryable": False,
+                }
+            else:
+                attempted += 1
+                try:
+                    result = self.cloud.desktop_delete_photo(
+                        photo_uuid,
+                        str(entry.get("local_project_code") or ""),
+                        str(entry.get("local_photo_id") or ""),
+                        self._desktop_machine_id(),
+                    )
+                except Exception as exc:
+                    result = {"ok": False, "error": str(exc), "retryable": True}
+            result = dict(result or {})
+            ack_required = bool(entry.get("ack_after_delete"))
+            if result.get("ok") and ack_required and result.get("deleted_at"):
+                try:
+                    ack = self.cloud.desktop_ack_photo(
+                        photo_uuid,
+                        str(entry.get("local_project_code") or ""),
+                        str(entry.get("local_photo_id") or ""),
+                        self._desktop_machine_id(),
+                    )
+                except Exception as exc:
+                    ack = {"ok": False, "error": str(exc), "retryable": True}
+                ack = dict(ack or {})
+                if not ack.get("ok") or ack.get("cleanup_pending") or (
+                    ack.get("cleanup_status") == "cleanup_pending"
+                ):
+                    result = {
+                        "ok": False,
+                        "error": str(ack.get("error") or "删除已同步，等待服务器清理原图"),
+                        "retryable": True,
+                    }
+
+            if result.get("ok"):
+                def finish(persisted):
+                    current = (persisted.get("delete_pending") or {}).get(photo_uuid)
+                    if isinstance(current, dict) and str(current.get("event_id") or "") == event_id:
+                        persisted["delete_pending"].pop(photo_uuid, None)
+                self._mutate_state_for_identity(identity, finish)
+                deleted += 1
+                continue
+
+            failed += 1
+            last_error = str(result.get("error") or "删除请求失败")[:300]
+
+            def record_failure(persisted):
+                current = (persisted.get("delete_pending") or {}).get(photo_uuid)
+                if not isinstance(current, dict) or str(current.get("event_id") or "") != event_id:
+                    return
+                current["attempts"] = int(current.get("attempts") or 0) + 1
+                current["last_error"] = last_error
+                current["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            self._mutate_state_for_identity(identity, record_failure)
+        remaining = len(
+            (self._read_state_for_identity(identity).get("delete_pending") or {})
+        )
+        return {
+            "ok": True,
+            "attempted": attempted,
+            "deleted": deleted,
+            "failed": failed,
+            "remaining": remaining,
+            "last_error": last_error,
+        }
 
     def _find_photo_uuid(self, photo_uuid: str) -> Optional[dict]:
         target = str(photo_uuid or "").strip()
@@ -1074,7 +1335,8 @@ class DesktopMobileSync:
             category=category,
             title=str(item.get("title") or "").strip(),
             photo_date=photo_date,
-            uploaded_by="微信小程序",
+            photographer=str(item.get("photographer") or "").strip(),
+            uploaded_by=str(item.get("uploaded_by") or "微信小程序").strip(),
             orientation=display_orientation,
             process_name=process_name,
             per_file_meta=per_file_meta,
@@ -1186,6 +1448,13 @@ class DesktopMobileSync:
     def _ack_import(self, photo_uuid: str, local: dict) -> dict:
         # 如果服务器已经提交 ACK 但响应在网络中丢失，这条记录保证下个
         # 周期仍用相同 UUID 和本地编号进行幂等重试。
+        if self._handoff_ack_to_delete(photo_uuid, local):
+            return {
+                "ok": True,
+                "ack_sent": False,
+                "delete_pending": True,
+                "cleanup_pending": True,
+            }
         self._queue_ack(photo_uuid, local)
         try:
             verified = self._verified_ack_local(photo_uuid, local)
@@ -1271,14 +1540,25 @@ class DesktopMobileSync:
         original_max_bytes = max(1, min(MAX_ORIGINAL_PHOTO_BYTES, original_max_bytes))
         imported = 0
         duplicates = 0
+        skipped_deleted = 0
         for item in result.get("items") or []:
+            photo_uuid = str(item.get("photo_uuid") or "").strip()
+            if photo_uuid in (self._read_state().get("delete_pending") or {}):
+                # 显式删除尚未送达时，绝不能把同一张待归档照片重新导回本机。
+                skipped_deleted += 1
+                item_cursor = str(item.get("cursor") or "").strip()
+                if item_cursor:
+                    state = self._read_state()
+                    state["inbox_cursor"] = item_cursor
+                    self._write_state(state)
+                continue
             try:
                 local = self._import_inbox_item(item, original_max_bytes)
             except Exception as exc:
                 return {"ok": False, "error": str(exc), "retryable": True, "imported": imported}
             if not local.get("ok"):
                 return {**local, "imported": imported}
-            ack = self._ack_import(str(item.get("photo_uuid") or ""), local)
+            ack = self._ack_import(photo_uuid, local)
             if not ack.get("ok"):
                 return {**ack, "imported": imported}
             imported += 0 if local.get("duplicate") else 1
@@ -1297,6 +1577,7 @@ class DesktopMobileSync:
             "ok": True,
             "imported": imported,
             "duplicates": duplicates,
+            "skipped_deleted": skipped_deleted,
             "ack_retried": pending_retry["retried"],
             "ack_local_invalid": pending_retry["invalid_local"],
             "ack_pending": len((self._read_state().get("ack_pending") or {})),
@@ -1378,6 +1659,8 @@ class DesktopMobileSync:
                 "desktop_machine_id": self._desktop_machine_id(),
                 "title": str(photo.get("title") or ""),
                 "photo_date": str(photo.get("photo_date") or ""),
+                "photographer": str(photo.get("photographer") or ""),
+                "uploaded_by": str(photo.get("uploaded_by") or ""),
                 "client_captured_at": _iso_local_time(str(photo.get("upload_time") or "")),
                 "orientation": preview.get("exif_orientation", 1),
                 "width": preview["width"],
@@ -1430,9 +1713,15 @@ class DesktopMobileSync:
                     return self.last_result
                 cycle_identity = self._state_identity()
                 cycle_generation = self._cloud_generation()
+                deletes = self._sync_delete_pending()
                 snapshot = self._sync_snapshot()
                 if not snapshot.get("ok"):
-                    self.last_result = {"ok": False, "stage": "snapshot", **snapshot}
+                    self.last_result = {
+                        "ok": False,
+                        "stage": "snapshot",
+                        "deletes": deletes,
+                        **snapshot,
+                    }
                     return self.last_result
                 if (
                     self._state_identity() != cycle_identity
@@ -1468,6 +1757,7 @@ class DesktopMobileSync:
                     return self.last_result
                 self.last_result = {
                     "ok": True,
+                    "deletes": deletes,
                     "snapshot": snapshot,
                     "inbox": inbox,
                     "backfill": backfill,

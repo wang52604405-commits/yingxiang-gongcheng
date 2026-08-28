@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import sqlite3
 import ast
 import sys
 import tempfile
@@ -167,6 +168,7 @@ class MobileServerContractTest(unittest.TestCase):
         desktop_machine_id="MACHINE-A",
         revision=7,
         requirements=None,
+        legacy_photo_uuids=None,
     ):
         # 大多数测试传账号登录令牌以表示租户；新桌面契约
         # 实际上传必须换成与请求机器一致的 desktop_sync_token。
@@ -230,6 +232,9 @@ class MobileServerContractTest(unittest.TestCase):
                 "conditional": sum(1 for item in requirements if item.get("required_type") == "conditional"),
                 "recommended": sum(1 for item in requirements if item.get("required_type") == "recommended"),
             }
+        if legacy_photo_uuids is not None:
+            payload["photo_inventory_complete"] = True
+            payload["photo_uuids"] = list(legacy_photo_uuids)
         response = cls.client.post(
             "/api/desktop/v1/project-snapshot",
             json=payload,
@@ -237,6 +242,7 @@ class MobileServerContractTest(unittest.TestCase):
         )
         if response.status_code != 200:
             raise AssertionError(response.get_json())
+        return response
 
     @staticmethod
     def _jpeg(color=(34, 110, 154), size=(640, 480)):
@@ -303,6 +309,57 @@ class MobileServerContractTest(unittest.TestCase):
             },
             headers=self._headers(token),
             content_type="multipart/form-data",
+        )
+
+    def _backfill(
+        self,
+        token,
+        photo_uuid,
+        project_id,
+        *,
+        desktop_machine_id="MACHINE-A",
+        color=(26, 88, 112),
+        photographer="",
+        uploaded_by="",
+    ):
+        content = self._jpeg(color)
+        return self.client.post(
+            "/api/desktop/v1/backfill-photo",
+            data={
+                "file": (io.BytesIO(content), "桌面查看副本.jpg"),
+                "photo_uuid": photo_uuid,
+                "project_id": project_id,
+                "scope": "engineering",
+                "category": "construction",
+                "unit_code": "YNLQ-001-01-001",
+                "title": "钢筋安装检查",
+                "photo_date": "2026-08-28",
+                "photographer": photographer,
+                "uploaded_by": uploaded_by,
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "desktop_machine_id": desktop_machine_id,
+            },
+            headers=self._headers(token),
+            content_type="multipart/form-data",
+        )
+
+    def _delete_photo(
+        self,
+        token,
+        photo_uuid,
+        *,
+        desktop_machine_id="MACHINE-A",
+        local_project_code="",
+        local_photo_id="",
+    ):
+        return self.client.post(
+            f"/api/desktop/v1/photos/{photo_uuid}/delete",
+            json={
+                "desktop_machine_id": desktop_machine_id,
+                "local_project_code": local_project_code,
+                "local_photo_id": local_photo_id,
+            },
+            headers=self._headers(token),
         )
 
     def _analyze_and_wait(self, token, batch_id, attempts=200):
@@ -434,6 +491,7 @@ class MobileServerContractTest(unittest.TestCase):
             ).fetchone()["total"]
         finally:
             conn.close()
+
         self.assertEqual(before_confirmation, 0)
 
         intent = verified_payload["binding_intent"]
@@ -611,6 +669,10 @@ class MobileServerContractTest(unittest.TestCase):
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(mobile_upload_sessions)")
             }
+            desktop_cursor_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(desktop_sync_cursors)")
+            }
         finally:
             conn.close()
         self.assertEqual(counts_after, counts_before)
@@ -629,6 +691,13 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertTrue(
             {"cleanup_status", "cleanup_error"}.issubset(upload_session_columns)
+        )
+        self.assertTrue(
+            {
+                "photo_inventory_project_id",
+                "photo_inventory_json",
+                "photo_inventory_initialized",
+            }.isdisjoint(desktop_cursor_columns)
         )
 
         first = self.client.post(
@@ -1998,6 +2067,348 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertEqual(rejected_backfill.status_code, 413)
         self.assertEqual(rejected_backfill.get_json()["code"], "preview_too_large")
         rejected_backfill.close()
+
+    def test_explicit_desktop_delete_hides_photo_is_idempotent_and_keeps_object(self):
+        project_id = f"delete-explicit-{uuid.uuid4().hex[:8]}"
+        photo_uuid = str(uuid.uuid4())
+        self._snapshot(
+            self.desktop_token_a,
+            "显式删除测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        backfilled = self._backfill(
+            self.desktop_token_a,
+            photo_uuid,
+            project_id,
+            photographer="张三",
+            uploaded_by="资料员王工",
+        )
+        self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
+        self.assertEqual(backfilled.get_json()["photo"]["photographer"], "张三")
+        self.assertEqual(backfilled.get_json()["photo"]["uploaded_by"], "资料员王工")
+
+        with patch("server.mobile_storage.LocalObjectStorage.delete") as delete_object:
+            deleted = self._delete_photo(self.desktop_token_a, photo_uuid)
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertFalse(deleted.get_json()["idempotent"])
+        delete_object.assert_not_called()
+
+        gallery = self.client.get(
+            f"/api/mobile/v1/photos?project_id={project_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(gallery.status_code, 200, gallery.get_json())
+        self.assertEqual(gallery.get_json()["total"], 0)
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 404)
+
+        repeated = self._delete_photo(self.desktop_token_a, photo_uuid)
+        self.assertEqual(repeated.status_code, 200, repeated.get_json())
+        self.assertTrue(repeated.get_json()["idempotent"])
+        missing = self._delete_photo(self.desktop_token_a, str(uuid.uuid4()))
+        self.assertEqual(missing.status_code, 200, missing.get_json())
+        self.assertTrue(missing.get_json()["idempotent"])
+
+        conn = self.db.connect()
+        try:
+            tombstone = conn.execute(
+                "SELECT deleted_at, deleted_by_machine_id, storage_key FROM cloud_photos "
+                "WHERE photo_uuid = ?",
+                (photo_uuid,),
+            ).fetchone()
+            self.assertTrue(tombstone["deleted_at"])
+            self.assertEqual(tombstone["deleted_by_machine_id"], "MACHINE-A")
+            from server import config
+
+            self.assertTrue((config.MOBILE_STORAGE_DIR / tombstone["storage_key"]).is_file())
+        finally:
+            conn.close()
+
+    def test_explicit_desktop_delete_isolated_by_machine_and_account(self):
+        project_id = f"delete-isolation-{uuid.uuid4().hex[:8]}"
+        photo_uuid = str(uuid.uuid4())
+        self._snapshot(
+            self.desktop_token_a,
+            "删除隔离测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        backfilled = self._backfill(self.desktop_token_a, photo_uuid, project_id)
+        self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
+
+        wrong_machine = self._delete_photo(
+            self.desktop_token_a_alt,
+            photo_uuid,
+            desktop_machine_id="MACHINE-A-ALT",
+        )
+        self.assertEqual(wrong_machine.status_code, 403, wrong_machine.get_json())
+        self.assertEqual(wrong_machine.get_json()["code"], "wrong_desktop_machine")
+
+        other_account = self._delete_photo(
+            self.desktop_token_b,
+            photo_uuid,
+            desktop_machine_id="MACHINE-B",
+        )
+        self.assertEqual(other_account.status_code, 200, other_account.get_json())
+        self.assertTrue(other_account.get_json()["idempotent"])
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+
+    def test_snapshot_inventory_fields_never_delete_empty_or_partial_local_sets(self):
+        project_id = f"snapshot-no-delete-{uuid.uuid4().hex[:8]}"
+        first_uuid = str(uuid.uuid4())
+        second_uuid = str(uuid.uuid4())
+        self._snapshot(
+            self.desktop_token_a,
+            "快照不推断删除测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        for photo_uuid in (first_uuid, second_uuid):
+            backfilled = self._backfill(self.desktop_token_a, photo_uuid, project_id)
+            self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
+
+        self._snapshot(
+            self.desktop_token_a,
+            "快照不推断删除测试工程",
+            project_id=project_id,
+            revision=2,
+            legacy_photo_uuids=[],
+        )
+        partial_snapshot = self._snapshot(
+            self.desktop_token_a,
+            "快照不推断删除测试工程",
+            project_id=project_id,
+            revision=3,
+            legacy_photo_uuids=[first_uuid],
+        )
+        self.assertNotIn("deleted_photo_count", partial_snapshot.get_json())
+        gallery = self.client.get(
+            f"/api/mobile/v1/photos?project_id={project_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(gallery.status_code, 200, gallery.get_json())
+        self.assertEqual(
+            {item["photo_uuid"] for item in gallery.get_json()["photos"]},
+            {first_uuid, second_uuid},
+        )
+
+    def test_pending_delete_requires_local_identity_and_survives_ack_race(self):
+        project_id = f"delete-ack-race-{uuid.uuid4().hex[:8]}"
+        self._snapshot(
+            self.desktop_token_a,
+            "删除 ACK 竞态测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        batch_id = self._create_batch(self.token_a, project_id=project_id)
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            self._jpeg((42, 92, 122)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{batch_id}/commit",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+        self.assertEqual(committed.get_json()["batch"]["status"], "desktop_pending")
+
+        missing_identity = self._delete_photo(self.desktop_token_a, photo_uuid)
+        self.assertEqual(missing_identity.status_code, 409, missing_identity.get_json())
+        self.assertEqual(
+            missing_identity.get_json()["code"], "pending_photo_identity_required"
+        )
+        deleted = self._delete_photo(
+            self.desktop_token_a,
+            photo_uuid,
+            local_project_code="LOCAL-001",
+            local_photo_id="SY-RACE-001",
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+
+        batch_after_delete = self.client.get(
+            f"/api/mobile/v1/batches/{batch_id}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(batch_after_delete.status_code, 200, batch_after_delete.get_json())
+        deleted_photo = batch_after_delete.get_json()["batch"]["photos"][0]
+        self.assertEqual(deleted_photo["photo_uuid"], photo_uuid)
+        self.assertTrue(deleted_photo["deleted_at"])
+
+        ack = self.client.post(
+            f"/api/desktop/v1/photos/{photo_uuid}/ack",
+            json={
+                "local_project_code": "LOCAL-001",
+                "local_photo_id": "SY-RACE-001",
+                "desktop_machine_id": "MACHINE-A",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(ack.status_code, 200, ack.get_json())
+        detail = self.client.get(
+            f"/api/mobile/v1/photos/{photo_uuid}",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(detail.status_code, 404)
+        conn = self.db.connect()
+        try:
+            row = conn.execute(
+                "SELECT status, local_project_code, local_photo_id, deleted_at, "
+                "deleted_by_machine_id FROM cloud_photos WHERE photo_uuid = ?",
+                (photo_uuid,),
+            ).fetchone()
+            self.assertEqual(row["status"], "desktop_imported")
+            self.assertEqual(row["local_project_code"], "LOCAL-001")
+            self.assertEqual(row["local_photo_id"], "SY-RACE-001")
+            self.assertTrue(row["deleted_at"])
+            self.assertEqual(row["deleted_by_machine_id"], "MACHINE-A")
+        finally:
+            conn.close()
+
+    def test_legacy_target_delete_requires_matching_local_identifiers(self):
+        project_id = f"delete-legacy-{uuid.uuid4().hex[:8]}"
+        photo_uuid = str(uuid.uuid4())
+        self._snapshot(
+            self.desktop_token_a,
+            "旧照片删除身份测试工程",
+            project_id=project_id,
+            revision=1,
+        )
+        backfilled = self._backfill(self.desktop_token_a, photo_uuid, project_id)
+        self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
+        conn = self.db.connect()
+        try:
+            conn.execute(
+                "UPDATE cloud_photos SET target_machine_id = 'default', "
+                "local_project_code = 'LEGACY-P', local_photo_id = 'LEGACY-001' "
+                "WHERE photo_uuid = ?",
+                (photo_uuid,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        missing_identity = self._delete_photo(self.desktop_token_a, photo_uuid)
+        self.assertEqual(missing_identity.status_code, 403, missing_identity.get_json())
+        wrong_identity = self._delete_photo(
+            self.desktop_token_a,
+            photo_uuid,
+            local_project_code="LEGACY-P",
+            local_photo_id="OTHER-001",
+        )
+        self.assertEqual(wrong_identity.status_code, 403, wrong_identity.get_json())
+        deleted = self._delete_photo(
+            self.desktop_token_a,
+            photo_uuid,
+            local_project_code="LEGACY-P",
+            local_photo_id="LEGACY-001",
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+
+    def test_legacy_cloud_photo_schema_migrates_without_losing_existing_rows(self):
+        legacy_column_lines = (
+            "    photographer         TEXT NOT NULL DEFAULT '',\n",
+            "    uploaded_by          TEXT NOT NULL DEFAULT '',\n",
+            "    deleted_at           TEXT NOT NULL DEFAULT '',\n",
+            "    deleted_by_machine_id TEXT NOT NULL DEFAULT '',\n",
+        )
+        legacy_mobile_schema = self.db.MOBILE_SCHEMA
+        for declaration in legacy_column_lines:
+            self.assertIn(declaration, legacy_mobile_schema)
+            legacy_mobile_schema = legacy_mobile_schema.replace(declaration, "", 1)
+
+        with tempfile.TemporaryDirectory(prefix="album-legacy-photo-schema-") as temp_dir:
+            legacy_db_path = Path(temp_dir) / "server.db"
+            conn = sqlite3.connect(legacy_db_path)
+            try:
+                conn.executescript(self.db.SCHEMA)
+                conn.executescript(legacy_mobile_schema)
+                account_id = conn.execute(
+                    "INSERT INTO accounts (username, password_hash) VALUES (?, ?)",
+                    ("legacy-photo-owner", "legacy-hash"),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO cloud_photos (account_id, photo_uuid, project_id, source, "
+                    "scope, sha256, size_bytes, storage_key, created_at, updated_at) "
+                    "VALUES (?, ?, ?, 'desktop', 'engineering', ?, ?, ?, ?, ?)",
+                    (
+                        account_id,
+                        "11111111-1111-4111-8111-111111111111",
+                        "legacy-project",
+                        "a" * 64,
+                        12345,
+                        "legacy/preview.jpg",
+                        "2026-08-28 10:00:00",
+                        "2026-08-28 10:00:00",
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            original_db_path = self.db.config.DB_PATH
+            self.db.config.DB_PATH = legacy_db_path
+            try:
+                self.db.init_db()
+                migrated = self.db.connect()
+                try:
+                    photo_columns = {
+                        row["name"]
+                        for row in migrated.execute("PRAGMA table_info(cloud_photos)")
+                    }
+                    batch_columns = {
+                        row["name"]
+                        for row in migrated.execute("PRAGMA table_info(mobile_batches)")
+                    }
+                    expected_columns = {
+                        "photographer",
+                        "uploaded_by",
+                        "deleted_at",
+                        "deleted_by_machine_id",
+                    }
+                    self.assertTrue(expected_columns.issubset(photo_columns))
+                    self.assertTrue(expected_columns.isdisjoint(batch_columns))
+                    row = migrated.execute(
+                        "SELECT photo_uuid, size_bytes, photographer, uploaded_by, "
+                        "deleted_at, deleted_by_machine_id FROM cloud_photos "
+                        "WHERE project_id = 'legacy-project'"
+                    ).fetchone()
+                    self.assertIsNotNone(row)
+                    self.assertEqual(row["photo_uuid"], "11111111-1111-4111-8111-111111111111")
+                    self.assertEqual(row["size_bytes"], 12345)
+                    self.assertEqual(row["photographer"], "")
+                    self.assertEqual(row["uploaded_by"], "")
+                    self.assertEqual(row["deleted_at"], "")
+                    self.assertEqual(row["deleted_by_machine_id"], "")
+                finally:
+                    migrated.close()
+            finally:
+                self.db.config.DB_PATH = original_db_path
+
+    def test_mobile_upload_records_authenticated_account_as_photographer(self):
+        batch_id = self._create_batch(self.token_a)
+        photo_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            batch_id,
+            photo_uuid,
+            self._jpeg((44, 96, 118)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        photo = uploaded.get_json()["photo"]
+        self.assertEqual(photo["photographer"], "tenant_a")
+        self.assertEqual(photo["uploaded_by"], "tenant_a")
 
     def test_shared_match_confidence_and_ocr_failure_degrades_to_review(self):
         from server import mobile_recognition

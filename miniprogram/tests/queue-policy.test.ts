@@ -27,9 +27,9 @@ describe('照片大小与本机队列策略', () => {
     expect(isOriginalWithinLimit(MAX_ORIGINAL_BYTES + 1)).toBe(false)
   })
 
-  it('8MiB 是 uploadFile 安全边界，超过一个字节即走分片', () => {
-    expect(requiresChunkedUpload(8 * 1024 * 1024)).toBe(false)
-    expect(requiresChunkedUpload(8 * 1024 * 1024 + 1)).toBe(true)
+  it('4MiB 是 uploadFile 安全边界，超过一个字节即走分片', () => {
+    expect(requiresChunkedUpload(4 * 1024 * 1024)).toBe(false)
+    expect(requiresChunkedUpload(4 * 1024 * 1024 + 1)).toBe(true)
   })
 
   it('队列达到 160MB 后拒绝继续加入', () => {

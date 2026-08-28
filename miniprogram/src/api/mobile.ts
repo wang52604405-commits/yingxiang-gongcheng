@@ -3,6 +3,8 @@ import { apiBinaryRequest, apiRequest, apiUploadPhoto } from './client'
 import { buildChunkUploadInit, normalizeBatchPayload, type ChunkUploadState, type CreateBatchPayload, type PhotoUploadMetadata } from './contracts'
 import { normalizeBatch, normalizeCloudPhoto, normalizeProject, normalizeTreeNode, type NormalizedBatch } from './normalize'
 
+export const CHUNK_FINALIZE_TIMEOUT_MS = 120_000
+
 export interface AuthResponse {
   ok: true
   token?: string
@@ -115,7 +117,7 @@ export const mobileApi = {
       sha256: metadata.sha256,
       original_size_bytes: metadata.original_size_bytes,
       total_chunks: totalChunks,
-    })
+    }, true, CHUNK_FINALIZE_TIMEOUT_MS)
   },
   batch: async (batchId: string): Promise<{ ok: true; batch_id: string; status: string; photos: NormalizedBatch['photos'] }> => {
     const raw = await apiRequest<any>('GET', `/batches/${encodeURIComponent(batchId)}`)

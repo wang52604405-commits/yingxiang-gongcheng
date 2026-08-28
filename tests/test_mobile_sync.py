@@ -101,6 +101,7 @@ class FakeManager:
         category="construction",
         title="",
         photo_date="",
+        photographer="",
         uploaded_by="",
         orientation="landscape",
         process_name="",
@@ -126,6 +127,7 @@ class FakeManager:
                     "category": category,
                     "title": meta.get("title") or title,
                     "photo_date": meta.get("photo_date") or photo_date,
+                    "photographer": photographer,
                     "uploaded_by": uploaded_by,
                     "orientation": orientation,
                     "process_name": process_name,
@@ -173,6 +175,7 @@ class FakeCloud:
         ack_results=None,
         inbox_batches=None,
         backfill_results=None,
+        delete_results=None,
         identity="fake-account",
     ):
         self.raw = raw
@@ -182,13 +185,18 @@ class FakeCloud:
         self.snapshot_calls = 0
         self.acks = []
         self.backfills = []
+        self.deletes = []
         self.inbox_machine_ids = []
         self.ack_results = list(ack_results or [])
         self.backfill_results = list(backfill_results or [])
+        self.delete_results = list(delete_results or [])
         self.identity = identity
 
     def desktop_sync_identity(self):
         return self.identity
+
+    def desktop_sync_identity_for_account(self, account_id):
+        return str(account_id or "")
 
     def desktop_sync_account_id(self):
         return self.identity
@@ -228,6 +236,14 @@ class FakeCloud:
         if self.ack_results:
             return self.ack_results.pop(0)
         return {"ok": True, "cleanup_status": "deleted", "cleanup_pending": False}
+
+    def desktop_delete_photo(self, photo_uuid, local_project_code, local_photo_id, desktop_machine_id=""):
+        self.deletes.append(
+            (photo_uuid, local_project_code, local_photo_id, desktop_machine_id, self.identity)
+        )
+        if self.delete_results:
+            return self.delete_results.pop(0)
+        return {"ok": True, "idempotent": False}
 
     def desktop_backfill_photo(self, path, metadata):
         raw = Path(path).read_bytes()
@@ -351,6 +367,173 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertTrue(all(unit["unit_code"].startswith("YNLQ-") for unit in units))
         self.assertEqual(units[0]["processes"], ["普通混凝土备仓", "普通混凝土浇筑"])
         self.assertEqual(snapshot["other_tree"][0]["node_code"], "QTYX-001")
+        self.assertNotIn("photo_inventory_complete", snapshot)
+        self.assertNotIn("photo_uuids", snapshot)
+
+    def test_snapshot_never_infers_photo_deletion_or_assigns_inventory_uuids(self):
+        self.add_unit(photos=[{
+            "id": "SY001",
+            "filename": "construction-SY001.jpg",
+            "category": "construction",
+        }])
+        cloud = FakeCloud()
+        result = self.service(cloud)._sync_snapshot()
+        self.assertTrue(result["ok"])
+        self.assertNotIn("photo_uuids", cloud.snapshot)
+        self.assertNotIn("photo_inventory_complete", cloud.snapshot)
+        self.assertFalse(
+            self.manager.get_project("YNLQ-001-01-001")["photos"][0].get("photo_uuid")
+        )
+
+    def test_explicit_delete_queue_survives_offline_then_clears_after_success(self):
+        photo_uuid = str(uuid.uuid4())
+        cloud = FakeCloud(delete_results=[
+            {"ok": False, "network_error": True, "retryable": True, "error": "offline"},
+            {"ok": True, "idempotent": False},
+        ])
+        service = self.service(cloud)
+        with patch.object(mobile_sync.threading, "Thread") as wake:
+            queued = service.enqueue_photo_delete(
+                photo_uuid,
+                "YNLQ-001-01-001",
+                "SY001",
+                project_id="default",
+                cloud_account_id="fake-account",
+            )
+        self.assertTrue(queued["queued"])
+        wake.assert_called_once()
+        wake.return_value.start.assert_called_once()
+        self.assertEqual(service.status()["delete_pending_count"], 1)
+
+        first = service.run_once()
+        self.assertTrue(first["ok"], "删除请求失败不得阻断其它同步阶段")
+        self.assertEqual(first["deletes"]["failed"], 1)
+        self.assertEqual(service.status()["delete_pending_count"], 1)
+        second = service.run_once()
+        self.assertTrue(second["ok"])
+        self.assertEqual(second["deletes"]["deleted"], 1)
+        self.assertEqual(service.status()["delete_pending_count"], 0)
+        self.assertEqual(len(cloud.deletes), 2)
+        self.assertTrue(all(item[3] == "MACHINE-A" for item in cloud.deletes))
+
+    def test_delete_without_uuid_never_queues_or_calls_cloud(self):
+        cloud = FakeCloud()
+        service = self.service(cloud)
+        with patch.object(mobile_sync.threading, "Thread") as wake:
+            result = service.enqueue_photo_delete(
+                "", "YNLQ-001-01-001", "SY001", cloud_account_id="fake-account"
+            )
+        self.assertFalse(result["queued"])
+        self.assertEqual(result["code"], "photo_uuid_missing")
+        self.assertEqual(service.status()["delete_pending_count"], 0)
+        self.assertEqual(cloud.deletes, [])
+        wake.assert_not_called()
+
+    def test_logged_out_delete_is_saved_in_owner_partition_not_logged_out_partition(self):
+        photo_uuid = str(uuid.uuid4())
+        cloud = FakeCloud(identity="")
+        service = self.service(cloud)
+        queued = service.enqueue_photo_delete(
+            photo_uuid,
+            "YNLQ-001-01-001",
+            "SY001",
+            cloud_account_id="fake-account",
+        )
+        self.assertTrue(queued["queued"])
+        document = json.loads((self.root / "state.json").read_text(encoding="utf-8"))
+        self.assertIn("fake-account|MACHINE-A", document["scopes"])
+        self.assertNotIn("__logged_out__|MACHINE-A", document["scopes"])
+        self.assertIn(photo_uuid, document["scopes"]["fake-account|MACHINE-A"]["delete_pending"])
+
+        cloud.identity = "fake-account"
+        synced = service.run_once()
+        self.assertTrue(synced["ok"])
+        self.assertEqual(synced["deletes"]["deleted"], 1)
+        self.assertEqual(service.status()["delete_pending_count"], 0)
+
+    def test_delete_supersedes_ack_pending_for_same_local_photo(self):
+        photo_uuid = str(uuid.uuid4())
+        service = self.service(FakeCloud())
+        state = service._read_state()
+        state["ack_pending"][photo_uuid] = {
+            "local_project_code": "YNLQ-001-01-001",
+            "local_photo_id": "SY001",
+        }
+        state["cleanup_pending"][photo_uuid] = dict(state["ack_pending"][photo_uuid])
+        service._write_state(state)
+        with patch.object(mobile_sync.threading, "Thread"):
+            service.enqueue_photo_delete(
+                photo_uuid,
+                "YNLQ-001-01-001",
+                "SY001",
+                cloud_account_id="fake-account",
+            )
+        persisted = service._read_state()
+        self.assertNotIn(photo_uuid, persisted["ack_pending"])
+        self.assertNotIn(photo_uuid, persisted["cleanup_pending"])
+        self.assertIn(photo_uuid, persisted["delete_pending"])
+        self.assertTrue(persisted["delete_pending"][photo_uuid]["ack_after_delete"])
+
+    def test_stale_general_state_write_cannot_erase_new_delete_event(self):
+        photo_uuid = str(uuid.uuid4())
+        service = self.service(FakeCloud())
+        stale = service._read_state()
+        with patch.object(mobile_sync.threading, "Thread"):
+            service.enqueue_photo_delete(
+                photo_uuid,
+                "YNLQ-001-01-001",
+                "SY001",
+                cloud_account_id="fake-account",
+            )
+
+        # 模拟快照网络请求结束后，把请求前读取的旧 state 写回。
+        stale["snapshot_revision"] = 2026082801
+        service._write_state(stale)
+        persisted = service._read_state()
+        self.assertEqual(persisted["snapshot_revision"], 2026082801)
+        self.assertIn(photo_uuid, persisted["delete_pending"])
+
+    def test_ack_race_is_handed_to_delete_queue_then_cleans_server_original(self):
+        photo_uuid = str(uuid.uuid4())
+        cloud = FakeCloud(
+            delete_results=[{
+                "ok": True,
+                "idempotent": False,
+                "deleted_at": "2026-08-28 12:00:00",
+            }],
+            ack_results=[{
+                "ok": True,
+                "cleanup_status": "deleted",
+                "cleanup_pending": False,
+            }],
+        )
+        service = self.service(cloud)
+        with patch.object(mobile_sync.threading, "Thread"):
+            service.enqueue_photo_delete(
+                photo_uuid,
+                "YNLQ-001-01-001",
+                "SY001",
+                cloud_account_id="fake-account",
+            )
+        # 模拟本地落盘后、普通 ACK 入队前发生删除；此处文件已经不存在。
+        handed_off = service._ack_import(photo_uuid, {
+            "project_code": "YNLQ-001-01-001",
+            "photo_id": "SY001",
+        })
+        self.assertTrue(handed_off["ok"])
+        self.assertTrue(handed_off["delete_pending"])
+        self.assertEqual(cloud.acks, [])
+        self.assertTrue(
+            service._read_state()["delete_pending"][photo_uuid]["ack_after_delete"]
+        )
+
+        result = service.run_once()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["deletes"]["deleted"], 1)
+        self.assertEqual(service.status()["delete_pending_count"], 0)
+        self.assertEqual(len(cloud.deletes), 1)
+        self.assertEqual(len(cloud.acks), 1)
+        self.assertEqual(cloud.acks[0][0:3], (photo_uuid, "YNLQ-001-01-001", "SY001"))
 
     def test_mobile_original_over_200k_is_exact_idempotent_and_cleanup_retries(self):
         self.add_unit()
@@ -367,6 +550,8 @@ class DesktopMobileSyncTest(unittest.TestCase):
             "process_name": "",
             "title": "基槽验收",
             "photo_date": "2026-08-25",
+            "photographer": "现场张工",
+            "uploaded_by": "zhangsan",
             "orientation": "landscape",
             "original_download_url": "/download/original",
             "original_sha256": hashlib.sha256(raw).hexdigest(),
@@ -404,6 +589,8 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertEqual(stored.read_bytes(), raw, "手机原图必须原字节落盘")
         self.assertTrue(data["photos"][0]["mobile_original_received"])
         self.assertEqual(data["photos"][0]["photo_uuid"], photo_uuid)
+        self.assertEqual(data["photos"][0]["photographer"], "现场张工")
+        self.assertEqual(data["photos"][0]["uploaded_by"], "zhangsan")
         self.assertEqual(len(cloud.acks), 3, "响应丢失与清理 pending 都必须幂等重发 ACK")
         self.assertTrue(all(ack[3] == "MACHINE-A" for ack in cloud.acks))
         self.assertIn(photo_uuid, persisted_after_first.get("ack_pending", {}))
@@ -1038,6 +1225,7 @@ class DesktopMobileSyncTest(unittest.TestCase):
                 cloud_client.desktop_project_snapshot({"snapshot_id": "strict"}),
                 cloud_client.desktop_inbox(desktop_machine_id="MACHINE-A"),
                 cloud_client.desktop_ack_photo(str(uuid.uuid4()), "YNLQ-001", "SY001", "MACHINE-A"),
+                cloud_client.desktop_delete_photo(str(uuid.uuid4()), "YNLQ-001", "SY001", "MACHINE-A"),
                 cloud_client.desktop_download_bytes("/api/mobile/v1/original"),
                 cloud_client.desktop_backfill_photo(self.root / "not-read-without-token.jpg", {}),
             ]
