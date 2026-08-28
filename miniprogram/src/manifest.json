@@ -2,8 +2,8 @@
   "name": "工程影像",
   "appid": "__UNI__ENGINEERING_IMAGE_V1",
   "description": "水利、房建、市政、电力工程现场影像采集、同步与归档",
-  "versionName": "1.3.1",
-  "versionCode": "131",
+  "versionName": "1.3.2",
+  "versionCode": "132",
   "transformPx": false,
   "mp-weixin": {
     "appid": "",

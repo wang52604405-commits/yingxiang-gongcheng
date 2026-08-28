@@ -4,6 +4,7 @@ import { runtimeRequest, runtimeUpload } from '@api-runtime'
 import { buildPhotoUploadForm, type PhotoUploadMetadata } from './contracts'
 
 const TOKEN_KEY = 'engineering-image:auth-token:v1'
+export const DIRECT_UPLOAD_WATCHDOG_MS = 60_000
 
 export class ApiError extends Error {
   code: string
@@ -97,26 +98,44 @@ export async function apiUploadPhoto(
   }
   const token = tokenStorage.get()
   return new Promise((resolve, reject) => {
-    const task = uni.uploadFile({
-      url: `${API_BASE_URL}/api/mobile/v1/batches/${encodeURIComponent(batchId)}/photos`,
-      filePath,
-      name: 'file',
-      formData: buildPhotoUploadForm(metadata),
-      header: token ? { Authorization: `Bearer ${token}` } : {},
-      timeout: 55_000,
-      success: (response) => {
-        let body: any
-        try {
-          body = JSON.parse(response.data)
-        } catch {
-          reject(new ApiError('服务器返回了无法识别的内容', 'INVALID_RESPONSE', true, response.statusCode))
-          return
-        }
-        if (response.statusCode >= 200 && response.statusCode < 300 && body?.ok) resolve(body)
-        else reject(new ApiError(body?.error || '照片上传失败', body?.code || `HTTP_${response.statusCode}`, Boolean(body?.retryable), response.statusCode))
-      },
-      fail: (error) => reject(new ApiError(error.errMsg || '照片上传中断', 'UPLOAD_INTERRUPTED', true)),
-    })
-    task.onProgressUpdate((event) => onProgress?.(Math.max(0, Math.min(100, event.progress))))
+    let task: ReturnType<typeof uni.uploadFile> | undefined
+    let settled = false
+    const finish = (action: () => void) => {
+      if (settled) return
+      settled = true
+      clearTimeout(watchdog)
+      action()
+    }
+    const watchdog = setTimeout(() => {
+      if (settled) return
+      settled = true
+      try { task?.abort?.() } catch { /* 超时本身已能释放队列，abort 失败不应覆盖原错误。 */ }
+      reject(new ApiError('照片上传超时，1MB 归档图仍保存在本机，请重试', 'UPLOAD_TIMEOUT', true, 408))
+    }, DIRECT_UPLOAD_WATCHDOG_MS)
+    try {
+      task = uni.uploadFile({
+        url: `${API_BASE_URL}/api/mobile/v1/batches/${encodeURIComponent(batchId)}/photos`,
+        filePath,
+        name: 'file',
+        formData: buildPhotoUploadForm(metadata),
+        header: token ? { Authorization: `Bearer ${token}` } : {},
+        timeout: 55_000,
+        success: (response) => {
+          let body: any
+          try {
+            body = JSON.parse(response.data)
+          } catch {
+            finish(() => reject(new ApiError('服务器返回了无法识别的内容', 'INVALID_RESPONSE', true, response.statusCode)))
+            return
+          }
+          if (response.statusCode >= 200 && response.statusCode < 300 && body?.ok) finish(() => resolve(body))
+          else finish(() => reject(new ApiError(body?.error || '照片上传失败', body?.code || `HTTP_${response.statusCode}`, Boolean(body?.retryable), response.statusCode)))
+        },
+        fail: (error) => finish(() => reject(new ApiError(error.errMsg || '照片上传中断', 'UPLOAD_INTERRUPTED', true))),
+      })
+      task.onProgressUpdate?.((event: { progress: number }) => onProgress?.(Math.max(0, Math.min(100, event.progress))))
+    } catch (error) {
+      finish(() => reject(new ApiError(error instanceof Error ? error.message : '照片上传无法启动', 'UPLOAD_INTERRUPTED', true)))
+    }
   })
 }

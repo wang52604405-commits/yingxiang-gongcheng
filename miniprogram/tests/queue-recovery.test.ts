@@ -264,6 +264,7 @@ describe('原图优先落盘与账号隔离队列', () => {
   it('旧队列只有原图时自动迁移为 1MB JPEG 归档图，且不伪造相册来源', async () => {
     const photo = localPhoto('32', 'legacy-original-only')
     photo.status = 'uploading'
+    photo.original_size = 4 * 1024 * 1024
     photo.remote_batch_id = undefined
     photo.draft = { ...draft, capture_source: undefined, transfer_profile: undefined }
     delete photo.transfer_path

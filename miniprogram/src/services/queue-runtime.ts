@@ -41,6 +41,61 @@ let networkListenerRegistered = false
 let ownerGeneration = 0
 let foregroundTimer: ReturnType<typeof setInterval> | null = null
 const AUTO_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000] as const
+export const IMAGE_PREPARATION_STEP_TIMEOUT_MS = 60_000
+const FILE_DELETE_CALLBACK_TIMEOUT_MS = 3_000
+const preparationTasks = new Map<string, Promise<boolean>>()
+let preparationTail: Promise<void> = Promise.resolve()
+
+class ImagePreparationTimeoutError extends Error {
+  readonly code = 'IMAGE_PROCESS_TIMEOUT'
+  readonly retryable = true
+
+  constructor(step: string) {
+    super(`${step}超时，请点击重试`)
+    this.name = 'ImagePreparationTimeoutError'
+  }
+}
+
+async function runPreparationExclusively<T>(work: () => Promise<T>): Promise<T> {
+  const previous = preparationTail
+  let release = () => {}
+  preparationTail = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  try {
+    return await work()
+  } finally {
+    release()
+  }
+}
+
+function withPreparationWatchdog<T>(
+  step: string,
+  operation: Promise<T>,
+  cleanupLateResult?: (value: T) => Promise<void>,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new ImagePreparationTimeoutError(step))
+    }, IMAGE_PREPARATION_STEP_TIMEOUT_MS)
+    operation.then((value) => {
+      if (settled) {
+        if (cleanupLateResult) void cleanupLateResult(value).catch(() => undefined)
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }, (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+}
 
 function now(): string {
   return new Date().toISOString()
@@ -71,10 +126,18 @@ async function removeSavedFile(path: string): Promise<boolean> {
   const wxApi = (globalThis as { wx?: any }).wx
   if (!wxApi?.getFileSystemManager) return false
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (removed: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(removed)
+    }
+    const timer = setTimeout(() => finish(false), FILE_DELETE_CALLBACK_TIMEOUT_MS)
     wxApi.getFileSystemManager().unlink({
       filePath: path,
-      success: () => resolve(true),
-      fail: (error: { errMsg?: string }) => resolve(String(error?.errMsg || '').includes('no such file')),
+      success: () => finish(true),
+      fail: (error: { errMsg?: string }) => finish(String(error?.errMsg || '').includes('no such file')),
     })
   })
 }
@@ -184,12 +247,26 @@ function scheduleAutomaticRetry(photo: LocalPhoto, error: unknown, retryFrom: Ph
 
 function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, preparation = false): void {
   if (!isCurrentOwner(photo.owner_account_id)) return
+  const errorShape = error && typeof error === 'object' ? error as { code?: unknown; retryable?: unknown } : undefined
+  const failureCode = isAuthExpired(error)
+    ? 'AUTH_EXPIRED'
+    : error instanceof ApiError
+      ? error.code
+      : typeof errorShape?.code === 'string'
+        ? errorShape.code
+        : undefined
   photo.retry_from = retryFrom
   photo.status = 'failed'
   const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；1MB 归档图仍保存在本机' : errorMessage(error)
   photo.error = preparation ? `原图已安全保存；${message}` : message
-  photo.failure_code = isAuthExpired(error) ? 'AUTH_EXPIRED' : error instanceof ApiError ? error.code : undefined
-  photo.retryable = isProjectAccessRevoked(error) ? false : isAuthExpired(error) ? true : error instanceof ApiError ? error.retryable : true
+  photo.failure_code = failureCode
+  photo.retryable = isProjectAccessRevoked(error)
+    ? false
+    : isAuthExpired(error)
+      ? true
+      : typeof errorShape?.retryable === 'boolean'
+        ? errorShape.retryable
+        : true
   photo.auto_retry_pending = undefined
   photo.auto_retry_attempts = undefined
   photo.next_retry_at = undefined
@@ -331,12 +408,15 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
   }
 }
 
-async function completePreparation(photo: LocalPhoto, generation = ownerGeneration): Promise<boolean> {
+async function completePreparationOnce(photo: LocalPhoto, generation = ownerGeneration): Promise<boolean> {
   const owner = photo.owner_account_id
   if (!isCurrentOwner(owner, generation) || !photo.original_path) return false
   try {
     if (!photo.original_mime_type || !photo.width || !photo.height) {
-      const inspected = await inspectOriginalSource(photo.original_path, photo.original_filename, photo.client_captured_at)
+      const inspected = await withPreparationWatchdog(
+        '读取原图信息',
+        inspectOriginalSource(photo.original_path, photo.original_filename, photo.client_captured_at),
+      )
       if (!isCurrentOwner(owner, generation)) return false
       photo.width = inspected.width
       photo.height = inspected.height
@@ -347,9 +427,25 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
       persist(owner)
     }
     if (!photo.transfer_path) {
-      const prepared = await prepareTransferImage(photo.original_path, photo.original_filename)
-      if (!isCurrentOwner(owner, generation)) return false
-      const saved = await persistPreparedTransfer(prepared)
+      const prepared = await withPreparationWatchdog(
+        '生成 1MB 归档图',
+        prepareTransferImage(photo.original_path, photo.original_filename),
+        async (late) => { await removeGeneratedFile(late.transferTempPath) },
+      )
+      if (!isCurrentOwner(owner, generation)) {
+        await removeGeneratedFile(prepared.transferTempPath)
+        return false
+      }
+      let saved: Awaited<ReturnType<typeof persistPreparedTransfer>>
+      try {
+        saved = await withPreparationWatchdog(
+          '保存 1MB 归档图',
+          persistPreparedTransfer(prepared),
+          async (late) => { await removeSavedFile(late.transferPath) },
+        )
+      } finally {
+        await removeGeneratedFile(prepared.transferTempPath)
+      }
       if (!isCurrentOwner(owner, generation)) {
         await removeSavedFile(saved.transferPath)
         return false
@@ -365,14 +461,30 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
       throw new Error('归档图超过 1MB，已停止上传')
     }
     if (!photo.transfer_sha256) {
-      photo.transfer_sha256 = await hashFile(photo.transfer_path)
+      photo.transfer_sha256 = await withPreparationWatchdog('校验 1MB 归档图', hashFile(photo.transfer_path))
       if (!isCurrentOwner(owner, generation)) return false
       persist(owner)
     }
     if (!photo.preview_path) {
-      const prepared = await preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at)
-      if (!isCurrentOwner(owner, generation)) return false
-      const saved = await persistPreparedPreview(prepared)
+      const prepared = await withPreparationWatchdog(
+        '生成 100KB 本机预览',
+        preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at),
+        async (late) => { await removeGeneratedFile(late.previewTempPath) },
+      )
+      if (!isCurrentOwner(owner, generation)) {
+        await removeGeneratedFile(prepared.previewTempPath)
+        return false
+      }
+      let saved: Awaited<ReturnType<typeof persistPreparedPreview>>
+      try {
+        saved = await withPreparationWatchdog(
+          '保存 100KB 本机预览',
+          persistPreparedPreview(prepared),
+          async (late) => { await removeSavedFile(late.previewPath) },
+        )
+      } finally {
+        await removeGeneratedFile(prepared.previewTempPath)
+      }
       if (!isCurrentOwner(owner, generation)) {
         await removeSavedFile(saved.previewPath)
         return false
@@ -386,7 +498,7 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
       persist(owner)
     }
     if (photo.preview_path && !photo.preview_sha256) {
-      photo.preview_sha256 = await hashFile(photo.preview_path)
+      photo.preview_sha256 = await withPreparationWatchdog('校验 100KB 本机预览', hashFile(photo.preview_path))
       if (!isCurrentOwner(owner, generation)) return false
       persist(owner)
     }
@@ -400,10 +512,27 @@ async function completePreparation(photo: LocalPhoto, generation = ownerGenerati
   }
 }
 
+function completePreparation(photo: LocalPhoto, generation = ownerGeneration): Promise<boolean> {
+  const key = `${generation}:${photo.owner_account_id}:${photo.photo_uuid}`
+  const existing = preparationTasks.get(key)
+  if (existing) return existing
+  const task = runPreparationExclusively(() => completePreparationOnce(photo, generation))
+    .finally(() => {
+      if (preparationTasks.get(key) === task) preparationTasks.delete(key)
+    })
+  preparationTasks.set(key, task)
+  return task
+}
+
 async function repairIncompletePhotos(generation: number): Promise<void> {
-  const items = state.photos.filter((photo) => photo.preparation_pending && photo.original_path)
+  if (state.preparing) return
+  const items = state.photos.filter((photo) => (
+    photo.preparation_pending
+    && photo.original_path
+    && photo.failure_code !== 'IMAGE_PROCESS_TIMEOUT'
+  ))
   for (const photo of items) {
-    if (!isCurrentOwner(photo.owner_account_id, generation)) return
+    if (state.preparing || !isCurrentOwner(photo.owner_account_id, generation)) return
     await completePreparation(photo, generation)
   }
 }
@@ -526,6 +655,10 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     }
     if (!scheduleAutomaticRetry(photo, error, 'uploading')) markFailed(photo, error, 'uploading')
     if (isAuthExpired(error)) void notifyAuthExpired(owner)
+  } finally {
+    if (isCurrentOwner(owner, generation) && String(photo.status) === 'uploading') {
+      markFailed(photo, new ApiError('照片上传未完成，1MB 归档图仍保存在本机，请重试', 'UPLOAD_INTERRUPTED', true), 'uploading')
+    }
   }
 }
 
@@ -718,12 +851,12 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
   if (!state.hydrated) hydrate()
   const owner = state.ownerAccountId
   const generation = ownerGeneration
-  if (!owner) return
-  await repairIncompletePhotos(generation)
-  state.online = await getNetworkType()
-  if (!isCurrentOwner(owner, generation) || !state.online || !state.foreground || state.running) return
+  if (!owner || state.preparing || state.running || !state.foreground) return
   state.running = true
   try {
+    await repairIncompletePhotos(generation)
+    state.online = await getNetworkType()
+    if (!isCurrentOwner(owner, generation) || !state.online || !state.foreground || state.preparing) return
     for (const batch of [...state.batches]) {
       if (!isCurrentOwner(owner, generation) || !state.online) break
       const batchPhotos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
@@ -827,6 +960,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
   const owner = state.ownerAccountId
   const generation = ownerGeneration
   if (!owner) throw new Error('账号尚未就绪，请重新进入小程序')
+  if (state.preparing) throw new Error('照片正在准备，请稍候再次选择')
   state.preparing = true
   state.prepareProgress = { current: 0, total: sourcePaths.length, message: '正在安全保存原图' }
   const batch: LocalBatch = {
@@ -842,7 +976,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
   try {
     for (let index = 0; index < sourcePaths.length; index += 1) {
       if (!isCurrentOwner(owner, generation)) throw new Error('账号已切换，本次照片处理已停止')
-      const sourceSize = await getSourceFileSize(sourcePaths[index])
+      const sourceSize = await withPreparationWatchdog('读取原图大小', getSourceFileSize(sourcePaths[index]))
       if (sourceSize > MAX_ORIGINAL_BYTES) throw new Error('单张原图不能超过 50MB，请选择较小的 JPEG 或 PNG')
       if (!Number.isFinite(sourceSize) || sourceSize <= 0) throw new Error('原图文件为空或无法读取')
       if (queueBytes.value + sourceSize + MAX_TRANSFER_BYTES + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) throw new Error('本机影像将超过 160MB，请联网完成传输后再继续拍摄')
@@ -892,7 +1026,6 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       if (queueBytes.value > MAX_QUEUE_BYTES) throw new Error('本机影像超过 160MB；当前原图和预览均已保留，请先联网中转')
     }
     persist(owner)
-    void resume('manual')
     return batch
   } catch (error) {
     if (isCurrentOwner(owner, generation)) {
@@ -901,7 +1034,6 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
         if (index >= 0) state.batches.splice(index, 1)
       } else {
         batch.preparation_error = error instanceof Error ? error.message : '部分照片处理失败'
-        void resume('manual')
       }
       persist(owner)
     }
@@ -911,6 +1043,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
     if (isCurrentOwner(owner, generation)) {
       state.preparing = false
       state.prepareProgress = { current: 0, total: 0, message: '' }
+      if (batch.photo_uuids.length) void resume('manual')
     }
   }
 }
@@ -974,6 +1107,23 @@ function clearPermanentArchiveInfoFailure(batch: LocalBatch): void {
     photo.auto_retry_attempts = undefined
     photo.next_retry_at = undefined
     photo.updated_at = now()
+  })
+}
+
+async function removeGeneratedFile(path: string): Promise<void> {
+  if (!path) return
+  const wxApi = (globalThis as { wx?: any }).wx
+  if (!wxApi?.getFileSystemManager) return
+  await new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(finish, FILE_DELETE_CALLBACK_TIMEOUT_MS)
+    wxApi.getFileSystemManager().unlink({ filePath: path, success: finish, fail: finish })
   })
 }
 

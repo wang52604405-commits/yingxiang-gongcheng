@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { batchIdempotencyKey, buildChunkUploadInit, buildPhotoUploadForm, normalizeBatchPayload, photoIdempotencyKey } from '@/api/contracts'
 import { normalizeBatch, normalizeCloudPhoto, normalizeMediaUrl, normalizeProject, normalizeTreeNode } from '@/api/normalize'
 import { API_BASE_URL } from '@/config/env'
-import { apiUploadPhoto } from '@/api/client'
+import { apiUploadPhoto, DIRECT_UPLOAD_WATCHDOG_MS } from '@/api/client'
 import { normalizeBootstrapResponse } from '@/api/mobile'
 
 describe('移动端 API v1 契约', () => {
@@ -179,5 +179,34 @@ describe('移动端 API v1 契约', () => {
     expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/user/archive.jpg', name: 'file', timeout: 55_000 }))
     expect(uploadFile.mock.calls[0][0].formData.photo_uuid).toBe('photo-timeout')
     expect(uploadFile.mock.calls[0][0].formData.transfer_profile).toBe('jpeg_1m')
+  })
+
+  it('微信直传不回调时 watchdog 中止任务并返回可重试超时', async () => {
+    vi.useFakeTimers()
+    const abort = vi.fn()
+    const uploadFile = vi.fn(() => ({ abort, onProgressUpdate: vi.fn() }))
+    ;(globalThis as any).uni = { getStorageSync: () => 'token', uploadFile }
+    try {
+      const pending = apiUploadPhoto('18', '/user/archive.jpg', {
+        photo_uuid: 'photo-hung-upload',
+        client_captured_at: '2026-08-25T01:00:00Z',
+        orientation: 1,
+        width: 2_560,
+        height: 1_920,
+        sha256: 'd'.repeat(64),
+        original_size_bytes: 900_000,
+        original_filename: 'archive.jpg',
+        original_mime_type: 'image/jpeg',
+        title: '',
+        photo_date: '2026-08-25',
+        transfer_profile: 'jpeg_1m',
+      })
+      const rejected = expect(pending).rejects.toMatchObject({ code: 'UPLOAD_TIMEOUT', retryable: true, statusCode: 408 })
+      await vi.advanceTimersByTimeAsync(DIRECT_UPLOAD_WATCHDOG_MS)
+      await rejected
+      expect(abort).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
