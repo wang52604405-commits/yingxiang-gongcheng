@@ -98,6 +98,9 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("github.event.before", workflow)
         self.assertIn("$env:GITHUB_SHA", workflow)
         self.assertIn("deploy_auth\\.py", workflow)
+        self.assertIn("\\.github/workflows/deploy\\.yml", workflow)
+        self.assertIn("[IO.File]::AppendAllText", workflow)
+        self.assertIn("[Text.UTF8Encoding]::new($false)", workflow)
         self.assertNotIn("git diff --name-only HEAD^ HEAD", workflow)
 
     def test_nginx_https_keeps_legacy_http_api_without_redirect(self):

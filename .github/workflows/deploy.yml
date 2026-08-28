@@ -134,15 +134,29 @@ jobs:
             if (-not $before -or $before -match '^0+$') {
               $before = "HEAD^"
             }
-            $changed = git diff --name-only $before $env:GITHUB_SHA 2>$null |
-              Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$)'
+            $changedFiles = @(git diff --name-only $before $env:GITHUB_SHA 2>$null)
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Unable to compare the pushed range; deploying server fail-safe."
+              $changed = $true
+            } else {
+              $changed = $changedFiles |
+                Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|\.github/workflows/deploy\.yml$)'
+            }
           }
           if ($changed) {
-            Write-Host "服务器代码或部署器有变更，执行授权中心部署"
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=true"
+            Write-Host "Server deployment is required."
+            [IO.File]::AppendAllText(
+              $env:GITHUB_OUTPUT,
+              "run_deploy=true`n",
+              [Text.UTF8Encoding]::new($false)
+            )
           } else {
-            Write-Host "服务器代码与部署器无变更，跳过授权中心部署"
-            Add-Content -Path $env:GITHUB_OUTPUT -Value "run_deploy=false"
+            Write-Host "No server deployment is required."
+            [IO.File]::AppendAllText(
+              $env:GITHUB_OUTPUT,
+              "run_deploy=false`n",
+              [Text.UTF8Encoding]::new($false)
+            )
           }
 
       - name: 部署授权中心到阿里云
