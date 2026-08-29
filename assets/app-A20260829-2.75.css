@@ -7616,7 +7616,7 @@
        的照片同时展开时把整个单元详情拉得失控。 */
     #unitView .unit-photo-section:not(.is-collapsed) {
       height: auto;
-      max-height: min(68vh, 620px);
+      max-height: none;
       grid-template-rows: auto auto auto;
       align-self: start;
     }
