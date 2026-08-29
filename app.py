@@ -5213,6 +5213,10 @@ UPDATE_PUBLIC_FIELDS = {
     "updated_at",
 }
 
+# 安装助手接管后，正常情况会在数秒内关闭本服务；超过此时间仍没有新状态，
+# 说明助手没有真正接管，必须恢复为可重试状态，不能无限显示“安装中”。
+UPDATE_INSTALL_STALE_MS = 2 * 60 * 1000
+
 
 UPDATE_HELPER_SCRIPT = r'''param(
     [Parameter(Mandatory = $true)][string]$InstallerPath,
@@ -5247,9 +5251,16 @@ function Write-UpdateStatus([string]$StateName, [string]$Message, [string]$Publi
         } | ConvertTo-Json -Compress
         $statusDirectory = [System.IO.Path]::GetDirectoryName($StatusPath)
         [System.IO.Directory]::CreateDirectory($statusDirectory) | Out-Null
-        $statusTemp = $StatusPath + '.helper.tmp'
-        [System.IO.File]::WriteAllText($statusTemp, $payload, (New-Object System.Text.UTF8Encoding($false)))
-        Move-Item -LiteralPath $statusTemp -Destination $StatusPath -Force
+        # 页面会高频读取状态文件；直接重试写入，避免临时文件替换碰撞后悄悄
+        # 丢失“已失败”状态，导致页面永远停在安装中。
+        for ($attempt = 0; $attempt -lt 6; $attempt++) {
+            try {
+                [System.IO.File]::WriteAllText($StatusPath, $payload, (New-Object System.Text.UTF8Encoding($false)))
+                return
+            } catch {
+                Start-Sleep -Milliseconds 120
+            }
+        }
     } catch { }
 }
 
@@ -5275,6 +5286,7 @@ try {
         -not [string]::Equals([System.IO.Path]::GetExtension($installerFull), '.exe', [System.StringComparison]::OrdinalIgnoreCase)) {
         throw '安装包不存在或格式不正确'
     }
+    Write-UpdateStatus 'installing' '正在关闭旧版本并安装…' '' $false
     $currentServer = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $ServerPid) -ErrorAction SilentlyContinue
     if (-not $currentServer -or @($currentServer | Where-Object {
         $candidate = $_
@@ -5302,6 +5314,10 @@ try {
         throw ("安装程序未能完成（退出码 " + $installerExit + "）")
     }
     Write-UpdateStatus 'installed' '更新完成，正在打开新版本…' '' $false
+    $launcher = Join-Path $installFull '工程影像管理平台.exe'
+    if ([System.IO.File]::Exists($launcher)) {
+        Start-Process -FilePath $launcher -WorkingDirectory $installFull -WindowStyle Hidden
+    }
     exit 0
 } catch {
     $publicMessage = [string]$_.Exception.Message
@@ -5311,7 +5327,8 @@ try {
     Write-UpdateStatus 'failed' '更新失败' $publicMessage $true
     try {
         $launcher = Join-Path $installFull '工程影像管理平台.exe'
-        if ([System.IO.File]::Exists($launcher)) {
+        # 如果旧程序仍活着，不能再启动一个托盘实例；只有已经关闭后才负责恢复。
+        if (@(Get-InstalledAppProcesses).Count -eq 0 -and [System.IO.File]::Exists($launcher)) {
             Start-Process -FilePath $launcher -WorkingDirectory $installFull -WindowStyle Hidden
         }
     } catch { }
@@ -5393,7 +5410,7 @@ class DesktopUpdateManager:
         worker_alive = bool(self.worker and self.worker.is_alive())
         age_ms = int(time.time() * 1000) - int(self._status.get("updated_at") or 0)
         interrupted_download = self._status.get("state") in {"checking", "downloading", "verifying"}
-        expired_install = self._status.get("state") == "installing" and age_ms > 15 * 60 * 1000
+        expired_install = self._status.get("state") == "installing" and age_ms > UPDATE_INSTALL_STALE_MS
         if not worker_alive and (interrupted_download or expired_install):
             self._status.update({
                 "state": "failed",

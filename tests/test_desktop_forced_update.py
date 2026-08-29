@@ -113,7 +113,11 @@ class DesktopForcedUpdateTest(unittest.TestCase):
             self.assertEqual(recent_install["state"], "installing")
 
             status_path.write_text(
-                json.dumps({**base, "state": "installing", "updated_at": now - 16 * 60 * 1000}),
+                json.dumps({
+                    **base,
+                    "state": "installing",
+                    "updated_at": now - self.desktop.UPDATE_INSTALL_STALE_MS - 1,
+                }),
                 encoding="utf-8",
             )
             expired_install = self.desktop.DesktopUpdateManager(status_path).public_status()
@@ -269,7 +273,9 @@ class DesktopForcedUpdateTest(unittest.TestCase):
             self.assertIn("工程影像管理平台.exe", helper)
             self.assertNotIn("taskkill", helper.lower())
             success_path = helper.split("} catch {\n    $publicMessage", 1)[0]
-            self.assertNotIn("Start-Process", success_path)
+            self.assertIn("Start-Process", success_path)
+            self.assertIn("正在打开新版本", success_path)
+            self.assertIn("旧程序仍活着", helper)
             self.assertNotIn("'/CLOSEAPPLICATIONS'", helper)
 
     def test_api_contract_defaults_to_mandatory_and_source_mode_stays_unlocked(self):
@@ -384,7 +390,8 @@ class DesktopForcedUpdateTest(unittest.TestCase):
         self.assertIn('id="retryUpdateBtn"', html)
         self.assertIn('apiJson("/api/cloud/update-status")', javascript)
         self.assertIn('apiJson("/api/cloud/apply-update", { method: "POST" })', javascript)
-        self.assertIn("UPDATE_INSTALL_WATCHDOG_MS", javascript)
+        self.assertIn("const UPDATE_INSTALL_WATCHDOG_MS = 90 * 1000", javascript)
+        self.assertIn('String(status.state || "") === "installing"', javascript)
         self.assertIn("安装等待超时。请先手动打开软件；若仍是旧版本，请重新下载。", javascript)
         update_function = javascript[javascript.index("async function checkForUpdate"):javascript.index("async function ensureAuthenticated")]
         self.assertNotIn("confirm(", update_function)

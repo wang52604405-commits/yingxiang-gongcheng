@@ -1,5 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
-    const UPDATE_INSTALL_WATCHDOG_MS = 12 * 60 * 1000;
+    // 助手正常会很快关闭当前程序；仍持续返回“安装中”时也必须脱离遮罩，
+    // 给用户明确失败和安全重试入口，不能只在网络断开时才检查超时。
+    const UPDATE_INSTALL_WATCHDOG_MS = 90 * 1000;
     const state = {
       dashboard: {},
       projectInfo: {},
@@ -1855,6 +1857,19 @@ const $ = (selector) => document.querySelector(selector);
         const status = await apiJson("/api/cloud/update-status");
         state.update.pollFailures = 0;
         renderUpdateStatus(status);
+        if (String(status.state || "") === "installing") {
+          const installWait = Date.now() - Number(state.update.installingSince || Date.now());
+          if (installWait >= UPDATE_INSTALL_WATCHDOG_MS) {
+            renderUpdateStatus({
+              state: "failed",
+              latest_version: state.update.manifest?.latest_version || "",
+              error: "安装等待超时。软件没有完成重启，请重新下载。",
+              message: "新版本未能自动启动",
+              retryable: true
+            });
+            return;
+          }
+        }
         if (["failed", "installed", "idle"].includes(String(status.state || ""))) return;
         state.update.pollTimer = window.setTimeout(pollUpdateStatus, 700);
       } catch (_error) {
