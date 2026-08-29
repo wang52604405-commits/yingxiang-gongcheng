@@ -393,7 +393,8 @@ class DesktopForcedUpdateTest(unittest.TestCase):
         self.assertNotIn("confirm(", update_function)
         self.assertNotIn("startMandatoryUpdate", update_function)
         self.assertNotIn("apply-update", update_function)
-        self.assertIn('"mandatory": True', publish)
+        self.assertIn('"mandatory": False', publish)
+        self.assertIn('"manual_update_only": True', publish)
 
     def test_install_and_deploy_scripts_never_kill_by_global_name_or_foreign_port(self):
         root = Path(__file__).resolve().parents[1]

@@ -141,7 +141,11 @@ def write_remote_version(new_version: str, note: str) -> None:
         "changelog": [item.strip() for item in note.splitlines() if item.strip()],
         "sha256": hashlib.sha256(INSTALLER.read_bytes()).hexdigest(),
         "size": INSTALLER.stat().st_size,
-        "mandatory": True,
+        # 更新从 A20260829-2.75 起统一由客户端红点提醒，用户下载后自行
+        # 覆盖安装；发布清单绝不再把任何版本标记为强制自动安装。
+        "mandatory": False,
+        "manual_update_only": True,
+        "auto_update_supported": False,
     }
     print(f"[version.json] 将更新为 {new_version}，note: {note!r}")
     if DRY_RUN:
