@@ -13,6 +13,7 @@ from pathlib import Path
 
 import licensing
 import tamper_guard
+import tls_compat
 
 try:
     import pystray
@@ -25,7 +26,7 @@ except Exception:  # pragma: no cover - 托盘不可用时退化为静默
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260829-2.77"
+APP_VERSION = "A20260829-2.78"
 UPDATE_URL = "https://api.shuiliyingxiang.cn/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"
@@ -70,7 +71,7 @@ def _ver_tuple(version):
 def fetch_remote_version():
     """获取服务器上的最新版本信息；兼容旧版 url/note 字段。"""
     try:
-        with urllib.request.urlopen(UPDATE_URL, timeout=UPDATE_TIMEOUT) as resp:
+        with tls_compat.secure_urlopen(UPDATE_URL, timeout=UPDATE_TIMEOUT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return (
             data.get("version"),

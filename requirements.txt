@@ -8,3 +8,5 @@ xlrd>=2.0.1
 Pillow
 rapidocr-onnxruntime
 pystray
+truststore==0.10.4
+certifi

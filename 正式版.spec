@@ -10,6 +10,8 @@
 from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
 _ocr_dat = collect_all('rapidocr_onnxruntime')
+_truststore_dat = collect_all('truststore')
+_certifi_dat = collect_all('certifi')
 
 
 def collect_onnxruntime_min():
@@ -22,9 +24,9 @@ _ort_datas, _ort_binaries, _ort_hidden = collect_onnxruntime_min()
 a = Analysis(
     ['desktop_launcher.py', 'server_launcher.py'],
     pathex=[],
-    binaries=_ocr_dat[1] + _ort_binaries,
-    datas=[('templates', 'templates'), ('assets', 'assets')] + _ocr_dat[0] + _ort_datas,
-    hiddenimports=['openpyxl', 'xlrd', 'flask', 'werkzeug', 'pystray', 'pystray._win32', 'PIL', 'PIL.Image', 'PIL._tkinter_finder'] + _ocr_dat[2] + _ort_hidden,
+    binaries=_ocr_dat[1] + _ort_binaries + _truststore_dat[1] + _certifi_dat[1],
+    datas=[('templates', 'templates'), ('assets', 'assets')] + _ocr_dat[0] + _ort_datas + _truststore_dat[0] + _certifi_dat[0],
+    hiddenimports=['openpyxl', 'xlrd', 'flask', 'werkzeug', 'pystray', 'pystray._win32', 'PIL', 'PIL.Image', 'PIL._tkinter_finder'] + _ocr_dat[2] + _ort_hidden + _truststore_dat[2] + _certifi_dat[2],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -22,6 +22,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import tls_compat
+
 CLOUD_CONFIG_NAME = "cloud_config.json"
 CLOUD_ACCOUNT_NAME = "cloud_account.json"
 PRODUCT_CONFIG_CACHE_NAME = "product_config_cache.json"
@@ -30,7 +32,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260829-2.77"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260829-2.78"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -98,7 +100,7 @@ class _NoCredentialRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _open_no_redirect(request, timeout=15):
-    return urllib.request.build_opener(_NoCredentialRedirect()).open(
+    return tls_compat.build_secure_opener(_NoCredentialRedirect()).open(
         request, timeout=timeout
     )
 
@@ -1222,7 +1224,7 @@ def _desktop_download_bytes_with_context(
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "retryable": False}
     try:
-        opener = urllib.request.build_opener(_NoDownloadRedirect())
+        opener = tls_compat.build_secure_opener(_NoDownloadRedirect())
         with opener.open(req, timeout=timeout) as resp:
             content_length = int(resp.headers.get("Content-Length") or 0)
             if content_length > max_bytes:

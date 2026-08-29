@@ -30,6 +30,7 @@ import licensing
 import cloud_client
 import mobile_sync
 import tamper_guard
+import tls_compat
 import watermark_ocr
 import professional_templates
 from server import mobile_recognition
@@ -5846,7 +5847,7 @@ class DesktopUpdateManager:
             headers["Range"] = f"bytes={existing}-"
         request_obj = urllib.request.Request(manifest["url"], headers=headers, method="GET")
         try:
-            with urllib.request.urlopen(request_obj, timeout=60) as response:
+            with tls_compat.secure_urlopen(request_obj, timeout=60) as response:
                 final_url = str(getattr(response, "geturl", lambda: manifest["url"])() or manifest["url"])
                 final_parts = urllib.parse.urlsplit(final_url)
                 if final_parts.scheme.lower() != "https" or not final_parts.hostname or final_parts.username or final_parts.password:

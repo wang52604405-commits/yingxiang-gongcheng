@@ -162,7 +162,7 @@ class DesktopForcedUpdateTest(unittest.TestCase):
                 headers={"Content-Range": f"bytes {split}-{len(payload) - 1}/{len(payload)}"},
             )
             with patch.object(self.desktop.tempfile, "gettempdir", return_value=temp_dir), patch.object(
-                self.desktop.urllib.request, "urlopen", return_value=response
+                self.desktop.tls_compat, "secure_urlopen", return_value=response
             ) as urlopen:
                 target = manager._download_package("job", manifest)
             self.assertEqual(target.read_bytes(), payload)
@@ -183,8 +183,8 @@ class DesktopForcedUpdateTest(unittest.TestCase):
             manager = self.manager(Path(temp_dir))
             manager._status.update({"job_id": "job", "state": "downloading"})
             with patch.object(self.desktop.tempfile, "gettempdir", return_value=temp_dir), patch.object(
-                self.desktop.urllib.request,
-                "urlopen",
+                self.desktop.tls_compat,
+                "secure_urlopen",
                 return_value=_FakeResponse(payload, status=200),
             ):
                 with self.assertRaisesRegex(self.desktop.DesktopUpdateError, "完整性校验失败"):
