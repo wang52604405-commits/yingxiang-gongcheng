@@ -1813,7 +1813,9 @@ class AlbumManager:
         process_name = str(photo.get("process_name") or "").strip()
         process_code = self._process_code(data, process_name) if process_name else ""
         if processes:
-            # 两级新编号：单元级 SYDY/JYDY，工序级 SYGX/JYGX（每工序独立从 001 开始）
+            # 两级编号仍必须以单元工程编码开头；否则不同单元会出现相同的
+            # SYDY001 / SYGX001，既无法辨认来源，也容易在打印、同步时混淆。
+            # 单元级：<单元编码>-SYDY001；工序级：<单元编码>-GY001-SYGX001。
             settings = read_engineering_settings()
             rules = settings.get("numbering_rules") or read_numbering_rules()
             rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
@@ -1823,7 +1825,11 @@ class AlbumManager:
                 digits = 3
             seq = f"{int(sequence):0{digits}d}"
             cat = "JY" if category == "supervision" else "SY"
-            return f"{cat}{'GX' if process_code else 'DY'}{seq}"
+            unit_code = safe_project_code(
+                data.get("display_project_code") or data.get("project_code")
+            )
+            process_segment = f"-{safe_project_code(process_code)}" if process_code else ""
+            return f"{unit_code}{process_segment}-{cat}{'GX' if process_code else 'DY'}{seq}"
         settings = read_engineering_settings()
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
@@ -2088,14 +2094,17 @@ class AlbumManager:
         return items
 
     def repair_legacy_process_photo_scopes(self, project_code):
-        """修复老数据中“没有工序名却带 GY 编码”的单元照片。
+        """修复两类历史两级编号问题。
 
-        该情况会把单元照片错标成 SYGX/JYGX。修复仅重编号和安全改名，
-        不删除照片、不改变题名或拍摄信息。
+        - 没有工序名却带 GY 编码的照片，属于单元照片，不能错标为工序照片；
+        - 旧版两级编号漏掉单元工程编码，例如 SYDY001 / SYGX001。
+
+        修复仅重编号和安全改名，不删除照片、不改变题名或拍摄信息。
         """
         with self._project_write_lock(project_code):
             data = self.get_project(project_code)
             needs_repair = False
+            has_processes = bool(data.get("processes") or [])
             for photo in data.get("photos", []):
                 process_name = str(photo.get("process_name") or "").strip()
                 process_code = str(photo.get("process_code") or "").strip()
@@ -2111,6 +2120,9 @@ class AlbumManager:
                     if process_code != expected_code:
                         photo["process_code"] = expected_code
                         needs_repair = True
+                # 仅识别旧版系统自动生成的短编号；不触碰用户自己输入的其它编号。
+                if has_processes and re.fullmatch(r"(?:SY|JY)(?:DY|GX)\d{1,8}", archive_id):
+                    needs_repair = True
             if not needs_repair:
                 return 0
             for category in PHOTO_CATEGORIES:
@@ -7331,7 +7343,7 @@ def api_photos(project_code):
 
 @app.route("/api/photos/<path:project_code>/processes", methods=["POST"])
 def api_add_process(project_code):
-    """给单元添加工序：添加后该单元切换为两级编号（单元级 SYDY/JYDY，工序级 SYGX/JYGX）。"""
+    """给单元添加工序，并切换为带单元编码前缀的两级照片编号。"""
     user, error = login_required_json()
     if error:
         return error
