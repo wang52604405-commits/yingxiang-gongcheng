@@ -157,6 +157,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "unit_order_digits": 3,
     "print_layout": "landscape",
     "print_page_size": 4,
+    "print_single_alignment": "center",
     "print_photo_preset": "5inch",
     "print_photo_width_cm": 12.7,
     "print_photo_height_cm": 8.9,
@@ -726,6 +727,10 @@ def _normalize_engineering_settings(settings):
     if not 1 <= settings["print_page_size"] <= 12:
         settings["print_page_size"] = 4
     settings["print_layout"] = "portrait" if settings.get("print_layout") == "portrait" else "landscape"
+    requested_single_alignment = str(settings.get("print_single_alignment") or "").strip().lower()
+    settings["print_single_alignment"] = (
+        requested_single_alignment if requested_single_alignment in {"center", "top"} else "center"
+    )
     settings["print_photo_preset"] = settings.get("print_photo_preset") if settings.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else "5inch"
     preset_sizes = {"4inch": (10.2, 7.6), "5inch": (12.7, 8.9), "6inch": (15.2, 10.2)}
     if settings["print_photo_preset"] in preset_sizes:
@@ -799,6 +804,14 @@ def write_engineering_settings(payload):
     if not 1 <= page_size <= 12:
         raise ValueError("每页张数只能填写 1 到 12")
     current["print_page_size"] = page_size
+    requested_single_alignment = str(payload.get(
+        "print_single_alignment", current.get("print_single_alignment", "center")
+    ) or "").strip().lower()
+    current["print_single_alignment"] = (
+        requested_single_alignment
+        if requested_single_alignment in {"center", "top"}
+        else "center"
+    )
     current["print_photo_preset"] = payload.get("print_photo_preset") if payload.get("print_photo_preset") in {"4inch", "5inch", "6inch", "custom"} else current.get("print_photo_preset", "5inch")
     current["print_photo_width_cm"] = normalize_print_photo_size(payload.get("print_photo_width_cm", current.get("print_photo_width_cm", 0)))
     current["print_photo_height_cm"] = normalize_print_photo_size(payload.get("print_photo_height_cm", current.get("print_photo_height_cm", 0)))
@@ -3390,6 +3403,7 @@ PRINT_STYLE_DEFAULTS = {
     "single": {
         "print_layout": "landscape",
         "print_page_size": 1,
+        "print_single_alignment": "center",
         "print_photo_preset": "custom",
         "print_photo_width_cm": 26.0,
         "print_photo_height_cm": 17.2,
@@ -3426,6 +3440,14 @@ def print_settings_from_request():
     settings["print_photo_preset"] = preset
     settings["print_photo_width_cm"] = width_cm
     settings["print_photo_height_cm"] = height_cm
+    single_alignment = str(
+        request.args.get("single_alignment")
+        or settings.get("print_single_alignment")
+        or "center"
+    ).strip().lower()
+    settings["print_single_alignment"] = (
+        single_alignment if single_alignment in {"center", "top"} else "center"
+    )
     def request_float(name, default, minimum, maximum):
         try:
             return max(minimum, min(maximum, float(request.args.get(name, default))))
@@ -3674,6 +3696,7 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
     caption_position = str(settings.get("print_caption_position") or "bottom")
     caption_size = float(settings.get("print_caption_size_mm", 7.5))
     show_page_title = bool(settings.get("print_show_page_title", True))
+    single_alignment = str(settings.get("print_single_alignment") or "center")
     if layout == "portrait":
         paper_w, paper_h = 210.0, 297.0
     else:
@@ -3717,9 +3740,12 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
             row_y = 0.0
             x = 0.0
             row_h = 0.0
-        # 每页 1 张时横向居中，避免大图单张版式偏左
+        # 单张时让“照片 + 标签”作为整体置中；旧版只能横向居中，
+        # 小尺寸照片仍会贴在页面上方，视觉上不是真正居中。
         if page_size == 1:
             x = max(0.0, (page_w - block_w) / 2)
+            if single_alignment == "center":
+                row_y = max(0.0, (page_h - block_h) / 2)
         item = dict(photo)
         item["_left"] = round(x, 1)
         item["_top"] = round(row_y, 1)
@@ -5763,12 +5789,12 @@ def api_cloud_check_update():
     result = cloud_client.check_update()
     result = dict(result) if isinstance(result, dict) else {"ok": False, "error": "检查更新失败"}
     has_update = bool(result.get("has_update"))
-    result["mandatory"] = bool(result.get("mandatory", True)) if has_update else False
-    result["auto_update_supported"] = bool(getattr(sys, "frozen", False))
-    result["update_status_url"] = "/api/cloud/update-status"
-    result["apply_update_url"] = "/api/cloud/apply-update"
-    if has_update and not result["auto_update_supported"]:
-        result["manual_download_url"] = "/api/cloud/download-update"
+    # 桌面端采用“发现新版本 → 用户下载覆盖安装”的稳定模式。
+    # 旧版客户端也会据此停止自动关闭进程和后台安装。
+    result["mandatory"] = False
+    result["auto_update_supported"] = False
+    result["manual_update_only"] = True
+    result["manual_download_url"] = "/api/cloud/download-update" if has_update else ""
     return jsonify(result)
 
 
@@ -5797,16 +5823,14 @@ def api_cloud_download_update():
 
 @app.route("/api/cloud/apply-update", methods=["POST"])
 def api_cloud_apply_update():
-    """立即受理更新；下载、校验、退出旧进程和安装均由后台任务完成。"""
-    if not getattr(sys, "frozen", False):
-        return jsonify({
-            "ok": False,
-            "supported": False,
-            "error": "源码调试模式不执行自动安装，请下载正式安装版后测试",
-            "manual_download_url": "/api/cloud/download-update",
-        }), 409
-    status = desktop_update_manager().start()
-    return jsonify(status), 202
+    """保留旧地址用于兼容，但禁止客户端自动下载、关闭或安装。"""
+    return jsonify({
+        "ok": False,
+        "supported": False,
+        "manual_update_only": True,
+        "error": "已改为手动安装更新包：请下载后关闭软件，再覆盖安装",
+        "manual_download_url": "/api/cloud/download-update",
+    }), 410
 
 
 @app.route("/api/cloud/logout", methods=["POST"])

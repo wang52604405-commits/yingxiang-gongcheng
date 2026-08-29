@@ -278,7 +278,7 @@ class DesktopForcedUpdateTest(unittest.TestCase):
             self.assertIn("旧程序仍活着", helper)
             self.assertNotIn("'/CLOSEAPPLICATIONS'", helper)
 
-    def test_api_contract_defaults_to_mandatory_and_source_mode_stays_unlocked(self):
+    def test_api_contract_uses_manual_download_for_every_client(self):
         client = self.desktop.app.test_client()
         update = {
             "ok": True,
@@ -289,33 +289,28 @@ class DesktopForcedUpdateTest(unittest.TestCase):
             "size": 123,
         }
         with patch.object(self.desktop.cloud_client, "check_update", return_value=update), patch.object(
-            self.desktop.sys, "frozen", False, create=True
+            self.desktop.sys, "frozen", True, create=True
         ):
             check = client.get("/api/cloud/check-update").get_json()
             apply_response = client.post("/api/cloud/apply-update")
-        self.assertTrue(check["mandatory"])
+        self.assertFalse(check["mandatory"])
         self.assertFalse(check["auto_update_supported"])
-        self.assertEqual(apply_response.status_code, 409)
+        self.assertTrue(check["manual_update_only"])
+        self.assertEqual(check["manual_download_url"], "/api/cloud/download-update")
+        self.assertEqual(apply_response.status_code, 410)
         self.assertFalse(apply_response.get_json()["supported"])
         self.assertIn("manual_download_url", apply_response.get_json())
 
-    def test_installed_api_accepts_once_and_returns_202(self):
+    def test_installed_api_never_starts_background_install(self):
         client = self.desktop.app.test_client()
         manager = MagicMock()
-        manager.start.return_value = {
-            "ok": True,
-            "supported": True,
-            "started": True,
-            "state": "checking",
-            "job_id": "job",
-        }
         with patch.object(self.desktop.sys, "frozen", True, create=True), patch.object(
             self.desktop, "desktop_update_manager", return_value=manager
         ):
             response = client.post("/api/cloud/apply-update")
-        self.assertEqual(response.status_code, 202)
-        self.assertTrue(response.get_json()["started"])
-        manager.start.assert_called_once_with()
+        self.assertEqual(response.status_code, 410)
+        self.assertTrue(response.get_json()["manual_update_only"])
+        manager.start.assert_not_called()
 
     def test_tray_check_update_only_opens_the_local_state_machine(self):
         import desktop_launcher
@@ -387,14 +382,17 @@ class DesktopForcedUpdateTest(unittest.TestCase):
         javascript = (root / "assets" / asset_match.group(1)).read_text(encoding="utf-8")
         publish = (root / "publish_update.py").read_text(encoding="utf-8")
         self.assertIn('id="updateOverlay"', html)
-        self.assertIn('id="retryUpdateBtn"', html)
-        self.assertIn('apiJson("/api/cloud/update-status")', javascript)
-        self.assertIn('apiJson("/api/cloud/apply-update", { method: "POST" })', javascript)
-        self.assertIn("const UPDATE_INSTALL_WATCHDOG_MS = 90 * 1000", javascript)
-        self.assertIn('String(status.state || "") === "installing"', javascript)
-        self.assertIn("安装等待超时。请先手动打开软件；若仍是旧版本，请重新下载。", javascript)
+        self.assertIn('id="checkUpdateBtn"', html)
+        self.assertIn('id="updateNoticeDot"', html)
+        self.assertLess(html.index('id="checkUpdateBtn"'), html.index('id="settingsMenuBtn"'))
+        self.assertIn('id="downloadUpdateLink"', html)
+        self.assertIn("function setUpdateAvailable", javascript)
+        self.assertIn("function renderManualUpdate", javascript)
+        self.assertIn('setUpdateAvailable(true)', javascript)
         update_function = javascript[javascript.index("async function checkForUpdate"):javascript.index("async function ensureAuthenticated")]
         self.assertNotIn("confirm(", update_function)
+        self.assertNotIn("startMandatoryUpdate", update_function)
+        self.assertNotIn("apply-update", update_function)
         self.assertIn('"mandatory": True', publish)
 
     def test_install_and_deploy_scripts_never_kill_by_global_name_or_foreign_port(self):

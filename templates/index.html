@@ -203,6 +203,7 @@
             </div>
           </div>
         </div>
+        <button type="button" id="checkUpdateBtn" class="update-check-button" title="检查软件新版本">检查更新<span id="updateNoticeDot" class="update-notice-dot" hidden aria-label="有新版本"></span></button>
         <div class="settings-menu-wrap">
           <button type="button" id="settingsMenuBtn">设置</button>
           <div class="settings-menu" id="settingsMenu">
@@ -210,7 +211,6 @@
             <button type="button" id="settingsExportCsvBtn">导出CSV</button>
             <button type="button" id="settingsExportJsonBtn">导出JSON</button>
             <button type="button" id="setupPageBtn">局域网配置</button>
-            <button type="button" id="checkUpdateBtn">检查更新</button>
             <button type="button" id="machineIdBtn">机器ID</button>
             <button type="button" id="logoutBtn" style="display:none;">更换姓名</button>
           </div>
@@ -479,7 +479,7 @@
             <div class="upload-choice-head">
               <div>
                 <h3 id="printSetupTitle">打印设置</h3>
-                <p>先选择常用默认方案，或展开自定义排版后再进入打印预览。</p>
+                <p>已带入本工程的打印设置；也可切换常用方案后再进入预览。</p>
               </div>
               <button class="ghost" type="button" id="closePrintSetupBtn">关闭</button>
             </div>
@@ -525,6 +525,7 @@
                 <div class="print-custom-grid">
                   <label>纸张方向<select id="printSetupLayout"><option value="landscape">A4 横版</option><option value="portrait">A4 竖版</option></select></label>
                   <label>每页照片数量<input id="printSetupPageSize" type="number" min="1" max="12" step="1" value="4"></label>
+                  <label>单张打印位置<select id="printSetupSingleAlignment"><option value="center">页面居中</option><option value="top">靠上排列</option></select></label>
                   <label>照片规格<select id="printSetupPreset"><option value="4inch">4寸 10.2×7.6cm</option><option value="5inch" selected>5寸 12.7×8.9cm</option><option value="6inch">6寸 15.2×10.2cm</option><option value="custom">自定义尺寸</option></select></label>
                   <label>图片填充<select id="printSetupImageFit"><option value="contain" selected>完整显示（可留白）</option><option value="cover">铺满裁切</option></select></label>
                   <label>照片宽度(cm)<input id="printSetupPhotoWidth" type="number" min="1" max="30" step="0.1" value="12.7"></label>
@@ -744,12 +745,13 @@
             <div class="project-settings-grid">
               <label>默认打印版式<select id="settingsPrintLayoutInput" class="orientation-select"><option value="landscape">横版</option><option value="portrait">竖版</option></select></label>
               <label>默认每页张数<select id="settingsPrintPageSizeInput" class="orientation-select"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></label>
+              <label>单张打印位置<select id="settingsPrintSingleAlignmentInput" class="orientation-select"><option value="center">页面居中</option><option value="top">靠上排列</option></select></label>
               <label>照片尺寸<select id="settingsPrintPhotoPresetInput" class="orientation-select"><option value="4inch">4寸（10.2×7.6cm）</option><option value="5inch">5寸（12.7×8.9cm）</option><option value="6inch">6寸（15.2×10.2cm）</option><option value="custom">自定义尺寸</option></select></label>
               <label>照片宽度(厘米)<input id="settingsPrintPhotoWidthInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
               <label>照片高度(厘米)<input id="settingsPrintPhotoHeightInput" type="number" min="0" step="0.01" placeholder="留空则自动"></label>
               <label>照片说明字号<input id="settingsPrintCaptionFontSizeInput" type="number" min="5" max="14" step="0.1" placeholder="10"></label>
             </div>
-            <p class="import-hint">选择 4寸、5寸或6寸后自动填写标准尺寸；选择“自定义尺寸”可自行输入宽高。版式和每页张数会按实际可用空间自动分页。</p>
+            <p class="import-hint">选择 1 张时可设为页面居中；4寸、5寸、6寸会自动填写标准尺寸，选择“自定义尺寸”可直接输入宽高。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="storage">
             <h4>照片存储优化</h4>
@@ -875,31 +877,28 @@
       <div class="update-mark" aria-hidden="true">
         <span class="update-mark-arrow">↓</span>
       </div>
-      <span class="update-required-label" id="updateRequiredLabel">必须更新</span>
-      <h2 id="updateTitle">正在准备新版本</h2>
+      <span class="update-required-label" id="updateRequiredLabel">发现新版本</span>
+      <h2 id="updateTitle">下载后手动安装</h2>
       <p class="update-version" id="updateVersion">正在读取版本信息…</p>
-      <p class="update-message" id="updateMessage">更新会自动完成，请保持软件开启。</p>
-      <div class="update-progress" id="updateProgress" role="progressbar" aria-label="更新下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <p class="update-message" id="updateMessage">请下载安装包，关闭软件后双击安装即可覆盖升级。</p>
+      <div class="update-progress" id="updateProgress" role="progressbar" aria-label="更新下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
         <span id="updateProgressFill"></span>
       </div>
-      <div class="update-progress-meta">
+      <div class="update-progress-meta" id="updateProgressMeta" hidden>
         <strong id="updatePercent">0%</strong>
         <span id="updateBytes">等待下载</span>
       </div>
-      <ol class="update-stages" aria-label="更新步骤">
+      <ol class="update-stages" id="updateStages" aria-label="更新步骤" hidden>
         <li data-update-stage="downloading">下载</li>
         <li data-update-stage="verifying">校验</li>
         <li data-update-stage="installing">安装</li>
       </ol>
       <div class="update-error" id="updateError" role="alert" hidden></div>
-      <div class="update-actions" id="updateRetryActions" hidden>
-        <button type="button" id="retryUpdateBtn">重新下载</button>
-      </div>
-      <div class="update-actions update-dev-actions" id="updateDevActions" hidden>
+      <div class="update-actions update-dev-actions" id="updateDownloadActions">
         <a class="button-link" id="downloadUpdateLink" href="/api/cloud/download-update" target="_blank" rel="noopener">下载安装版</a>
-        <button class="secondary" type="button" id="dismissDevUpdateBtn">继续调试</button>
+        <button class="secondary" type="button" id="dismissUpdateBtn">稍后安装</button>
       </div>
-      <p class="update-footnote" id="updateFootnote">下载完成后软件会自动重启，工程资料不会受影响。</p>
+      <p class="update-footnote" id="updateFootnote">安装前先关闭工程影像管理平台；工程资料不会被覆盖或删除。</p>
     </section>
   </div>
 

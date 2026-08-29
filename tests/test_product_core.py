@@ -746,6 +746,39 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('class="pr-90"', rendered)
         self.assertIn("摄影者：张三", rendered)
 
+    def test_single_photo_print_is_centered_and_keeps_selected_photo_size(self):
+        settings = {
+            "print_margin_top_mm": 6,
+            "print_margin_right_mm": 6,
+            "print_margin_bottom_mm": 6,
+            "print_margin_left_mm": 6,
+            "print_horizontal_gap_mm": 2,
+            "print_vertical_gap_mm": 2,
+            "print_caption_position": "bottom",
+            "print_caption_size_mm": 7.5,
+            "print_show_page_title": True,
+            "print_single_alignment": "center",
+        }
+        pages = self.desktop.layout_fixed_photo_pages(
+            [{"id": "SY-001", "detail_rows": [{"label": "题名", "value": "单张居中"}]}],
+            layout="landscape",
+            page_size=1,
+            photo_width_mm=102,
+            photo_height_mm=76,
+            print_settings=settings,
+        )
+        item = pages[0][0]
+        printable_width = 297 - settings["print_margin_left_mm"] - settings["print_margin_right_mm"]
+        printable_height = 210 - settings["print_margin_top_mm"] - settings["print_margin_bottom_mm"] - 7
+        self.assertAlmostEqual(item["_left"], (printable_width - item["_w"]) / 2, places=1)
+        self.assertAlmostEqual(item["_top"], (printable_height - item["_block_h"]) / 2, places=1)
+
+        with self.desktop.app.test_request_context("/?style=custom&photo_preset=6inch&single_alignment=top"):
+            configured = self.desktop.print_settings_from_request()
+        self.assertEqual(configured["print_photo_width_cm"], 15.2)
+        self.assertEqual(configured["print_photo_height_cm"], 10.2)
+        self.assertEqual(configured["print_single_alignment"], "top")
+
     def test_editing_photo_without_orientation_keeps_detected_portrait(self):
         from PIL import Image
         from werkzeug.datastructures import FileStorage

@@ -7375,6 +7375,26 @@
       backdrop-filter: blur(8px);
     }
     .update-overlay.open { display: grid; }
+    .update-progress[hidden],
+    .update-progress-meta[hidden],
+    .update-stages[hidden] { display: none; }
+    #checkUpdateBtn {
+      position: relative;
+      isolation: isolate;
+    }
+    .update-notice-dot {
+      position: absolute;
+      top: 5px;
+      right: 5px;
+      width: 8px;
+      height: 8px;
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: #e5484d;
+      box-shadow: 0 1px 4px rgba(147, 22, 35, .34);
+      pointer-events: none;
+    }
+    .update-notice-dot[hidden] { display: none; }
     .update-panel {
       width: min(460px, 100%);
       padding: 30px;

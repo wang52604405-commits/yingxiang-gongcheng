@@ -1531,6 +1531,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#settingsSupervisionDigits").value = supervision.digits || 3;
       $("#settingsPrintLayoutInput").value = settings.print_layout || "landscape";
       $("#settingsPrintPageSizeInput").value = String(settings.print_page_size || 4);
+      $("#settingsPrintSingleAlignmentInput").value = settings.print_single_alignment || "center";
       $("#settingsPrintPhotoPresetInput").value = settings.print_photo_preset || "5inch";
       $("#settingsPrintPhotoWidthInput").value = settings.print_photo_width_cm || "";
       $("#settingsPrintPhotoHeightInput").value = settings.print_photo_height_cm || "";
@@ -1632,6 +1633,7 @@ const $ = (selector) => document.querySelector(selector);
         unit_order_digits: Number($("#settingsUnitOrderDigitsInput").value || 3),
         print_layout: $("#settingsPrintLayoutInput").value,
         print_page_size: Number($("#settingsPrintPageSizeInput").value || 4),
+        print_single_alignment: $("#settingsPrintSingleAlignmentInput").value,
         print_photo_preset: $("#settingsPrintPhotoPresetInput").value,
         print_photo_width_cm: Number($("#settingsPrintPhotoWidthInput").value || 0),
         print_photo_height_cm: Number($("#settingsPrintPhotoHeightInput").value || 0),
@@ -1739,6 +1741,14 @@ const $ = (selector) => document.querySelector(selector);
       return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     }
 
+    function setUpdateAvailable(hasUpdate) {
+      const button = $("#checkUpdateBtn");
+      const dot = $("#updateNoticeDot");
+      if (dot) dot.hidden = !hasUpdate;
+      button?.classList.toggle("update-available", Boolean(hasUpdate));
+      button?.setAttribute("title", hasUpdate ? "发现新版本，点击下载安装包" : "检查软件新版本");
+    }
+
     function openUpdateOverlay(mode = "mandatory") {
       const overlay = $("#updateOverlay");
       if (!overlay) return;
@@ -1753,9 +1763,9 @@ const $ = (selector) => document.querySelector(selector);
       if (!wasOpen) overlay.querySelector(".update-panel")?.focus({ preventScroll: true });
     }
 
-    function closeDevelopmentUpdate() {
+    function closeManualUpdate() {
       const overlay = $("#updateOverlay");
-      if (!overlay || overlay.dataset.mode !== "development") return;
+      if (!overlay || overlay.dataset.mode !== "manual") return;
       overlay.classList.remove("open");
       overlay.setAttribute("aria-hidden", "true");
       document.body.classList.remove("update-required");
@@ -1764,20 +1774,22 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
-    function renderDevelopmentUpdate(manifest) {
+    function renderManualUpdate(manifest) {
       state.update.manifest = manifest;
-      openUpdateOverlay("development");
+      openUpdateOverlay("manual");
       const overlay = $("#updateOverlay");
-      overlay.dataset.state = "unsupported";
-      $("#updateRequiredLabel").textContent = "源码调试模式";
-      $("#updateTitle").textContent = "新版本仅支持安装版更新";
-      $("#updateVersion").textContent = `${manifest.current_version || "当前源码"} → ${manifest.latest_version}`;
-      $("#updateMessage").textContent = "这里不会锁定开发页面。需要验证更新时，请下载安装版。";
+      overlay.dataset.state = "available";
+      $("#updateRequiredLabel").textContent = "发现新版本";
+      $("#updateTitle").textContent = "下载后手动安装";
+      $("#updateVersion").textContent = `${manifest.current_version || $("#appVersionBadge")?.textContent || "当前版本"} → ${manifest.latest_version}`;
+      $("#updateMessage").textContent = "请下载安装包，关闭软件后双击安装即可覆盖升级。";
+      $("#updateProgress").hidden = true;
+      $("#updateProgressMeta").hidden = true;
+      $("#updateStages").hidden = true;
       $("#updateError").hidden = true;
-      $("#updateRetryActions").hidden = true;
-      $("#updateDevActions").hidden = false;
+      $("#updateDownloadActions").hidden = false;
       $("#downloadUpdateLink").href = manifest.manual_download_url || "/api/cloud/download-update";
-      $("#updateFootnote").textContent = "继续调试不会触发下载、退出进程或安装。";
+      $("#updateFootnote").textContent = "安装前先关闭工程影像管理平台；工程资料不会被覆盖或删除。";
     }
 
     function renderUpdateStatus(status = {}) {
@@ -1936,30 +1948,14 @@ const $ = (selector) => document.querySelector(selector);
       state.update.checkPromise = (async () => {
         const data = await apiJson("/api/cloud/check-update");
         if (!data.has_update || !data.latest_version) {
+          setUpdateAvailable(false);
           if (manual) showNotice("当前已是最新版本。");
           return;
         }
         state.update.manifest = data;
-        if (!data.auto_update_supported) {
-          renderDevelopmentUpdate(data);
-          return;
-        }
-
-        openUpdateOverlay("mandatory");
-        let existing = null;
-        try {
-          existing = await apiJson(data.update_status_url || "/api/cloud/update-status");
-        } catch (_error) {}
-        if (existing && existing.latest_version === data.latest_version && existing.state === "failed") {
-          renderUpdateStatus(existing);
-          return;
-        }
-        if (existing && existing.latest_version === data.latest_version && ["checking", "downloading", "verifying", "installing"].includes(existing.state)) {
-          renderUpdateStatus(existing);
-          state.update.pollTimer = window.setTimeout(pollUpdateStatus, 250);
-          return;
-        }
-        await startMandatoryUpdate();
+        setUpdateAvailable(true);
+        if (manual) renderManualUpdate(data);
+        return data;
       })();
       try {
         await state.update.checkPromise;
@@ -4482,8 +4478,7 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#setupPageBtn").addEventListener("click", () => window.open("/setup", "_blank"));
     $("#checkUpdateBtn").addEventListener("click", () => checkForUpdate(true).catch((error) => showNotice(error.message, true)));
-    $("#retryUpdateBtn").addEventListener("click", () => startMandatoryUpdate());
-    $("#dismissDevUpdateBtn").addEventListener("click", closeDevelopmentUpdate);
+    $("#dismissUpdateBtn").addEventListener("click", closeManualUpdate);
     $("#machineIdBtn").addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#gateMachineIdBtn")?.addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#closeMachineIdBtn").addEventListener("click", closeMachineIdModal);
@@ -4958,10 +4953,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
-      default: { style: "default", layout: "landscape", page_size: "4", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      single: { style: "single", layout: "landscape", page_size: "1", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      default: { style: "default", layout: "landscape", page_size: "4", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      single: { style: "single", layout: "landscape", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
       custom: null
     };
 
@@ -4980,9 +4975,10 @@ const $ = (selector) => document.querySelector(selector);
     function applyPrintStyleToPanel(style) {
       const params = PRINT_STYLES[style];
       if (!params) return;
-      const map = { layout: "printSetupLayout", page_size: "printSetupPageSize", photo_preset: "printSetupPreset", photo_width_cm: "printSetupPhotoWidth", photo_height_cm: "printSetupPhotoHeight", caption_position: "printSetupCaptionPosition", caption_size_mm: "printSetupCaptionSize", caption_font_size: "printSetupCaptionFont", margin_top_mm: "printSetupMarginTop", margin_right_mm: "printSetupMarginRight", margin_bottom_mm: "printSetupMarginBottom", margin_left_mm: "printSetupMarginLeft", horizontal_gap_mm: "printSetupHorizontalGap", vertical_gap_mm: "printSetupVerticalGap", image_fit: "printSetupImageFit", show_page_title: "printSetupShowPageTitle" };
+      const map = { layout: "printSetupLayout", page_size: "printSetupPageSize", single_alignment: "printSetupSingleAlignment", photo_preset: "printSetupPreset", photo_width_cm: "printSetupPhotoWidth", photo_height_cm: "printSetupPhotoHeight", caption_position: "printSetupCaptionPosition", caption_size_mm: "printSetupCaptionSize", caption_font_size: "printSetupCaptionFont", margin_top_mm: "printSetupMarginTop", margin_right_mm: "printSetupMarginRight", margin_bottom_mm: "printSetupMarginBottom", margin_left_mm: "printSetupMarginLeft", horizontal_gap_mm: "printSetupHorizontalGap", vertical_gap_mm: "printSetupVerticalGap", image_fit: "printSetupImageFit", show_page_title: "printSetupShowPageTitle" };
       Object.entries(map).forEach(([key, id]) => { if (params[key] !== undefined) $(`#${id}`).value = String(params[key]); });
       syncPrintSetupPreset();
+      syncPrintSingleAlignment();
     }
 
     function syncPrintSetupPreset() {
@@ -4997,10 +4993,19 @@ const $ = (selector) => document.querySelector(selector);
       $("#printSetupPhotoHeight").disabled = !custom;
     }
 
+    function syncPrintSingleAlignment() {
+      const input = $("#printSetupSingleAlignment");
+      if (!input) return;
+      const enabled = Number($("#printSetupPageSize").value || 4) === 1;
+      input.disabled = !enabled;
+      input.closest("label")?.classList.toggle("is-disabled", !enabled);
+    }
+
     function loadPrintSetupValues() {
       const settings = state.engineeringSettings || {};
       $("#printSetupLayout").value = settings.print_layout || "landscape";
       $("#printSetupPageSize").value = String(settings.print_page_size || 4);
+      $("#printSetupSingleAlignment").value = settings.print_single_alignment || "center";
       $("#printSetupPreset").value = settings.print_photo_preset || "5inch";
       $("#printSetupPhotoWidth").value = settings.print_photo_width_cm || 12.7;
       $("#printSetupPhotoHeight").value = settings.print_photo_height_cm || 8.9;
@@ -5018,12 +5023,14 @@ const $ = (selector) => document.querySelector(selector);
       const fields = new Set(settings.print_caption_fields || ["title", "id", "photo_date", "photographer"]);
       document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
       syncPrintSetupPreset();
+      syncPrintSingleAlignment();
     }
 
     function openPrintSetup(url) {
       state.pendingPrintUrl = url;
       loadPrintSetupValues();
-      selectPrintStyle("default");
+      // 工程设置是默认值，不应被“默认打印”预设静默覆盖。
+      selectPrintStyle("custom");
       $("#printSetupModal").classList.add("open");
       $("#printSetupModal").setAttribute("aria-hidden", "false");
     }
@@ -5041,6 +5048,7 @@ const $ = (selector) => document.querySelector(selector);
       return new URLSearchParams({
         layout: $("#printSetupLayout").value,
         page_size: String(pageSize),
+        single_alignment: $("#printSetupSingleAlignment").value,
         photo_preset: $("#printSetupPreset").value,
         photo_width_cm: $("#printSetupPhotoWidth").value || "12.7",
         photo_height_cm: $("#printSetupPhotoHeight").value || "8.9",
@@ -5079,6 +5087,7 @@ const $ = (selector) => document.querySelector(selector);
 
     document.querySelectorAll("[data-print-style]").forEach((button) => button.addEventListener("click", () => selectPrintStyle(button.dataset.printStyle)));
     $("#printSetupPreset").addEventListener("change", syncPrintSetupPreset);
+    $("#printSetupPageSize").addEventListener("input", syncPrintSingleAlignment);
     $("#printSetupCaptionPosition").addEventListener("change", () => {
       const side = ["left", "right"].includes($("#printSetupCaptionPosition").value);
       const current = Number($("#printSetupCaptionSize").value || 0);
