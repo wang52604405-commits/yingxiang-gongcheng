@@ -76,8 +76,8 @@ describe('采集权限入口覆盖', () => {
   it('产品版本已进入 V1.3', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.3.3')
-    expect(manifest.versionName).toBe('1.3.3')
+    expect(pkg.version).toBe('1.3.4')
+    expect(manifest.versionName).toBe('1.3.4')
     expect(source('src/pages/profile/index.vue')).toContain('工程影像 V1.3')
   })
 })
