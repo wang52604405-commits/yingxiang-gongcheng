@@ -173,6 +173,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_image_fit": "contain",
     "print_show_page_title": True,
     "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+    "last_print_settings": {},
     "watermark_ocr_enabled": True,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
@@ -762,6 +763,18 @@ def _normalize_engineering_settings(settings):
     if not isinstance(caption_fields, list):
         caption_fields = ["title", "id", "photo_date", "photographer"]
     settings["print_caption_fields"] = [field for field in caption_fields if field in allowed_caption_fields]
+    last_print = settings.get("last_print_settings")
+    allowed_last_print_fields = {
+        "layout", "page_size", "single_alignment", "photo_preset", "photo_width_cm",
+        "photo_height_cm", "caption_position", "caption_size_mm", "caption_font_size",
+        "margin_top_mm", "margin_right_mm", "margin_bottom_mm", "margin_left_mm",
+        "horizontal_gap_mm", "vertical_gap_mm", "image_fit", "show_page_title", "caption_fields",
+    }
+    settings["last_print_settings"] = (
+        {str(key): value for key, value in last_print.items() if str(key) in allowed_last_print_fields}
+        if isinstance(last_print, dict)
+        else {}
+    )
     fields = settings.get("photo_detail_fields")
     if not isinstance(fields, list) or not fields:
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
@@ -841,6 +854,18 @@ def write_engineering_settings(payload):
     if isinstance(payload.get("print_caption_fields"), list):
         allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
         current["print_caption_fields"] = [field for field in payload.get("print_caption_fields") if field in allowed_caption_fields]
+    if isinstance(payload.get("last_print_settings"), dict):
+        allowed_last_print_fields = {
+            "layout", "page_size", "single_alignment", "photo_preset", "photo_width_cm",
+            "photo_height_cm", "caption_position", "caption_size_mm", "caption_font_size",
+            "margin_top_mm", "margin_right_mm", "margin_bottom_mm", "margin_left_mm",
+            "horizontal_gap_mm", "vertical_gap_mm", "image_fit", "show_page_title", "caption_fields",
+        }
+        current["last_print_settings"] = {
+            str(key): value
+            for key, value in payload["last_print_settings"].items()
+            if str(key) in allowed_last_print_fields
+        }
     # OCR 是批量自动归档的核心能力，不允许旧设置把它关闭。
     current["watermark_ocr_enabled"] = True
     if isinstance(payload.get("photo_detail_fields"), list):
@@ -3664,11 +3689,18 @@ PRINT_FIXED_GAP = 2.0
 
 def _print_caption_h(photo, single_line=False):
     """照片下方说明文字高度：字号加大、最多两行；4 张/页时压缩排版但仍支持两行。"""
-    rows = len(photo.get("detail_rows") or [])
+    detail_rows = photo.get("detail_rows") or []
+    rows = len(detail_rows)
     if rows <= 0:
         return 0.0
     if single_line:
-        return 4.9
+        # 4 张/页会把字段合成一行。短信息保持紧凑，字段较多时必须预留两行，
+        # 否则浏览器虽不溢出，文字会被裁成半行，看起来像“压字”。
+        summary_length = sum(
+            len(str(row.get("label") or "")) + len(str(row.get("value") or "")) + 2
+            for row in detail_rows
+        )
+        return 11.0 if summary_length > 44 else 6.0
     # 每行最多折成两行，行高压小
     return round(max(6.0, rows * 4.8 + 1.0), 1)
 
@@ -3716,8 +3748,15 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
         width = float(photo_width_mm or PHOTO_5IN_LANDSCAPE[0])
         height = float(photo_height_mm or PHOTO_5IN_LANDSCAPE[1])
         has_caption = bool(photo.get("detail_rows")) and caption_position != "hidden"
-        caption_extent = caption_size if has_caption else 0.0
+        # 说明区按实际行数预留空间。以前 2 张/页仍固定给 7.5mm，
+        # 四项信息会被裁掉；现在宁可自动多分页，也不压字。
+        caption_extent = max(
+            caption_size,
+            _print_caption_h(photo, single_line=single_line),
+        ) if has_caption else 0.0
         if caption_position in {"left", "right"}:
+            # 左右标签至少保留可读列宽；兼容旧工程里 7.5mm 的遗留设置。
+            caption_extent = max(caption_extent, 32.0)
             block_w = width + caption_extent
             block_h = height
             caption_h = height
@@ -3770,6 +3809,37 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
     if current:
         pages.append(current)
     return pages
+
+
+def assign_unique_print_page_numbers(project_groups):
+    """为一次打印任务的所有单元、工序页生成唯一工程页码。"""
+    records = []
+    for group_index, group in enumerate(project_groups or []):
+        pages = list(group.get("pages") or []) if isinstance(group, dict) else []
+        normalized_pages = []
+        for raw_page in pages:
+            page = dict(raw_page) if isinstance(raw_page, dict) else {"items": raw_page}
+            unit_name = str(
+                page.get("unit_name")
+                or group.get("project_name")
+                or group.get("name")
+                or group.get("project_code")
+                or ""
+            )
+            page["unit_name"] = unit_name
+            normalized_pages.append(page)
+            records.append((page, (group_index, unit_name)))
+        group["pages"] = normalized_pages
+    unit_totals = {}
+    for _, unit_key in records:
+        unit_totals[unit_key] = unit_totals.get(unit_key, 0) + 1
+    unit_seen = {}
+    for page_number, (page, unit_key) in enumerate(records, start=1):
+        unit_seen[unit_key] = unit_seen.get(unit_key, 0) + 1
+        page["print_page_number"] = page_number
+        page["unit_page_number"] = unit_seen[unit_key]
+        page["unit_page_total"] = unit_totals[unit_key]
+    return project_groups
 
 
 PHOTO_STATISTICS_COLUMNS = [
@@ -7448,6 +7518,7 @@ def print_album_category_batch(category):
             project_groups.append(unit_book)
         if process_book["pages"]:
             project_groups.append(process_book)
+        assign_unique_print_page_numbers(project_groups)
         project = {
             "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 册",
             "project_name": "、".join((item.get("level") or "全部影像") for item in project_groups[:3])
@@ -7516,6 +7587,7 @@ def print_album_category(category, project_code):
                 "photos": photos,
                 "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
             })
+        assign_unique_print_page_numbers(project_groups)
         return render_template(
             "print.html",
             project=project,
@@ -7554,6 +7626,7 @@ def print_album(project_code):
             "project_name": project.get("project_name") or project.get("name") or "",
             "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
         }]
+        assign_unique_print_page_numbers(project_groups)
         return render_template("print.html", project=project, photos=photos, project_groups=project_groups, category="", category_label="全部影像", print_layout=layout, print_page_size=page_size, print_settings=print_settings, watermark_text=watermark_text_for_user())
     except Exception as exc:
         return str(exc), 404

@@ -4957,28 +4957,70 @@ const $ = (selector) => document.querySelector(selector);
       portrait2: { style: "portrait2", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
       landscape2: { style: "landscape2", layout: "landscape", page_size: "2", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
       single: { style: "single", layout: "landscape", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      last: null,
       custom: null
     };
 
+    const PRINT_SETUP_FIELD_IDS = { layout: "printSetupLayout", page_size: "printSetupPageSize", single_alignment: "printSetupSingleAlignment", photo_preset: "printSetupPreset", photo_width_cm: "printSetupPhotoWidth", photo_height_cm: "printSetupPhotoHeight", caption_position: "printSetupCaptionPosition", caption_size_mm: "printSetupCaptionSize", caption_font_size: "printSetupCaptionFont", margin_top_mm: "printSetupMarginTop", margin_right_mm: "printSetupMarginRight", margin_bottom_mm: "printSetupMarginBottom", margin_left_mm: "printSetupMarginLeft", horizontal_gap_mm: "printSetupHorizontalGap", vertical_gap_mm: "printSetupVerticalGap", image_fit: "printSetupImageFit", show_page_title: "printSetupShowPageTitle" };
+
+    function lastPrintSettings() {
+      const saved = state.engineeringSettings?.last_print_settings;
+      return saved && typeof saved === "object" && Object.keys(saved).length ? saved : null;
+    }
+
+    function applyPrintSetupValues(values) {
+      if (!values || typeof values !== "object") return;
+      Object.entries(PRINT_SETUP_FIELD_IDS).forEach(([key, id]) => {
+        if (values[key] === undefined || values[key] === null) return;
+        const input = $(`#${id}`);
+        if (!input) return;
+        const value = String(values[key]);
+        if (input.tagName === "SELECT" && !Array.from(input.options).some((option) => option.value === value)) return;
+        input.value = value;
+      });
+      if (values.caption_fields !== undefined) {
+        const fields = new Set(Array.isArray(values.caption_fields)
+          ? values.caption_fields
+          : String(values.caption_fields).split(",").filter(Boolean));
+        document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
+      }
+      syncPrintSetupPreset();
+      syncPrintSingleAlignment();
+    }
+
+    function refreshLastPrintStyle() {
+      const button = $("#lastPrintStyleBtn");
+      const description = $("#lastPrintStyleDesc");
+      const saved = lastPrintSettings();
+      if (!button || !description) return;
+      button.disabled = !saved;
+      if (!saved) {
+        description.textContent = "本工程暂未保存打印方案";
+        return;
+      }
+      const pageSize = Number(saved.page_size || 4);
+      const sizeLabels = { "4inch": "4寸", "5inch": "5寸", "6inch": "6寸", custom: "自定义尺寸" };
+      description.textContent = `${saved.layout === "portrait" ? "A4 竖版" : "A4 横版"} · 每页${pageSize}张 · ${sizeLabels[saved.photo_preset] || "自定义尺寸"}`;
+    }
+
     function selectPrintStyle(style) {
-      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "default";
+      const savedLast = lastPrintSettings();
+      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) && (style !== "last" || savedLast) ? style : "custom";
       document.querySelectorAll("[data-print-style]").forEach((button) => {
         const active = button.dataset.printStyle === state.printStyle;
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", active ? "true" : "false");
       });
-      const isCustom = state.printStyle === "custom";
+      const isCustom = state.printStyle === "custom" || state.printStyle === "last";
       $("#printCustomPanel").classList.toggle("open", isCustom);
-      if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      if (state.printStyle === "last") applyPrintSetupValues(savedLast);
+      else if (!isCustom) applyPrintStyleToPanel(state.printStyle);
     }
 
     function applyPrintStyleToPanel(style) {
       const params = PRINT_STYLES[style];
       if (!params) return;
-      const map = { layout: "printSetupLayout", page_size: "printSetupPageSize", single_alignment: "printSetupSingleAlignment", photo_preset: "printSetupPreset", photo_width_cm: "printSetupPhotoWidth", photo_height_cm: "printSetupPhotoHeight", caption_position: "printSetupCaptionPosition", caption_size_mm: "printSetupCaptionSize", caption_font_size: "printSetupCaptionFont", margin_top_mm: "printSetupMarginTop", margin_right_mm: "printSetupMarginRight", margin_bottom_mm: "printSetupMarginBottom", margin_left_mm: "printSetupMarginLeft", horizontal_gap_mm: "printSetupHorizontalGap", vertical_gap_mm: "printSetupVerticalGap", image_fit: "printSetupImageFit", show_page_title: "printSetupShowPageTitle" };
-      Object.entries(map).forEach(([key, id]) => { if (params[key] !== undefined) $(`#${id}`).value = String(params[key]); });
-      syncPrintSetupPreset();
-      syncPrintSingleAlignment();
+      applyPrintSetupValues(params);
     }
 
     function syncPrintSetupPreset() {
@@ -5024,6 +5066,7 @@ const $ = (selector) => document.querySelector(selector);
       document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
       syncPrintSetupPreset();
       syncPrintSingleAlignment();
+      refreshLastPrintStyle();
     }
 
     function openPrintSetup(url) {
@@ -5067,10 +5110,22 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
-    function confirmPrintSetup() {
+    async function rememberLastPrint(params) {
+      const data = await apiJson("/api/engineering-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { last_print_settings: Object.fromEntries(params.entries()) } })
+      });
+      state.engineeringSettings = data.settings || state.engineeringSettings;
+      refreshLastPrintStyle();
+    }
+
+    async function confirmPrintSetup() {
       if (!state.pendingPrintUrl) return;
       const url = new URL(state.pendingPrintUrl, window.location.origin);
-      printSetupParams().forEach((value, key) => url.searchParams.set(key, value));
+      const params = printSetupParams();
+      await rememberLastPrint(params);
+      params.forEach((value, key) => url.searchParams.set(key, value));
       const target = `${url.pathname}${url.search}`;
       closePrintSetup();
       window.open(target, "_blank");
@@ -5096,7 +5151,7 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#closePrintSetupBtn").addEventListener("click", closePrintSetup);
     $("#cancelPrintSetupBtn").addEventListener("click", closePrintSetup);
-    $("#confirmPrintSetupBtn").addEventListener("click", confirmPrintSetup);
+    $("#confirmPrintSetupBtn").addEventListener("click", () => confirmPrintSetup().catch((error) => showNotice(error.message || "保存打印方案失败", true)));
     $("#printSetupModal").addEventListener("click", (event) => { if (event.target.id === "printSetupModal") closePrintSetup(); });
 
     $("#printConstructionBtn").addEventListener("click", () => openUnitPrint("construction"));

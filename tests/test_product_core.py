@@ -779,6 +779,57 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(configured["print_photo_height_cm"], 10.2)
         self.assertEqual(configured["print_single_alignment"], "top")
 
+    def test_print_layout_keeps_captions_readable_and_page_numbers_unique(self):
+        settings = {
+            "print_margin_top_mm": 6,
+            "print_margin_right_mm": 6,
+            "print_margin_bottom_mm": 6,
+            "print_margin_left_mm": 6,
+            "print_horizontal_gap_mm": 2,
+            "print_vertical_gap_mm": 2,
+            "print_caption_position": "bottom",
+            "print_caption_size_mm": 7.5,
+            "print_show_page_title": True,
+        }
+        detailed_photo = {
+            "id": "SY-DETAIL",
+            "detail_rows": [
+                {"label": "题名", "value": "完整显示文字"},
+                {"label": "编号", "value": "SY-DETAIL"},
+                {"label": "拍摄日期", "value": "2026-08-29"},
+                {"label": "摄影人", "value": "测试员"},
+            ],
+        }
+        pages = self.desktop.layout_fixed_photo_pages(
+            [
+                detailed_photo,
+                dict(detailed_photo, id="SY-DETAIL-2"),
+                dict(detailed_photo, id="SY-DETAIL-3"),
+                dict(detailed_photo, id="SY-DETAIL-4"),
+            ],
+            layout="landscape",
+            page_size=4,
+            photo_width_mm=127,
+            photo_height_mm=89,
+            print_settings=settings,
+        )
+        self.assertEqual(len(pages), 2, "说明区不足时应自动分页，不能把文字压进照片")
+        self.assertGreaterEqual(pages[0][0]["_caption_h"], 11.0)
+
+        groups = [
+            {"project_code": "U-1", "project_name": "一号单元", "level": "单元照片", "pages": [pages[0], pages[1]]},
+            {"project_code": "U-2", "project_name": "二号单元", "level": "工序照片", "pages": [[detailed_photo]]},
+        ]
+        numbered = self.desktop.assign_unique_print_page_numbers(groups)
+        all_pages = [page for group in numbered for page in group["pages"]]
+        self.assertEqual([page["print_page_number"] for page in all_pages], [1, 2, 3])
+        self.assertEqual([page["unit_page_number"] for page in all_pages], [1, 2, 1])
+
+        normalized = self.desktop._normalize_engineering_settings({
+            "last_print_settings": {"page_size": "1", "photo_preset": "6inch", "unknown": "discard"},
+        })
+        self.assertEqual(normalized["last_print_settings"], {"page_size": "1", "photo_preset": "6inch"})
+
     def test_editing_photo_without_orientation_keeps_detected_portrait(self):
         from PIL import Image
         from werkzeug.datastructures import FileStorage

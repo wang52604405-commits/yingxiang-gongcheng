@@ -485,6 +485,13 @@
             </div>
             <div class="print-setup-body">
               <div class="print-mode-grid print-style-grid">
+                <button class="print-mode-card print-style-card" type="button" id="lastPrintStyleBtn" data-print-style="last" aria-pressed="false" disabled>
+                  <span class="print-style-schematic" aria-hidden="true">
+                    <span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span>
+                  </span>
+                  <strong>上次打印</strong>
+                  <span class="print-style-desc" id="lastPrintStyleDesc">本工程暂未保存打印方案</span>
+                </button>
                 <button class="print-mode-card print-style-card active" type="button" data-print-style="default" aria-pressed="true">
                   <span class="print-style-schematic" aria-hidden="true">
                     <span class="ps-paper ps-landscape ps-grid4"><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span></span>

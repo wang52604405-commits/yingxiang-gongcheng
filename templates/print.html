@@ -226,7 +226,7 @@
         <section class="page{% if loop.first and not g_first %} group-start{% endif %}">
           {% if show_page_title %}<div class="title">
             <h1>{{ page_unit }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
-            <div class="meta">第 {{ loop.index }} 页 / 共 {{ g_pages|length }} 页</div>
+            <div class="meta">工程页 {{ "%03d"|format(page.print_page_number or loop.index) }}{% if page.unit_page_total|default(1)|int > 1 %} · 本单元第 {{ page.unit_page_number }} 页{% endif %}</div>
           </div>{% endif %}
           <div class="layout-fixed">
             {% for item in page_items %}
