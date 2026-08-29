@@ -200,27 +200,27 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches).toHaveLength(1)
     expect(queueRuntime.state.photos).toHaveLength(1)
     expect(queueRuntime.state.batches[0].photo_uuids).toEqual([queueRuntime.state.photos[0].photo_uuid])
-    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '', transfer_path: '/user/transfer.jpg', preview_path: '/user/preview.jpg' })
+    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '', transfer_path: '/user/transfer.jpg', preview_path: '', status: 'local_ready' })
+    expect(mocks.preparePreview).not.toHaveBeenCalled()
   })
 
-  it('本机预览生成失败时保留暂存原图和 1MiB 归档图等待恢复', async () => {
+  it('不在手机端生成 100KB 预览，准备好 1MB 上传图后立刻进入待传队列', async () => {
     const storage = new Map<string, any>()
     const unlink = installPlatform(storage, false)
     mocks.stageOriginal.mockResolvedValue({ originalPath: '/user/only-original.jpg', originalSize: 9_000_000, originalFilename: 'camera.jpg' })
-    mocks.preparePreview.mockRejectedValue(new Error('预览生成失败'))
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.enqueue(['/tmp/camera.jpg'], draft)
     expect(queueRuntime.state.photos[0]).toMatchObject({
-      original_path: '/user/only-original.jpg',
+      original_path: '',
       transfer_path: '/user/transfer.jpg',
       preview_path: '',
-      status: 'failed',
-      preparation_pending: true,
+      status: 'local_ready',
+      preparation_pending: false,
     })
-    expect(queueRuntime.state.photos[0].error).toContain('预览生成失败')
-    expect(unlink).not.toHaveBeenCalledWith('/user/only-original.jpg')
+    expect(mocks.preparePreview).not.toHaveBeenCalled()
+    expect(unlink).toHaveBeenCalledWith('/user/only-original.jpg')
   })
 
   it('处理失败的照片可只从本机删除，并清理原图、传输图和预览图', async () => {
@@ -255,15 +255,16 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.createBatch).not.toHaveBeenCalled()
   })
 
-  it('暂存原图可在重试时补齐 100KB 预览，准备完成后才删除大图', async () => {
+  it('旧版本卡在本机预览的照片升级后自动恢复上传，不要求删除重拍', async () => {
     const photo = localPhoto('32', 'preview-recovery')
     photo.status = 'failed'
     photo.retry_from = 'local_ready'
+    photo.failure_code = 'IMAGE_PROCESS_TIMEOUT'
+    photo.error = '原图已安全保存；生成 100KB 本机预览超时，请点击重试'
     photo.preparation_pending = true
     photo.preview_path = ''
     photo.preview_size = 0
     photo.preview_sha256 = ''
-    photo.original_sha256 = ''
     photo.remote_batch_id = undefined
     const batch = localBatch(photo)
     batch.remote_batch_id = undefined
@@ -276,20 +277,22 @@ describe('原图优先落盘与账号隔离队列', () => {
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'preview-batch' })
     mocks.uploadPhoto.mockResolvedValue({ ok: true, photo: { status: 'server_saved' } })
     mocks.commitBatch.mockResolvedValue({ ok: true })
+    mocks.photo.mockRejectedValue(new Error('预览稍后下载'))
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
-    await queueRuntime.retry('preview-recovery')
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'local_ready', preparation_pending: false, error: undefined })
+    await queueRuntime.resume('manual')
     await vi.waitFor(() => expect(queueRuntime.state.photos[0]?.status).toBe('desktop_pending'))
     expect(mocks.uploadPhoto).toHaveBeenCalledWith('preview-batch', '/user/32-transfer.jpg', expect.any(Object), expect.any(Function))
-    expect(mocks.persistPreparedPreview).toHaveBeenCalled()
-    expect(mocks.downloadServerPreview).not.toHaveBeenCalled()
+    expect(mocks.preparePreview).not.toHaveBeenCalled()
+    expect(mocks.persistPreparedPreview).not.toHaveBeenCalled()
     expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
     expect(queueRuntime.state.photos[0]).toMatchObject({
       original_path: '',
-      preview_path: '/user/preview.jpg',
-      preview_size: 90_000,
-      preview_recovery_pending: false,
+      transfer_path: '',
+      preview_path: '',
+      preview_recovery_pending: true,
     })
   })
 

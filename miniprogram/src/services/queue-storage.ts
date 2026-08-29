@@ -187,7 +187,7 @@ function recoverWal(fs: any, owner: string, photos: LocalPhoto[], batches: Local
         retry_from: 'local_ready',
         retryable: true,
         preparation_pending: true,
-        error: '检测到上次处理中断；原图已安全恢复，请继续生成预览',
+        error: '检测到上次处理中断；原图已安全恢复，请继续准备上传图',
         progress: 0,
       })
       photoIds.add(wal.photo_uuid)

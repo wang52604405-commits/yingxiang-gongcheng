@@ -5,7 +5,7 @@ import type { CreateBatchPayload } from '@/api/contracts'
 import type { Assignment, LocalBatch, LocalPhoto, PhotoStatus, UploadDraft } from '@/types/domain'
 import { createUuid } from './ids'
 import { hashFile } from './sha256'
-import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedPreview, persistPreparedTransfer, preparePreview, prepareTransferImage } from './image-compression'
+import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedTransfer, prepareTransferImage } from './image-compression'
 import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_TRANSFER_BYTES, MAX_UPLOAD_CONCURRENCY, isTransferWithinLimit, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
 import { canTransition, recoverInterruptedStatus } from './photo-state'
 import { notifyAuthExpired } from './auth-expiry-coordinator'
@@ -400,7 +400,7 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
     status: 'failed',
     retry_from: 'local_ready',
     progress: 0,
-    error: '原图已安全保存，正在生成本机预览',
+    error: '原图已安全保存，正在准备 1MB 上传图',
     retryable: true,
     preparation_pending: true,
     created_at: createdAt,
@@ -465,43 +465,9 @@ async function completePreparationOnce(photo: LocalPhoto, generation = ownerGene
       if (!isCurrentOwner(owner, generation)) return false
       persist(owner)
     }
-    if (!photo.preview_path) {
-      const prepared = await withPreparationWatchdog(
-        '生成 100KB 本机预览',
-        preparePreview(photo.original_path, photo.original_filename, photo.client_captured_at),
-        async (late) => { await removeGeneratedFile(late.previewTempPath) },
-      )
-      if (!isCurrentOwner(owner, generation)) {
-        await removeGeneratedFile(prepared.previewTempPath)
-        return false
-      }
-      let saved: Awaited<ReturnType<typeof persistPreparedPreview>>
-      try {
-        saved = await withPreparationWatchdog(
-          '保存 100KB 本机预览',
-          persistPreparedPreview(prepared),
-          async (late) => { await removeSavedFile(late.previewPath) },
-        )
-      } finally {
-        await removeGeneratedFile(prepared.previewTempPath)
-      }
-      if (!isCurrentOwner(owner, generation)) {
-        await removeSavedFile(saved.previewPath)
-        return false
-      }
-      photo.preview_path = saved.previewPath
-      photo.preview_size = saved.previewSize
-      photo.preview_width = saved.previewWidth
-      photo.preview_height = saved.previewHeight
-      photo.preview_recovery_pending = false
-      photo.preview_error = undefined
-      persist(owner)
-    }
-    if (photo.preview_path && !photo.preview_sha256) {
-      photo.preview_sha256 = await withPreparationWatchdog('校验 100KB 本机预览', hashFile(photo.preview_path))
-      if (!isCurrentOwner(owner, generation)) return false
-      persist(owner)
-    }
+    // 100KB 预览由服务器在收到 1MB 上传图后生成。此前在手机端再次压缩
+    // 大图，会让部分机型长期卡在“正在生成本机预览”，照片也无法上传。
+    // 上传成功后 tryRecoverServerPreview 会只下载服务器生成的合规预览。
     photo.preparation_pending = false
     setStatus(photo, 'local_ready', true)
     await cleanupOriginal(photo)
@@ -908,6 +874,18 @@ function hydrate(): void {
   const storedPhotos = stored?.owner_account_id === owner && Array.isArray(stored.photos) ? stored.photos : []
   const storedBatches = stored?.owner_account_id === owner && Array.isArray(stored.batches) ? stored.batches : []
   state.photos.splice(0, state.photos.length, ...storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
+    // 旧版本在“本机预览”步骤超时的照片，1MB 上传图已经准备完成。
+    // 升级后直接恢复为待上传，不要求用户删除重拍。
+    const previewOnlyTimeout = Boolean(
+      photo.status === 'failed'
+      && photo.failure_code === 'IMAGE_PROCESS_TIMEOUT'
+      && photo.retry_from === 'local_ready'
+      && photo.transfer_path
+      && photo.transfer_sha256
+      && photo.transfer_filename
+      && isTransferWithinLimit(Number(photo.transfer_size || 0))
+      && !photo.preview_path,
+    )
     const recoveredStatus = recoverInterruptedStatus(photo.status)
     const needsTransferMigration = Boolean(photo.original_path && !photo.transfer_path && (
       ['local_ready', 'uploading'].includes(photo.status)
@@ -916,9 +894,13 @@ function hydrate(): void {
     return {
       ...photo,
       draft: { ...photo.draft, transfer_profile: photo.draft.transfer_profile || 'jpeg_1m' },
-      status: recoveredStatus,
+      status: previewOnlyTimeout ? 'local_ready' : recoveredStatus,
       progress: photo.status === 'uploading' ? 0 : photo.progress,
-      preparation_pending: photo.preparation_pending || needsTransferMigration,
+      preparation_pending: previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration),
+      error: previewOnlyTimeout ? undefined : photo.error,
+      retryable: previewOnlyTimeout ? undefined : photo.retryable,
+      retry_from: previewOnlyTimeout ? undefined : photo.retry_from,
+      failure_code: previewOnlyTimeout ? undefined : photo.failure_code,
     }
   }))
   state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => ({

@@ -27,16 +27,19 @@ export async function choosePhotoPaths(source: 'camera' | 'album'): Promise<stri
   const result = await new Promise<any>((resolve, reject) => {
     const options = {
       count: source === 'camera' ? 1 : getAlbumSelectionLimit(),
-      mediaType: ['image'],
       sourceType: [source],
-      sizeType: ['original'],
-      camera: 'back',
+      // 现场上传最终会统一压缩到 1MB；不要把微信相册的“原图”锁死，
+      // 否则用户既无法取消原图，也会在手机上承担不必要的大图处理。
+      sizeType: ['compressed'],
       success: resolve,
       fail: reject,
     }
     const wxApi = (globalThis as { wx?: any }).wx
-    if (wxApi?.chooseMedia) wxApi.chooseMedia(options)
-    else (uni as any).chooseMedia(options)
+    if (wxApi?.chooseImage) wxApi.chooseImage(options)
+    else (uni as any).chooseImage(options)
   })
-  return (result.tempFiles || []).map((file: { tempFilePath?: string; path?: string }) => file.tempFilePath || file.path).filter(Boolean)
+  const paths = Array.isArray(result.tempFilePaths)
+    ? result.tempFilePaths
+    : (result.tempFiles || []).map((file: { tempFilePath?: string; path?: string }) => file.tempFilePath || file.path)
+  return paths.filter(Boolean)
 }

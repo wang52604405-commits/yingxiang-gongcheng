@@ -43,11 +43,11 @@ function requestDelete(photo: (typeof queueRuntime.state.photos)[number]) {
 
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
   if (photo.transfer_path) {
-    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 预览待恢复'
+    const preview = photo.preview_path ? ` · 预览 ${formatBytes(photo.preview_size)}` : ' · 上传后生成预览'
     return `待传图 ${formatBytes(Number(photo.transfer_size || 0))}${preview}`
   }
   if (photo.original_path) {
-    return `原始照片已保存 · 正在生成传输图`
+    return `原始照片已保存 · 正在准备 1MB 上传图`
   }
   if (!photo.preview_path) return '归档图已上传 · 预览自动恢复中'
   return `预览 ${formatBytes(photo.preview_size)}`
