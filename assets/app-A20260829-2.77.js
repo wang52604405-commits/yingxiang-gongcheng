@@ -40,6 +40,7 @@ const $ = (selector) => document.querySelector(selector);
       printPageSize: 4,
       printStyle: "default",
       pendingPrintUrl: "",
+      printSourceUrl: "",
       batchSelectedUnits: new Set(),
       batchSelectedProcesses: new Set(),
       batchVisibleCodes: [],
@@ -4968,6 +4969,11 @@ const $ = (selector) => document.querySelector(selector);
       return saved && typeof saved === "object" && Object.keys(saved).length ? saved : null;
     }
 
+    function lastPrintJob() {
+      const saved = state.engineeringSettings?.last_print_job;
+      return saved && typeof saved === "object" && Array.isArray(saved.groups) && saved.groups.length ? saved : null;
+    }
+
     function applyPrintSetupValues(values) {
       if (!values || typeof values !== "object") return;
       Object.entries(PRINT_SETUP_FIELD_IDS).forEach(([key, id]) => {
@@ -4992,20 +4998,23 @@ const $ = (selector) => document.querySelector(selector);
       const button = $("#lastPrintStyleBtn");
       const description = $("#lastPrintStyleDesc");
       const saved = lastPrintSettings();
+      const job = lastPrintJob();
       if (!button || !description) return;
-      button.disabled = !saved;
-      if (!saved) {
-        description.textContent = "本工程暂未保存打印方案";
+      button.disabled = !saved || !job;
+      if (!saved || !job) {
+        description.textContent = saved ? "请先完成一次打印，保存所选照片" : "本工程暂未保存打印方案";
         return;
       }
       const pageSize = Number(saved.page_size || 4);
       const sizeLabels = { "4inch": "4寸", "5inch": "5寸", "6inch": "6寸", custom: "自定义尺寸" };
-      description.textContent = `${saved.layout === "portrait" ? "A4 竖版" : "A4 横版"} · 每页${pageSize}张 · ${sizeLabels[saved.photo_preset] || "自定义尺寸"}`;
+      const photoCount = Math.max(0, Number(job.photo_count || 0));
+      description.textContent = `恢复上次选中的 ${photoCount || "多"} 张照片 · ${saved.layout === "portrait" ? "A4 竖版" : "A4 横版"} · 每页${pageSize}张 · ${sizeLabels[saved.photo_preset] || "自定义尺寸"}`;
     }
 
     function selectPrintStyle(style) {
       const savedLast = lastPrintSettings();
-      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) && (style !== "last" || savedLast) ? style : "custom";
+      const savedJob = lastPrintJob();
+      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) && (style !== "last" || (savedLast && savedJob)) ? style : "custom";
       document.querySelectorAll("[data-print-style]").forEach((button) => {
         const active = button.dataset.printStyle === state.printStyle;
         button.classList.toggle("active", active);
@@ -5013,8 +5022,13 @@ const $ = (selector) => document.querySelector(selector);
       });
       const isCustom = state.printStyle === "custom" || state.printStyle === "last";
       $("#printCustomPanel").classList.toggle("open", isCustom);
-      if (state.printStyle === "last") applyPrintSetupValues(savedLast);
-      else if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      if (state.printStyle === "last") {
+        state.pendingPrintUrl = "/print/last";
+        applyPrintSetupValues(savedLast);
+      } else {
+        state.pendingPrintUrl = state.printSourceUrl || state.pendingPrintUrl;
+        if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      }
     }
 
     function applyPrintStyleToPanel(style) {
@@ -5071,6 +5085,7 @@ const $ = (selector) => document.querySelector(selector);
 
     function openPrintSetup(url) {
       state.pendingPrintUrl = url;
+      state.printSourceUrl = url;
       loadPrintSetupValues();
       // 工程设置是默认值，不应被“默认打印”预设静默覆盖。
       selectPrintStyle("custom");
@@ -5082,6 +5097,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#printSetupModal").classList.remove("open");
       $("#printSetupModal").setAttribute("aria-hidden", "true");
       state.pendingPrintUrl = "";
+      state.printSourceUrl = "";
     }
 
     function printSetupParams() {
@@ -5129,13 +5145,25 @@ const $ = (selector) => document.querySelector(selector);
       const target = `${url.pathname}${url.search}`;
       closePrintSetup();
       window.open(target, "_blank");
+      // 打印页会在服务器端冻结本次实际进入预览的照片；稍后回读设置，让
+      // 当前窗口无需刷新即可启用“上次打印”。
+      window.setTimeout(() => {
+        apiJson("/api/engineering-settings")
+          .then((data) => {
+            state.engineeringSettings = data.settings || state.engineeringSettings;
+            refreshLastPrintStyle();
+          })
+          .catch(() => {});
+      }, 350);
     }
 
     function openUnitPrint(category) {
       requireSelected(() => {
         const url = new URL(`/print/${encodeURIComponent(category)}/${encodeURIComponent(state.selectedCode)}`, window.location.origin);
+        // 未进入多选时，明确固定为当前全部照片；这样后续新增照片不会混进“上次打印”。
         const ids = selectedPrintIds(category);
-        if (ids.length) url.searchParams.set("ids", ids.join(","));
+        const fixedIds = ids.length ? ids : categoryPhotos(category).map((photo) => String(photo.id || "")).filter(Boolean);
+        if (fixedIds.length) url.searchParams.set("ids", fixedIds.join(","));
         openPrintSetup(`${url.pathname}${url.search}`);
       });
     }

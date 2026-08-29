@@ -797,6 +797,72 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(configured["print_photo_height_cm"], 10.2)
         self.assertEqual(configured["print_single_alignment"], "top")
 
+    def test_last_print_replays_exact_photo_ids_after_new_photos_are_added(self):
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        project = self.desktop.manager.create_project(
+            "LAST-PRINT-EXACT",
+            "上次打印精确照片验收",
+            source_fields={"分部工程名称": "左岸分部工程"},
+        )
+
+        def add_photo(title):
+            source = io.BytesIO()
+            Image.new("RGB", (640, 480), (30, 120, 150)).save(source, "JPEG")
+            source.seek(0)
+            return self.desktop.manager.add_photos(
+                project["project_code"],
+                [FileStorage(stream=source, filename=f"{title}.jpg")],
+                category="construction",
+                title=title,
+                photo_date="2026-08-29",
+            )[0]
+
+        first = add_photo("上次打印照片一")
+        second = add_photo("上次打印照片二")
+        initial = self.client.get(
+            f"/print/construction/{project['project_code']}?ids={first['id']},{second['id']}"
+        )
+        self.assertEqual(initial.status_code, 200, initial.get_data(as_text=True))
+
+        saved_job = self.desktop.read_engineering_settings()["last_print_job"]
+        self.assertEqual(saved_job["photo_count"], 2)
+        self.assertEqual(
+            saved_job["groups"][0]["items"][0]["photo_ids"],
+            [first["id"], second["id"]],
+        )
+
+        add_photo("后来新增不能混入")
+        replay = self.client.get("/print/last")
+        rendered = replay.get_data(as_text=True)
+        self.assertEqual(replay.status_code, 200, rendered)
+        self.assertIn("上次打印照片一", rendered)
+        self.assertIn("上次打印照片二", rendered)
+        self.assertNotIn("后来新增不能混入", rendered)
+
+        normalized = self.desktop._normalize_engineering_settings({
+            "last_print_job": {
+                "groups": [{
+                    "level": "单元照片",
+                    "items": [{
+                        "project_code": "LAST-PRINT-EXACT",
+                        "category": "construction",
+                        "photo_ids": [first["id"], first["id"], ""],
+                    }, {
+                        "project_code": "DROP",
+                        "category": "unknown",
+                        "photo_ids": ["DROP-SY001"],
+                    }],
+                }],
+            },
+        })
+        self.assertEqual(normalized["last_print_job"]["photo_count"], 1)
+        self.assertEqual(
+            normalized["last_print_job"]["groups"][0]["items"][0]["photo_ids"],
+            [first["id"]],
+        )
+
     def test_print_layout_keeps_captions_readable_and_page_numbers_unique(self):
         settings = {
             "print_margin_top_mm": 6,

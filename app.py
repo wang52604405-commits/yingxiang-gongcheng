@@ -174,6 +174,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_show_page_title": True,
     "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     "last_print_settings": {},
+    "last_print_job": {},
     "watermark_ocr_enabled": True,
     "photo_detail_fields": [
         {"label": "编号", "source": "id", "value": ""},
@@ -709,6 +710,71 @@ def _read_legacy_engineering_settings():
     return settings
 
 
+LAST_PRINT_JOB_MAX_PHOTOS = 30000
+
+
+def _normalize_last_print_job(value):
+    """只保存可安全重放的上次打印照片清单，避免把临时界面状态写进工程设置。"""
+    if not isinstance(value, dict):
+        return {}
+    raw_groups = value.get("groups")
+    if not isinstance(raw_groups, list):
+        return {}
+    groups = []
+    photo_count = 0
+    for raw_group in raw_groups[:4]:
+        if not isinstance(raw_group, dict):
+            continue
+        level = str(raw_group.get("level") or "全部影像").strip()[:60] or "全部影像"
+        normalized_items = []
+        for raw_item in list(raw_group.get("items") or [])[:300]:
+            if not isinstance(raw_item, dict):
+                continue
+            project_code = str(raw_item.get("project_code") or "").strip()[:160]
+            category = str(raw_item.get("category") or "").strip()
+            if category and category not in PHOTO_CATEGORIES:
+                continue
+            raw_ids = raw_item.get("photo_ids")
+            if not project_code or not isinstance(raw_ids, list):
+                continue
+            photo_ids = []
+            seen = set()
+            for photo_id in raw_ids:
+                normalized_id = str(photo_id or "").strip()[:240]
+                if not normalized_id or normalized_id in seen:
+                    continue
+                seen.add(normalized_id)
+                photo_ids.append(normalized_id)
+                photo_count += 1
+                if photo_count >= LAST_PRINT_JOB_MAX_PHOTOS:
+                    break
+            if photo_ids:
+                normalized_items.append({
+                    "project_code": project_code,
+                    "category": category,
+                    "photo_ids": photo_ids,
+                })
+            if photo_count >= LAST_PRINT_JOB_MAX_PHOTOS:
+                break
+        if normalized_items:
+            groups.append({"level": level, "items": normalized_items})
+        if photo_count >= LAST_PRINT_JOB_MAX_PHOTOS:
+            break
+    if not groups:
+        return {}
+    try:
+        saved_at = max(0, int(value.get("saved_at") or 0))
+    except (TypeError, ValueError):
+        saved_at = 0
+    return {
+        "version": 1,
+        "mode": "pdf" if str(value.get("mode") or "").strip().lower() == "pdf" else "print",
+        "groups": groups,
+        "photo_count": photo_count,
+        "saved_at": saved_at,
+    }
+
+
 def _normalize_engineering_settings(settings):
     """校正工程设置，保证旧数据和手工编辑都不会破坏编号与打印。"""
     settings = settings if isinstance(settings, dict) else deep_default_settings()
@@ -784,6 +850,7 @@ def _normalize_engineering_settings(settings):
         if isinstance(last_print, dict)
         else {}
     )
+    settings["last_print_job"] = _normalize_last_print_job(settings.get("last_print_job"))
     fields = settings.get("photo_detail_fields")
     if not isinstance(fields, list) or not fields:
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
@@ -876,6 +943,8 @@ def write_engineering_settings(payload):
             for key, value in payload["last_print_settings"].items()
             if str(key) in allowed_last_print_fields
         }
+    if isinstance(payload.get("last_print_job"), dict):
+        current["last_print_job"] = _normalize_last_print_job(payload["last_print_job"])
     # OCR 是批量自动归档的核心能力，不允许旧设置把它关闭。
     current["watermark_ocr_enabled"] = True
     if isinstance(payload.get("photo_detail_fields"), list):
@@ -3517,6 +3586,88 @@ def print_photo_ids_from_request():
     if not raw:
         return set()
     return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def _last_print_item(project, photos, category=""):
+    """将已经解析完成的照片固定为可重打的 ID 清单。"""
+    photo_ids = [str(photo.get("id") or "").strip() for photo in photos or []]
+    photo_ids = [photo_id for photo_id in photo_ids if photo_id]
+    if not photo_ids:
+        return {}
+    return {
+        "project_code": str((project or {}).get("project_code") or "").strip(),
+        "category": category if category in PHOTO_CATEGORIES else "",
+        "photo_ids": photo_ids,
+    }
+
+
+def remember_last_print_job(groups, mode="print"):
+    """按当前工程记录本次真正进入预览的照片，供“上次打印”精确重放。"""
+    payload = _normalize_last_print_job({
+        "mode": mode,
+        "groups": groups,
+        "saved_at": int(time.time()),
+    })
+    if not payload:
+        return {}
+    try:
+        settings = read_engineering_settings()
+        settings["last_print_job"] = payload
+        write_engineering_settings(settings)
+    except Exception:
+        # 打印本身不能因为“记住上次打印”失败而中断；下次仍可正常打印。
+        app.logger.warning("保存上次打印任务失败", exc_info=True)
+        return {}
+    return payload
+
+
+def restore_last_print_groups(print_settings):
+    """从工程设置恢复上次已固定的照片 ID；已删除照片会自动跳过。"""
+    job = _normalize_last_print_job(read_engineering_settings().get("last_print_job"))
+    if not job:
+        return [], {}
+    layout = print_layout_from_request()
+    page_size = print_page_size_from_request()
+    photo_width_mm = float(print_settings["print_photo_width_cm"]) * 10
+    photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
+    project_groups = []
+    for saved_group in job["groups"]:
+        pages = []
+        for saved_item in saved_group["items"]:
+            project_code = saved_item["project_code"]
+            try:
+                project = manager.get_project(project_code)
+            except Exception:
+                continue
+            category = saved_item.get("category") or ""
+            photo_by_id = {
+                str(photo.get("id") or ""): photo
+                for photo in manager.get_photos(project_code)
+            }
+            photos = []
+            for photo_id in saved_item["photo_ids"]:
+                photo = photo_by_id.get(photo_id)
+                if not photo:
+                    continue
+                if category and manager._normalize_category(photo.get("category")) != category:
+                    continue
+                photos.append(photo)
+            if not photos:
+                continue
+            enriched = enrich_print_photos(project, photos, print_settings)
+            name = project.get("project_name") or project.get("name") or project_code
+            for page in layout_fixed_photo_pages(
+                enriched,
+                layout,
+                page_size,
+                photo_width_mm,
+                photo_height_mm,
+                print_settings,
+            ):
+                pages.append({"unit_name": name, "items": page})
+        if pages:
+            project_groups.append({"level": saved_group["level"], "pages": pages})
+    return project_groups, job
 
 
 def _print_photo_source(project, photo):
@@ -7514,6 +7665,10 @@ def print_album_category_batch(category):
         # 单元照片与工序照片分别成册：各册内部按单元顺序排，页码各自连续
         unit_book = {"level": "单元照片", "pages": []}
         process_book = {"level": "工序照片", "pages": []}
+        last_print_groups = [
+            {"level": "单元照片", "items": []},
+            {"level": "工序照片", "items": []},
+        ]
         for code in codes[:300]:
             project = manager.get_project(code)
             project_photos = [
@@ -7528,9 +7683,15 @@ def print_album_category_batch(category):
             want_process = not has_level_selection or code in process_codes
             name = project.get("project_name") or project.get("name") or code
             if want_unit and unit_photos:
+                last_item = _last_print_item(project, unit_photos, category)
+                if last_item:
+                    last_print_groups[0]["items"].append(last_item)
                 for page in layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings):
                     unit_book["pages"].append({"unit_name": name, "items": page})
             if want_process and process_photos:
+                last_item = _last_print_item(project, process_photos, category)
+                if last_item:
+                    last_print_groups[1]["items"].append(last_item)
                 for page in layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings):
                     process_book["pages"].append({"unit_name": name, "items": page})
         project_groups = []
@@ -7539,6 +7700,10 @@ def print_album_category_batch(category):
         if process_book["pages"]:
             project_groups.append(process_book)
         assign_unique_print_page_numbers(project_groups)
+        remember_last_print_job(
+            [group for group in last_print_groups if group["items"]],
+            mode,
+        )
         project = {
             "project_code": f"{'批量导出PDF' if mode == 'pdf' else '批量打印'} {len(project_groups)} 册",
             "project_name": "、".join((item.get("level") or "全部影像") for item in project_groups[:3])
@@ -7583,6 +7748,7 @@ def print_album_category(category, project_code):
         photos = enrich_print_photos(project, photos, print_settings)
         unit_photos, process_photos = split_photos_by_level(project, photos)
         project_groups = []
+        last_print_groups = []
         if process_photos:
             if unit_photos:
                 project_groups.append({
@@ -7592,6 +7758,9 @@ def print_album_category(category, project_code):
                     "photos": unit_photos,
                     "pages": layout_fixed_photo_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
                 })
+                last_item = _last_print_item(project, unit_photos, category)
+                if last_item:
+                    last_print_groups.append({"level": "单元照片", "items": [last_item]})
             project_groups.append({
                 "project_code": project.get("project_code") or project_code,
                 "project_name": project.get("project_name") or project.get("name") or "",
@@ -7599,6 +7768,9 @@ def print_album_category(category, project_code):
                 "photos": process_photos,
                 "pages": layout_fixed_photo_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
             })
+            last_item = _last_print_item(project, process_photos, category)
+            if last_item:
+                last_print_groups.append({"level": "工序照片", "items": [last_item]})
         else:
             project_groups.append({
                 "project_code": project.get("project_code") or project_code,
@@ -7607,7 +7779,11 @@ def print_album_category(category, project_code):
                 "photos": photos,
                 "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
             })
+            last_item = _last_print_item(project, photos, category)
+            if last_item:
+                last_print_groups.append({"level": "全部影像", "items": [last_item]})
         assign_unique_print_page_numbers(project_groups)
+        remember_last_print_job(last_print_groups)
         return render_template(
             "print.html",
             project=project,
@@ -7619,6 +7795,48 @@ def print_album_category(category, project_code):
             print_settings=print_settings,
             watermark_text=watermark_text_for_user(),
             category_label=PHOTO_CATEGORY_LABELS.get(category, category),
+        )
+    except Exception as exc:
+        return str(exc), 404
+
+
+@app.route("/print/last")
+def print_last_album():
+    """重放本工程上次打印时实际选中的照片，而非重新按当前照片列表全选。"""
+    try:
+        locked = expired_license_response("打印")
+        if locked:
+            return locked
+        print_settings = print_settings_from_request()
+        layout = print_layout_from_request()
+        page_size = print_page_size_from_request()
+        project_groups, job = restore_last_print_groups(print_settings)
+        if not job:
+            return "本工程还没有可重打的照片，请先完成一次打印预览", 404
+        if not project_groups:
+            return "上次打印的照片已被删除或当前工程不可用，无法重新打印", 404
+        assign_unique_print_page_numbers(project_groups)
+        saved_count = int(job.get("photo_count") or 0)
+        available_count = sum(
+            len(page.get("items") or [])
+            for group in project_groups
+            for page in group.get("pages") or []
+        )
+        project = {
+            "project_code": "上次打印",
+            "project_name": f"恢复上次选择的 {available_count} / {saved_count} 张照片",
+        }
+        return render_template(
+            "print.html",
+            project=project,
+            photos=[],
+            project_groups=project_groups,
+            category="",
+            category_label="上次打印照片",
+            print_layout=layout,
+            print_page_size=page_size,
+            print_settings=print_settings,
+            watermark_text=watermark_text_for_user(),
         )
     except Exception as exc:
         return str(exc), 404
@@ -7647,6 +7865,9 @@ def print_album(project_code):
             "pages": layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings),
         }]
         assign_unique_print_page_numbers(project_groups)
+        last_item = _last_print_item(project, photos)
+        if last_item:
+            remember_last_print_job([{"level": "全部影像", "items": [last_item]}])
         return render_template("print.html", project=project, photos=photos, project_groups=project_groups, category="", category_label="全部影像", print_layout=layout, print_page_size=page_size, print_settings=print_settings, watermark_text=watermark_text_for_user())
     except Exception as exc:
         return str(exc), 404
