@@ -7541,3 +7541,88 @@
       .update-mark-arrow { animation: none !important; }
       .update-progress > span { transition: opacity 120ms ease; }
     }
+
+    /* 新工程入口：轻量但明确，避免把“新建”埋进设置抽屉。 */
+    .top-batch-actions .top-new-project-btn {
+      min-width: 100px;
+      color: #063c49;
+      background: #dff9f3;
+      border-color: rgba(222, 255, 248, .92);
+      box-shadow: 0 7px 16px rgba(0, 34, 45, .16);
+    }
+    .top-batch-actions .top-new-project-btn:hover {
+      color: #062f3b;
+      background: #ffffff;
+    }
+    .top-batch-actions .top-new-project-btn:active,
+    .new-engineering-project-modal button:active { transform: scale(.97); }
+    .new-engineering-project-modal {
+      width: min(100% - 32px, 620px);
+      max-height: min(84vh, 650px);
+      border: 1px solid var(--ds-line, var(--line));
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: var(--ds-shadow, var(--shadow));
+      overflow: auto;
+    }
+    .new-engineering-project-form { gap: 16px; padding: 18px; }
+    .new-engineering-project-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .new-engineering-project-grid .wide { grid-column: 1 / -1; }
+    .new-engineering-project-grid input,
+    .new-engineering-project-grid select { min-height: 40px; }
+    .new-engineering-project-note {
+      display: grid;
+      gap: 4px;
+      padding: 11px 12px;
+      border: 1px solid #bee3dc;
+      border-radius: 10px;
+      color: #42636a;
+      background: #f1fbf8;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .new-engineering-project-note strong { color: #0a675f; }
+    @media (max-width: 760px) {
+      .top-batch-actions .top-new-project-btn { min-width: 86px; }
+      .new-engineering-project-grid { grid-template-columns: 1fr; }
+      .new-engineering-project-grid .wide { grid-column: auto; }
+    }
+
+    /* 有工序时会产生多行施工/监理影像区。主容器原先锁高且裁切，第二行
+       虽已渲染却无法到达；仅让单元详情成为明确的纵向滚动容器。 */
+    #unitView {
+      height: 100%;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      padding: 0 5px 18px 0;
+      -webkit-overflow-scrolling: touch;
+    }
+    #unitView .page-head {
+      top: 0;
+    }
+    #unitView .photo-sections.is-process-layout {
+      align-content: start;
+      padding-bottom: 4px;
+    }
+    #unitView .process-photo-section {
+      height: min(64vh, 650px);
+      max-height: min(64vh, 650px);
+    }
+    @media (max-width: 900px) {
+      #unitView {
+        height: auto !important;
+        overflow: visible !important;
+        padding-right: 0;
+      }
+      #unitView .process-photo-section {
+        height: auto;
+        max-height: none;
+      }
+    }

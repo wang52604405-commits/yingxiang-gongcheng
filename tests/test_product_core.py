@@ -276,6 +276,125 @@ class DesktopSecurityContractTest(unittest.TestCase):
         with Image.open(io.BytesIO(raw_thumb)) as image:
             self.assertEqual(max(image.size), 720)
 
+    def test_new_engineering_project_keeps_settings_and_other_images_isolated(self):
+        """新工程必须不能继承或改写当前工程的规则、目录和照片容器。"""
+        with self.client.session_transaction() as session:
+            session["username"] = "工程隔离验收员"
+        before = self.client.get("/api/project-info").get_json()
+        previous_id = before["active_engineering_project_id"]
+        previous_settings = self.client.get("/api/engineering-settings").get_json()["settings"]
+
+        created = self.client.post(
+            "/api/engineering-projects",
+            json={
+                "project_name": "专业隔离测试工程",
+                "project_code": "ISOLATION-2026",
+                "industry": "市政工程",
+                "project_type": "道路工程",
+                "delete_password": "Isolate7286",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        payload = created.get_json()
+        new_id = payload["active_engineering_project_id"]
+        self.assertNotEqual(new_id, previous_id)
+        self.assertTrue(Path(payload["backup"]).exists())
+        self.assertEqual(payload["project_info"]["industry"], "市政工程")
+
+        # 新工程的设置是默认副本；修改它不允许影响切回去的旧工程。
+        self.assertEqual(
+            self.client.post(
+                "/api/engineering-settings",
+                json={"settings": {"print_page_size": 2}},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/other-images/nodes",
+                json={"code": "QT-ISO", "name": "隔离目录"},
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post("/api/engineering-projects/active", json={"id": previous_id}).status_code,
+            200,
+        )
+        restored_settings = self.client.get("/api/engineering-settings").get_json()["settings"]
+        self.assertEqual(restored_settings["print_page_size"], previous_settings["print_page_size"])
+        restored_tree = self.client.get("/api/other-images/tree").get_json()["tree"]
+        self.assertNotIn(
+            "QT-ISO",
+            [node.get("code") for node in restored_tree.get("nodes", [])],
+        )
+
+    def test_unit_photos_never_keep_a_process_number(self):
+        """历史 GY 残留只能归到单元照片，真实工序照片仍使用 GX 编号。"""
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        with self.client.session_transaction() as session:
+            session["username"] = "编号修复验收员"
+
+        project_code = "PROCESS-SCOPE-REPAIR"
+        self.desktop.manager.create_project(
+            project_code,
+            "工序编号修复单元",
+            source_fields={
+                "单元工程名称": "工序编号修复单元",
+                "单元工程编码": project_code,
+                "划分类型": "划分工序单元",
+                "工序名称列表": "混凝土浇筑",
+            },
+        )
+        # 真实有工序的单元会在项目元数据中明确保存工序列表；这里模拟该现场。
+        process_project = self.desktop.manager.get_project(project_code)
+        process_project["processes"] = ["混凝土浇筑"]
+        self.desktop.manager._write_metadata(project_code, process_project)
+
+        def jpg_file(name):
+            buffer = io.BytesIO()
+            Image.new("RGB", (80, 60), (30, 120, 160)).save(buffer, "JPEG")
+            buffer.seek(0)
+            return FileStorage(stream=buffer, filename=name, content_type="image/jpeg")
+
+        self.desktop.manager.add_photos(
+            project_code, [jpg_file("construction.jpg")], category="construction"
+        )
+        self.desktop.manager.add_photos(
+            project_code, [jpg_file("supervision.jpg")], category="supervision"
+        )
+        data = self.desktop.manager.get_project(project_code)
+        for photo in data["photos"]:
+            if photo["category"] == "construction":
+                photo.update({"id": "SYGX064", "process_name": "", "process_code": "GY001"})
+            else:
+                photo.update({"id": "JYGX050", "process_name": "", "process_code": "GY001"})
+        self.desktop.manager._write_metadata(project_code, data)
+
+        repaired = self.client.get(f"/api/photos/{project_code}")
+        self.assertEqual(repaired.status_code, 200, repaired.get_json())
+        photos = repaired.get_json()["photos"]
+        self.assertEqual(
+            {photo["id"] for photo in photos if photo["category"] == "construction"},
+            {"SYDY001"},
+        )
+        self.assertEqual(
+            {photo["id"] for photo in photos if photo["category"] == "supervision"},
+            {"JYDY001"},
+        )
+        self.assertTrue(all(not photo["process_code"] for photo in photos))
+
+        actual_process = self.desktop.manager.add_photos(
+            project_code,
+            [jpg_file("actual-process.jpg")],
+            category="construction",
+            process_name="混凝土浇筑",
+            process_code="GY999",  # 调用方给错也必须按工序名称纠正。
+        )[0]
+        self.assertEqual(actual_process["id"], "SYGX001")
+        self.assertEqual(actual_process["process_code"], "GY001")
+
     def test_delete_photo_enqueues_explicit_uuid_without_rolling_back_local_delete(self):
         from PIL import Image
         from unittest.mock import MagicMock

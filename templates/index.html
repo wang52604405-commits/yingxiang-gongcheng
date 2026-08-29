@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260829-2.72.css">
+  <link rel="stylesheet" href="/assets/app-A20260829-2.73.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -55,6 +55,7 @@
         <button id="topOtherBtn" type="button">其它影像</button>
       </div>
       <div class="top-batch-actions" aria-label="批量打印">
+        <button class="top-new-project-btn" type="button" id="newEngineeringProjectBtn">+ 新建工程</button>
         <select id="engineeringProjectSelect" class="project-select" title="当前工程"></select>
         <div class="project-import-wrap">
           <button class="top-quick-btn" type="button" id="projectImportMenuBtn" aria-expanded="false" aria-controls="projectImportMenu">项目划分 ▾</button>
@@ -772,6 +773,34 @@
     </section>
   </div>
 
+  <div id="newEngineeringProjectModal" class="modal-backdrop" aria-hidden="true">
+    <section class="machine-id-modal new-engineering-project-modal" role="dialog" aria-modal="true" aria-labelledby="newEngineeringProjectTitle">
+      <div class="upload-choice-head">
+        <div>
+          <h3 id="newEngineeringProjectTitle">新建工程</h3>
+          <p>新工程从空白资料开始，项目划分、照片、专业规则和其它影像均独立保存。</p>
+        </div>
+        <button class="ghost" type="button" id="closeNewEngineeringProjectBtn">关闭</button>
+      </div>
+      <form id="newEngineeringProjectForm" class="photo-edit-form new-engineering-project-form">
+        <div class="new-engineering-project-grid">
+          <label class="wide">工程名称<input id="newEngineeringProjectNameInput" type="text" maxlength="120" required placeholder="例如：某某水库除险加固工程"></label>
+          <label>工程编号<input id="newEngineeringProjectCodeInput" type="text" maxlength="80" placeholder="可选；不填自动生成"></label>
+          <label>工程专业<select id="newEngineeringProjectIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="电力工程">电力工程</option></select></label>
+          <label>工程类型<input id="newEngineeringProjectTypeInput" type="text" maxlength="80" placeholder="例如：河道治理 / 房建主体"></label>
+          <label>归档地区<input id="newEngineeringProjectRegionInput" type="text" maxlength="80" placeholder="可选"></label>
+          <label class="wide">工程删除密码<input id="newEngineeringProjectDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="6–32 位；用于删除本工程"></label>
+          <label class="wide">确认删除密码<input id="newEngineeringProjectDeletePasswordConfirmInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="再次输入删除密码"></label>
+        </div>
+        <div class="new-engineering-project-note"><strong>独立边界</strong><span>不会带入当前工程的照片、项目划分、编号、打印设置、成员或其它影像目录。</span></div>
+        <div class="photo-edit-actions">
+          <button class="secondary" type="button" id="cancelNewEngineeringProjectBtn">取消</button>
+          <button type="submit" id="submitNewEngineeringProjectBtn">创建并进入工程</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div id="folderReviewModal" class="modal-backdrop" aria-hidden="true">
     <section class="machine-id-modal folder-review-modal" role="dialog" aria-modal="true" aria-labelledby="folderReviewTitle">
       <div class="upload-choice-head">
@@ -874,6 +903,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260829-2.72.js"></script>
+  <script defer src="/assets/app-A20260829-2.73.js"></script>
 </body>
 </html>

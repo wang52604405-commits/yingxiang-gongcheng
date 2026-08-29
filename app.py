@@ -679,23 +679,37 @@ def deep_default_settings():
     return json.loads(json.dumps(DEFAULT_ENGINEERING_SETTINGS, ensure_ascii=False))
 
 
-def read_engineering_settings():
+def _merge_engineering_settings(settings, saved):
+    """把一份工程设置叠加到默认设置上，并保留旧版字段的兼容性。"""
+    if not isinstance(saved, dict):
+        return settings
+    settings.update({key: value for key, value in saved.items() if key != "numbering_rules"})
+    saved_rules = saved.get("numbering_rules")
+    if isinstance(saved_rules, dict):
+        for category in PHOTO_CATEGORIES:
+            if isinstance(saved_rules.get(category), dict):
+                settings["numbering_rules"][category].update(saved_rules[category])
+    return settings
+
+
+def _read_legacy_engineering_settings():
+    """读取单工程时代的设置，只作为老工程首次隔离时的迁移来源。"""
     settings = deep_default_settings()
     if ENGINEERING_SETTINGS_PATH.exists():
         try:
             saved = json.loads(read_text_with_fallback(ENGINEERING_SETTINGS_PATH))
         except (OSError, ValueError, json.JSONDecodeError):
             saved = {}
-        if isinstance(saved, dict):
-            settings.update({k: v for k, v in saved.items() if k != "numbering_rules"})
-            saved_rules = saved.get("numbering_rules")
-            if isinstance(saved_rules, dict):
-                for category in PHOTO_CATEGORIES:
-                    if isinstance(saved_rules.get(category), dict):
-                        settings["numbering_rules"][category].update(saved_rules[category])
+        _merge_engineering_settings(settings, saved)
     legacy_rules = read_numbering_rules_file()
     for category in PHOTO_CATEGORIES:
         settings["numbering_rules"][category].update(legacy_rules.get(category, {}))
+    return settings
+
+
+def _normalize_engineering_settings(settings):
+    """校正工程设置，保证旧数据和手工编辑都不会破坏编号与打印。"""
+    settings = settings if isinstance(settings, dict) else deep_default_settings()
     settings["numbering_mode"] = settings.get("numbering_mode") if settings.get("numbering_mode") in {"custom", "unit_order"} else "custom"
     try:
         settings["process_digits"] = max(1, min(8, int(settings.get("process_digits", 3))))
@@ -748,6 +762,23 @@ def read_engineering_settings():
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
     settings["watermark_ocr_enabled"] = True
     return settings
+
+
+def read_engineering_settings(project_id=None):
+    """读取当前工程的独立设置。
+
+    老版只有一份工程设置文件。升级后不改写它；未迁移的当前工程仍可读到
+    原有设置，第一次保存或新建工程后才会写入该工程自己的 metadata。
+    """
+    data = read_engineering_projects()
+    target_id = project_id or data.get("active_id")
+    project = next((item for item in data.get("projects", []) if item.get("id") == target_id), None)
+    saved = project.get("engineering_settings") if isinstance(project, dict) else None
+    if isinstance(saved, dict):
+        settings = _merge_engineering_settings(deep_default_settings(), saved)
+    else:
+        settings = _read_legacy_engineering_settings()
+    return _normalize_engineering_settings(settings)
 
 
 def write_engineering_settings(payload):
@@ -816,8 +847,13 @@ def write_engineering_settings(payload):
             current["photo_detail_fields"] = fields
     if isinstance(payload.get("numbering_rules"), dict):
         current["numbering_rules"] = write_numbering_rules(payload.get("numbering_rules"), persist=False)
-    ENGINEERING_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ENGINEERING_SETTINGS_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 设置不再写入全局 engineering_settings.json，改为跟随当前工程保存。
+    # 旧文件只读保留，方便旧版回退或首次迁移，避免多工程之间相互覆盖。
+    data = read_engineering_projects()
+    project = current_engineering_project(data)
+    project["engineering_settings"] = json.loads(json.dumps(current, ensure_ascii=False))
+    project["settings_updated_at"] = now_text()
+    write_engineering_projects(data)
     return current
 
 
@@ -874,8 +910,11 @@ def write_numbering_rules(payload, persist=True):
             raise ValueError("编号位数必须是数字") from exc
         rules[category].update({"template": template, "unit_template": unit_template, "process_template": process_template, "start": start, "digits": digits})
     if persist:
-        NUMBERING_RULES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        NUMBERING_RULES_PATH.write_text(json.dumps(rules, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 编号规则是工程设置的一部分。旧的编号规则文件保留不动，不再作为
+        # 多工程之间的共享写入点。
+        settings = read_engineering_settings()
+        settings["numbering_rules"] = rules
+        write_engineering_settings(settings)
     return rules
 
 
@@ -1552,12 +1591,13 @@ class AlbumManager:
     def _next_id(self, project_code, category, process_name="", process_code=""):
         category = self._normalize_category(category)
         meta = self._read_metadata(project_code)
+        process_name = str(process_name or "").strip()
+        # 调用方不能只靠 GY 编码把单元照片塞进工序编号空间。
+        process_code = self._process_code(meta, process_name) if process_name else ""
         used = set()
         candidate_photo = {"process_name": process_name, "process_code": process_code}
         target_scope = self._sequence_scope(meta, candidate_photo, category)
-        scope_process_code = str(process_code or "").strip() or (
-            self._process_code(meta, process_name) if process_name else ""
-        )
+        scope_process_code = process_code
         for photo in meta.get("photos", []):
             photo_category = self._normalize_category(photo.get("category"))
             if photo_category == category and self._sequence_scope(meta, photo, category) == target_scope:
@@ -1643,9 +1683,9 @@ class AlbumManager:
         category = self._normalize_category(category)
         photo = photo or {}
         process_name = str(photo.get("process_name") or "").strip()
-        process_code = str(photo.get("process_code") or "").strip()
-        if not process_code and process_name:
-            process_code = self._process_code(data, process_name)
+        # 工序归属以“工序名称”作为唯一事实来源。旧数据偶有仅残留 GYxxx
+        # 编码的情况；那仍是单元照片，不能被错编为 SYGX/JYGX。
+        process_code = self._process_code(data, process_name) if process_name else ""
         return (category, process_code)
 
     def _archive_id_for_photo(self, data, photo, category, sequence):
@@ -1653,9 +1693,7 @@ class AlbumManager:
         photo = photo or {}
         processes = data.get("processes") or []
         process_name = str(photo.get("process_name") or "").strip()
-        process_code = str(photo.get("process_code") or "").strip() or (
-            self._process_code(data, process_name) if process_name else ""
-        )
+        process_code = self._process_code(data, process_name) if process_name else ""
         if processes:
             # 两级新编号：单元级 SYDY/JYDY，工序级 SYGX/JYGX（每工序独立从 001 开始）
             settings = read_engineering_settings()
@@ -1738,6 +1776,10 @@ class AlbumManager:
         staged = []
         counters = {}
         for photo in matching:
+            process_name = str(photo.get("process_name") or "").strip()
+            # 统一修正历史残留的 process_code：空工序名就是单元照片。
+            photo["process_name"] = process_name
+            photo["process_code"] = self._process_code(data, process_name) if process_name else ""
             scope = self._sequence_scope(data, photo, category)
             counters[scope] = counters.get(scope, 0) + 1
             index = counters[scope]
@@ -1745,12 +1787,8 @@ class AlbumManager:
             old_path = photos_dir / old_filename
             old_thumb = photos_dir / self._thumb_filename(old_filename)
             ext = Path(old_filename).suffix.lower() or ".jpg"
-            if photo.get("process_name") and not photo.get("process_code"):
-                photo["process_code"] = self._process_code(data, photo.get("process_name"))
             new_id = self._archive_id_for_photo(data, photo, category, index)
-            scope_code = str(photo.get("process_code") or "").strip() or (
-                self._process_code(data, photo.get("process_name")) if photo.get("process_name") else ""
-            )
+            scope_code = str(photo.get("process_code") or "").strip()
             new_filename = self._photo_filename(category, new_id, ext, scope_code)
             if new_filename == old_filename and str(photo.get("id") or "") == new_id:
                 # 顺序未变，无需重命名（刷新自动归位时避免无谓的文件搬移）
@@ -1931,6 +1969,38 @@ class AlbumManager:
         self._photos_cache[key] = (mtime, items)
         return items
 
+    def repair_legacy_process_photo_scopes(self, project_code):
+        """修复老数据中“没有工序名却带 GY 编码”的单元照片。
+
+        该情况会把单元照片错标成 SYGX/JYGX。修复仅重编号和安全改名，
+        不删除照片、不改变题名或拍摄信息。
+        """
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            needs_repair = False
+            for photo in data.get("photos", []):
+                process_name = str(photo.get("process_name") or "").strip()
+                process_code = str(photo.get("process_code") or "").strip()
+                archive_id = str(photo.get("id") or "").upper()
+                if not process_name and (
+                    process_code
+                    or archive_id.startswith(("SYGX", "JYGX"))
+                ):
+                    photo["process_code"] = ""
+                    needs_repair = True
+                elif process_name:
+                    expected_code = self._process_code(data, process_name)
+                    if process_code != expected_code:
+                        photo["process_code"] = expected_code
+                        needs_repair = True
+            if not needs_repair:
+                return 0
+            for category in PHOTO_CATEGORIES:
+                self._renumber_category(project_code, data, category)
+            self._write_metadata(data["project_code"], data)
+            self.invalidate_projects_cache()
+            return 1
+
     def optimize_existing_photo(self, project_code, photo_id):
         with self._project_write_lock(project_code):
             data = self.get_project(project_code)
@@ -1989,9 +2059,7 @@ class AlbumManager:
         category = self._normalize_category(category)
         orientation = self._normalize_orientation(orientation)
         process_name = str(process_name or "").strip()
-        process_code = str(process_code or "").strip() or (
-            self._process_code(data, process_name) if process_name else ""
-        )
+        process_code = self._process_code(data, process_name) if process_name else ""
         photos_dir = self._photos_dir(project_code)
         photos_dir.mkdir(parents=True, exist_ok=True)
         added = []
@@ -2115,7 +2183,9 @@ class AlbumManager:
                 continue
             ext = Path(src_path.name).suffix.lower() or ".jpg"
             photo_process_name = str(photo.get("process_name") or "").strip()
-            photo_process_code = str(photo.get("process_code") or "").strip()
+            # 复制也只认工序名称，不能把施工单元照片里遗留的 GY 编码
+            # 传播到监理单元照片。
+            photo_process_code = self._process_code(data, photo_process_name) if photo_process_name else ""
             photo_id = self._next_id(data["project_code"], "supervision", photo_process_name, photo_process_code)
             filename = self._photo_filename("supervision", photo_id, ext, photo_process_code)
             target = photos_dir / filename
@@ -4138,27 +4208,30 @@ def trial_upload_limit_response(incoming_count):
     return None
 
 
-def read_other_images():
-    if not OTHER_IMAGES_PATH.exists():
-        return {"nodes": []}
-    try:
-        data = json.loads(read_text_with_fallback(OTHER_IMAGES_PATH))
-    except (OSError, json.JSONDecodeError, ValueError):
-        backup = OTHER_IMAGES_PATH.with_name(
-            f"{OTHER_IMAGES_PATH.stem}.broken_{datetime.now().strftime('%Y%m%d_%H%M%S')}{OTHER_IMAGES_PATH.suffix}"
-        )
-        try:
-            shutil.copy2(OTHER_IMAGES_PATH, backup)
-        except OSError:
-            pass
-        return {"nodes": []}
-    nodes = data.get("nodes", [])
-    return {"nodes": nodes if isinstance(nodes, list) else []}
+def read_other_images(project_id=None):
+    """读取当前工程的其它影像目录树，不再让多个工程共用一棵树。"""
+    engineering_data = read_engineering_projects()
+    target_id = project_id or engineering_data.get("active_id")
+    project = next(
+        (item for item in engineering_data.get("projects", []) if item.get("id") == target_id),
+        None,
+    )
+    stored = project.get("other_images") if isinstance(project, dict) else None
+    if isinstance(stored, dict):
+        nodes = stored.get("nodes", [])
+        return {"nodes": json.loads(json.dumps(nodes, ensure_ascii=False)) if isinstance(nodes, list) else []}
+    # 老版还没迁移时，保持当前工程可见；一旦新建第二个工程，会先固化到旧工程。
+    return _legacy_other_images_data()
 
 
 def write_other_images(data):
-    OTHER_IMAGES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OTHER_IMAGES_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    nodes = (data or {}).get("nodes", [])
+    if not isinstance(nodes, list):
+        raise ValueError("其它影像目录格式不正确")
+    engineering_data = read_engineering_projects()
+    project = current_engineering_project(engineering_data)
+    project["other_images"] = {"nodes": json.loads(json.dumps(nodes, ensure_ascii=False))}
+    write_engineering_projects(engineering_data)
 
 
 def natural_sort_key(text):
@@ -4360,6 +4433,11 @@ def seed_other_images_from_folder(force=False):
     if data.get("nodes") and not force:
         ensure_other_image_projects(data.get("nodes") or [])
         return data
+    # 新建工程明确带有空的其它影像树时，不能悄悄从另一工程的模板目录灌入。
+    # 用户可在本工程内按需新建目录；老工程首次升级仍可按原逻辑读取模板。
+    active = current_engineering_project()
+    if isinstance(active.get("other_images"), dict) and not force:
+        return data
     nodes = build_other_nodes_from_folder(OTHER_IMAGES_TEMPLATE_DIR)
     if not nodes:
         return data
@@ -4435,6 +4513,18 @@ def read_engineering_projects():
             continue
         project = dict(default_project)
         project.update({key: str(item.get(key) or "").strip() for key in project.keys()})
+        # 新版把“编号/打印/字段”和“其它影像目录”放在工程元数据里。
+        # 这两个字段不是字符串，必须显式保留，不能被上面的旧字段兼容逻辑抹掉。
+        if isinstance(item.get("engineering_settings"), dict):
+            project["engineering_settings"] = json.loads(
+                json.dumps(item["engineering_settings"], ensure_ascii=False)
+            )
+        if isinstance(item.get("other_images"), dict):
+            project["other_images"] = json.loads(
+                json.dumps(item["other_images"], ensure_ascii=False)
+            )
+        if item.get("settings_updated_at"):
+            project["settings_updated_at"] = str(item.get("settings_updated_at") or "").strip()
         stored_hash = str(item.get("delete_password_hash") or "").strip()
         legacy_password = str(item.get("delete_password") or "").strip()
         if not stored_hash and legacy_password and legacy_password != LEGACY_DELETE_SAFETY_PASSWORD:
@@ -4475,6 +4565,55 @@ def write_engineering_projects(data):
     active_project = current_engineering_project(data)
     write_project_info(active_project)
     return data
+
+
+def backup_engineering_metadata(reason):
+    """在会改变工程边界前做可恢复快照，不碰任何照片目录。"""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_dir = DATA_DIR / "backups" / "engineering-metadata" / f"{stamp}-{reason}"
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    for source in (
+        ENGINEERING_PROJECTS_PATH,
+        PROJECT_INFO_PATH,
+        ENGINEERING_SETTINGS_PATH,
+        NUMBERING_RULES_PATH,
+        OTHER_IMAGES_PATH,
+    ):
+        if source.exists():
+            shutil.copy2(source, backup_dir / source.name)
+    return backup_dir
+
+
+def _legacy_other_images_data():
+    if not OTHER_IMAGES_PATH.exists():
+        return {"nodes": []}
+    try:
+        data = json.loads(read_text_with_fallback(OTHER_IMAGES_PATH))
+    except (OSError, json.JSONDecodeError, ValueError):
+        backup = OTHER_IMAGES_PATH.with_name(
+            f"{OTHER_IMAGES_PATH.stem}.broken_{datetime.now().strftime('%Y%m%d_%H%M%S')}{OTHER_IMAGES_PATH.suffix}"
+        )
+        try:
+            shutil.copy2(OTHER_IMAGES_PATH, backup)
+        except OSError:
+            pass
+        return {"nodes": []}
+    nodes = data.get("nodes", []) if isinstance(data, dict) else []
+    return {"nodes": nodes if isinstance(nodes, list) else []}
+
+
+def bind_legacy_project_state_before_split(data):
+    """新建第二个工程前，把老的共享状态固化到旧工程，随后彻底分开。"""
+    current = current_engineering_project(data)
+    changed = False
+    if not isinstance(current.get("engineering_settings"), dict):
+        current["engineering_settings"] = _read_legacy_engineering_settings()
+        current["settings_updated_at"] = now_text()
+        changed = True
+    if not isinstance(current.get("other_images"), dict):
+        current["other_images"] = _legacy_other_images_data()
+        changed = True
+    return changed
 
 
 def current_engineering_project(data=None):
@@ -4742,10 +4881,7 @@ def create_other_image_node(payload):
             raise ValueError("上级其它影像不存在")
         target_list = parent.setdefault("children", [])
 
-    node = {"code": code, "name": name, "children": []}
-    target_list.append(node)
-    write_other_images(data)
-    manager.create_project(
+    project = manager.create_project(
         code,
         name,
         source_fields={
@@ -4755,6 +4891,16 @@ def create_other_image_node(payload):
             "自定义编号": code,
         },
     )
+    # 与其它工程同名时，PhotoManager 会生成独立内部编号；目录树必须记录
+    # 这个实际编号，才能永远打开本工程的照片，而不是同名工程的数据。
+    node = {
+        "code": str(project.get("project_code") or code),
+        "display_code": code,
+        "name": name,
+        "children": [],
+    }
+    target_list.append(node)
+    write_other_images(data)
     return node
 
 
@@ -5828,6 +5974,9 @@ def _public_project(project):
     out = dict(project)
     out.pop("delete_password", None)
     password_hash = out.pop("delete_password_hash", "")
+    # 工程设置和其它影像树通过各自接口读取，避免工程列表把完整配置重复下发。
+    out.pop("engineering_settings", None)
+    out.pop("other_images", None)
     out["delete_password_set"] = bool(password_hash)
     return out
 
@@ -5876,7 +6025,10 @@ def api_save_project_info():
     payload = request.get_json(silent=True) or request.form
     try:
         data = read_engineering_projects()
-        project_id = safe_engineering_project_id(payload.get("id") or payload.get("project_code") or payload.get("project_name"))
+        # 编辑页传入稳定 ID；名称或编号变化不应该意外变成一个新工程。
+        project_id = safe_engineering_project_id(
+            payload.get("id") or payload.get("project_code") or payload.get("project_name")
+        )
         now = now_text()
         existing_project = next(
             (item for item in data.get("projects", []) if item.get("id") == project_id),
@@ -5923,6 +6075,16 @@ def api_save_project_info():
             "created_at": now,
             "updated_at": now,
         }
+        if isinstance((existing_project or {}).get("engineering_settings"), dict):
+            project["engineering_settings"] = json.loads(json.dumps(
+                existing_project["engineering_settings"], ensure_ascii=False
+            ))
+        if isinstance((existing_project or {}).get("other_images"), dict):
+            project["other_images"] = json.loads(json.dumps(
+                existing_project["other_images"], ensure_ascii=False
+            ))
+        if (existing_project or {}).get("settings_updated_at"):
+            project["settings_updated_at"] = str(existing_project["settings_updated_at"])
         replaced = False
         for index, item in enumerate(data.get("projects", [])):
             if item.get("id") == project_id:
@@ -5942,6 +6104,80 @@ def api_save_project_info():
         })
     except Exception as exc:
         return json_error(str(exc))
+
+
+@app.route("/api/engineering-projects", methods=["POST"])
+def api_create_engineering_project():
+    """创建一个完全独立的工程容器：照片、划分、专业规则和其它影像均为空白。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or request.form
+    try:
+        project_name = str(payload.get("project_name") or "").strip()
+        project_code = str(payload.get("project_code") or "").strip()
+        if not project_name:
+            return json_error("请输入工程名称", 400)
+        delete_password = validate_engineering_delete_password(payload.get("delete_password"))
+        data = read_engineering_projects()
+        # 中文工程名没有 ASCII 编号时，生成内部 ID；用户看到的名称和工程编号保持原样。
+        candidate = safe_engineering_project_id(project_code)
+        if not project_code or candidate == DEFAULT_ENGINEERING_PROJECT_ID:
+            candidate = f"project-{uuid.uuid4().hex[:12]}"
+        project_id = candidate
+        existing_ids = {str(item.get("id") or "") for item in data.get("projects", [])}
+        if project_id in existing_ids:
+            return json_error("工程编号已存在，请换一个", 409)
+        if project_code and any(
+            str(item.get("project_code") or "").strip().lower() == project_code.lower()
+            for item in data.get("projects", [])
+        ):
+            return json_error("工程编号已存在，请换一个", 409)
+
+        # 第一次拆分多工程前保留老工程的实际设置与其它影像目录，并留下磁盘快照。
+        backup_dir = backup_engineering_metadata("before-create-project")
+        bind_legacy_project_state_before_split(data)
+        now = now_text()
+        project = default_engineering_project()
+        project.update({
+            "id": project_id,
+            "project_name": project_name,
+            "project_code": project_code or project_id,
+            "owner": str(payload.get("owner") or "").strip(),
+            "contractor": str(payload.get("contractor") or "").strip(),
+            "supervisor": str(payload.get("supervisor") or "").strip(),
+            "location": str(payload.get("location") or "").strip(),
+            "start_date": str(payload.get("start_date") or "").strip(),
+            "description": str(payload.get("description") or "").strip(),
+            "industry": str(payload.get("industry") or "水利工程").strip() or "水利工程",
+            "project_type": str(payload.get("project_type") or "").strip(),
+            "region": str(payload.get("region") or "").strip(),
+            "template_version": str(
+                professional_templates.catalog().get("version") or "V1.0"
+            ).strip(),
+            "delete_password_hash": generate_password_hash(delete_password),
+            # 必须是新副本：不能继承当前工程的编号、照片字段或打印设置。
+            "engineering_settings": deep_default_settings(),
+            # 空树明确表示不从其它工程自动读取目录或照片。
+            "other_images": {"nodes": []},
+            "created_at": now,
+            "updated_at": now,
+        })
+        data.setdefault("projects", []).append(project)
+        data["active_id"] = project_id
+        write_engineering_projects(data)
+        manager.invalidate_projects_cache()
+        return jsonify({
+            "ok": True,
+            "project_info": _public_project(project),
+            "engineering_projects": [_public_project(item) for item in data.get("projects", [])],
+            "active_engineering_project_id": project_id,
+            "backup": str(backup_dir),
+        })
+    except ValueError as exc:
+        return json_error(str(exc), 400)
+    except Exception as exc:
+        return json_error(str(exc), 500)
 
 
 @app.route("/api/engineering-projects/active", methods=["POST"])
@@ -6801,6 +7037,9 @@ def api_upload_auto_match():
 @app.route("/api/photos/<path:project_code>")
 def api_photos(project_code):
     try:
+        # 每次进入单元时安全修复一次历史“单元照片误用工序号”的数据。
+        # 只调整编号和文件名，不会删除、压缩或改动照片内容与说明。
+        manager.repair_legacy_process_photo_scopes(project_code)
         project = manager.get_project(project_code)
         return jsonify({"ok": True, "project": project, "photos": manager.get_photos(project_code)})
     except Exception as exc:

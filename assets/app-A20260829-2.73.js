@@ -1110,6 +1110,61 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
+    function openNewEngineeringProjectModal() {
+      const form = $("#newEngineeringProjectForm");
+      form?.reset();
+      const industry = $("#newEngineeringProjectIndustryInput");
+      if (industry) industry.value = "水利工程";
+      $("#newEngineeringProjectModal").classList.add("open");
+      $("#newEngineeringProjectModal").setAttribute("aria-hidden", "false");
+      setTimeout(() => $("#newEngineeringProjectNameInput")?.focus(), 0);
+    }
+
+    function closeNewEngineeringProjectModal() {
+      $("#newEngineeringProjectModal").classList.remove("open");
+      $("#newEngineeringProjectModal").setAttribute("aria-hidden", "true");
+      $("#newEngineeringProjectForm")?.reset();
+    }
+
+    async function createEngineeringProject(event) {
+      event.preventDefault();
+      if (!(await ensureAuthenticated("新建工程"))) return;
+      const password = $("#newEngineeringProjectDeletePasswordInput").value;
+      const confirmPassword = $("#newEngineeringProjectDeletePasswordConfirmInput").value;
+      if (password !== confirmPassword) {
+        showNotice("两次输入的工程删除密码不一致。", true);
+        return;
+      }
+      const submitButton = $("#submitNewEngineeringProjectBtn");
+      if (submitButton) submitButton.disabled = true;
+      try {
+        const data = await apiJson("/api/engineering-projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_name: $("#newEngineeringProjectNameInput").value.trim(),
+            project_code: $("#newEngineeringProjectCodeInput").value.trim(),
+            industry: $("#newEngineeringProjectIndustryInput").value,
+            project_type: $("#newEngineeringProjectTypeInput").value.trim(),
+            region: $("#newEngineeringProjectRegionInput").value.trim(),
+            delete_password: password
+          })
+        });
+        state.projectInfo = data.project_info || {};
+        state.engineeringProjects = data.engineering_projects || state.engineeringProjects;
+        state.activeEngineeringProjectId = data.active_engineering_project_id || "";
+        state.selectedProject = null;
+        state.selectedCode = "";
+        state.selectedOtherCode = "";
+        closeNewEngineeringProjectModal();
+        renderProjectInfo();
+        await refreshAll();
+        showNotice("新工程已创建，当前资料与专业规则均为独立空白。请先导入项目划分。");
+      } finally {
+        if (submitButton && submitButton.isConnected) submitButton.disabled = false;
+      }
+    }
+
     const NUMBER_TEMPLATE_LABELS = [
       ["{unit_code}", "【单元编号】"],
       ["{unit_order}", "【单元顺序号】"],
@@ -1545,6 +1600,7 @@ const $ = (selector) => document.querySelector(selector);
       event.preventDefault();
       if (!(await ensureAuthenticated("保存工程信息"))) return;
       const payload = {
+        id: currentEngineeringProject()?.id || state.activeEngineeringProjectId || "",
         project_name: $("#projectInfoNameInput").value.trim(),
         project_code: $("#projectInfoCodeInput").value.trim(),
         industry: $("#projectInfoIndustryInput").value,
@@ -4324,6 +4380,15 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#engineeringProjectSelect").addEventListener("change", (event) => {
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
+    });
+    $("#newEngineeringProjectBtn")?.addEventListener("click", openNewEngineeringProjectModal);
+    $("#closeNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
+    $("#cancelNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
+    $("#newEngineeringProjectForm")?.addEventListener("submit", (event) => {
+      createEngineeringProject(event).catch((error) => showNotice(error.message || "新建工程失败", true));
+    });
+    $("#newEngineeringProjectModal")?.addEventListener("click", (event) => {
+      if (event.target.id === "newEngineeringProjectModal") closeNewEngineeringProjectModal();
     });
     $("#projectInfoBtn")?.addEventListener("click", openProjectInfoModal);
     $("#closeProjectInfoBtn").addEventListener("click", closeProjectInfoModal);
