@@ -1,0 +1,8 @@
+{
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "app-header": "../../components/AppHeader",
+    "ui-icon": "../../components/UiIcon"
+  }
+}

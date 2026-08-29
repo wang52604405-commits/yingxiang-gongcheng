@@ -1,0 +1,1 @@
+"use strict";const e=require("../common/vendor.js"),s=e.defineComponent({__name:"LoadingOverlay",props:{visible:{type:Boolean},message:{default:"正在处理"},progress:{default:""}},setup:s=>(s,o)=>e.e({a:s.visible},s.visible?e.e({b:e.t(s.message),c:s.progress},s.progress?{d:e.t(s.progress)}:{}):{})});wx.createComponent(s);

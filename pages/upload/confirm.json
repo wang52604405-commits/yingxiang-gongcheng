@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "page-header": "../../components/PageHeader",
+    "loading-overlay": "../../components/LoadingOverlay"
+  }
+}

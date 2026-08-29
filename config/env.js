@@ -1,0 +1,1 @@
+"use strict";const _=({}.VITE_API_BASE_URL||"https://api.shuiliyingxiang.cn").replace(/\/$/,"");exports.API_BASE_URL=_,exports.BUILD_CHANNEL="__ENGINEERING_API_REAL__",exports.EMPTY_PROJECT={id:"",name:"尚未选择工程",code:""},exports.WECHAT_APP_ID="wx8ad581f01bf4b09f";

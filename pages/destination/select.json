@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "page-header": "../../components/PageHeader",
+    "ui-icon": "../../components/UiIcon"
+  }
+}

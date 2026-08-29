@@ -1,0 +1,1 @@
+"use strict";let e=null,t=null,n=0;exports.notifyAuthExpired=function(r){return t||(!e||Date.now()-n<5e3?Promise.resolve():(n=Date.now(),t=e(r).finally(()=>{t=null}),t))},exports.registerAuthExpiredHandler=function(t){e=t};
