@@ -704,12 +704,29 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(settings["print_caption_font_size"], 10.0)
         self.assertEqual(settings["print_caption_size_mm"], 7.5)
         self.assertIn("photographer", settings["print_caption_fields"])
+        self.assertIn("part_name", settings["print_caption_fields"])
+        legacy_print_fields = self.desktop._normalize_engineering_settings({
+            "print_caption_fields": ["title", "id", "photo_date"],
+        })
+        self.assertEqual(
+            legacy_print_fields["print_caption_fields"],
+            ["title", "id", "part_name", "photo_date"],
+        )
+        explicit_fields = self.desktop._normalize_engineering_settings({
+            "print_caption_fields": ["title", "id", "photo_date"],
+            "print_caption_fields_schema_version": 2,
+        })
+        self.assertNotIn("part_name", explicit_fields["print_caption_fields"])
 
         with self.desktop.app.test_request_context("/?style=custom&image_fit=cover"):
             custom = self.desktop.print_settings_from_request()
         self.assertEqual(custom["print_image_fit"], "cover")
 
-        project = {"project_code": "PRINT-CHECK", "project_name": "打印验收单元"}
+        project = {
+            "project_code": "PRINT-CHECK",
+            "project_name": "打印验收单元",
+            "source_fields": {"分部工程名称": "左岸连接工程"},
+        }
         photos = self.desktop.enrich_print_photos(project, [{
             "id": "PRINT-CHECK-SY001",
             "title": "四边完整验收照片",
@@ -744,6 +761,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn("object-fit: contain", rendered)
         self.assertIn("font-size: 10.0px", rendered)
         self.assertIn('class="pr-90"', rendered)
+        self.assertIn("分部工程：左岸连接工程", rendered)
         self.assertIn("摄影者：张三", rendered)
 
     def test_single_photo_print_is_centered_and_keeps_selected_photo_size(self):

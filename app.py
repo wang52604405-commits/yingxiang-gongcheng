@@ -172,7 +172,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_vertical_gap_mm": 2.0,
     "print_image_fit": "contain",
     "print_show_page_title": True,
-    "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+    "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     "last_print_settings": {},
     "watermark_ocr_enabled": True,
     "photo_detail_fields": [
@@ -758,11 +758,20 @@ def _normalize_engineering_settings(settings):
             settings[field] = default_value
     settings["print_image_fit"] = settings.get("print_image_fit") if settings.get("print_image_fit") in {"cover", "contain"} else "contain"
     settings["print_show_page_title"] = bool(settings.get("print_show_page_title", True))
-    allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+    allowed_caption_fields = {"id", "title", "project_name", "part_name", "photo_date", "photographer", "description"}
     caption_fields = settings.get("print_caption_fields")
     if not isinstance(caption_fields, list):
-        caption_fields = ["title", "id", "photo_date", "photographer"]
-    settings["print_caption_fields"] = [field for field in caption_fields if field in allowed_caption_fields]
+        caption_fields = ["title", "id", "part_name", "photo_date", "photographer"]
+    caption_fields = [field for field in caption_fields if field in allowed_caption_fields]
+    try:
+        caption_schema_version = int(settings.get("print_caption_fields_schema_version") or 1)
+    except (TypeError, ValueError):
+        caption_schema_version = 1
+    if caption_schema_version < 2 and "part_name" not in caption_fields:
+        insertion_index = caption_fields.index("id") + 1 if "id" in caption_fields else len(caption_fields)
+        caption_fields.insert(insertion_index, "part_name")
+    settings["print_caption_fields"] = caption_fields
+    settings["print_caption_fields_schema_version"] = 2
     last_print = settings.get("last_print_settings")
     allowed_last_print_fields = {
         "layout", "page_size", "single_alignment", "photo_preset", "photo_width_cm",
@@ -852,8 +861,9 @@ def write_engineering_settings(payload):
     current["print_image_fit"] = payload.get("print_image_fit") if payload.get("print_image_fit") in {"cover", "contain"} else current.get("print_image_fit", "contain")
     current["print_show_page_title"] = bool(payload.get("print_show_page_title", current.get("print_show_page_title", True)))
     if isinstance(payload.get("print_caption_fields"), list):
-        allowed_caption_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+        allowed_caption_fields = {"id", "title", "project_name", "part_name", "photo_date", "photographer", "description"}
         current["print_caption_fields"] = [field for field in payload.get("print_caption_fields") if field in allowed_caption_fields]
+        current["print_caption_fields_schema_version"] = 2
     if isinstance(payload.get("last_print_settings"), dict):
         allowed_last_print_fields = {
             "layout", "page_size", "single_alignment", "photo_preset", "photo_width_cm",
@@ -3387,7 +3397,7 @@ PRINT_STYLE_DEFAULTS = {
         "print_vertical_gap_mm": 2.0,
         "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     },
     "portrait2": {
         "print_layout": "portrait",
@@ -3406,7 +3416,7 @@ PRINT_STYLE_DEFAULTS = {
         "print_vertical_gap_mm": 4.0,
         "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     },
     "landscape2": {
         "print_layout": "landscape",
@@ -3423,7 +3433,7 @@ PRINT_STYLE_DEFAULTS = {
         "print_vertical_gap_mm": 2.0,
         "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     },
     "single": {
         "print_layout": "landscape",
@@ -3443,7 +3453,7 @@ PRINT_STYLE_DEFAULTS = {
         "print_vertical_gap_mm": 2.0,
         "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "photo_date", "photographer"],
+        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
     },
 }
 
@@ -3492,10 +3502,10 @@ def print_settings_from_request():
     settings["print_image_fit"] = image_fit if image_fit in {"cover", "contain"} else "contain"
     show_page_title = str(request.args.get("show_page_title", "1" if settings.get("print_show_page_title", True) else "0")).lower()
     settings["print_show_page_title"] = show_page_title not in {"0", "false", "no", "off"}
-    allowed_fields = {"id", "title", "project_name", "photo_date", "photographer", "description"}
+    allowed_fields = {"id", "title", "project_name", "part_name", "photo_date", "photographer", "description"}
     raw_fields = request.args.get("caption_fields")
     if raw_fields is None:
-        fields = settings.get("print_caption_fields") or ["title", "id", "photo_date", "photographer"]
+        fields = settings.get("print_caption_fields") or ["title", "id", "part_name", "photo_date", "photographer"]
     else:
         fields = [item.strip() for item in str(raw_fields).split(",") if item.strip()]
     settings["print_caption_fields"] = [field for field in fields if field in allowed_fields]
@@ -3509,13 +3519,25 @@ def print_photo_ids_from_request():
     return {item.strip() for item in raw.split(",") if item.strip()}
 
 
-def photo_detail_rows(project, photo, print_settings=None):
-    settings = read_engineering_settings()
-    fields = settings.get("photo_detail_fields") or DEFAULT_ENGINEERING_SETTINGS["photo_detail_fields"]
+def _print_photo_source(project, photo):
+    """合并照片与工程层级，供打印信息字段稳定读取。"""
     source = {}
     source.update(project.get("source_fields", {}) if isinstance(project, dict) else {})
     source.update(project or {})
     source.update(photo or {})
+    if not str(source.get("part_name") or "").strip():
+        source["part_name"] = str(
+            source.get("分部工程名称")
+            or source.get("分项工程名称")
+            or ""
+        ).strip()
+    return source
+
+
+def photo_detail_rows(project, photo, print_settings=None):
+    settings = read_engineering_settings()
+    fields = settings.get("photo_detail_fields") or DEFAULT_ENGINEERING_SETTINGS["photo_detail_fields"]
+    source = _print_photo_source(project, photo)
     rows = []
     for field in fields:
         label = str(field.get("label") or "").strip()
@@ -3540,14 +3562,12 @@ def photo_detail_rows(project, photo, print_settings=None):
         "title": "题名",
         "id": "编号",
         "project_name": "单元工程",
+        "part_name": "分部工程",
         "photo_date": "拍摄日期",
         "photographer": "摄影人",
         "description": "描述",
     }
-    source = {}
-    source.update(project.get("source_fields", {}) if isinstance(project, dict) else {})
-    source.update(project or {})
-    source.update(photo or {})
+    source = _print_photo_source(project, photo)
     filtered = []
     for key in allowed:
         row = row_by_source.get(key)

@@ -4953,10 +4953,10 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
-      default: { style: "default", layout: "landscape", page_size: "4", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
-      single: { style: "single", layout: "landscape", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,photo_date,photographer" },
+      default: { style: "default", layout: "landscape", page_size: "4", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      single: { style: "single", layout: "landscape", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
       last: null,
       custom: null
     };
@@ -5062,7 +5062,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#printSetupVerticalGap").value = settings.print_vertical_gap_mm ?? 2;
       $("#printSetupImageFit").value = settings.print_image_fit || "contain";
       $("#printSetupShowPageTitle").value = settings.print_show_page_title === false ? "0" : "1";
-      const fields = new Set(settings.print_caption_fields || ["title", "id", "photo_date", "photographer"]);
+      const fields = new Set(settings.print_caption_fields || ["title", "id", "part_name", "photo_date", "photographer"]);
       document.querySelectorAll("[data-print-caption-field]").forEach((input) => { input.checked = fields.has(input.value); });
       syncPrintSetupPreset();
       syncPrintSingleAlignment();
