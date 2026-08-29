@@ -7611,6 +7611,20 @@
       align-content: start;
       padding-bottom: 4px;
     }
+    /* 单元照片不再按视口强行占满：一两张时紧贴卡片内容，多张时才出现
+       本栏滚动，后续工序区随内容自然上移。工序栏保留独立高度，避免多工序
+       的照片同时展开时把整个单元详情拉得失控。 */
+    #unitView .unit-photo-section:not(.is-collapsed) {
+      height: auto;
+      max-height: min(68vh, 620px);
+      grid-template-rows: auto auto auto;
+      align-self: start;
+    }
+    #unitView .unit-photo-section:not(.is-collapsed) .photos {
+      height: auto;
+      max-height: min(56vh, 520px);
+      overflow-y: auto;
+    }
     #unitView .process-photo-section {
       height: min(64vh, 650px);
       max-height: min(64vh, 650px);
