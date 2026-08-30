@@ -25,6 +25,10 @@ if (bundle.includes('__ENGINEERING_API_MOCK__')) throw new Error('微信构建�
 for (const marker of ['mockRequest', 'mockUpload', 'samplePhotos']) {
   if (bundle.includes(marker)) throw new Error(`微信正式构建混入 Mock 样例标识：${marker}`)
 }
+const compressionBundle = readFileSync(join(output, 'services', 'image-compression.js'), 'utf8')
+if (compressionBundle.includes('require("./queue-policy.js")')) {
+  throw new Error('图片压缩包依赖 queue-policy 模块；真机缓存异常时会中断 1MB 上传图生成')
+}
 const projectConfig = JSON.parse(readFileSync(join(output, 'project.config.json'), 'utf8'))
 if (!projectConfig.libVersion || Number(projectConfig.libVersion.split('.')[0]) < 2 || (projectConfig.libVersion.startsWith('2.') && Number(projectConfig.libVersion.split('.')[1]) < 25)) {
   throw new Error('微信基础库必须为 2.25.0 或更高，才能一次选择 20 张照片')

@@ -1,16 +1,44 @@
-import {
-  MAX_JPEG_QUALITY,
-  MAX_PREVIEW_BYTES,
-  MAX_TRANSFER_BYTES,
-  MIN_JPEG_QUALITY,
-  fitWithinMaxEdge,
-  isPreviewWithinLimit,
-  isTransferWithinLimit,
-  shrinkDimensions,
-  TRANSFER_INITIAL_MAX_EDGE,
-  type Dimensions,
-} from './queue-policy'
 import { readFilePrefix } from './sha256'
+
+/**
+ * 图片处理运行在微信原生文件线程。这里必须保持独立，不能依赖队列策略模块：
+ * 部分真机缓存过旧模块时会让 CommonJS require 返回 undefined，进而导致压缩在
+ * 读取 MIN_JPEG_QUALITY 前中断。队列仍会在上传前做同样的 1MB 复核。
+ */
+const MAX_PREVIEW_BYTES = 102_400
+const MAX_TRANSFER_BYTES = 1024 * 1024
+const INITIAL_MAX_EDGE = 1_920
+const TRANSFER_INITIAL_MAX_EDGE = 2_560
+const MIN_JPEG_QUALITY = 30
+const MAX_JPEG_QUALITY = 90
+const RESIZE_FACTOR = 0.85
+
+interface Dimensions {
+  width: number
+  height: number
+}
+
+function fitWithinMaxEdge(width: number, height: number, maxEdge = INITIAL_MAX_EDGE): Dimensions {
+  const edge = Math.max(width, height)
+  if (edge <= maxEdge) return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) }
+  const ratio = maxEdge / edge
+  return { width: Math.max(1, Math.round(width * ratio)), height: Math.max(1, Math.round(height * ratio)) }
+}
+
+function shrinkDimensions(dimensions: Dimensions): Dimensions {
+  return {
+    width: Math.max(1, Math.round(dimensions.width * RESIZE_FACTOR)),
+    height: Math.max(1, Math.round(dimensions.height * RESIZE_FACTOR)),
+  }
+}
+
+function isPreviewWithinLimit(size: number): boolean {
+  return Number.isFinite(size) && size > 0 && size <= MAX_PREVIEW_BYTES
+}
+
+function isTransferWithinLimit(size: number): boolean {
+  return Number.isFinite(size) && size > 0 && size <= MAX_TRANSFER_BYTES
+}
 
 interface ImageInfo {
   path: string
