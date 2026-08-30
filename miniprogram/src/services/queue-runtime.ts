@@ -1237,7 +1237,9 @@ async function deleteFailed(photoUuid: string): Promise<void> {
   photo.preview_retry_attempts = undefined
   photo.preview_next_retry_at = undefined
   photo.local_deleted_at = now()
-  setStatus(photo, 'local_deleted')
+  // 删除入口已先严格确认是 failed。这里不再依赖状态表的配置，避免旧包或
+  // 合并时遗漏 failed -> local_deleted 后，文件删完却无法更新队列状态。
+  setStatus(photo, 'local_deleted', true)
   queueFileStore.clearOriginalWal(photo.owner_account_id, photo.photo_uuid)
   persist(photo.owner_account_id)
 }
