@@ -296,6 +296,49 @@ describe('原图优先落盘与账号隔离队列', () => {
     })
   })
 
+  it('旧版本仅留下原图的预览超时照片会自动改走 1MB 新链路', async () => {
+    const photo = localPhoto('32', 'preview-timeout-original-only')
+    photo.status = 'failed'
+    photo.retry_from = 'local_ready'
+    photo.failure_code = 'IMAGE_PROCESS_TIMEOUT'
+    photo.error = '原图已安全保存；生成 100KB 本机预览超时，请点击重试'
+    photo.preparation_pending = true
+    photo.preview_path = ''
+    photo.preview_size = 0
+    photo.preview_sha256 = ''
+    delete photo.transfer_path
+    delete photo.transfer_size
+    delete photo.transfer_sha256
+    delete photo.transfer_filename
+    delete photo.transfer_width
+    delete photo.transfer_height
+    const batch = localBatch(photo)
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, false)
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      preparation_pending: true,
+      error: '已升级上传方式，正在恢复 1MB 上传图',
+      failure_code: undefined,
+    })
+
+    await queueRuntime.resume('app-show')
+    expect(mocks.prepareTransferImage).toHaveBeenCalledWith('/user/32-original.jpg', '32.jpg')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      original_path: '',
+      transfer_path: '/user/transfer.jpg',
+      preparation_pending: false,
+    })
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+  })
+
   it('旧队列只有原图时自动迁移为 1MB JPEG 归档图，且不伪造相册来源', async () => {
     const photo = localPhoto('32', 'legacy-original-only')
     photo.status = 'uploading'

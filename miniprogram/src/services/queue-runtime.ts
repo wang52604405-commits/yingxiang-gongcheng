@@ -874,17 +874,27 @@ function hydrate(): void {
   const storedPhotos = stored?.owner_account_id === owner && Array.isArray(stored.photos) ? stored.photos : []
   const storedBatches = stored?.owner_account_id === owner && Array.isArray(stored.batches) ? stored.batches : []
   state.photos.splice(0, state.photos.length, ...storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
-    // 旧版本在“本机预览”步骤超时的照片，1MB 上传图已经准备完成。
-    // 升级后直接恢复为待上传，不要求用户删除重拍。
-    const previewOnlyTimeout = Boolean(
+    // 旧版本会在手机端再生成 100KB 预览。它超时后，可能已经有可用的
+    // 1MB 上传图，也可能只留下了安全保存的原图；两种情况都不能永久
+    // 停留在旧版“正在生成本机预览”。前者直接上传，后者改走新版 1MB
+    // 归档图流程，保留原图且不要求用户删除重拍。
+    const legacyPreviewTimeout = Boolean(
       photo.status === 'failed'
       && photo.failure_code === 'IMAGE_PROCESS_TIMEOUT'
       && photo.retry_from === 'local_ready'
+      && !photo.preview_path,
+    )
+    const previewOnlyTimeout = Boolean(
+      legacyPreviewTimeout
       && photo.transfer_path
       && photo.transfer_sha256
       && photo.transfer_filename
       && isTransferWithinLimit(Number(photo.transfer_size || 0))
-      && !photo.preview_path,
+    )
+    const legacyOriginalTimeout = Boolean(
+      legacyPreviewTimeout
+      && !previewOnlyTimeout
+      && photo.original_path,
     )
     const recoveredStatus = recoverInterruptedStatus(photo.status)
     const needsTransferMigration = Boolean(photo.original_path && !photo.transfer_path && (
@@ -894,13 +904,13 @@ function hydrate(): void {
     return {
       ...photo,
       draft: { ...photo.draft, transfer_profile: photo.draft.transfer_profile || 'jpeg_1m' },
-      status: previewOnlyTimeout ? 'local_ready' : recoveredStatus,
+      status: (previewOnlyTimeout || legacyOriginalTimeout) ? 'local_ready' : recoveredStatus,
       progress: photo.status === 'uploading' ? 0 : photo.progress,
-      preparation_pending: previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration),
-      error: previewOnlyTimeout ? undefined : photo.error,
-      retryable: previewOnlyTimeout ? undefined : photo.retryable,
-      retry_from: previewOnlyTimeout ? undefined : photo.retry_from,
-      failure_code: previewOnlyTimeout ? undefined : photo.failure_code,
+      preparation_pending: legacyOriginalTimeout ? true : (previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration)),
+      error: legacyOriginalTimeout ? '已升级上传方式，正在恢复 1MB 上传图' : (previewOnlyTimeout ? undefined : photo.error),
+      retryable: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.retryable,
+      retry_from: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.retry_from,
+      failure_code: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.failure_code,
     }
   }))
   state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => ({
