@@ -4,7 +4,9 @@ import { runtimeRequest, runtimeUpload } from '@api-runtime'
 import { buildPhotoUploadForm, type PhotoUploadMetadata } from './contracts'
 
 const TOKEN_KEY = 'engineering-image:auth-token:v1'
-export const DIRECT_UPLOAD_WATCHDOG_MS = 60_000
+// 服务端会在接收原图后生成预览。弱网下给原生 uploadFile 足够的时间，
+// 由任务自身的 timeout 与此看门狗共同确保不会永久卡住。
+export const DIRECT_UPLOAD_WATCHDOG_MS = 125_000
 
 export class ApiError extends Error {
   code: string
@@ -110,7 +112,7 @@ export async function apiUploadPhoto(
       if (settled) return
       settled = true
       try { task?.abort?.() } catch { /* 超时本身已能释放队列，abort 失败不应覆盖原错误。 */ }
-      reject(new ApiError('照片上传超时，1MB 归档图仍保存在本机，请重试', 'UPLOAD_TIMEOUT', true, 408))
+      reject(new ApiError('原图上传超时，原图仍保存在本机，请重试', 'UPLOAD_TIMEOUT', true, 408))
     }, DIRECT_UPLOAD_WATCHDOG_MS)
     try {
       task = uni.uploadFile({
@@ -119,7 +121,7 @@ export async function apiUploadPhoto(
         name: 'file',
         formData: buildPhotoUploadForm(metadata),
         header: token ? { Authorization: `Bearer ${token}` } : {},
-        timeout: 55_000,
+        timeout: 120_000,
         success: (response) => {
           let body: any
           try {

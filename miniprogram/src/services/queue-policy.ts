@@ -3,7 +3,10 @@ export const MAX_TRANSFER_BYTES = 1024 * 1024
 export const MAX_ORIGINAL_BYTES = 50 * 1024 * 1024
 export const MAX_QUEUE_BYTES = 160 * 1024 * 1024
 export const MAX_UPLOAD_CONCURRENCY = 2
-export const DIRECT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024
+// 与服务端 MOBILE_DIRECT_UPLOAD_MAX_BYTES 保持一致。微信原生 uploadFile
+// 对普通手机照片比把 ArrayBuffer 塞进 request 更稳定；超过这个边界才启用
+// 可断点续传的分片协议。
+export const DIRECT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 export const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 export const INITIAL_MAX_EDGE = 1_920
 export const TRANSFER_INITIAL_MAX_EDGE = 2_560

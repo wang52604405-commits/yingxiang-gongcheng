@@ -542,7 +542,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', transfer_path: '', preview_path: '/user/32-preview.jpg' })
   })
 
-  it('新采集原图不走手机压缩，直接分片上传并在服务器保存后释放本机原图', async () => {
+  it('10MB 以内的新采集原图不走手机压缩，直接用微信原生上传并在服务器保存后释放本机原图', async () => {
     const photo = localPhoto('32', 'raw-original-upload')
     photo.status = 'local_ready'
     photo.remote_batch_id = undefined
@@ -563,7 +563,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     ]])
     const unlink = installPlatform(storage, true)
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'raw-batch' })
-    mocks.uploadPhotoInChunks.mockResolvedValue({ ok: true })
+    mocks.uploadPhoto.mockResolvedValue({ ok: true })
     mocks.commitBatch.mockResolvedValue({ ok: true })
 
     const { queueRuntime } = await import('@/services/queue-runtime')
@@ -571,25 +571,55 @@ describe('原图优先落盘与账号隔离队列', () => {
     await queueRuntime.resume('app-show')
 
     expect(mocks.prepareTransferImage).not.toHaveBeenCalled()
-    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
-    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
-      batchId: 'raw-batch',
-      filePath: '/user/32-original.jpg',
-      metadata: expect.objectContaining({
-        photo_uuid: 'raw-original-upload',
-        sha256: 'd'.repeat(64),
-        original_size_bytes: 3_000_000,
-        original_filename: '32.jpg',
-        original_mime_type: 'image/jpeg',
-      }),
-    }))
-    const metadata = mocks.uploadPhotoInChunks.mock.calls[0][0].metadata
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('raw-batch', '/user/32-original.jpg', expect.objectContaining({
+      photo_uuid: 'raw-original-upload',
+      sha256: 'd'.repeat(64),
+      original_size_bytes: 3_000_000,
+      original_filename: '32.jpg',
+      original_mime_type: 'image/jpeg',
+    }), expect.any(Function))
+    expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
+    const metadata = mocks.uploadPhoto.mock.calls[0][2]
     expect(metadata).not.toHaveProperty('transfer_profile')
     expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
     expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', original_path: '' })
   })
 
-  it('旧传输图失效时回退为原图分片上传，不再卡死或要求重拍', async () => {
+  it('超过 10MB 的原图才走可续传分片，避免单次上传超限', async () => {
+    const photo = localPhoto('32', 'raw-chunked-upload')
+    photo.status = 'local_ready'
+    photo.remote_batch_id = undefined
+    photo.original_size = 11 * 1024 * 1024
+    photo.original_sha256 = ''
+    delete photo.transfer_path
+    delete photo.transfer_size
+    delete photo.transfer_sha256
+    delete photo.transfer_filename
+    const batch = localBatch(photo)
+    batch.remote_batch_id = undefined
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    installPlatform(storage, true)
+    mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'chunked-batch' })
+    mocks.uploadPhotoInChunks.mockResolvedValue({ ok: true })
+    mocks.commitBatch.mockResolvedValue({ ok: true })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+
+    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
+    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: 'chunked-batch',
+      filePath: '/user/32-original.jpg',
+      metadata: expect.objectContaining({ original_size_bytes: 11 * 1024 * 1024 }),
+    }))
+  })
+
+  it('旧传输图失效时回退为原图直传，不再卡死或要求重拍', async () => {
     const photo = localPhoto('32', 'photo-large')
     photo.status = 'local_ready'
     photo.transfer_size = 1024 * 1024 + 1
@@ -603,22 +633,18 @@ describe('原图优先落盘与账号隔离队列', () => {
     ]])
     installPlatform(storage, true)
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'large-batch' })
-    mocks.uploadPhotoInChunks.mockResolvedValue({ ok: true })
+    mocks.uploadPhoto.mockResolvedValue({ ok: true })
     mocks.commitBatch.mockResolvedValue({ ok: true })
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
     expect(mocks.createBatch).toHaveBeenCalledWith(expect.objectContaining({ transfer_profile: undefined }))
-    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
-    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
-      batchId: 'large-batch',
-      filePath: '/user/32-original.jpg',
-      metadata: expect.objectContaining({
-        original_size_bytes: 3_000_000,
-        original_filename: '32.jpg',
-      }),
-    }))
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('large-batch', '/user/32-original.jpg', expect.objectContaining({
+      original_size_bytes: 3_000_000,
+      original_filename: '32.jpg',
+    }), expect.any(Function))
+    expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'desktop_pending',
       original_path: '',

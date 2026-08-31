@@ -551,9 +551,10 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       capture_source: photo.draft.capture_source,
       ...(legacyTransfer ? { transfer_profile: 'jpeg_1m' as const } : {}),
     }
-    // 原图无论大小都经分片接口发送，避免 4MB 以上请求受手机和网关限制；
-    // 老队列已经生成的 1MB 归档图保持兼容，仍可走旧的直传接口。
-    if (legacyTransfer && !requiresChunkedUpload(size)) {
+    // 10MB 以内使用微信原生 uploadFile：它直接接收文件路径，有可靠的上传
+    // 进度与超时控制。只有较大的原图才转换为可续传的二进制分片请求。
+    // 老队列已经生成的 1MB 归档图同样保持兼容。
+    if (!requiresChunkedUpload(size)) {
       photo.upload_mode = 'direct'
       persist(owner)
       await mobileApi.uploadPhoto(batch.remote_batch_id!, filePath, metadata, (progress) => {

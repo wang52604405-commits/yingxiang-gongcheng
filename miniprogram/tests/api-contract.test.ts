@@ -155,7 +155,7 @@ describe('移动端 API v1 契约', () => {
     expect(photo.thumb_url).toBe(signed)
   })
 
-  it('1MB 归档 JPEG 直传使用微信单请求安全超时并携带传输规格', async () => {
+  it('10MB 以内原图使用微信原生直传、长超时并保留传输规格兼容', async () => {
     const uploadFile = vi.fn((options: any) => {
       options.success({ statusCode: 200, data: '{"ok":true}' })
       return { onProgressUpdate: vi.fn() }
@@ -176,7 +176,7 @@ describe('移动端 API v1 契约', () => {
       capture_source: 'camera',
       transfer_profile: 'jpeg_1m',
     })
-    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/user/archive.jpg', name: 'file', timeout: 55_000 }))
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/user/archive.jpg', name: 'file', timeout: 120_000 }))
     expect(uploadFile.mock.calls[0][0].formData.photo_uuid).toBe('photo-timeout')
     expect(uploadFile.mock.calls[0][0].formData.transfer_profile).toBe('jpeg_1m')
   })
