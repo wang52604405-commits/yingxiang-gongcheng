@@ -76,8 +76,8 @@ describe('采集权限入口覆盖', () => {
   it('产品版本已进入 V1.3', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.3.6')
-    expect(manifest.versionName).toBe('1.3.6')
-    expect(source('src/pages/profile/index.vue')).toContain('工程影像 V1.3.6 · 上传引擎 1.3.6')
+    expect(pkg.version).toBe('1.3.7')
+    expect(manifest.versionName).toBe('1.3.7')
+    expect(source('src/pages/profile/index.vue')).toContain('工程影像 V1.3.7 · 上传引擎 1.3.7')
   })
 })

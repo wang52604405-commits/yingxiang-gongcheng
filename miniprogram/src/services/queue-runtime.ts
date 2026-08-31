@@ -41,7 +41,9 @@ let networkListenerRegistered = false
 let ownerGeneration = 0
 let foregroundTimer: ReturnType<typeof setInterval> | null = null
 const AUTO_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000] as const
-export const IMAGE_PREPARATION_STEP_TIMEOUT_MS = 60_000
+// 图片压缩器自身已经有 8 秒回调超时和备用路径；这里仅作为整步保险，
+// 不能让“正在恢复上传图”在界面上停留一分钟以上。
+export const IMAGE_PREPARATION_STEP_TIMEOUT_MS = 25_000
 const FILE_DELETE_CALLBACK_TIMEOUT_MS = 3_000
 const preparationTasks = new Map<string, Promise<boolean>>()
 let preparationTail: Promise<void> = Promise.resolve()

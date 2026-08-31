@@ -52,7 +52,7 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
     const adapter: CompressionAdapter = {
       getImageInfo: async () => ({ path: '/user/original.bin', width: 4_000, height: 3_000, orientation: 'up', type: 'png' }),
       renderJpeg: async (_path, dimensions, quality) => `${dimensions.width}-${quality}`,
-      getFileSize: async (path) => path === '/user/original.bin' ? 8_000_000 : Number(path.split('-').at(-1)) * 2_000,
+      getFileSize: async (path) => path === '/user/original.bin' ? 8_000_000 : Number(path.split('-').at(-1)) * 1_360,
       persist,
     }
     const original = await persistOriginalSource('/tmp/IMG_20260825.png', adapter)
@@ -60,7 +60,7 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
     expect(original).toEqual({ originalPath: '/user/original.bin', originalSize: 8_000_000, originalFilename: 'IMG_20260825.png' })
     const preview = await preparePreview(original.originalPath, original.originalFilename, '2026-08-25T01:41:00Z', adapter)
     expect(preview.originalMimeType).toBe('image/png')
-    expect(preview.previewTempPath.endsWith('-51')).toBe(true)
+    expect(preview.previewTempPath.endsWith('-75')).toBe(true)
     expect(preview.previewSize).toBe(102_000)
   })
 
@@ -71,7 +71,7 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
       getImageInfo: async () => ({ path: '/user/original.jpg', width: 1_920, height: 1_440, orientation: 1, type: 'jpg' }),
       renderJpeg: async (_path, dimensions, quality) => {
         const key = `${dimensions.width}-${quality}`
-        sizes.set(key, dimensions.width === 1_920 ? 130_000 : quality * 1_500)
+        sizes.set(key, dimensions.width === 1_920 ? 130_000 : quality * 1_250)
         return key
       },
       getFileSize: async (path) => path.startsWith('/user/preview') ? 102_401 : sizes.get(path)!,
@@ -92,7 +92,7 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
       getImageInfo: async () => ({ path: '/user/source.png', width: 4_000, height: 3_000, orientation: 1, type: 'png' }),
       renderJpeg: async (_path, dimensions, quality) => {
         const path = `/tmp/${dimensions.width}-${quality}.jpg`
-        sizes.set(path, quality === 90 ? 1_048_576 : quality * 10_000)
+        sizes.set(path, quality === 75 ? 1_048_576 : quality * 10_000)
         return path
       },
       getFileSize: async (path) => sizes.get(path) ?? 1_048_576,
@@ -119,7 +119,7 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
     expect(remove).toHaveBeenCalledWith('/user/archive.jpg')
   })
 
-  it('质量搜索只保留最终 JPEG 候选，其余临时图立即清理', async () => {
+  it('超限时只生成每一尺寸的一张 JPEG，并立即清理被淘汰的临时图', async () => {
     const rendered: string[] = []
     const remove = vi.fn(async (_path: string) => undefined)
     const adapter: CompressionAdapter = {
@@ -129,14 +129,17 @@ describe('原图安全落盘与 JPEG 本机预览', () => {
         rendered.push(path)
         return path
       },
-      getFileSize: async (path) => Number(path.match(/-(\d+)\.jpg$/)?.[1] || 0) * 2_000,
+      getFileSize: async (path) => {
+        const width = Number(path.match(/tmp\/(\d+)-/)?.[1] || 0)
+        return width >= 1_000 ? 130_000 : 90_000
+      },
       persist: async (path) => path,
       remove,
     }
 
     const prepared = await preparePreview('/user/source.jpg', 'source.jpg', '2026-08-25T01:41:00Z', adapter)
     const discarded = rendered.filter((path) => path !== prepared.previewTempPath)
-    expect(discarded.length).toBeGreaterThan(0)
+    expect(discarded.length).toBe(1)
     expect(remove.mock.calls.map(([path]) => path).sort()).toEqual([...new Set(discarded)].sort())
     expect(remove).not.toHaveBeenCalledWith(prepared.previewTempPath)
     expect(remove).not.toHaveBeenCalledWith('/user/source.jpg')

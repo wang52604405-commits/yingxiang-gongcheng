@@ -11,7 +11,14 @@ const INITIAL_MAX_EDGE = 1_920
 const TRANSFER_INITIAL_MAX_EDGE = 2_560
 const MIN_JPEG_QUALITY = 30
 const MAX_JPEG_QUALITY = 90
+// 真机上传只需要稳定生成一张合规 JPEG。过去为了在每个像素尺寸上寻找
+// “最高质量”，会连续调用原生压缩器 6～7 次；部分 Android 机型会在其中
+// 任一次不再回调，整张照片便永久停在准备状态。固定质量、按尺寸递减一次
+// 一次压缩，视觉质量仍足够，而原生调用次数大幅下降。
+const STABLE_JPEG_QUALITY = 75
 const RESIZE_FACTOR = 0.85
+const NATIVE_COMPRESS_CALLBACK_TIMEOUT_MS = 8_000
+const CANVAS_COMPRESS_CALLBACK_TIMEOUT_MS = 8_000
 
 interface Dimensions {
   width: number
@@ -254,17 +261,35 @@ function renderWithNativeCompressor(path: string, dimensions: Dimensions, qualit
   const uniApi = typeof uni === 'undefined' ? null : (uni as any)
   const compressor = wxApi?.compressImage || uniApi?.compressImage
   if (!compressor) return Promise.reject(new Error('当前微信基础库不支持图片压缩，请升级微信后重试'))
-  return wxPromise((success, fail) => compressor.call(wxApi?.compressImage ? wxApi : uniApi, {
-    src: path,
-    quality,
-    compressedWidth: dimensions.width,
-    compressedHeight: dimensions.height,
-    success: (result: { tempFilePath?: string }) => {
-      if (result?.tempFilePath) success(result.tempFilePath)
-      else fail(new Error('微信图片压缩未返回文件'))
-    },
-    fail,
-  }))
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error?: unknown, result?: { tempFilePath?: string }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) {
+        reject(error)
+      } else if (result?.tempFilePath) {
+        resolve(result.tempFilePath)
+      } else {
+        reject(new Error('微信图片压缩未返回文件'))
+      }
+    }
+    const timer = setTimeout(() => finish(new Error('微信图片压缩 8 秒未返回')),
+      NATIVE_COMPRESS_CALLBACK_TIMEOUT_MS)
+    try {
+      compressor.call(wxApi?.compressImage ? wxApi : uniApi, {
+        src: path,
+        quality,
+        compressedWidth: dimensions.width,
+        compressedHeight: dimensions.height,
+        success: (result: { tempFilePath?: string }) => finish(undefined, result),
+        fail: (error: unknown) => finish(error),
+      })
+    } catch (error) {
+      finish(error)
+    }
+  })
 }
 
 function renderWithOffscreenCanvas(path: string, dimensions: Dimensions, quality: number): Promise<string> {
@@ -274,27 +299,42 @@ function renderWithOffscreenCanvas(path: string, dimensions: Dimensions, quality
   }
 
   return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error?: unknown, path?: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else if (path) resolve(path)
+      else reject(new Error('离屏画布压缩未返回文件'))
+    }
+    const timer = setTimeout(() => finish(new Error('离屏画布压缩 8 秒未返回')),
+      CANVAS_COMPRESS_CALLBACK_TIMEOUT_MS)
     try {
       const canvas = wxApi.createOffscreenCanvas({ type: '2d', width: dimensions.width, height: dimensions.height })
       const context = canvas.getContext('2d')
       const image = canvas.createImage()
       image.onload = () => {
-        context.clearRect(0, 0, dimensions.width, dimensions.height)
-        context.drawImage(image, 0, 0, dimensions.width, dimensions.height)
-        wxApi.canvasToTempFilePath({
-          canvas,
-          fileType: 'jpg',
-          quality: quality / 100,
-          destWidth: dimensions.width,
-          destHeight: dimensions.height,
-          success: (result: { tempFilePath: string }) => resolve(result.tempFilePath),
-          fail: reject,
-        })
+        try {
+          context.clearRect(0, 0, dimensions.width, dimensions.height)
+          context.drawImage(image, 0, 0, dimensions.width, dimensions.height)
+          wxApi.canvasToTempFilePath({
+            canvas,
+            fileType: 'jpg',
+            quality: quality / 100,
+            destWidth: dimensions.width,
+            destHeight: dimensions.height,
+            success: (result: { tempFilePath?: string }) => finish(undefined, result.tempFilePath),
+            fail: (error: unknown) => finish(error),
+          })
+        } catch (error) {
+          finish(error)
+        }
       }
-      image.onerror = reject
+      image.onerror = (error: unknown) => finish(error)
       image.src = path
     } catch (error) {
-      reject(error)
+      finish(error)
     }
   })
 }
@@ -371,28 +411,12 @@ async function bestJpegAtDimensions(
   const generated = new Set<string>()
   let keepPath = ''
   try {
-    const minimumPath = await adapter.renderJpeg(sourcePath, dimensions, MIN_JPEG_QUALITY)
-    generated.add(minimumPath)
-    const minimumSize = await adapter.getFileSize(minimumPath)
-    if (!(Number.isFinite(minimumSize) && minimumSize > 0 && minimumSize <= maxBytes)) return null
-
-    let best = { path: minimumPath, size: minimumSize, quality: MIN_JPEG_QUALITY }
-    let low = MIN_JPEG_QUALITY + 1
-    let high = MAX_JPEG_QUALITY
-    while (low <= high) {
-      const quality = Math.floor((low + high) / 2)
-      const path = await adapter.renderJpeg(sourcePath, dimensions, quality)
-      generated.add(path)
-      const size = await adapter.getFileSize(path)
-      if (Number.isFinite(size) && size > 0 && size <= maxBytes) {
-        best = { path, size, quality }
-        low = quality + 1
-      } else {
-        high = quality - 1
-      }
-    }
-    keepPath = best.path
-    return best
+    const path = await adapter.renderJpeg(sourcePath, dimensions, STABLE_JPEG_QUALITY)
+    generated.add(path)
+    const size = await adapter.getFileSize(path)
+    if (!(Number.isFinite(size) && size > 0 && size <= maxBytes)) return null
+    keepPath = path
+    return { path, size, quality: STABLE_JPEG_QUALITY }
   } finally {
     await cleanupGeneratedJpegs(generated, keepPath, sourcePath, adapter)
   }
