@@ -200,11 +200,11 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches).toHaveLength(1)
     expect(queueRuntime.state.photos).toHaveLength(1)
     expect(queueRuntime.state.batches[0].photo_uuids).toEqual([queueRuntime.state.photos[0].photo_uuid])
-    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '', transfer_path: '/user/transfer.jpg', preview_path: '', status: 'local_ready' })
+    expect(queueRuntime.state.photos[0]).toMatchObject({ owner_account_id: '32', original_path: '/user/original-1.jpg', transfer_path: '', preview_path: '', status: 'local_ready' })
     expect(mocks.preparePreview).not.toHaveBeenCalled()
   })
 
-  it('不在手机端生成 100KB 预览，准备好 1MB 上传图后立刻进入待传队列', async () => {
+  it('不在手机端压缩或生成预览，原图立刻进入待传队列', async () => {
     const storage = new Map<string, any>()
     const unlink = installPlatform(storage, false)
     mocks.stageOriginal.mockResolvedValue({ originalPath: '/user/only-original.jpg', originalSize: 9_000_000, originalFilename: 'camera.jpg' })
@@ -213,14 +213,14 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.setOwner('32')
     await queueRuntime.enqueue(['/tmp/camera.jpg'], draft)
     expect(queueRuntime.state.photos[0]).toMatchObject({
-      original_path: '',
-      transfer_path: '/user/transfer.jpg',
+      original_path: '/user/only-original.jpg',
+      transfer_path: '',
       preview_path: '',
       status: 'local_ready',
       preparation_pending: false,
     })
     expect(mocks.preparePreview).not.toHaveBeenCalled()
-    expect(unlink).toHaveBeenCalledWith('/user/only-original.jpg')
+    expect(unlink).not.toHaveBeenCalledWith('/user/only-original.jpg')
   })
 
   it('处理失败的照片可只从本机删除，并清理原图、传输图和预览图', async () => {
@@ -296,7 +296,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     })
   })
 
-  it('旧版本仅留下原图的预览超时照片会自动改走 1MB 新链路', async () => {
+  it('旧版本仅留下原图的预览超时照片会自动改走原图分片链路', async () => {
     const photo = localPhoto('32', 'preview-timeout-original-only')
     photo.status = 'failed'
     photo.retry_from = 'local_ready'
@@ -323,23 +323,22 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.setOwner('32')
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
-      preparation_pending: true,
-      error: '已升级上传引擎，正在恢复 1MB 上传图',
+      preparation_pending: false,
+      error: undefined,
       failure_code: undefined,
     })
 
     await queueRuntime.resume('app-show')
-    expect(mocks.prepareTransferImage).toHaveBeenCalledWith('/user/32-original.jpg', '32.jpg')
+    expect(mocks.prepareTransferImage).not.toHaveBeenCalled()
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
-      original_path: '',
-      transfer_path: '/user/transfer.jpg',
+      original_path: '/user/32-original.jpg',
       preparation_pending: false,
     })
-    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).not.toHaveBeenCalledWith('/user/32-original.jpg')
   })
 
-  it('旧压缩模块配置错误会自动重新生成 1MB 上传图', async () => {
+  it('旧压缩模块配置错误会自动恢复为原图分片上传', async () => {
     const photo = localPhoto('32', 'legacy-compressor-config-error')
     photo.status = 'failed'
     photo.retry_from = 'local_ready'
@@ -365,24 +364,23 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.setOwner('32')
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
-      preparation_pending: true,
-      error: '已升级上传引擎，正在恢复 1MB 上传图',
+      preparation_pending: false,
+      error: undefined,
       failure_code: undefined,
       retry_from: undefined,
     })
 
     await queueRuntime.resume('app-show')
-    expect(mocks.prepareTransferImage).toHaveBeenCalledWith('/user/32-original.jpg', '32.jpg')
+    expect(mocks.prepareTransferImage).not.toHaveBeenCalled()
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
-      original_path: '',
-      transfer_path: '/user/transfer.jpg',
+      original_path: '/user/32-original.jpg',
       preparation_pending: false,
     })
-    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).not.toHaveBeenCalledWith('/user/32-original.jpg')
   })
 
-  it('旧队列只有原图时自动迁移为 1MB JPEG 归档图，且不伪造相册来源', async () => {
+  it('旧队列只有原图时自动迁移为原图分片上传，且不伪造相册来源', async () => {
     const photo = localPhoto('32', 'legacy-original-only')
     photo.status = 'uploading'
     photo.original_size = 4 * 1024 * 1024
@@ -410,15 +408,13 @@ describe('原图优先落盘与账号隔离队列', () => {
 
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
-      original_path: '',
-      transfer_path: '/user/transfer.jpg',
-      transfer_size: 900_000,
+      original_path: '/user/32-original.jpg',
       preparation_pending: false,
     })
-    expect(queueRuntime.state.photos[0].draft).toMatchObject({ transfer_profile: 'jpeg_1m' })
+    expect(queueRuntime.state.photos[0].draft.transfer_profile).toBeUndefined()
     expect(queueRuntime.state.photos[0].draft.capture_source).toBeUndefined()
     expect(queueRuntime.state.batches[0].draft.capture_source).toBeUndefined()
-    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(unlink).not.toHaveBeenCalledWith('/user/32-original.jpg')
     expect(mocks.createBatch).not.toHaveBeenCalled()
   })
 
@@ -546,7 +542,54 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', transfer_path: '', preview_path: '/user/32-preview.jpg' })
   })
 
-  it('传输图超过 1MiB 时不调用任何上传接口', async () => {
+  it('新采集原图不走手机压缩，直接分片上传并在服务器保存后释放本机原图', async () => {
+    const photo = localPhoto('32', 'raw-original-upload')
+    photo.status = 'local_ready'
+    photo.remote_batch_id = undefined
+    photo.original_sha256 = ''
+    photo.original_mime_type = ''
+    delete photo.transfer_path
+    delete photo.transfer_size
+    delete photo.transfer_sha256
+    delete photo.transfer_filename
+    delete photo.transfer_width
+    delete photo.transfer_height
+    const batch = localBatch(photo)
+    batch.remote_batch_id = undefined
+    batch.committed = false
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, true)
+    mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'raw-batch' })
+    mocks.uploadPhotoInChunks.mockResolvedValue({ ok: true })
+    mocks.commitBatch.mockResolvedValue({ ok: true })
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('app-show')
+
+    expect(mocks.prepareTransferImage).not.toHaveBeenCalled()
+    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
+    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: 'raw-batch',
+      filePath: '/user/32-original.jpg',
+      metadata: expect.objectContaining({
+        photo_uuid: 'raw-original-upload',
+        sha256: 'd'.repeat(64),
+        original_size_bytes: 3_000_000,
+        original_filename: '32.jpg',
+        original_mime_type: 'image/jpeg',
+      }),
+    }))
+    const metadata = mocks.uploadPhotoInChunks.mock.calls[0][0].metadata
+    expect(metadata).not.toHaveProperty('transfer_profile')
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', original_path: '' })
+  })
+
+  it('旧传输图失效时回退为原图分片上传，不再卡死或要求重拍', async () => {
     const photo = localPhoto('32', 'photo-large')
     photo.status = 'local_ready'
     photo.transfer_size = 1024 * 1024 + 1
@@ -560,20 +603,26 @@ describe('原图优先落盘与账号隔离队列', () => {
     ]])
     installPlatform(storage, true)
     mocks.createBatch.mockResolvedValue({ ok: true, batch_id: 'large-batch' })
+    mocks.uploadPhotoInChunks.mockResolvedValue({ ok: true })
+    mocks.commitBatch.mockResolvedValue({ ok: true })
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
-    expect(mocks.createBatch).not.toHaveBeenCalled()
+    expect(mocks.createBatch).toHaveBeenCalledWith(expect.objectContaining({ transfer_profile: undefined }))
     expect(mocks.uploadPhoto).not.toHaveBeenCalled()
-    expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
+    expect(mocks.uploadPhotoInChunks).toHaveBeenCalledWith(expect.objectContaining({
+      batchId: 'large-batch',
+      filePath: '/user/32-original.jpg',
+      metadata: expect.objectContaining({
+        original_size_bytes: 3_000_000,
+        original_filename: '32.jpg',
+      }),
+    }))
     expect(queueRuntime.state.photos[0]).toMatchObject({
-      status: 'failed',
-      retryable: false,
-      failure_code: 'TRANSFER_FILE_INVALID',
-      transfer_path: '/user/32-transfer.jpg',
+      status: 'desktop_pending',
+      original_path: '',
     })
-    expect(queueRuntime.state.photos[0].error).toContain('超过限制')
   })
 
   it('可重试的上传网络错误回到待上传，并按退避时间自动续传', async () => {
@@ -949,7 +998,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(unlink).not.toHaveBeenCalled()
   })
 
-  it('成员被移除后停止自动重试且保留本机 1MiB 归档图', async () => {
+  it('成员被移除后停止自动重试且保留本机原图', async () => {
     const photo = localPhoto('32', 'revoked-photo')
     photo.status = 'local_ready'
     photo.remote_batch_id = undefined
@@ -973,7 +1022,7 @@ describe('原图优先落盘与账号隔离队列', () => {
       status: 'failed',
       retryable: false,
       transfer_path: '/user/32-transfer.jpg',
-      error: '已无此工程采集权限；1MB 归档图仍保存在本机',
+      error: '已无此工程采集权限；原图仍保存在本机',
     })
     expect(unlink).not.toHaveBeenCalled()
   })

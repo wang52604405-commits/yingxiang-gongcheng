@@ -7,7 +7,7 @@ afterEach(() => {
 })
 
 describe('照片选择', () => {
-  it('相册默认选择压缩图，不锁定微信原图勾选', async () => {
+  it('相册始终选择原图，由服务器生成预览', async () => {
     const chooseImage = vi.fn(({ success }) => success({ tempFilePaths: ['/tmp/a.jpg', '/tmp/b.jpg'] }))
     ;(globalThis as { wx?: unknown }).wx = {
       requirePrivacyAuthorize: ({ success }: { success: () => void }) => success(),
@@ -20,7 +20,7 @@ describe('照片选择', () => {
     expect(chooseImage).toHaveBeenCalledWith(expect.objectContaining({
       count: 20,
       sourceType: ['album'],
-      sizeType: ['compressed'],
+      sizeType: ['original'],
     }))
   })
 })

@@ -47,7 +47,8 @@ function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
     return `待传图 ${formatBytes(Number(photo.transfer_size || 0))}${preview}`
   }
   if (photo.original_path) {
-    return `原始照片已保存 · 正在准备 1MB 上传图`
+    const phase = photo.status === 'uploading' ? '正在分片上传' : '等待分片上传'
+    return `原始照片 ${formatBytes(photo.original_size)} · ${phase}`
   }
   if (!photo.preview_path) return '归档图已上传 · 预览自动恢复中'
   return `预览 ${formatBytes(photo.preview_size)}`

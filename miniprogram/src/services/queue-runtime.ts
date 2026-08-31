@@ -5,8 +5,8 @@ import type { CreateBatchPayload } from '@/api/contracts'
 import type { Assignment, LocalBatch, LocalPhoto, PhotoStatus, UploadDraft } from '@/types/domain'
 import { createUuid } from './ids'
 import { hashFile } from './sha256'
-import { downloadServerPreview, getSourceFileSize, inspectOriginalSource, persistPreparedTransfer, prepareTransferImage } from './image-compression'
-import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_TRANSFER_BYTES, MAX_UPLOAD_CONCURRENCY, isTransferWithinLimit, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
+import { downloadServerPreview, getSourceFileSize } from './image-compression'
+import { MAX_ORIGINAL_BYTES, MAX_PREVIEW_BYTES, MAX_QUEUE_BYTES, MAX_UPLOAD_CONCURRENCY, isOriginalWithinLimit, isTransferWithinLimit, requiresChunkedUpload, retainedQueueBytes } from './queue-policy'
 import { canTransition, recoverInterruptedStatus } from './photo-state'
 import { notifyAuthExpired } from './auth-expiry-coordinator'
 import { queueFileStore } from './queue-storage'
@@ -41,8 +41,8 @@ let networkListenerRegistered = false
 let ownerGeneration = 0
 let foregroundTimer: ReturnType<typeof setInterval> | null = null
 const AUTO_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000] as const
-// 图片压缩器自身已经有 8 秒回调超时和备用路径；这里仅作为整步保险，
-// 不能让“正在恢复上传图”在界面上停留一分钟以上。
+// 只用于读取文件大小等轻量文件操作。原图上传不再依赖微信的图片压缩回调；
+// 某些真机会让该回调永久不返回，进而使原图从未发出。
 export const IMAGE_PREPARATION_STEP_TIMEOUT_MS = 25_000
 const FILE_DELETE_CALLBACK_TIMEOUT_MS = 3_000
 const preparationTasks = new Map<string, Promise<boolean>>()
@@ -259,7 +259,7 @@ function markFailed(photo: LocalPhoto, error: unknown, retryFrom: PhotoStatus, p
         : undefined
   photo.retry_from = retryFrom
   photo.status = 'failed'
-  const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；1MB 归档图仍保存在本机' : errorMessage(error)
+  const message = isProjectAccessRevoked(error) ? '已无此工程采集权限；原图仍保存在本机' : errorMessage(error)
   photo.error = preparation ? `原图已安全保存；${message}` : message
   photo.failure_code = failureCode
   photo.retryable = isProjectAccessRevoked(error)
@@ -308,7 +308,7 @@ function markArchiveInfoAccessRevoked(batch: LocalBatch, photos: LocalPhoto[], e
     markFailed(photo, error, retryFrom)
     photo.error = photo.status === 'failed' && retryFrom === 'server_saved'
       ? '已无此工程采集权限；服务器照片和本机100KB预览均已保留'
-      : '已无此工程采集权限；本机1MB归档图和100KB预览均已保留'
+      : '已无此工程采集权限；本机原图和100KB预览均已保留'
     photo.failure_code = failureCode
     photo.retryable = false
     photo.updated_at = now()
@@ -317,7 +317,7 @@ function markArchiveInfoAccessRevoked(batch: LocalBatch, photos: LocalPhoto[], e
 }
 
 function markArchiveInfoRequired(photo: LocalPhoto, draft: UploadDraft): void {
-  markFailed(photo, new Error(`${archiveInfoMessage(draft)}；1MB 归档图仍保存在本机`), 'local_ready')
+  markFailed(photo, new Error(`${archiveInfoMessage(draft)}；原图仍保存在本机`), 'local_ready')
   photo.failure_code = 'ARCHIVE_INFO_REQUIRED'
   photo.retryable = false
   persist(photo.owner_account_id)
@@ -332,9 +332,26 @@ function hasValidTransfer(photo: LocalPhoto): boolean {
   )
 }
 
-function markTransferInvalid(photo: LocalPhoto): void {
-  markFailed(photo, new Error('1MB 归档图不完整或超过限制；已停止提交，现有影像仍保存在本机'), 'local_ready')
-  photo.failure_code = 'TRANSFER_FILE_INVALID'
+function hasValidOriginal(photo: LocalPhoto): boolean {
+  return Boolean(
+    photo.original_path
+    && photo.original_filename
+    && isOriginalWithinLimit(Number(photo.original_size || 0)),
+  )
+}
+
+function hasValidUploadSource(photo: LocalPhoto): boolean {
+  return hasValidTransfer(photo) || hasValidOriginal(photo)
+}
+
+function originalMimeType(photo: LocalPhoto): 'image/jpeg' | 'image/png' {
+  if (photo.original_mime_type === 'image/png') return 'image/png'
+  return /\.png$/i.test(photo.original_filename || '') ? 'image/png' : 'image/jpeg'
+}
+
+function markUploadSourceInvalid(photo: LocalPhoto): void {
+  markFailed(photo, new Error('原图不完整、已丢失或超过 50MB；已停止提交，现有影像仍保存在本机'), 'local_ready')
+  photo.failure_code = 'ORIGINAL_FILE_INVALID'
   photo.retryable = false
   persist(photo.owner_account_id)
 }
@@ -402,7 +419,7 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
     status: 'failed',
     retry_from: 'local_ready',
     progress: 0,
-    error: '原图已安全保存，正在准备 1MB 上传图',
+    error: '原图已安全保存，等待上传',
     retryable: true,
     preparation_pending: true,
     created_at: createdAt,
@@ -414,65 +431,11 @@ async function completePreparationOnce(photo: LocalPhoto, generation = ownerGene
   const owner = photo.owner_account_id
   if (!isCurrentOwner(owner, generation) || !photo.original_path) return false
   try {
-    if (!photo.original_mime_type || !photo.width || !photo.height) {
-      const inspected = await withPreparationWatchdog(
-        '读取原图信息',
-        inspectOriginalSource(photo.original_path, photo.original_filename, photo.client_captured_at),
-      )
-      if (!isCurrentOwner(owner, generation)) return false
-      photo.width = inspected.width
-      photo.height = inspected.height
-      photo.orientation = inspected.orientation
-      photo.client_captured_at = inspected.capturedAt
-      photo.photo_date = inspected.capturedAt.slice(0, 10)
-      photo.original_mime_type = inspected.originalMimeType
-      persist(owner)
-    }
-    if (!photo.transfer_path) {
-      const prepared = await withPreparationWatchdog(
-        '生成 1MB 归档图',
-        prepareTransferImage(photo.original_path, photo.original_filename),
-        async (late) => { await removeGeneratedFile(late.transferTempPath) },
-      )
-      if (!isCurrentOwner(owner, generation)) {
-        await removeGeneratedFile(prepared.transferTempPath)
-        return false
-      }
-      let saved: Awaited<ReturnType<typeof persistPreparedTransfer>>
-      try {
-        saved = await withPreparationWatchdog(
-          '保存 1MB 归档图',
-          persistPreparedTransfer(prepared),
-          async (late) => { await removeSavedFile(late.transferPath) },
-        )
-      } finally {
-        await removeGeneratedFile(prepared.transferTempPath)
-      }
-      if (!isCurrentOwner(owner, generation)) {
-        await removeSavedFile(saved.transferPath)
-        return false
-      }
-      photo.transfer_path = saved.transferPath
-      photo.transfer_size = saved.transferSize
-      photo.transfer_filename = saved.transferFilename
-      photo.transfer_width = saved.transferWidth
-      photo.transfer_height = saved.transferHeight
-      persist(owner)
-    }
-    if (!isTransferWithinLimit(Number(photo.transfer_size || 0))) {
-      throw new Error('归档图超过 1MB，已停止上传')
-    }
-    if (!photo.transfer_sha256) {
-      photo.transfer_sha256 = await withPreparationWatchdog('校验 1MB 归档图', hashFile(photo.transfer_path))
-      if (!isCurrentOwner(owner, generation)) return false
-      persist(owner)
-    }
-    // 100KB 预览由服务器在收到 1MB 上传图后生成。此前在手机端再次压缩
-    // 大图，会让部分机型长期卡在“正在生成本机预览”，照片也无法上传。
-    // 上传成功后 tryRecoverServerPreview 会只下载服务器生成的合规预览。
+    if (!hasValidOriginal(photo)) throw new Error('原图不完整、已丢失或超过 50MB，无法上传')
+    // 原图直接分片上传。不要在手机上压缩或生成预览：微信客户端的压缩回调
+    // 在部分机型会永久卡住。SHA-256 在真正发起上传时计算，以便队列可立即可见。
     photo.preparation_pending = false
     setStatus(photo, 'local_ready', true)
-    await cleanupOriginal(photo)
     return true
   } catch (error) {
     markFailed(photo, error, 'local_ready', true)
@@ -554,37 +517,46 @@ async function tryRecoverServerPreview(photo: LocalPhoto, generation: number): P
 async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: number): Promise<void> {
   const owner = batch.owner_account_id
   if (!isCurrentOwner(owner, generation) || !state.online || photo.status !== 'local_ready' || !isAutomaticRetryDue(photo)) return
-  if (!hasValidTransfer(photo)) {
-    markTransferInvalid(photo)
+  if (!hasValidUploadSource(photo)) {
+    markUploadSourceInvalid(photo)
     return
   }
-  const transferPath = photo.transfer_path!
-  const transferSha256 = photo.transfer_sha256!
-  const transferFilename = photo.transfer_filename!
+  const legacyTransfer = hasValidTransfer(photo)
+  const filePath = legacyTransfer ? photo.transfer_path! : photo.original_path
   try {
     beginAutomaticRetryAttempt(photo)
     setStatus(photo, 'uploading')
     photo.progress = 1
     persist(owner)
+    // 原图的 SHA-256 必须在上传前得到，服务端以它校验断点续传最终组装结果。
+    // 这只是分块读取，不涉及图片解码或压缩。
+    if (!legacyTransfer && !photo.original_sha256) {
+      photo.original_sha256 = await hashFile(photo.original_path)
+      if (!isCurrentOwner(owner, generation)) return
+      persist(owner)
+    }
+    const size = Number(legacyTransfer ? photo.transfer_size : photo.original_size)
     const metadata = {
       photo_uuid: photo.photo_uuid,
       client_captured_at: photo.client_captured_at,
       orientation: photo.orientation,
-      width: Number(photo.transfer_width || photo.width),
-      height: Number(photo.transfer_height || photo.height),
-      sha256: transferSha256,
-      original_size_bytes: Number(photo.transfer_size),
-      original_filename: transferFilename,
-      original_mime_type: 'image/jpeg' as const,
+      width: Number(legacyTransfer ? (photo.transfer_width || photo.width) : photo.width),
+      height: Number(legacyTransfer ? (photo.transfer_height || photo.height) : photo.height),
+      sha256: legacyTransfer ? photo.transfer_sha256! : photo.original_sha256,
+      original_size_bytes: size,
+      original_filename: legacyTransfer ? photo.transfer_filename! : photo.original_filename,
+      original_mime_type: legacyTransfer ? 'image/jpeg' as const : originalMimeType(photo),
       title: photo.title,
       photo_date: photo.photo_date,
       capture_source: photo.draft.capture_source,
-      transfer_profile: 'jpeg_1m' as const,
+      ...(legacyTransfer ? { transfer_profile: 'jpeg_1m' as const } : {}),
     }
-    if (!requiresChunkedUpload(Number(photo.transfer_size))) {
+    // 原图无论大小都经分片接口发送，避免 4MB 以上请求受手机和网关限制；
+    // 老队列已经生成的 1MB 归档图保持兼容，仍可走旧的直传接口。
+    if (legacyTransfer && !requiresChunkedUpload(size)) {
       photo.upload_mode = 'direct'
       persist(owner)
-      await mobileApi.uploadPhoto(batch.remote_batch_id!, transferPath, metadata, (progress) => {
+      await mobileApi.uploadPhoto(batch.remote_batch_id!, filePath, metadata, (progress) => {
         if (isCurrentOwner(owner, generation)) photo.progress = progress
       })
     } else {
@@ -592,7 +564,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       persist(owner)
       await uploadPhotoInChunks({
         batchId: batch.remote_batch_id!,
-        filePath: transferPath,
+        filePath,
         metadata,
         previousUploadedChunks: photo.uploaded_chunks,
         shouldContinue: () => isCurrentOwner(owner, generation) && state.online && state.foreground,
@@ -614,6 +586,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     photo.server_saved_at = now()
     setStatus(photo, 'server_saved')
     await tryRecoverServerPreview(photo, generation)
+    await cleanupOriginal(photo)
     await cleanupTransfer(photo)
   } catch (error) {
     if (!isCurrentOwner(owner, generation)) return
@@ -625,7 +598,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     if (isAuthExpired(error)) void notifyAuthExpired(owner)
   } finally {
     if (isCurrentOwner(owner, generation) && String(photo.status) === 'uploading') {
-      markFailed(photo, new ApiError('照片上传未完成，1MB 归档图仍保存在本机，请重试', 'UPLOAD_INTERRUPTED', true), 'uploading')
+      markFailed(photo, new ApiError('照片上传未完成，原图仍保存在本机，请重试', 'UPLOAD_INTERRUPTED', true), 'uploading')
     }
   }
 }
@@ -733,9 +706,9 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
   const photos = state.photos.filter((photo) => batch.photo_uuids.includes(photo.photo_uuid))
   if (!await syncPendingArchiveInfo(batch, photos, generation)) return
   const ready = photos.filter((photo) => photo.status === 'local_ready' && isAutomaticRetryDue(photo))
-  const invalidTransfers = ready.filter((photo) => !hasValidTransfer(photo))
-  invalidTransfers.forEach(markTransferInvalid)
-  const uploadable = ready.filter((photo) => hasValidTransfer(photo))
+  const invalidSources = ready.filter((photo) => !hasValidUploadSource(photo))
+  invalidSources.forEach(markUploadSourceInvalid)
+  const uploadable = ready.filter((photo) => hasValidUploadSource(photo))
   if (uploadable.length && !isArchiveInfoComplete(batch.draft)) {
     uploadable.forEach((photo) => markArchiveInfoRequired(photo, batch.draft))
     return
@@ -749,7 +722,7 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
       category: batch.draft.category,
       mode: batch.draft.mode,
       capture_source: batch.draft.capture_source,
-      transfer_profile: batch.draft.transfer_profile || 'jpeg_1m',
+      transfer_profile: batch.draft.transfer_profile,
       assignment: batch.draft.assignment,
       requirement: batch.draft.requirement,
     }
@@ -875,20 +848,15 @@ function hydrate(): void {
   const stored = queueFileStore.load(owner)
   const storedPhotos = stored?.owner_account_id === owner && Array.isArray(stored.photos) ? stored.photos : []
   const storedBatches = stored?.owner_account_id === owner && Array.isArray(stored.batches) ? stored.batches : []
-  state.photos.splice(0, state.photos.length, ...storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
-    // 旧版本会在手机端再生成 100KB 预览。它超时后，可能已经有可用的
-    // 1MB 上传图，也可能只留下了安全保存的原图；两种情况都不能永久
-    // 停留在旧版“正在生成本机预览”。前者直接上传，后者改走新版 1MB
-    // 归档图流程，保留原图且不要求用户删除重拍。
+  const migratedPhotos = storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
+    // 旧版本会把手机压缩卡住的照片留在“正在准备 1MB 上传图”。升级后，
+    // 只要本机原图还在，就直接改走原图分片上传，不要求用户删除或重拍。
     const legacyPreviewTimeout = Boolean(
       photo.status === 'failed'
       && photo.failure_code === 'IMAGE_PROCESS_TIMEOUT'
       && photo.retry_from === 'local_ready'
       && !photo.preview_path,
     )
-    // 1.3.5 之前的真机包曾在加载压缩策略模块时中断。此类旧记录有时
-    // 没有 failure_code，不能让它永久卡在“处理失败”；升级后直接用新引擎
-    // 从安全保留的原图重新生成 1MB 上传图。
     const legacyCompressionModuleFailure = Boolean(
       photo.status === 'failed'
       && photo.retry_from === 'local_ready'
@@ -902,32 +870,41 @@ function hydrate(): void {
       && photo.transfer_filename
       && isTransferWithinLimit(Number(photo.transfer_size || 0))
     )
-    const legacyOriginalTimeout = Boolean(
-      legacyPreviewTimeout
-      && !previewOnlyTimeout
-      && photo.original_path,
-    )
-    const recoveredStatus = recoverInterruptedStatus(photo.status)
-    const needsTransferMigration = Boolean(photo.original_path && !photo.transfer_path && (
-      ['local_ready', 'uploading'].includes(photo.status)
+    const originalOnly = Boolean(photo.original_path && !hasValidTransfer(photo))
+    const recoverOriginal = Boolean(originalOnly && (
+      photo.preparation_pending
+      || legacyPreviewTimeout
+      || legacyCompressionModuleFailure
+      || ['local_ready', 'uploading'].includes(photo.status)
       || (photo.status === 'failed' && ['local_ready', 'uploading'].includes(photo.retry_from || 'local_ready'))
     ))
+    const recoveredStatus = recoverInterruptedStatus(photo.status)
     return {
       ...photo,
-      draft: { ...photo.draft, transfer_profile: photo.draft.transfer_profile || 'jpeg_1m' },
-      status: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? 'local_ready' : recoveredStatus,
+      draft: originalOnly ? { ...photo.draft, transfer_profile: undefined } : { ...photo.draft },
+      status: (previewOnlyTimeout || recoverOriginal) ? 'local_ready' : recoveredStatus,
       progress: photo.status === 'uploading' ? 0 : photo.progress,
-      preparation_pending: (legacyOriginalTimeout || legacyCompressionModuleFailure) ? true : (previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration)),
-      error: (legacyOriginalTimeout || legacyCompressionModuleFailure) ? '已升级上传引擎，正在恢复 1MB 上传图' : (previewOnlyTimeout ? undefined : photo.error),
-      retryable: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.retryable,
-      retry_from: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.retry_from,
-      failure_code: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.failure_code,
+      preparation_pending: false,
+      error: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.error,
+      retryable: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.retryable,
+      retry_from: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.retry_from,
+      failure_code: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.failure_code,
+    }
+  })
+  const originalOnlyBatchIds = new Set(migratedPhotos.filter((photo) => photo.original_path && !hasValidTransfer(photo)).map((photo) => photo.client_batch_id))
+  const legacyTransferBatchIds = new Set(migratedPhotos.filter(hasValidTransfer).map((photo) => photo.client_batch_id))
+  for (const photo of migratedPhotos) {
+    if (originalOnlyBatchIds.has(photo.client_batch_id) && !legacyTransferBatchIds.has(photo.client_batch_id)) photo.remote_batch_id = undefined
+  }
+  state.photos.splice(0, state.photos.length, ...migratedPhotos)
+  state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => {
+    const useOriginalUpload = originalOnlyBatchIds.has(batch.client_batch_id) && !legacyTransferBatchIds.has(batch.client_batch_id)
+    return {
+      ...batch,
+      remote_batch_id: useOriginalUpload ? undefined : batch.remote_batch_id,
+      draft: useOriginalUpload ? { ...batch.draft, transfer_profile: undefined } : { ...batch.draft },
     }
   }))
-  state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => ({
-    ...batch,
-    draft: { ...batch.draft, transfer_profile: batch.draft.transfer_profile || 'jpeg_1m' },
-  })))
   state.hydrated = true
   try { persist(owner) } catch { /* WAL 和上一有效槽仍是可靠恢复源，不能阻断启动。 */ }
   registerNetworkListener()
@@ -983,7 +960,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       const sourceSize = await withPreparationWatchdog('读取原图大小', getSourceFileSize(sourcePaths[index]))
       if (sourceSize > MAX_ORIGINAL_BYTES) throw new Error('单张原图不能超过 50MB，请选择较小的 JPEG 或 PNG')
       if (!Number.isFinite(sourceSize) || sourceSize <= 0) throw new Error('原图文件为空或无法读取')
-      if (queueBytes.value + sourceSize + MAX_TRANSFER_BYTES + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) throw new Error('本机影像将超过 160MB，请联网完成传输后再继续拍摄')
+      if (queueBytes.value + sourceSize + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) throw new Error('本机影像将超过 160MB，请联网完成传输后再继续拍摄')
       state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在安全保存第 ${index + 1} 张原图` }
       const photoUuid = createUuid()
       const filename = sourcePaths[index].replace(/\\/g, '/').split('/').pop() || 'photo'
@@ -1016,7 +993,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       photo.original_filename = original.originalFilename
       state.photos.unshift(photo)
       persist(owner)
-      if (original.originalSize > MAX_ORIGINAL_BYTES || queueBytes.value + MAX_TRANSFER_BYTES + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) {
+      if (original.originalSize > MAX_ORIGINAL_BYTES || queueBytes.value + MAX_PREVIEW_BYTES > MAX_QUEUE_BYTES) {
         photo.error = original.originalSize > MAX_ORIGINAL_BYTES
           ? '原图已安全保存，但实际文件超过 50MB，不能上传'
           : '原图已安全保存，但本机影像已达到 160MB'
@@ -1025,7 +1002,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
         persist(owner)
         throw new Error(photo.error)
       }
-      state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在准备第 ${index + 1} 张影像` }
+      state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `第 ${index + 1} 张已加入待上传队列` }
       await completePreparation(photo, generation)
       if (queueBytes.value > MAX_QUEUE_BYTES) throw new Error('本机影像超过 160MB；当前原图和预览均已保留，请先联网中转')
     }
@@ -1114,23 +1091,6 @@ function clearPermanentArchiveInfoFailure(batch: LocalBatch): void {
   })
 }
 
-async function removeGeneratedFile(path: string): Promise<void> {
-  if (!path) return
-  const wxApi = (globalThis as { wx?: any }).wx
-  if (!wxApi?.getFileSystemManager) return
-  await new Promise<void>((resolve) => {
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve()
-    }
-    const timer = setTimeout(finish, FILE_DELETE_CALLBACK_TIMEOUT_MS)
-    wxApi.getFileSystemManager().unlink({ filePath: path, success: finish, fail: finish })
-  })
-}
-
 function completeArchiveInfo(clientBatchId: string, projectName: string, assignment: Assignment): void {
   const batch = state.batches.find((item) => item.client_batch_id === clientBatchId)
   if (!batch || !isCurrentOwner(batch.owner_account_id)) throw new Error('本机队列中没有找到这批照片')
@@ -1139,7 +1099,6 @@ function completeArchiveInfo(clientBatchId: string, projectName: string, assignm
   batch.draft = {
     ...batch.draft,
     project_name: String(projectName || batch.draft.project_name || ''),
-    transfer_profile: 'jpeg_1m',
     assignment: { ...assignment },
   }
   if (!isArchiveInfoComplete(batch.draft)) throw new Error(archiveInfoMessage(batch.draft))

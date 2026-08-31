@@ -35,7 +35,7 @@
 
 ### `GET /api/mobile/v1/bootstrap`
 
-返回账号、服务器时间、当前工程、工程列表、层级数量摘要、照片 `queue`、兼容分片会话 `chunk_queue`、最近上传以及当前上传契约。`upload_contract` 除旧版兼容上限外，还含 `preferred_transfer_profile=jpeg_1m`，以及该规格的 `mime_type=image/jpeg`、`max_bytes=1048576`、`direct_upload=true`；永久预览限制为 `102400` 字节，最近上传只含预览。
+返回账号、服务器时间、当前工程、工程列表、层级数量摘要、照片 `queue`、分片会话 `chunk_queue`、最近上传以及当前上传契约。V1.4 默认以原图分片上传（单张不超过 50MB），服务器生成不超过 `102400` 字节的 JPEG 预览；旧版 `jpeg_1m` 规格保留兼容，不作为新客户端前置要求。
 
 ## 3. 工程与图库
 

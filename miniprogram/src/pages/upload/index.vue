@@ -38,7 +38,6 @@ const archiveDraft = computed<UploadDraft>(() => ({
   category: scope.value === 'engineering' ? category.value : undefined,
   mode: mode.value,
   capture_source: source.value,
-  transfer_profile: 'jpeg_1m',
   assignment: destination.value?.scope === scope.value ? destination.value.assignment : undefined,
   requirement: scope.value === 'engineering' && category.value === 'construction' ? requirement.value || undefined : undefined,
 }))

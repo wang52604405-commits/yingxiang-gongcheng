@@ -28,9 +28,9 @@ export async function choosePhotoPaths(source: 'camera' | 'album'): Promise<stri
     const options = {
       count: source === 'camera' ? 1 : getAlbumSelectionLimit(),
       sourceType: [source],
-      // 现场上传最终会统一压缩到 1MB；不要把微信相册的“原图”锁死，
-      // 否则用户既无法取消原图，也会在手机上承担不必要的大图处理。
-      sizeType: ['compressed'],
+      // 原图由服务器保存并生成预览，手机端不再调用不稳定的微信压缩接口。
+      // 选择器仅取原图，避免系统“原图”勾选状态导致实际文件规格不一致。
+      sizeType: ['original'],
       success: resolve,
       fail: reject,
     }
