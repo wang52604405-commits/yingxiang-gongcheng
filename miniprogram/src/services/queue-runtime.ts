@@ -884,6 +884,15 @@ function hydrate(): void {
       && photo.retry_from === 'local_ready'
       && !photo.preview_path,
     )
+    // 1.3.5 之前的真机包曾在加载压缩策略模块时中断。此类旧记录有时
+    // 没有 failure_code，不能让它永久卡在“处理失败”；升级后直接用新引擎
+    // 从安全保留的原图重新生成 1MB 上传图。
+    const legacyCompressionModuleFailure = Boolean(
+      photo.status === 'failed'
+      && photo.retry_from === 'local_ready'
+      && photo.original_path
+      && /MIN_JPEG_QUALITY|queue-policy|图片压缩配置/i.test(String(photo.error || '')),
+    )
     const previewOnlyTimeout = Boolean(
       legacyPreviewTimeout
       && photo.transfer_path
@@ -904,13 +913,13 @@ function hydrate(): void {
     return {
       ...photo,
       draft: { ...photo.draft, transfer_profile: photo.draft.transfer_profile || 'jpeg_1m' },
-      status: (previewOnlyTimeout || legacyOriginalTimeout) ? 'local_ready' : recoveredStatus,
+      status: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? 'local_ready' : recoveredStatus,
       progress: photo.status === 'uploading' ? 0 : photo.progress,
-      preparation_pending: legacyOriginalTimeout ? true : (previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration)),
-      error: legacyOriginalTimeout ? '已升级上传方式，正在恢复 1MB 上传图' : (previewOnlyTimeout ? undefined : photo.error),
-      retryable: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.retryable,
-      retry_from: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.retry_from,
-      failure_code: (previewOnlyTimeout || legacyOriginalTimeout) ? undefined : photo.failure_code,
+      preparation_pending: (legacyOriginalTimeout || legacyCompressionModuleFailure) ? true : (previewOnlyTimeout ? false : (photo.preparation_pending || needsTransferMigration)),
+      error: (legacyOriginalTimeout || legacyCompressionModuleFailure) ? '已升级上传引擎，正在恢复 1MB 上传图' : (previewOnlyTimeout ? undefined : photo.error),
+      retryable: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.retryable,
+      retry_from: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.retry_from,
+      failure_code: (previewOnlyTimeout || legacyOriginalTimeout || legacyCompressionModuleFailure) ? undefined : photo.failure_code,
     }
   }))
   state.batches.splice(0, state.batches.length, ...storedBatches.filter((batch) => String(batch.owner_account_id) === owner).map((batch) => ({

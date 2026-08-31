@@ -324,8 +324,51 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.photos[0]).toMatchObject({
       status: 'local_ready',
       preparation_pending: true,
-      error: '已升级上传方式，正在恢复 1MB 上传图',
+      error: '已升级上传引擎，正在恢复 1MB 上传图',
       failure_code: undefined,
+    })
+
+    await queueRuntime.resume('app-show')
+    expect(mocks.prepareTransferImage).toHaveBeenCalledWith('/user/32-original.jpg', '32.jpg')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      original_path: '',
+      transfer_path: '/user/transfer.jpg',
+      preparation_pending: false,
+    })
+    expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
+  })
+
+  it('旧压缩模块配置错误会自动重新生成 1MB 上传图', async () => {
+    const photo = localPhoto('32', 'legacy-compressor-config-error')
+    photo.status = 'failed'
+    photo.retry_from = 'local_ready'
+    photo.error = "Cannot read properties of undefined (reading 'MIN_JPEG_QUALITY')"
+    photo.preparation_pending = true
+    photo.preview_path = ''
+    photo.preview_size = 0
+    photo.preview_sha256 = ''
+    delete photo.transfer_path
+    delete photo.transfer_size
+    delete photo.transfer_sha256
+    delete photo.transfer_filename
+    delete photo.transfer_width
+    delete photo.transfer_height
+    const batch = localBatch(photo)
+    const storage = new Map<string, any>([[
+      'engineering-image:queue:v2:account:32',
+      { owner_account_id: '32', photos: [photo], batches: [batch] },
+    ]])
+    const unlink = installPlatform(storage, false)
+
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      preparation_pending: true,
+      error: '已升级上传引擎，正在恢复 1MB 上传图',
+      failure_code: undefined,
+      retry_from: undefined,
     })
 
     await queueRuntime.resume('app-show')

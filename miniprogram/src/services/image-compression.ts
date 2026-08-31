@@ -244,17 +244,33 @@ function createImageInfo(path: string): Promise<ImageInfo> {
   }))
 }
 
+/**
+ * 微信上优先走系统原生压缩器。Android 的离屏画布偶发会停在回调之前，
+ * 而 wx.compressImage 由系统媒体线程处理，稳定性更高。画布只作为旧基础库
+ * 或原生压缩器明确报错时的兜底，不能反过来作为默认路径。
+ */
+function renderWithNativeCompressor(path: string, dimensions: Dimensions, quality: number): Promise<string> {
+  const wxApi = (globalThis as { wx?: any }).wx
+  const uniApi = typeof uni === 'undefined' ? null : (uni as any)
+  const compressor = wxApi?.compressImage || uniApi?.compressImage
+  if (!compressor) return Promise.reject(new Error('当前微信基础库不支持图片压缩，请升级微信后重试'))
+  return wxPromise((success, fail) => compressor.call(wxApi?.compressImage ? wxApi : uniApi, {
+    src: path,
+    quality,
+    compressedWidth: dimensions.width,
+    compressedHeight: dimensions.height,
+    success: (result: { tempFilePath?: string }) => {
+      if (result?.tempFilePath) success(result.tempFilePath)
+      else fail(new Error('微信图片压缩未返回文件'))
+    },
+    fail,
+  }))
+}
+
 function renderWithOffscreenCanvas(path: string, dimensions: Dimensions, quality: number): Promise<string> {
   const wxApi = (globalThis as { wx?: any }).wx
   if (!wxApi?.createOffscreenCanvas || !wxApi?.canvasToTempFilePath) {
-    return wxPromise((success, fail) => (uni as any).compressImage({
-      src: path,
-      quality,
-      compressedWidth: dimensions.width,
-      compressedHeight: dimensions.height,
-      success: (result: { tempFilePath: string }) => success(result.tempFilePath),
-      fail,
-    }))
+    return Promise.reject(new Error('当前微信基础库不支持离屏画布压缩'))
   }
 
   return new Promise((resolve, reject) => {
@@ -281,6 +297,20 @@ function renderWithOffscreenCanvas(path: string, dimensions: Dimensions, quality
       reject(error)
     }
   })
+}
+
+async function renderJpegReliably(path: string, dimensions: Dimensions, quality: number): Promise<string> {
+  try {
+    return await renderWithNativeCompressor(path, dimensions, quality)
+  } catch (nativeError) {
+    try {
+      return await renderWithOffscreenCanvas(path, dimensions, quality)
+    } catch (canvasError) {
+      const nativeMessage = nativeError instanceof Error ? nativeError.message : '原生压缩失败'
+      const canvasMessage = canvasError instanceof Error ? canvasError.message : '离屏画布压缩失败'
+      throw new Error(`微信图片压缩失败：${nativeMessage}；兜底压缩失败：${canvasMessage}`)
+    }
+  }
 }
 
 function getFileSize(path: string): Promise<number> {
@@ -311,7 +341,7 @@ function removeFile(path: string): Promise<void> {
 
 export const wechatCompressionAdapter: CompressionAdapter = {
   getImageInfo: createImageInfo,
-  renderJpeg: renderWithOffscreenCanvas,
+  renderJpeg: renderJpegReliably,
   getFileSize,
   persist: persistFile,
   remove: removeFile,
