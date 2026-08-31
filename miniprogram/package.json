@@ -1,6 +1,6 @@
 {
   "name": "engineering-image-miniprogram",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "description": "工程影像微信小程序 V1.4：原图分片上传、统一采集与云同步",
   "scripts": {

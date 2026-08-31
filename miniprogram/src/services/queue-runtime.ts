@@ -528,21 +528,25 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     setStatus(photo, 'uploading')
     photo.progress = 1
     persist(owner)
-    // 原图的 SHA-256 必须在上传前得到，服务端以它校验断点续传最终组装结果。
-    // 这只是分块读取，不涉及图片解码或压缩。
-    if (!legacyTransfer && !photo.original_sha256) {
+    const size = Number(legacyTransfer ? photo.transfer_size : photo.original_size)
+    const useChunkedUpload = requiresChunkedUpload(size)
+    // 只有超过 10MB 的断点续传需要手机先计算 SHA-256，以校验最终组装结果。
+    // 普通直传由服务器在接收流时计算并校验，避免部分真机在纯 JS 全图哈希
+    // 阶段卡住，导致原图根本没有开始上传。
+    if (useChunkedUpload && !legacyTransfer && !photo.original_sha256) {
       photo.original_sha256 = await hashFile(photo.original_path)
       if (!isCurrentOwner(owner, generation)) return
       persist(owner)
     }
-    const size = Number(legacyTransfer ? photo.transfer_size : photo.original_size)
     const metadata = {
       photo_uuid: photo.photo_uuid,
       client_captured_at: photo.client_captured_at,
       orientation: photo.orientation,
       width: Number(legacyTransfer ? (photo.transfer_width || photo.width) : photo.width),
       height: Number(legacyTransfer ? (photo.transfer_height || photo.height) : photo.height),
-      sha256: legacyTransfer ? photo.transfer_sha256! : photo.original_sha256,
+      sha256: useChunkedUpload
+        ? (legacyTransfer ? photo.transfer_sha256! : photo.original_sha256)
+        : '',
       original_size_bytes: size,
       original_filename: legacyTransfer ? photo.transfer_filename! : photo.original_filename,
       original_mime_type: legacyTransfer ? 'image/jpeg' as const : originalMimeType(photo),
@@ -554,7 +558,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     // 10MB 以内使用微信原生 uploadFile：它直接接收文件路径，有可靠的上传
     // 进度与超时控制。只有较大的原图才转换为可续传的二进制分片请求。
     // 老队列已经生成的 1MB 归档图同样保持兼容。
-    if (!requiresChunkedUpload(size)) {
+    if (!useChunkedUpload) {
       photo.upload_mode = 'direct'
       persist(owner)
       await mobileApi.uploadPhoto(batch.remote_batch_id!, filePath, metadata, (progress) => {

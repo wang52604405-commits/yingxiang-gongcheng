@@ -508,7 +508,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.photo).not.toHaveBeenCalled()
   })
 
-  it('上传只发送 JPEG 传输图，server_saved 后立即释放传输图但保留预览', async () => {
+  it('普通直传不在手机计算 SHA，server_saved 后立即释放传输图但保留预览', async () => {
     const photo = localPhoto('32', 'photo-upload')
     photo.status = 'local_ready'
     photo.remote_batch_id = undefined
@@ -529,7 +529,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
     expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-transfer.jpg', expect.objectContaining({
-      sha256: 'd'.repeat(64),
+      sha256: '',
       original_size_bytes: 900_000,
       original_filename: '32.jpg',
       original_mime_type: 'image/jpeg',
@@ -573,7 +573,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.prepareTransferImage).not.toHaveBeenCalled()
     expect(mocks.uploadPhoto).toHaveBeenCalledWith('raw-batch', '/user/32-original.jpg', expect.objectContaining({
       photo_uuid: 'raw-original-upload',
-      sha256: 'd'.repeat(64),
+      sha256: '',
       original_size_bytes: 3_000_000,
       original_filename: '32.jpg',
       original_mime_type: 'image/jpeg',

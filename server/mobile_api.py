@@ -892,6 +892,7 @@ def _read_image_upload(
     max_edge: int,
     preview_only: bool = False,
     require_jpeg: bool = False,
+    require_claimed_sha: bool = True,
 ):
     if not file_storage:
         raise ApiProblem("file_required", "缺少图片文件")
@@ -926,11 +927,14 @@ def _read_image_upload(
         stream.close()
         raise ApiProblem("empty_image", "图片内容为空")
     claimed = str(claimed_sha or "").strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", claimed):
+    if claimed and not re.fullmatch(r"[0-9a-f]{64}", claimed):
         stream.close()
         raise ApiProblem("sha256_required", "缺少有效的图片 SHA-256")
     actual = digest.hexdigest()
-    if claimed != actual:
+    if require_claimed_sha and not claimed:
+        stream.close()
+        raise ApiProblem("sha256_required", "缺少有效的图片 SHA-256")
+    if claimed and claimed != actual:
         stream.close()
         raise ApiProblem("sha256_mismatch", "图片校验值不一致，请重新上传", 422, True)
 
@@ -1596,6 +1600,10 @@ def register_mobile_api(
                 is_mobile_original
                 and normalized_transfer_profile == JPEG_1M_TRANSFER_PROFILE
             ),
+            # 普通微信原图直传由服务端流式计算 SHA-256。这样 10MB 内照片
+            # 不必先在手机主线程做一次全文件 JavaScript 哈希；分片协议仍在
+            # init/finalize 阶段强制带 SHA-256，以保证断点续传的完整性。
+            require_claimed_sha=not is_mobile_original,
         )
         try:
             if str(claimed_size or "").strip():

@@ -1784,13 +1784,33 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertEqual(size_mismatch.status_code, 422)
         self.assertEqual(size_mismatch.get_json()["code"], "original_size_mismatch")
 
+        # 10MB 内微信原生直传不要求手机先做全文件 SHA-256；服务端在
+        # 接收流时自行计算，并将实际 SHA 用作照片 UUID 的幂等校验依据。
+        server_hashed_uuid = str(uuid.uuid4())
+        server_hashed = self._upload(
+            self.token_a, batch_id, server_hashed_uuid, valid, sha=""
+        )
+        self.assertEqual(server_hashed.status_code, 201, server_hashed.get_json())
+        conn = self.db.connect()
+        try:
+            server_hashed_row = conn.execute(
+                "SELECT original_sha256 FROM cloud_photos WHERE photo_uuid = ?",
+                (server_hashed_uuid,),
+            ).fetchone()
+            self.assertEqual(
+                server_hashed_row["original_sha256"],
+                hashlib.sha256(valid).hexdigest(),
+            )
+        finally:
+            conn.close()
+
         wide = self._jpeg((45, 75, 105), size=(12001, 1))
         dimensions = self._upload(
             self.token_a, batch_id, str(uuid.uuid4()), wide
         )
         self.assertEqual(dimensions.status_code, 422)
         self.assertEqual(dimensions.get_json()["code"], "image_dimensions_exceeded")
-        self.assertEqual(self._photo_count(self.token_a), count_before)
+        self.assertEqual(self._photo_count(self.token_a), count_before + 1)
 
         photo_uuid = str(uuid.uuid4())
         first = self._upload(
@@ -1806,7 +1826,7 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertTrue(second.get_json()["idempotent"])
         self.assertLessEqual(first.get_json()["photo"]["size_bytes"], 102400)
         self.assertEqual(first.get_json()["photo"]["mime_type"], "image/jpeg")
-        self.assertEqual(self._photo_count(self.token_a), count_before + 1)
+        self.assertEqual(self._photo_count(self.token_a), count_before + 2)
 
         conn = self.db.connect()
         try:
@@ -1861,7 +1881,7 @@ class MobileServerContractTest(unittest.TestCase):
             headers=self._headers(self.token_a),
         ).get_json()["batch"]
         self.assertEqual(empty["progress"]["total"], 0)
-        self.assertEqual(self._photo_count(self.token_a), count_before + 2)
+        self.assertEqual(self._photo_count(self.token_a), count_before + 3)
 
         from server.mobile_storage import StorageError
 
