@@ -59,6 +59,16 @@ class VersionAssetSafetyTest(unittest.TestCase):
             self.assertEqual(gzip.decompress((assets / f"{new_css.name}.gz").read_bytes()), new_css.read_bytes())
 
 
+class CloudAccountStateTest(unittest.TestCase):
+    def test_missing_account_file_stays_logged_out(self):
+        import cloud_client
+
+        with tempfile.TemporaryDirectory(prefix="album-empty-account-") as temp_dir:
+            missing = Path(temp_dir) / "cloud_account.json"
+            with patch.object(cloud_client, "cloud_account_path", return_value=missing):
+                self.assertEqual(cloud_client._read_cloud_account(), {})
+
+
 class ServerProductContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -707,6 +717,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertLess(upload_pos, settings_pos, "上传按钮必须直接出现在顶部主菜单")
         self.assertIn('id="engineeringProjectSearch"', html)
         self.assertIn('list="engineeringProjectOptions"', html)
+        self.assertIn('id="gateRegisterBtn" href="/license?register=1"', html)
         for tab in ("info", "division", "members", "upload", "print", "account", "device"):
             self.assertIn(f'data-project-settings-tab="{tab}"', html)
         self.assertIn('id="unitCategoryConstructionBtn"', html)
@@ -737,6 +748,8 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('class="recent-upload-thumb', script)
         self.assertIn('rec.thumb_url', script)
         self.assertIn('modal.classList.toggle("is-current-unit-upload", currentUnitOnly)', script)
+        self.assertNotIn('$("#gateRegisterBtn").addEventListener', script)
+        self.assertIn('if (manual || !state.auth.user) renderManualUpdate(data)', script)
         self.assertIn('openUploadChoiceModal(normalizePhotoCategory(category), processName, true)', script)
         self.assertIn('class="photo-selection-state"', script)
         self.assertIn('syncPhotoCardSelection(card, next)', script)
@@ -753,10 +766,15 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn(".print-style-schematic", styles)
         self.assertIn(".print-mode-card.print-style-card:not(:disabled):not(.active):hover", styles)
         self.assertIn("#unitView .photo-selection-state", styles)
+        self.assertIn(".auth-register-link", styles)
         self.assertRegex(
             styles,
             r"(?s)@media \(max-width: 760px\).*?\.overview-grid > \.overview-board\s*\{.*?grid-column: 1 !important;.*?grid-row: auto !important;",
         )
+
+        license_html = self.client.get("/license?register=1").get_data(as_text=True)
+        self.assertIn('let registrationRequested = new URLSearchParams(location.search).get("register") === "1"', license_html)
+        self.assertIn("if (registrationRequested) showRegistrationForm();", license_html)
 
     def test_recent_uploads_return_thumbnail_urls_for_frontend_cards(self):
         from PIL import Image

@@ -2032,7 +2032,9 @@ const $ = (selector) => document.querySelector(selector);
         }
         state.update.manifest = data;
         setUpdateAvailable(true);
-        if (manual) renderManualUpdate(data);
+        // 未登录用户看不到工作台里的更新红点，必须直接显示下载提示；
+        // 已登录用户仍保留“设置 → 检查更新”的非打扰式提醒。
+        if (manual || !state.auth.user) renderManualUpdate(data);
         return data;
       })();
       try {
@@ -4643,7 +4645,6 @@ const $ = (selector) => document.querySelector(selector);
       if (event.target.id === "otherImageModal") closeOtherImageModal();
     });
     $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true)));
-    $("#gateRegisterBtn").addEventListener("click", () => { window.location.href = "/license?register=1"; });
     // 输入即记住账号密码，未登录回填
     ["gateUsername", "gatePassword"].forEach((id) => {
       const el = document.getElementById(id);

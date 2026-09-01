@@ -32,7 +32,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260901-2.83"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260901-2.84"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -264,6 +264,10 @@ def _write_cloud_account(account: dict) -> None:
 def _read_cloud_account() -> dict:
     stored = _read_json(cloud_account_path()) or {}
     if not isinstance(stored, dict):
+        return {}
+    # 全新安装没有账号文件时必须保持“未登录”。此前会继续补入 server 字段，
+    # 使空账号字典变为 truthy，最终把未注册用户误判为已登录。
+    if not stored:
         return {}
     account = dict(stored)
     protected = str(account.pop("token_protected", "") or "")

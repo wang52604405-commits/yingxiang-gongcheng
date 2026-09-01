@@ -203,6 +203,31 @@
       gap: 10px;
       margin-top: 2px;
     }
+    .auth-register-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      color: var(--text);
+      background: #fff;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .16s var(--ease-out, ease-out);
+    }
+    .auth-register-link:hover {
+      color: var(--ux-brand-deep, #075e59);
+      background: var(--ux-hover-soft, #e7f4f1);
+      border-color: var(--ux-hover-line, #83beb4);
+      box-shadow: var(--ux-hover-shadow, 0 6px 16px rgba(8, 95, 89, .12));
+    }
+    .auth-register-link:active { transform: scale(.97); }
+    .auth-register-link:focus-visible {
+      outline: 3px solid rgba(15, 138, 122, .2);
+      outline-offset: 2px;
+    }
     .auth-machine-btn { width: 100%; }
     .auth-screen .notice { margin: 14px 0 0; }
     body.is-authed .auth-screen { display: none; }
@@ -1950,7 +1975,8 @@
         width: 100%;
         padding: 18px;
       }
-      .auth-actions button {
+      .auth-actions button,
+      .auth-actions .auth-register-link {
         min-height: 42px;
       }
       .app {
@@ -4710,6 +4736,7 @@
       }
 
       .auth-actions button,
+      .auth-actions .auth-register-link,
       .auth-machine-btn {
         width: 100%;
         min-height: 42px;

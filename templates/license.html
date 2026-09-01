@@ -299,6 +299,22 @@
   <script>
     const $ = (selector) => document.querySelector(selector);
     let productConfig = {};
+    let registrationRequested = new URLSearchParams(location.search).get("register") === "1";
+
+    function showRegistrationForm() {
+      $("#accountLoginForm").style.display = "none";
+      $("#accountForgotForm").style.display = "none";
+      $("#accountRegForm").style.display = "block";
+    }
+
+    function showLoginForm() {
+      $("#accountRegForm").style.display = "none";
+      $("#accountForgotForm").style.display = "none";
+      $("#accountLoginForm").style.display = "block";
+    }
+
+    // 注册入口必须立即响应，不能等待产品配置或云端账号状态返回。
+    if (registrationRequested) showRegistrationForm();
 
     function reportError(message, context = {}, stack = "", severity = "error") {
       fetch("/api/client-error", {
@@ -380,13 +396,15 @@
     function renderCloud(data) {
       const el = $("#cloudStatus");
       if (data.logged_in) {
+        registrationRequested = false;
         el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用）" : `免费版（${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`}`;
-        $("#accountLoginForm").style.display = "block";
+        showLoginForm();
         $("#cloudLogoutBtn").style.display = "inline-block";
         $("#showRegBtn").style.display = "none";
       } else {
         el.textContent = `未登录（注册后可永久免费使用 ${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`;
-        $("#accountLoginForm").style.display = "block";
+        if (registrationRequested) showRegistrationForm();
+        else showLoginForm();
         $("#cloudLogoutBtn").style.display = "none";
         $("#showRegBtn").style.display = "inline-block";
       }
@@ -432,12 +450,12 @@
 
     // ---- 登录 / 注册切换 ----
     $("#showRegBtn").addEventListener("click", () => {
-      $("#accountLoginForm").style.display = "none";
-      $("#accountRegForm").style.display = "block";
+      registrationRequested = true;
+      showRegistrationForm();
     });
     $("#backLoginBtn").addEventListener("click", () => {
-      $("#accountRegForm").style.display = "none";
-      $("#accountLoginForm").style.display = "block";
+      registrationRequested = false;
+      showLoginForm();
     });
 
     // ---- 登录 ----
@@ -538,12 +556,6 @@
 
     loadProduct()
       .then(() => Promise.all([refreshStatus(), refreshCloud()]))
-      .then(() => {
-        if (new URLSearchParams(location.search).get("register") === "1") {
-          $("#accountLoginForm").style.display = "none";
-          $("#accountRegForm").style.display = "block";
-        }
-      })
       .catch(() => {});
   </script>
 </body>
