@@ -7368,9 +7368,15 @@
       inset: 0;
       z-index: 20000;
       background: rgba(12, 24, 38, 0.18);
+      opacity: 0;
+      pointer-events: none;
       transition: background 160ms ease;
     }
-    .guide-overlay.active { background: rgba(12, 24, 38, 0.38); }
+    .guide-overlay.active {
+      background: rgba(12, 24, 38, 0.38);
+      opacity: 1;
+      pointer-events: auto;
+    }
     .guide-spot {
       position: fixed;
       z-index: 20002;

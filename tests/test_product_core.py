@@ -769,6 +769,16 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn(".auth-register-link", styles)
         self.assertRegex(
             styles,
+            r"\.guide-overlay\s*\{[^}]*pointer-events:\s*none;",
+            "尚未激活的工作台引导遮罩不能阻挡登录和注册按钮",
+        )
+        self.assertRegex(
+            styles,
+            r"\.guide-overlay\.active\s*\{[^}]*pointer-events:\s*auto;",
+            "只允许已激活的新手引导接管鼠标操作",
+        )
+        self.assertRegex(
+            styles,
             r"(?s)@media \(max-width: 760px\).*?\.overview-grid > \.overview-board\s*\{.*?grid-column: 1 !important;.*?grid-row: auto !important;",
         )
 
