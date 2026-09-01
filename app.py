@@ -7886,20 +7886,6 @@ def print_album(project_code):
         return str(exc), 404
 
 
-@app.route("/api/export/<path:project_code>/metadata.csv")
-def export_csv_route(project_code):
-    locked = expired_license_response("导出")
-    if locked:
-        return locked
-    data = manager.export_csv(project_code)
-    return send_file(
-        io.BytesIO(data),
-        mimetype="text/csv; charset=utf-8",
-        as_attachment=True,
-        download_name=f"{manager._safe_code(project_code)}_metadata.csv",
-    )
-
-
 @app.route("/api/export/photo-statistics.xlsx")
 def export_photo_statistics_route():
     locked = expired_license_response("导出统计")
@@ -7917,21 +7903,6 @@ def export_photo_statistics_route():
         )
     except Exception as exc:
         return json_error(str(exc), 500)
-
-
-@app.route("/api/export/<path:project_code>/metadata.json")
-def export_json_route(project_code):
-    locked = expired_license_response("导出")
-    if locked:
-        return locked
-    data = manager.get_project(project_code)
-    memory = io.BytesIO(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
-    return send_file(
-        memory,
-        mimetype="application/json",
-        as_attachment=True,
-        download_name=f"{manager._safe_code(project_code)}_metadata.json",
-    )
 
 
 @app.route("/api/export/<path:project_code>/zip")

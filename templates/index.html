@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260829-2.79.css">
+  <link rel="stylesheet" href="/assets/app-A20260901-2.80.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -50,45 +50,35 @@
         <div class="brand-mark">影</div>
         <h1>工程影像管理平台</h1>
       </div>
-      <div class="top-filter-group" aria-label="工程影像筛选">
-        <button id="topConstructionBtn" class="active" type="button">施工影像</button>
-        <button id="topOtherBtn" type="button">其它影像</button>
-      </div>
-      <div class="top-batch-actions" aria-label="批量打印">
-        <button class="top-new-project-btn" type="button" id="newEngineeringProjectBtn">+ 新建工程</button>
-        <select id="engineeringProjectSelect" class="project-select" title="当前工程"></select>
-        <div class="project-import-wrap">
-          <button class="top-quick-btn" type="button" id="projectImportMenuBtn" aria-expanded="false" aria-controls="projectImportMenu">项目划分 ▾</button>
-          <div class="project-import-menu" id="projectImportMenu" aria-hidden="true">
-            <div class="project-import-menu-head">
-              <strong>导入项目划分</strong>
-              <span>首次使用请先下载 Excel 模板，填写后再选择文件导入。</span>
-            </div>
-            <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载项目划分模板（Excel）</button>
-            <label class="file-tool">
-              <span class="file-label" id="importFileLabel">选择项目划分文件导入</span>
-              <input id="importFile" type="file" accept=".xls,.xlsx,.xlsm,.csv">
-            </label>
-            <button class="danger-tool" type="button" id="clearProjectsBtn">删除当前项目划分</button>
-          </div>
+      <div class="top-batch-actions" aria-label="当前工程与影像分类">
+        <div class="project-switcher" title="切换或新建工程">
+          <input id="engineeringProjectSearch" class="project-select" type="search" list="engineeringProjectOptions" title="搜索或切换工程" aria-label="搜索或切换工程" autocomplete="off">
+          <datalist id="engineeringProjectOptions"></datalist>
+          <select id="engineeringProjectSelect" hidden aria-hidden="true" tabindex="-1"></select>
+          <button class="top-new-project-btn" type="button" id="newEngineeringProjectBtn" title="新建工程" aria-label="新建工程">＋</button>
+        </div>
+        <div class="top-filter-group" aria-label="工程影像筛选">
+          <button id="topConstructionBtn" class="active" type="button">施工</button>
+          <button id="topOtherBtn" type="button">其它</button>
         </div>
       </div>
       <div class="top-actions">
         <span class="app-version-badge" id="appVersionBadge" title="当前软件版本"></span>
-        <button type="button" id="refreshBtn" title="重新读取工程、统计和照片数据">刷新</button>
+        <button type="button" id="globalUploadBtn" class="top-upload-btn">＋ 上传照片</button>
         <div class="settings-menu-wrap actions-menu-wrap">
-          <button type="button" id="actionsMenuBtn">操作</button>
+          <button type="button" id="actionsMenuBtn" aria-expanded="false">更多</button>
           <div class="settings-menu" id="actionsMenu">
-            <button type="button" id="globalUploadBtn">上传照片</button>
             <button type="button" id="folderImportBtn">导入文件夹</button>
             <input type="file" id="folderImportInput" webkitdirectory multiple accept=".jpg,.jpeg,.png" style="display:none">
             <button type="button" id="menuPrintConstructionBtn">施工打印</button>
             <button type="button" id="menuPrintSupervisionBtn">监理打印</button>
             <button type="button" id="exportPhotoStatsBtn">导出统计表</button>
+            <button type="button" id="refreshBtn" title="重新读取工程、统计和照片数据">刷新数据</button>
           </div>
         </div>
-        <div class="support-wrap">
-          <button type="button" id="supportBtn">账号与会员</button>
+        <button type="button" id="settingsMenuBtn" class="top-settings-btn">设置</button>
+        <div class="support-wrap settings-portal-source">
+          <button type="button" id="supportBtn" hidden>账号与会员</button>
           <div id="supportPanel" class="support-panel" aria-hidden="true">
             <h3>免费使用与分享</h3>
             <div class="support-settings-form">
@@ -203,18 +193,6 @@
             </div>
           </div>
         </div>
-        <button type="button" id="checkUpdateBtn" class="update-check-button" title="检查软件新版本">检查更新<span id="updateNoticeDot" class="update-notice-dot" hidden aria-label="有新版本"></span></button>
-        <div class="settings-menu-wrap">
-          <button type="button" id="settingsMenuBtn">设置</button>
-          <div class="settings-menu" id="settingsMenu">
-            <button type="button" id="settingsProjectInfoBtn">工程设置</button>
-            <button type="button" id="settingsExportCsvBtn">导出CSV</button>
-            <button type="button" id="settingsExportJsonBtn">导出JSON</button>
-            <button type="button" id="setupPageBtn">局域网配置</button>
-            <button type="button" id="machineIdBtn">机器ID</button>
-            <button type="button" id="logoutBtn" style="display:none;">更换姓名</button>
-          </div>
-        </div>
         <div class="auth-box" id="authBox">
           <span id="authStatus" class="auth-status">未登录</span>
         </div>
@@ -326,21 +304,47 @@
         <section id="unitView" style="display:none;">
           <div class="page-head">
             <div>
+              <div class="unit-breadcrumbs" id="unitBreadcrumbs">工程影像 / 单元工程</div>
               <h2 id="unitTitle">单元工程详情</h2>
-              <p id="unitSub">查看照片、打印和导出成果。</p>
+              <p id="unitSub">查看、上传和整理当前单元照片。</p>
             </div>
             <div class="actions">
-              <button class="secondary" type="button" id="backPartBtn">返回单元列表</button>
-              <button class="secondary" type="button" id="printConstructionBtn">施工打印</button>
-              <button class="secondary" type="button" id="printSupervisionBtn">监理打印</button>
-              <button class="secondary" type="button" id="exportUnitStatsBtn">统计表</button>
-              <button type="button" id="addProcessBtn">添加工序</button>
-              <button type="button" id="exportZipBtn">ZIP</button>
-              <button class="danger" type="button" id="deleteUnitBtn">删除单元</button>
+              <button class="secondary" type="button" id="backPartBtn">返回</button>
+              <button class="secondary" type="button" id="unitPrintCurrentBtn">打印当前</button>
+              <button class="secondary" type="button" id="addProcessBtn">＋ 工序</button>
+              <div class="unit-more-wrap">
+                <button class="secondary" type="button" id="unitMoreMenuBtn" aria-expanded="false">更多</button>
+                <div class="unit-more-menu" id="unitMoreMenu">
+                  <button type="button" id="exportUnitStatsBtn">导出统计表</button>
+                  <button type="button" id="exportZipBtn">导出 ZIP</button>
+                  <button class="danger" type="button" id="deleteUnitBtn">删除单元</button>
+                </div>
+              </div>
+              <button type="button" id="printConstructionBtn" hidden>施工打印</button>
+              <button type="button" id="printSupervisionBtn" hidden>监理打印</button>
             </div>
           </div>
 
-          <section class="panel">
+          <section class="unit-gallery-shell">
+            <div class="unit-gallery-toolbar">
+              <div class="unit-gallery-tabs" id="unitCategoryTabs" role="tablist" aria-label="影像类型">
+                <button class="active" type="button" id="unitCategoryConstructionBtn" data-unit-category="construction">施工 <span id="unitConstructionCount">0</span></button>
+                <button type="button" id="unitCategorySupervisionBtn" data-unit-category="supervision">监理 <span id="unitSupervisionCount">0</span></button>
+              </div>
+              <div class="unit-process-tabs" id="unitProcessTabs" aria-label="单元与工序"></div>
+              <div class="unit-gallery-actions">
+                <span class="unit-gallery-count" id="unitGalleryCount">0 张</span>
+                <button class="secondary" type="button" id="gallerySelectBtn">选择</button>
+                <button type="button" id="galleryUploadBtn">＋ 上传照片</button>
+              </div>
+            </div>
+            <div class="photo-selection-bar" id="photoSelectionBar" hidden>
+              <strong id="photoSelectionCount">已选 0 张</strong>
+              <button class="secondary" type="button" id="selectAllCurrentPhotosBtn">全选当前</button>
+              <button class="secondary" type="button" id="printSelectedPhotosBtn">打印所选</button>
+              <button class="danger" type="button" id="deleteSelectedCurrentPhotosBtn">删除所选</button>
+              <button class="ghost" type="button" id="cancelPhotoSelectionBtn">取消</button>
+            </div>
             <div class="unit-combined">
               <section id="photoSectionsHost" class="photo-side photo-sections">
                 <section class="photo-section">
@@ -398,31 +402,41 @@
           <section class="upload-choice-modal" role="dialog" aria-modal="true" aria-labelledby="uploadChoiceTitle">
             <div class="upload-choice-head">
               <div>
-                <h3 id="uploadChoiceTitle">选择上传类型</h3>
-                <p id="uploadChoiceSub">先选择施工或监理影像，再上传照片。</p>
+                <h3 id="uploadChoiceTitle">上传照片</h3>
+                <p id="uploadChoiceSub">确认归档位置后添加照片。</p>
               </div>
               <button class="ghost" type="button" id="closeUploadChoiceBtn">关闭</button>
             </div>
+            <div class="upload-flow-summary" id="uploadTargetSummary">尚未选择归档单元</div>
             <div class="upload-choice-body">
               <button class="upload-choice-card" type="button" data-upload-choice="construction">
-                <strong>施工单元影像</strong>
-                <span>上传施工过程、成品外观、关键工序等照片。</span>
+                <strong>施工影像</strong>
+                <span>施工过程、成品外观、关键节点</span>
               </button>
               <button class="upload-choice-card" type="button" data-upload-choice="supervision">
-                <strong>监理单元影像</strong>
-                <span>上传旁站、验收、见证等监理照片。</span>
+                <strong>监理影像</strong>
+                <span>旁站、验收、见证记录</span>
               </button>
+              <label class="upload-process-field">归档层级<select id="uploadProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
             </div>
             <form id="uploadModalForm" class="upload-modal-form">
-              <label>选择照片<input id="uploadModalFiles" type="file" accept=".jpg,.jpeg,.png" multiple></label>
-              <label>题名<input id="uploadModalTitle" type="text" placeholder="文件名含日期和文字时自动识别，可留空"></label>
-              <label>时间<input id="uploadModalDate" type="date" title="文件名含日期可自动识别，留空自动提取"></label>
-              <label>摄影者<input id="uploadModalPhotographer" type="text"></label>
-              <button type="submit">上传照片</button>
-              <button class="secondary" type="button" id="autoMatchUploadBtn">按名称自动匹配上传</button>
               <div id="uploadModalDrop" class="upload-drop-zone" tabindex="0">
-                <strong>拖拽 / 粘贴 JPG/PNG 照片到这里上传</strong>
-                <span id="uploadModalFileSummary">也可以直接粘贴图片，文件名包含单元编码或单元名称时可自动匹配上传。</span>
+                <strong>选择、拖入或粘贴照片</strong>
+                <span id="uploadModalFileSummary">支持 JPG、JPEG、PNG，可一次选择多张。</span>
+                <label class="upload-file-button">选择照片<input id="uploadModalFiles" type="file" accept=".jpg,.jpeg,.png" multiple></label>
+              </div>
+              <div id="uploadFileQueue" class="upload-file-queue" aria-live="polite"></div>
+              <details class="upload-extra-fields">
+                <summary>补充照片信息（可选）</summary>
+                <div class="upload-extra-grid">
+                  <label>题名<input id="uploadModalTitle" type="text" placeholder="默认从文件名识别"></label>
+                  <label>时间<input id="uploadModalDate" type="date" title="留空则读取文件名或照片信息"></label>
+                  <label>摄影者<input id="uploadModalPhotographer" type="text" placeholder="默认使用当前账号"></label>
+                </div>
+              </details>
+              <div class="upload-submit-row">
+                <button class="secondary" type="button" id="autoMatchUploadBtn">自动匹配其它单元</button>
+                <button type="submit" id="startUploadBtn">开始上传</button>
               </div>
               <div id="uploadModalResult" class="upload-modal-result"></div>
             </form>
@@ -642,20 +656,20 @@
     <section class="machine-id-modal project-info-modal" role="dialog" aria-modal="true" aria-labelledby="projectInfoTitle">
       <div class="upload-choice-head">
         <div>
-          <h3 id="projectInfoTitle">工程设置</h3>
-          <p>填写工程信息，并配置导入匹配、编号、打印和照片详情字段。</p>
+          <h3 id="projectInfoTitle">设置中心</h3>
+          <p>工程、项目划分、上传规则、账号和设备设置都集中在这里。</p>
         </div>
         <button class="ghost" type="button" id="closeProjectInfoBtn">关闭</button>
       </div>
       <form id="projectInfoForm" class="photo-edit-form project-settings-form">
         <nav class="project-settings-tabs" aria-label="工程设置分类">
-          <button class="active" type="button" data-project-settings-tab="info">1. 工程信息</button>
-          <button type="button" data-project-settings-tab="members">2. 项目成员</button>
-          <button type="button" data-project-settings-tab="numbering">3. 编号规则</button>
-          <button type="button" data-project-settings-tab="matching">4. 导入匹配</button>
-          <button type="button" data-project-settings-tab="fields">5. 照片字段</button>
-          <button type="button" data-project-settings-tab="print">6. 打印设置</button>
-          <button type="button" data-project-settings-tab="storage">7. 照片存储</button>
+          <button class="active" type="button" data-project-settings-tab="info">工程与专业</button>
+          <button type="button" data-project-settings-tab="division">项目划分</button>
+          <button type="button" data-project-settings-tab="members">项目成员</button>
+          <button type="button" data-project-settings-tab="upload">上传与匹配</button>
+          <button type="button" data-project-settings-tab="print">打印与存储</button>
+          <button type="button" data-project-settings-tab="account">账号与会员</button>
+          <button type="button" data-project-settings-tab="device">设备与更新</button>
         </nav>
         <div class="project-settings-body">
           <section class="project-settings-panel active" data-project-settings-panel="info">
@@ -675,6 +689,31 @@
               <p class="import-hint wide">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
               <div class="project-settings-card wide" id="professionalPlanSummary"><strong>专业影像采集模板</strong><p class="import-hint">水利沿用现有项目划分；房建、市政、电力会按专业模板同步“必拍 / 条件必拍 / 推荐”清单到小程序。</p><button class="secondary" type="button" id="openProfessionalPlanBtn">查看详细采集清单</button></div>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
+            </div>
+          </section>
+          <section class="project-settings-panel" data-project-settings-panel="division">
+            <div class="settings-section-heading">
+              <div>
+                <h4>项目划分</h4>
+                <p class="import-hint">下载模板、导入划分和清除划分使用同一套操作逻辑。</p>
+              </div>
+            </div>
+            <div class="project-import-menu open settings-static-menu" id="projectImportMenu" aria-hidden="false">
+              <button id="projectImportMenuBtn" type="button" hidden aria-expanded="true" aria-controls="projectImportMenu">项目划分</button>
+              <div class="project-import-menu-head">
+                <strong>导入项目划分</strong>
+                <span>首次使用先下载 Excel 模板，填写后选择文件导入。导入前不会改动现有照片。</span>
+              </div>
+              <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载项目划分模板（Excel）</button>
+              <label class="file-tool">
+                <span class="file-label" id="importFileLabel">选择项目划分文件导入</span>
+                <input id="importFile" type="file" accept=".xls,.xlsx,.xlsm,.csv">
+              </label>
+              <div class="settings-danger-zone">
+                <strong>危险操作</strong>
+                <span>只清除当前工程的项目划分，操作前需要再次确认。</span>
+                <button class="danger-tool" type="button" id="clearProjectsBtn">删除当前项目划分</button>
+              </div>
             </div>
           </section>
           <section class="project-settings-panel project-members-panel" data-project-settings-panel="members">
@@ -711,7 +750,7 @@
               <div id="projectInvitesList" class="project-invites-list"></div>
             </section>
           </section>
-          <section class="project-settings-panel" data-project-settings-panel="numbering">
+          <section class="project-settings-panel" data-project-settings-panel="numbering" data-project-settings-group="upload">
             <h4>编号规则</h4>
             <div class="project-settings-grid">
               <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">编号完全自定义</option><option value="unit_order">按项目划分单元编号排序</option></select></label>
@@ -725,7 +764,7 @@
             </div>
             <p class="import-hint">可用中文占位：单元编号、单元顺序号、流水号、类别。示例：【单元编号】-SY【流水号】。</p>
           </section>
-          <section class="project-settings-panel" data-project-settings-panel="matching">
+          <section class="project-settings-panel" data-project-settings-panel="matching" data-project-settings-group="upload">
             <h4>导入匹配</h4>
             <div class="project-settings-card">
               <strong>多重规则自动匹配单元</strong>
@@ -736,11 +775,11 @@
               <p class="import-hint">批量文件夹导入先显示施工区域、题名、候选单元、置信度和匹配依据。低置信度或多候选必须由客户确认。</p>
             </div>
             <div class="project-settings-card">
-              <strong>统一按单元管理</strong>
-              <p class="import-hint">不再创建、识别或展示“工序”。施工内容只作为照片题名，不会生成“混凝土备仓”等工序。</p>
+              <strong>单元与工序分层归档</strong>
+              <p class="import-hint">先匹配单元，再由上传面板明确选择“单元照片”或具体工序；系统不会根据模糊文字擅自创建工序。</p>
             </div>
           </section>
-          <section class="project-settings-panel" data-project-settings-panel="fields">
+          <section class="project-settings-panel" data-project-settings-panel="fields" data-project-settings-group="upload">
             <h4>照片字段</h4>
             <div class="project-settings-grid">
               <label>描述位置<select id="settingsPrintCaptionPositionInput" class="orientation-select"><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="top">照片上方</option><option value="bottom">照片下方</option></select></label>
@@ -748,7 +787,7 @@
             <label class="wide">照片详情字段<textarea id="settingsPhotoFieldsInput" placeholder="每行一个字段：标签=来源，例如：施工部位=project_name；桩号=自定义文字"></textarea></label>
             <p class="import-hint">上传时自动识别水印：施工内容写入题名，施工区域用于匹配项目划分，拍摄时间写入照片日期。字段来源可用：id、title、project_name、photo_date、photographer、description。</p>
           </section>
-          <section class="project-settings-panel" data-project-settings-panel="print">
+          <section class="project-settings-panel" data-project-settings-panel="print" data-project-settings-group="print">
             <h4>打印设置</h4>
             <div class="project-settings-grid">
               <label>默认打印版式<select id="settingsPrintLayoutInput" class="orientation-select"><option value="landscape">横版</option><option value="portrait">竖版</option></select></label>
@@ -761,7 +800,7 @@
             </div>
             <p class="import-hint">选择 1 张时可设为页面居中；4寸、5寸、6寸会自动填写标准尺寸，选择“自定义尺寸”可直接输入宽高。</p>
           </section>
-          <section class="project-settings-panel" data-project-settings-panel="storage">
+          <section class="project-settings-panel" data-project-settings-panel="storage" data-project-settings-group="print">
             <h4>照片存储优化</h4>
             <div class="project-settings-card">
               <strong>原图永久备份，日常使用图最大 300KB</strong>
@@ -773,11 +812,49 @@
               <button class="secondary" type="button" id="pausePhotoOptimizationBtn">暂停</button>
             </div>
           </section>
+          <section class="project-settings-panel" data-project-settings-panel="account">
+            <div class="settings-section-heading">
+              <div>
+                <h4>账号与会员</h4>
+                <p class="import-hint">登录、微信绑定、项目归属、会员与邀请都在这里管理。</p>
+              </div>
+            </div>
+            <div id="settingsAccountHost" class="settings-account-host"></div>
+          </section>
+          <section class="project-settings-panel" data-project-settings-panel="device">
+            <h4>设备与更新</h4>
+            <div class="settings-device-grid">
+              <button class="settings-device-card" type="button" id="setupPageBtn"><strong>局域网配置</strong><span>设置同一网络内的访问方式</span></button>
+              <button class="settings-device-card" type="button" id="machineIdBtn"><strong>机器 ID</strong><span>查看当前归档电脑标识</span></button>
+              <button class="settings-device-card" type="button" id="checkUpdateBtn"><strong>检查更新</strong><span>检查并下载最新正式版本</span><i id="updateNoticeDot" class="update-notice-dot" hidden aria-label="有新版本"></i></button>
+              <button class="settings-device-card" type="button" id="settingsRefreshBtn"><strong>刷新数据</strong><span>重新读取工程、统计和照片</span></button>
+              <button class="settings-device-card" type="button" id="logoutBtn" style="display:none;"><strong>更换姓名</strong><span>切换本机操作人员</span></button>
+            </div>
+          </section>
         </div>
         <div class="project-settings-actions">
           <button class="danger" type="button" id="deleteEngineeringProjectBtn">删除本工程</button>
           <button class="secondary" type="button" id="cancelProjectInfoBtn">取消</button>
           <button type="submit">保存</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="addProcessModal" class="modal-backdrop" aria-hidden="true">
+    <section class="machine-id-modal add-process-modal" role="dialog" aria-modal="true" aria-labelledby="addProcessTitle">
+      <div class="upload-choice-head">
+        <div>
+          <h3 id="addProcessTitle">添加工序</h3>
+          <p>工序只用于当前单元，添加后会出现在照片图库上方。</p>
+        </div>
+        <button class="ghost" type="button" id="closeAddProcessBtn">关闭</button>
+      </div>
+      <form id="addProcessForm" class="photo-edit-form">
+        <label>工序名称<input id="addProcessNameInput" type="text" maxlength="80" required placeholder="例如：钢筋安装、混凝土浇筑"></label>
+        <div class="photo-edit-actions">
+          <button class="secondary" type="button" id="cancelAddProcessBtn">取消</button>
+          <button type="submit">添加工序</button>
         </div>
       </form>
     </section>
@@ -910,6 +987,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260829-2.79.js"></script>
+  <script defer src="/assets/app-A20260901-2.80.js"></script>
 </body>
 </html>

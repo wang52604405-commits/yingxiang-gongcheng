@@ -53,6 +53,12 @@ const $ = (selector) => document.querySelector(selector);
       batchTouchY: 0,
       photoSelectMode: {},
       selectedPrintPhotos: {},
+      activePhotoCategory: "construction",
+      activeProcessName: "",
+      photoSelectionMode: false,
+      photoSelectionAnchor: -1,
+      uploadQueuedFiles: [],
+      uploadQueueResults: [],
       overviewExpandedUnits: new Set(),
       optimizationStatus: {},
       projectMembers: [],
@@ -815,7 +821,9 @@ const $ = (selector) => document.querySelector(selector);
       state.uploadChoiceCategory = normalizePhotoCategory(category);
       document.querySelectorAll("[data-upload-choice]").forEach((button) => {
         button.classList.toggle("active", normalizePhotoCategory(button.dataset.uploadChoice) === state.uploadChoiceCategory);
+        button.setAttribute("aria-pressed", button.classList.contains("active") ? "true" : "false");
       });
+      renderUploadTargetSummary();
     }
 
     function renderUploadProjectPicker() {
@@ -844,6 +852,8 @@ const $ = (selector) => document.querySelector(selector);
       state.selectedProject = project;
       state.selectedCode = projectCode(project);
       renderUploadProjectPicker();
+      renderUploadProcessOptions();
+      renderUploadTargetSummary();
     }
 
     function syncSelectedProjectFromList() {
@@ -1088,6 +1098,50 @@ const $ = (selector) => document.querySelector(selector);
       select.innerHTML = state.engineeringProjects.map((project) => `
         <option value="${escapeHtml(project.id || "")}" ${project.id === state.activeEngineeringProjectId ? "selected" : ""}>${escapeHtml(engineeringProjectLabel(project))}</option>
       `).join("");
+      const search = $("#engineeringProjectSearch");
+      const options = $("#engineeringProjectOptions");
+      if (options) {
+        options.innerHTML = state.engineeringProjects.map((project) =>
+          `<option value="${escapeHtml(engineeringProjectLabel(project))}"></option>`
+        ).join("");
+      }
+      if (search) {
+        const active = currentEngineeringProject();
+        const label = engineeringProjectLabel(active);
+        search.value = label;
+        search.title = label ? `当前工程：${label}。可直接输入名称或编号搜索。` : "搜索或切换工程";
+      }
+    }
+
+    function resolveEngineeringProjectSearch(value) {
+      const query = String(value || "").trim().toLowerCase();
+      if (!query) return null;
+      const exact = state.engineeringProjects.find((project) => engineeringProjectLabel(project).toLowerCase() === query);
+      if (exact) return exact;
+      const matches = state.engineeringProjects.filter((project) => {
+        const searchable = [engineeringProjectLabel(project), project.project_name, project.project_code, project.id]
+          .filter(Boolean).join(" ").toLowerCase();
+        return searchable.includes(query);
+      });
+      return matches.length === 1 ? matches[0] : null;
+    }
+
+    function commitEngineeringProjectSearch() {
+      const search = $("#engineeringProjectSearch");
+      const project = resolveEngineeringProjectSearch(search?.value);
+      if (!project) {
+        renderEngineeringProjectSelect();
+        showNotice("没有找到唯一工程，请输入更完整的工程名称或编号。", true);
+        return;
+      }
+      if (project.id === state.activeEngineeringProjectId) {
+        renderEngineeringProjectSelect();
+        return;
+      }
+      setActiveEngineeringProject(project.id).catch((error) => {
+        renderEngineeringProjectSelect();
+        showNotice(error.message, true);
+      });
     }
 
     async function setActiveEngineeringProject(projectId) {
@@ -1193,21 +1247,43 @@ const $ = (selector) => document.querySelector(selector);
       return value;
     }
 
+    function mountUnifiedSettings() {
+      const host = $("#settingsAccountHost");
+      const panel = $("#supportPanel");
+      if (!host || !panel) return;
+      if (panel.parentElement !== host) host.appendChild(panel);
+      panel.classList.add("is-settings-embedded", "open");
+      panel.setAttribute("aria-hidden", "false");
+    }
+
     function setProjectSettingsTab(tab) {
       const nextTab = tab || "info";
       document.querySelectorAll("[data-project-settings-tab]").forEach((button) => {
         button.classList.toggle("active", button.dataset.projectSettingsTab === nextTab);
       });
       document.querySelectorAll("[data-project-settings-panel]").forEach((panel) => {
-        panel.classList.toggle("active", panel.dataset.projectSettingsPanel === nextTab);
+        panel.classList.toggle(
+          "active",
+          panel.dataset.projectSettingsPanel === nextTab || panel.dataset.projectSettingsGroup === nextTab
+        );
       });
       const membersMode = nextTab === "members";
       const form = $("#projectInfoForm");
-      if (form) form.classList.toggle("members-mode", membersMode);
+      if (form) {
+        form.classList.toggle("members-mode", membersMode);
+        form.dataset.activeTab = nextTab;
+      }
       const cancelButton = $("#cancelProjectInfoBtn");
-      if (cancelButton) cancelButton.textContent = membersMode ? "关闭" : "取消";
+      const utilityMode = ["division", "members", "account", "device"].includes(nextTab);
+      if (cancelButton) cancelButton.textContent = utilityMode ? "关闭" : "取消";
       if (membersMode && !state.projectMembersLoading && state.projectMembersProjectId !== state.activeEngineeringProjectId) {
         loadProjectMembers().catch(() => {});
+      }
+      if (nextTab === "account") {
+        mountUnifiedSettings();
+        setSupportTab("status");
+        loadProductConfig().catch(() => {});
+        loadSharePoints().catch((error) => showNotice(error.message, true));
       }
     }
 
@@ -1501,6 +1577,7 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function openProjectInfoModal() {
+      mountUnifiedSettings();
       const settings = state.engineeringSettings || {};
       const rules = settings.numbering_rules || {};
       const construction = rules.construction || {};
@@ -2780,6 +2857,7 @@ const $ = (selector) => document.querySelector(selector);
 
     function setView(mode) {
       state.viewMode = mode;
+      document.body.classList.toggle("is-unit-view", mode === "unit");
       $("#overviewView").style.display = mode === "overview" ? "" : "none";
       $("#partView").style.display = mode === "part" ? "" : "none";
       $("#unitView").style.display = mode === "unit" ? "" : "none";
@@ -2909,11 +2987,20 @@ const $ = (selector) => document.querySelector(selector);
       state.photos = data.photos || [];
       state.photoPage = { construction: 1, supervision: 1 };
       state.selectedPrintPhotos = {};
+      state.activePhotoCategory = findOtherNode(state.selectedCode) ? "construction" : normalizePhotoCategory(state.pendingUploadCategory || "construction");
+      state.activeProcessName = "";
+      state.photoSelectionMode = false;
+      state.photoSelectionAnchor = -1;
       renderUnit();
       setView("unit");
       renderOtherImagesTree();
       if (window.matchMedia("(pointer: coarse), (max-width: 900px)").matches) {
-        setTimeout(() => $("#unitView").scrollIntoView({ block: "start", behavior: "smooth" }), 0);
+        setTimeout(() => {
+          const unitView = $("#unitView");
+          const topbarHeight = $(".topbar")?.getBoundingClientRect().height || 0;
+          const top = unitView.getBoundingClientRect().top + window.scrollY - topbarHeight - 8;
+          window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        }, 0);
       }
       if (tab === "upload") openUploadChoiceModal();
       if (tab !== "upload" && state.pendingUploadCategory) {
@@ -2926,17 +3013,31 @@ const $ = (selector) => document.querySelector(selector);
     function renderUnit() {
       const project = state.selectedProject;
       if (!project) return;
+      const hierarchy = getHierarchy(project);
       $("#unitTitle").textContent = projectName(project);
-      $("#unitSub").textContent = projectCode(project);
+      $("#unitSub").textContent = `${projectCode(project)} · ${state.projectInfo?.industry || "工程影像"}`;
+      $("#unitBreadcrumbs").textContent = [hierarchy.contractName, hierarchy.unitProjectName, hierarchy.partName, projectName(project)].filter(Boolean).join(" / ") || "工程影像 / 单元工程";
       renderPhotos();
     }
 
-    async function addProcess() {
+    function openAddProcessModal() {
       if (!state.selectedCode) return;
-      const name = (window.prompt("请输入工序名称（如：混凝土）") || "").trim();
-      if (!name) {
-        return;
-      }
+      $("#addProcessForm").reset();
+      $("#addProcessModal").classList.add("open");
+      $("#addProcessModal").setAttribute("aria-hidden", "false");
+      setTimeout(() => $("#addProcessNameInput")?.focus(), 0);
+    }
+
+    function closeAddProcessModal() {
+      $("#addProcessModal").classList.remove("open");
+      $("#addProcessModal").setAttribute("aria-hidden", "true");
+    }
+
+    async function addProcess(event) {
+      event?.preventDefault();
+      if (!state.selectedCode) return;
+      const name = ($("#addProcessNameInput")?.value || "").trim();
+      if (!name) return showNotice("请输入工序名称。", true);
       if (!(await ensureAuthenticated("添加工序"))) return;
       const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/processes`, {
         method: "POST",
@@ -2945,6 +3046,9 @@ const $ = (selector) => document.querySelector(selector);
       });
       if (state.selectedProject) state.selectedProject.processes = data.processes || [];
       state.photos = data.photos || [];
+      state.activeProcessName = name;
+      clearPhotoSelection(false);
+      closeAddProcessModal();
       renderPhotos();
       await refreshAll();
       showNotice(`工序「${name}」已添加，照片编号已按两级规则更新。`);
@@ -2957,7 +3061,7 @@ const $ = (selector) => document.querySelector(selector);
     const PHOTOS_BATCH = 120;
     let photoLazyObserver = null;
 
-    function photoCardHTML(photo, key, sectionKey, isSelectMode) {
+    function photoCardHTML(photo, key, sectionKey, isSelectMode, index = 0) {
       const orientation = normalizePhotoOrientation(photo.orientation);
       const photoId = String(photo.id || "");
       const isPrintSelected = Boolean(state.selectedPrintPhotos[printSelectionKey(key, photoId)]);
@@ -2970,7 +3074,7 @@ const $ = (selector) => document.querySelector(selector);
         : (uploader ? `上传者 ${uploader}` : "拍摄者未记录");
       const idLabel = photoIdTail(photo) || photoId;
       return `
-        <article class="photo is-${orientation}${isPrintSelected ? " is-selected" : ""}${isSelectMode ? " is-select-mode" : ""}" draggable="${isSelectMode ? "false" : "true"}" data-photo-id="${escapeHtml(photoId)}" data-category="${key}" data-section-key="${escapeHtml(sectionKey)}">
+        <article class="photo is-${orientation}${isPrintSelected ? " is-selected" : ""}${isSelectMode ? " is-select-mode" : ""}" draggable="${isSelectMode ? "false" : "true"}" data-photo-id="${escapeHtml(photoId)}" data-photo-index="${index}" data-category="${key}" data-section-key="${escapeHtml(sectionKey)}">
           <button class="photo-preview-trigger" type="button" data-preview-src="${escapeHtml(photo.url || "")}" data-preview-title="${escapeHtml(title)}">
             <img src="${escapeHtml(photo.thumb_url || THUMB_PLACEHOLDER)}" loading="lazy" decoding="async" alt="${escapeHtml(title)}">
           </button>
@@ -3010,10 +3114,11 @@ const $ = (selector) => document.querySelector(selector);
       const photos = photosForSection(key, groupName);
       const rendered = parseInt(listEl.dataset.rendered || "0", 10);
       if (rendered >= photos.length) return;
-      const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
+      const isSelectMode = Boolean(state.photoSelectionMode);
       const next = photos.slice(rendered, rendered + PHOTOS_BATCH);
-      listEl.insertAdjacentHTML("beforeend", next.map((photo) => photoCardHTML(photo, key, sectionKey, isSelectMode)).join(""));
+      listEl.insertAdjacentHTML("beforeend", next.map((photo, index) => photoCardHTML(photo, key, sectionKey, isSelectMode, rendered + index)).join(""));
       listEl.dataset.rendered = String(rendered + next.length);
+      bindPhotoGalleryEvents(listEl);
     }
 
     function setupLazyPhotoLoad() {
@@ -3041,194 +3146,144 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
-    function renderPhotos() {
-      const host = $("#photoSectionsHost");
-      if (!host) return;
-      // 其它影像单元只有施工影像，不显示监理栏
-      const isOtherUnit = Boolean(findOtherNode(state.selectedCode));
-      const categories = isOtherUnit
-        ? photoCategories.filter((c) => c.key !== "supervision")
-        : photoCategories;
-      const processList = isProcessProject() ? selectedProcesses() : [];
-      const groups = [{ name: "", code: "" }, ...processList.map((name) => ({ name, code: processCodeForName(name) }))];
-      host.className = `photo-side photo-sections ${processList.length ? "is-process-layout" : ""}`;
-      host.innerHTML = groups.map((group, groupIndex) => categories.map(({ key }) => {
-        const sectionId = `${key}_${groupIndex}`;
-        const groupName = String(group.name || "").trim();
-        const processMatches = (photo) => {
-          const pn = String(photo.process_name || "").trim();
-          return groupName ? pn === groupName : pn === "";
-        };
-        const photos = categoryPhotos(key).filter(processMatches);
-        const sectionKey = photoSectionKey(key, group.name);
-        const isSelectMode = Boolean(state.photoSelectMode[sectionKey]);
-        const useConstructionBtn = key === "supervision"
-          ? `<button class="secondary" type="button" data-use-construction="${escapeHtml(sectionKey)}" data-process-name="${escapeHtml(group.name)}">复制施工照片</button>`
-          : "";
-        const isUnitLevel = !groupName;
-        const levelLabel = isUnitLevel ? "单元照片" : `工序：${group.name}`;
-        const catLabel = key === "supervision" ? "监理单元影像" : "施工单元影像";
-        const titleText = `${catLabel}（${levelLabel}）`;
-        const isEmpty = photos.length === 0;
-        const collapseBtn = isUnitLevel ? "" : `<button type="button" data-toggle-collapse="${escapeHtml(sectionKey)}">收起</button>`;
-        return `
-          <section class="photo-section ${isUnitLevel ? "unit-photo-section" : "process-photo-section"}${isEmpty ? " is-empty" : ""}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
-            <div class="photo-section-head">
-              <h3 class="photo-section-title${isUnitLevel ? "" : " process-title"}"${isUnitLevel ? "" : ` data-toggle-collapse-title="${escapeHtml(sectionKey)}"`}>${escapeHtml(titleText)}</h3>
-              <div class="photo-section-actions">
-                ${collapseBtn}
-                <button type="button" data-toggle-select-photos="${escapeHtml(sectionKey)}">${isSelectMode ? "取消" : "多选"}</button>
-                <button class="secondary" type="button" data-delete-selected-photos="${escapeHtml(sectionKey)}">删除</button>
-                ${useConstructionBtn}
-                <button type="button" data-unit-upload="${key}" data-process-name="${escapeHtml(group.name)}">上传</button>
-              </div>
-            </div>
-            <form id="${sectionId}UploadForm" class="photo-upload-form" style="display:none;" data-category="${key}" data-process-name="${escapeHtml(group.name)}">
-              <label>选择照片<input id="${sectionId}PhotoFiles" type="file" accept=".jpg,.jpeg,.png" multiple></label>
-              <label>题名<input id="${sectionId}PhotoTitle" type="text" placeholder="文件名含日期和文字时自动识别，可留空"></label>
-              <label>时间<input id="${sectionId}PhotoDate" type="date" title="文件名含日期可自动识别，留空自动提取"></label>
-              <label>摄影者<input id="${sectionId}PhotoPhotographer" type="text"></label>
-              <label>文字说明<textarea id="${sectionId}PhotoDescription"></textarea></label>
-              <div class="upload-drop-zone" tabindex="0">
-                <strong>拖拽 JPG/PNG 到这里上传，也可直接粘贴图片</strong>
-                <span>文件选择、拖拽、粘贴使用同一套上传规则。</span>
-              </div>
-              <div class="actions"><button type="submit">上传照片</button></div>
-              <div id="${sectionId}UploadResult" class="inline-result" style="display:none;"></div>
-            </form>
-            <div id="${sectionId}PhotosList" class="photos" data-rendered="${Math.min(photos.length, PHOTOS_BATCH)}">
-              ${photos.length ? photos.slice(0, PHOTOS_BATCH).map((photo) => photoCardHTML(photo, key, sectionKey, isSelectMode)).join("") : `<div class="empty">暂无照片。</div>`}
-            </div>
-          </section>
-        `;
-      }).join("")).join("");
+    function clearPhotoSelection(shouldRender = true) {
+      state.selectedPrintPhotos = {};
+      state.photoSelectionMode = false;
+      state.photoSelectionAnchor = -1;
+      if (shouldRender) renderPhotos();
+    }
 
-      host.querySelectorAll("button[data-unit-upload]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const section = button.closest(".photo-section");
-          const form = section?.querySelector(".photo-upload-form");
-          if (form) form.style.display = form.style.display === "none" ? "grid" : "none";
-        });
-      });
-      host.querySelectorAll("button[data-toggle-collapse]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const section = button.closest(".photo-section");
-          if (!section) return;
-          const collapsed = section.classList.toggle("is-collapsed");
-          button.textContent = collapsed ? "展开" : "收起";
-        });
-      });
-      host.querySelectorAll("[data-toggle-collapse-title]").forEach((titleEl) => {
-        titleEl.addEventListener("click", () => {
-          const section = titleEl.closest(".photo-section");
-          if (!section) return;
-          const collapsed = section.classList.toggle("is-collapsed");
-          const btn = section.querySelector("[data-toggle-collapse]");
-          if (btn) btn.textContent = collapsed ? "展开" : "收起";
-        });
-      });
-      host.querySelectorAll("button[data-use-construction]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const processName = button.dataset.processName || "";
-          if (!window.confirm("将本单元尚未复制的施工照片复制到监理影像，并自动生成监理编号（JY…）。已复制照片会自动跳过，确定继续吗？")) return;
-          try {
-            if (!(await ensureAuthenticated("使用施工照片"))) return;
-            const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/copy-construction-to-supervision`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ process_name: processName })
-            });
-            state.photos = data.photos || [];
-            state.selectedPrintPhotos = {};
-            renderPhotos();
-            showNotice(`已复制 ${data.added ? data.added.length : 0} 张施工照片到监理影像。`);
-          } catch (error) {
-            showNotice(error.message, true);
-          }
-        });
-      });
-      host.querySelectorAll("button[data-toggle-select-photos]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const key = button.dataset.toggleSelectPhotos || "";
-          state.photoSelectMode[key] = !state.photoSelectMode[key];
-          renderPhotos();
-        });
-      });
-      host.querySelectorAll("button[data-delete-selected-photos]").forEach((button) => {
-        button.addEventListener("click", () => deleteSelectedPhotos(button.dataset.deleteSelectedPhotos).catch((error) => showNotice(error.message, true)));
-      });
-      host.querySelectorAll(".photo-upload-form").forEach((form) => {
-        form.addEventListener("submit", (event) => {
-          event.preventDefault();
-          uploadCategoryFiles(form.dataset.category, form.querySelector("input[type=file]").files, form).catch((error) => showNotice(error.message, true));
-        });
-        let dragDepth = 0;
-        form.addEventListener("dragenter", (event) => {
-          event.preventDefault();
-          dragDepth += 1;
-          form.classList.add("is-dragging");
-        });
-        form.addEventListener("dragover", (event) => {
-          event.preventDefault();
-          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-          form.classList.add("is-dragging");
-        });
-        form.addEventListener("dragleave", () => {
-          dragDepth = Math.max(0, dragDepth - 1);
-          if (dragDepth === 0) form.classList.remove("is-dragging");
-        });
-        form.addEventListener("drop", (event) => {
-          event.preventDefault();
-          dragDepth = 0;
-          form.classList.remove("is-dragging");
-          uploadCategoryFiles(form.dataset.category, event.dataTransfer.files, form).catch((error) => showNotice(error.message, true));
-        });
-        form.addEventListener("paste", (event) => {
-          const files = Array.from(event.clipboardData?.files || []);
-          if (!files.length) return;
-          event.preventDefault();
-          uploadCategoryFiles(form.dataset.category, files, form).catch((error) => showNotice(error.message, true));
-        });
-      });
-      host.querySelectorAll("button[data-edit-photo]").forEach((button) => {
-        button.addEventListener("click", (event) => {
+    function activeGalleryPhotos() {
+      return photosForSection(state.activePhotoCategory, state.activeProcessName);
+    }
+
+    function updatePhotoSelectionBar() {
+      const current = activeGalleryPhotos();
+      const selected = current.filter((photo) => state.selectedPrintPhotos[printSelectionKey(state.activePhotoCategory, photo.id)]);
+      const bar = $("#photoSelectionBar");
+      if (bar) bar.hidden = !state.photoSelectionMode;
+      if ($("#photoSelectionCount")) $("#photoSelectionCount").textContent = `已选 ${selected.length} 张`;
+      if ($("#selectAllCurrentPhotosBtn")) $("#selectAllCurrentPhotosBtn").textContent = current.length > 0 && selected.length === current.length ? "取消全选" : "全选当前";
+      if ($("#printSelectedPhotosBtn")) $("#printSelectedPhotosBtn").disabled = !selected.length;
+      if ($("#deleteSelectedCurrentPhotosBtn")) $("#deleteSelectedCurrentPhotosBtn").disabled = !selected.length;
+      if ($("#gallerySelectBtn")) {
+        $("#gallerySelectBtn").textContent = state.photoSelectionMode ? "取消选择" : "选择";
+        $("#gallerySelectBtn").disabled = !current.length;
+      }
+    }
+
+    function selectGalleryScope(category, processName = "") {
+      const nextCategory = normalizePhotoCategory(category);
+      const nextProcess = String(processName || "").trim();
+      if (nextCategory === state.activePhotoCategory && nextProcess === state.activeProcessName) return;
+      clearPhotoSelection(false);
+      state.activePhotoCategory = nextCategory;
+      state.activeProcessName = nextProcess;
+      renderPhotos();
+    }
+
+    function bindPhotoGalleryEvents(root) {
+      root.querySelectorAll("button[data-edit-photo]").forEach((button) => {
+        button.onclick = (event) => {
           event.stopPropagation();
           const card = button.closest(".photo");
-          if (card && state.photoSelectMode[card.dataset.sectionKey]) {
-            togglePhotoSelection(card);
-            return;
-          }
+          if (state.photoSelectionMode && card) return togglePhotoSelection(card, event.shiftKey);
           openPhotoEdit(button.dataset.category, button.dataset.editPhoto).catch((error) => showNotice(error.message, true));
-        });
+        };
       });
-      host.querySelectorAll("input[data-print-photo]").forEach((input) => {
-        input.addEventListener("click", (event) => event.stopPropagation());
-        input.addEventListener("change", () => {
+      root.querySelectorAll("input[data-print-photo]").forEach((input) => {
+        input.onclick = (event) => event.stopPropagation();
+        input.onchange = () => {
           setPhotoSelected(input.dataset.category, input.dataset.printPhoto, input.checked);
           input.closest(".photo")?.classList.toggle("is-selected", input.checked);
-        });
+          updatePhotoSelectionBar();
+        };
       });
-      host.querySelectorAll(".photo[data-photo-id]").forEach((card) => {
-        card.addEventListener("click", (event) => {
-          if (!state.photoSelectMode[card.dataset.sectionKey]) return;
-          if (event.target.closest(".photo-title-button, .photo-print-check, input, label")) return;
+      root.querySelectorAll(".photo[data-photo-id]").forEach((card) => {
+        card.onclick = (event) => {
+          if (!state.photoSelectionMode || event.target.closest("input, label")) return;
           event.preventDefault();
-          togglePhotoSelection(card);
-        });
+          togglePhotoSelection(card, event.shiftKey);
+        };
       });
-      host.querySelectorAll("[data-preview-src]").forEach((button) => {
-        button.addEventListener("click", (event) => {
+      root.querySelectorAll("[data-preview-src]").forEach((button) => {
+        button.onclick = (event) => {
           const card = button.closest(".photo");
-          if (card && state.photoSelectMode[card.dataset.sectionKey]) {
+          if (state.photoSelectionMode && card) {
             event.preventDefault();
             event.stopPropagation();
-            togglePhotoSelection(card);
+            togglePhotoSelection(card, event.shiftKey);
             return;
           }
           openPhotoPreview(button.dataset.previewSrc, button.dataset.previewTitle);
-        });
+        };
       });
-      initPhotoDragSort(host);
+    }
+
+    function renderPhotos() {
+      const host = $("#photoSectionsHost");
+      if (!host || !state.selectedProject) return;
+      const isOtherUnit = Boolean(findOtherNode(state.selectedCode));
+      if (isOtherUnit) state.activePhotoCategory = "construction";
+      const processList = isProcessProject() ? selectedProcesses() : [];
+      if (state.activeProcessName && !processList.includes(state.activeProcessName)) state.activeProcessName = "";
+      const category = normalizePhotoCategory(state.activePhotoCategory);
+      const processName = state.activeProcessName || "";
+      const sectionKey = photoSectionKey(category, processName);
+      const photos = photosForSection(category, processName);
+      const categoryLabel = category === "supervision" ? "监理" : "施工";
+      const scopeLabel = processName || "单元照片";
+
+      $("#unitCategoryConstructionBtn")?.classList.toggle("active", category === "construction");
+      $("#unitCategorySupervisionBtn")?.classList.toggle("active", category === "supervision");
+      if ($("#unitCategorySupervisionBtn")) $("#unitCategorySupervisionBtn").hidden = isOtherUnit;
+      if ($("#unitConstructionCount")) $("#unitConstructionCount").textContent = String(categoryPhotos("construction").length);
+      if ($("#unitSupervisionCount")) $("#unitSupervisionCount").textContent = String(categoryPhotos("supervision").length);
+      if ($("#unitGalleryCount")) $("#unitGalleryCount").textContent = `${photos.length} 张`;
+
+      const processTabs = $("#unitProcessTabs");
+      processTabs.innerHTML = [{ name: "", label: "单元照片" }, ...processList.map((name) => ({ name, label: name }))].map((item) => {
+        const count = photosForSection(category, item.name).length;
+        return `<button type="button" class="${item.name === processName ? "active" : ""}" data-gallery-process="${escapeHtml(item.name)}" title="${escapeHtml(item.label)}">${escapeHtml(item.label)} <span>${count}</span></button>`;
+      }).join("");
+      processTabs.querySelectorAll("[data-gallery-process]").forEach((button) => {
+        button.onclick = () => selectGalleryScope(category, button.dataset.galleryProcess || "");
+      });
+
+      host.className = "photo-side photo-sections is-single-gallery";
+      host.innerHTML = `
+        <section class="photo-section active-photo-section${photos.length ? "" : " is-empty"}" data-photo-section="${escapeHtml(sectionKey)}" data-category="${category}" data-process-name="${escapeHtml(processName)}">
+          <div class="photo-section-head">
+            <div><h3 class="photo-section-title">${escapeHtml(categoryLabel)} · ${escapeHtml(scopeLabel)}</h3><p>当前只显示这一组照片，切换上方标签可查看其它分类。</p></div>
+            ${category === "supervision" ? `<button class="secondary" type="button" data-use-construction data-process-name="${escapeHtml(processName)}">复制同组施工照片</button>` : ""}
+          </div>
+          <div class="photos" data-rendered="${Math.min(photos.length, PHOTOS_BATCH)}">
+            ${photos.length ? photos.slice(0, PHOTOS_BATCH).map((photo, index) => photoCardHTML(photo, category, sectionKey, state.photoSelectionMode, index)).join("") : `<div class="empty gallery-empty"><strong>这里还没有照片</strong><span>点击“上传到当前”即可直接归档到 ${escapeHtml(categoryLabel)} / ${escapeHtml(scopeLabel)}。</span></div>`}
+          </div>
+        </section>`;
+
+      const copyButton = host.querySelector("[data-use-construction]");
+      if (copyButton) copyButton.onclick = async () => {
+        if (!window.confirm("将同组尚未复制的施工照片复制到监理影像，并自动生成监理编号吗？已复制照片会自动跳过。")) return;
+        try {
+          if (!(await ensureAuthenticated("使用施工照片"))) return;
+          const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/copy-construction-to-supervision`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ process_name: processName })
+          });
+          state.photos = data.photos || [];
+          clearPhotoSelection(false);
+          renderPhotos();
+          showNotice(`已复制 ${data.added ? data.added.length : 0} 张施工照片到监理影像。`);
+        } catch (error) {
+          showNotice(error.message, true);
+        }
+      };
+      bindPhotoGalleryEvents(host);
+      if (!state.photoSelectionMode) initPhotoDragSort(host);
+      setupLazyPhotoLoad();
+      updatePhotoSelectionBar();
     }
 
     function openPhotoPreview(src, title) {
@@ -3297,43 +3352,58 @@ const $ = (selector) => document.querySelector(selector);
       }[char]));
     }
 
-    async function openUploadChoiceModal() {
+    function renderUploadProcessOptions(preferredProcess = null) {
+      const select = $("#uploadProcessSelect");
+      if (!select) return;
+      const processes = state.selectedProject && Array.isArray(state.selectedProject.processes) ? state.selectedProject.processes : [];
+      const wanted = preferredProcess === null ? select.value : String(preferredProcess || "");
+      select.innerHTML = `<option value="">单元照片</option>${processes.map((name) => `<option value="${escapeHtml(name)}">工序 · ${escapeHtml(name)}</option>`).join("")}`;
+      select.value = processes.includes(wanted) ? wanted : "";
+    }
+
+    function renderUploadTargetSummary() {
+      const summary = $("#uploadTargetSummary");
+      if (!summary) return;
+      if (!state.selectedCode || !state.selectedProject) {
+        summary.textContent = "尚未选择归档单元";
+        summary.classList.add("is-empty");
+        return;
+      }
+      const category = normalizePhotoCategory(state.uploadChoiceCategory) === "supervision" ? "监理" : "施工";
+      const processName = $("#uploadProcessSelect")?.value || "";
+      summary.classList.remove("is-empty");
+      summary.innerHTML = `<strong>${escapeHtml(projectName(state.selectedProject))}</strong><span>${escapeHtml(state.selectedCode)} · ${category} · ${escapeHtml(processName || "单元照片")}</span>`;
+    }
+
+    async function openUploadChoiceModal(category = null, processName = null) {
       $("#uploadChoiceSub").textContent = state.selectedCode
-        ? `${projectName(state.selectedProject)} / ${state.selectedCode}`
-        : "先选择项目划分，再选择上传类型。";
+        ? "归档位置已预填，确认后再开始上传。"
+        : "先选择归档单元，再添加照片。";
       $("#uploadProjectSearch").value = "";
       $("#uploadModalResult").style.display = "none";
       $("#uploadModalResult").classList.remove("is-warning");
-      setUploadChoiceCategory(state.uploadChoiceCategory || "construction");
+      $("#uploadModalForm").reset();
+      state.uploadQueuedFiles = [];
+      state.uploadQueueResults = [];
+      renderUploadFileQueue();
+      setUploadChoiceCategory(category || state.activePhotoCategory || state.uploadChoiceCategory || "construction");
       $("#uploadProjectPickerBody").innerHTML = `<div class="unit-image-empty">正在加载单元工程…</div>`;
       await ensureAllProjectsLoaded();
+      syncSelectedProjectFromList();
+      renderUploadProcessOptions(processName === null ? state.activeProcessName : processName);
       renderUploadProjectPicker();
+      renderUploadTargetSummary();
       $("#uploadChoiceModal").classList.add("open");
       $("#uploadChoiceModal").setAttribute("aria-hidden", "false");
-      setTimeout(() => $("#uploadProjectSearch").focus(), 0);
+      setTimeout(() => (state.selectedCode ? $("#uploadModalFiles") : $("#uploadProjectSearch"))?.focus(), 0);
     }
 
-    function openUnitUpload(category) {
+    function openUnitUpload(category, processName = state.activeProcessName) {
       if (!state.selectedCode || !state.selectedProject) {
         showNotice("请先选择单元工程。", true);
         return;
       }
-      category = normalizePhotoCategory(category);
-      const form = $(`#${category}UploadForm`);
-      if (!form) return;
-      const shouldOpen = form.style.display === "none" || !form.style.display;
-      photoCategories.forEach(({ key }) => {
-        const item = $(`#${key}UploadForm`);
-        const button = document.querySelector(`[data-unit-upload="${key}"]`);
-        if (!item || !button) return;
-        item.style.display = key === category && shouldOpen ? "grid" : "none";
-        button.textContent = key === category && shouldOpen ? "收起" : "上传";
-      });
-      if (shouldOpen) {
-        const input = $(`#${category}PhotoFiles`);
-        form.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        setTimeout(() => input?.focus(), 0);
-      }
+      openUploadChoiceModal(normalizePhotoCategory(category), processName).catch((error) => showNotice(error.message, true));
     }
 
     function closeUploadChoiceModal() {
@@ -3342,84 +3412,117 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function focusUploadCategory(category) {
-      setUploadChoiceCategory(category);
-      closeUploadChoiceModal();
       if (!state.selectedCode) {
         showNotice("请先在项目划分中选择单元工程。", true);
         return;
       }
-      await loadProject(state.selectedCode, "detail");
-      category = normalizePhotoCategory(category);
+      if (state.viewMode !== "unit") await loadProject(state.selectedCode, "detail");
+      state.activePhotoCategory = normalizePhotoCategory(category);
+      state.activeProcessName = "";
+      clearPhotoSelection(false);
       setView("unit");
-      document.querySelectorAll(".photo-section").forEach((section) => section.classList.remove("is-target"));
-      const input = document.querySelector(`form[data-category="${category}"] input[type=file]`);
-      if (!input) return;
-      const section = input.closest(".photo-section");
-      section.classList.add("is-target");
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-      input.focus();
-      setTimeout(() => section.classList.remove("is-target"), 1800);
+      renderPhotos();
+      await openUploadChoiceModal(state.activePhotoCategory, state.activeProcessName);
     }
 
     function normalizeImageFiles(files) {
       return Array.from(files || []).filter((file) => /\.(jpe?g|png)$/i.test(file.name || ""));
     }
 
-    function updateUploadModalFileSummary(files) {
-      const allFiles = Array.from(files || $("#uploadModalFiles").files || []);
-      const imageFiles = normalizeImageFiles(allFiles);
-      const skipped = Math.max(0, allFiles.length - imageFiles.length);
-      const summary = $("#uploadModalFileSummary");
-      if (!summary) return;
-      if (!allFiles.length) {
-        summary.textContent = "照片文件名包含单元编码或单元名称时，可自动匹配上传。";
-        return;
-      }
-      summary.textContent = skipped
-        ? `已选择 ${imageFiles.length} 张照片，已忽略 ${skipped} 个非 JPG/PNG 文件。`
-        : `已选择 ${imageFiles.length} 张照片。`;
+    function uploadFileKey(file) {
+      return `${file.name || "photo"}:${file.size || 0}:${file.lastModified || 0}`;
     }
 
-    async function uploadFromModal(event, droppedFiles = null) {
+    function renderUploadFileQueue() {
+      const queue = $("#uploadFileQueue");
+      const summary = $("#uploadModalFileSummary");
+      if (summary) summary.textContent = state.uploadQueuedFiles.length ? `待上传 ${state.uploadQueuedFiles.length} 张，确认位置后点击“开始上传”。` : "支持 JPG、JPEG、PNG，可一次选择多张。";
+      if (!queue) return;
+      queue.innerHTML = state.uploadQueuedFiles.map((file, index) => {
+        const result = state.uploadQueueResults[index] || { status: "queued", message: "等待上传" };
+        const size = file.size >= 1024 * 1024 ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+        return `<div class="upload-queue-item is-${escapeHtml(result.status)}"><span class="upload-queue-index">${index + 1}</span><strong title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</strong><small>${size}</small><em>${escapeHtml(result.message || "等待上传")}</em><button type="button" data-remove-upload-file="${index}" aria-label="移除 ${escapeHtml(file.name)}">×</button></div>`;
+      }).join("");
+      queue.querySelectorAll("[data-remove-upload-file]").forEach((button) => {
+        button.onclick = () => {
+          const index = Number(button.dataset.removeUploadFile);
+          state.uploadQueuedFiles.splice(index, 1);
+          state.uploadQueueResults.splice(index, 1);
+          renderUploadFileQueue();
+        };
+      });
+    }
+
+    function updateUploadModalFileSummary(files, append = false) {
+      const allFiles = Array.from(files || []);
+      const imageFiles = normalizeImageFiles(allFiles);
+      const skipped = Math.max(0, allFiles.length - imageFiles.length);
+      const base = append ? state.uploadQueuedFiles : [];
+      const seen = new Set(base.map(uploadFileKey));
+      state.uploadQueuedFiles = [...base, ...imageFiles.filter((file) => !seen.has(uploadFileKey(file)))];
+      state.uploadQueueResults = state.uploadQueuedFiles.map(() => ({ status: "queued", message: "等待上传" }));
+      renderUploadFileQueue();
+      if (skipped) showNotice(`已忽略 ${skipped} 个非 JPG/PNG 文件。`, true);
+    }
+
+    async function uploadFromModal(event) {
       event?.preventDefault();
       if (!state.selectedCode) {
         showNotice("请先在项目划分中选择单元工程。", true);
         return;
       }
       if (!(await ensureAuthenticated("上传照片"))) return;
-      const allFiles = droppedFiles ? Array.from(droppedFiles || []) : Array.from($("#uploadModalFiles").files || []);
-      const files = normalizeImageFiles(allFiles);
+      const files = [...state.uploadQueuedFiles];
       if (!files.length) {
         showNotice("请选择或拖入 JPG/PNG 照片。", true);
         return;
       }
-      const form = new FormData();
-      let photoDate = $("#uploadModalDate").value;
-      // 日期为空时：先从文件名提取，取不到则提交由后端 EXIF 兜底
-      if (!photoDate) {
-        const firstFile = files[0];
-        if (firstFile) photoDate = parseDateFromName(firstFile.name);
-      }
-      form.append("category", state.uploadChoiceCategory || "construction");
-      form.append("title", $("#uploadModalTitle").value.trim());
-      form.append("photo_date", photoDate);
-      form.append("photographer", $("#uploadModalPhotographer").value.trim());
-      form.append("description", "");
-      form.append("orientation", "landscape");
-      files.forEach((file) => form.append("files", file));
-
       const uploadCode = state.selectedCode;
-      const data = await apiJson(`/api/upload/${encodeURIComponent(uploadCode)}`, { method: "POST", body: form });
-      if (state.selectedCode === uploadCode) state.photos = data.photos || state.photos;
-      $("#uploadModalForm").reset();
-      updateUploadModalFileSummary([]);
+      const processName = $("#uploadProcessSelect")?.value || "";
+      const startButton = $("#startUploadBtn");
+      const autoButton = $("#autoMatchUploadBtn");
+      startButton.disabled = true;
+      autoButton.disabled = true;
+      let latestPhotos = state.photos;
+      let successCount = 0;
+      const failedFiles = [];
+      const failedResults = [];
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        state.uploadQueueResults[index] = { status: "uploading", message: "正在上传" };
+        renderUploadFileQueue();
+        const form = new FormData();
+        form.append("category", state.uploadChoiceCategory || "construction");
+        form.append("title", $("#uploadModalTitle").value.trim());
+        form.append("photo_date", $("#uploadModalDate").value || parseDateFromName(file.name));
+        form.append("photographer", $("#uploadModalPhotographer").value.trim());
+        form.append("description", "");
+        form.append("orientation", "landscape");
+        form.append("process_name", processName);
+        form.append("process_code", processCodeForName(processName));
+        form.append("files", file);
+        try {
+          const data = await apiJson(`/api/upload/${encodeURIComponent(uploadCode)}`, { method: "POST", body: form });
+          latestPhotos = data.photos || latestPhotos;
+          successCount += 1;
+          state.uploadQueueResults[index] = { status: "success", message: "上传成功" };
+        } catch (error) {
+          failedFiles.push(file);
+          failedResults.push({ status: "failed", message: error.message || "上传失败，可重试" });
+          state.uploadQueueResults[index] = { status: "failed", message: error.message || "上传失败" };
+        }
+        renderUploadFileQueue();
+      }
+      if (state.selectedCode === uploadCode) state.photos = latestPhotos;
+      startButton.disabled = false;
+      autoButton.disabled = false;
       await refreshAll();
       renderUploadProjectPicker();
       if (state.viewMode === "unit" && state.selectedCode === uploadCode) renderPhotos();
       const result = $("#uploadModalResult");
-      result.classList.remove("is-warning");
+      result.classList.toggle("is-warning", Boolean(failedFiles.length));
       result.innerHTML = `
-        <span>上传成功，已归档 ${files.length} 张到 ${escapeHtml(uploadCode)}。</span>
+        <span>已成功归档 ${successCount} 张${failedFiles.length ? `，${failedFiles.length} 张失败，可直接重试` : ""}。</span>
         <button class="secondary mini" type="button" id="uploadModalDetailBtn">查看详情</button>
       `;
       result.style.display = "flex";
@@ -3427,53 +3530,22 @@ const $ = (selector) => document.querySelector(selector);
         closeUploadChoiceModal();
         loadProject(uploadCode, "detail").catch((error) => showNotice(error.message, true));
       });
-      showNotice("照片已上传。");
+      state.uploadQueuedFiles = failedFiles;
+      state.uploadQueueResults = failedResults;
+      $("#uploadModalFiles").value = "";
+      renderUploadFileQueue();
+      showNotice(failedFiles.length ? "部分照片上传失败，请检查后重试。" : "照片已全部上传并归档。", Boolean(failedFiles.length));
     }
 
     async function uploadAutoMatchFromModal() {
       if (!(await ensureAuthenticated("自动匹配上传照片"))) return;
-      const allFiles = Array.from($("#uploadModalFiles").files || []);
-      const files = normalizeImageFiles(allFiles);
+      const files = [...state.uploadQueuedFiles];
       if (!files.length) {
         showNotice("请选择 JPG/PNG 照片后再自动匹配上传。", true);
         return;
       }
       await previewFolderImport(files, state.uploadChoiceCategory || "construction");
       closeUploadChoiceModal();
-      return;
-      const form = new FormData();
-      let photoDate = $("#uploadModalDate").value;
-      // 日期为空时：先从文件名提取，取不到则提交由后端 EXIF 兜底
-      if (!photoDate) {
-        const firstFile = files[0];
-        if (firstFile) photoDate = parseDateFromName(firstFile.name);
-      }
-      form.append("category", state.uploadChoiceCategory || "construction");
-      form.append("title", $("#uploadModalTitle").value.trim());
-      form.append("photo_date", photoDate);
-      form.append("photographer", $("#uploadModalPhotographer").value.trim());
-      form.append("description", "");
-      form.append("orientation", "landscape");
-      files.forEach((file) => form.append("files", file));
-
-      const data = await apiJson("/api/upload-auto-match", { method: "POST", body: form });
-      $("#uploadModalForm").reset();
-      updateUploadModalFileSummary([]);
-      await refreshAll();
-      renderUploadProjectPicker();
-      if (state.selectedCode) {
-        const refreshed = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}`);
-        state.photos = refreshed.photos || state.photos;
-        if (state.viewMode === "unit") renderPhotos();
-      }
-      const unmatched = data.unmatched || [];
-      const result = $("#uploadModalResult");
-      result.classList.toggle("is-warning", Boolean(unmatched.length));
-      result.innerHTML = `
-        <span>自动匹配上传成功：${Number(data.added_count || 0)} 张，归档到 ${Number(data.project_count || 0)} 个单元${unmatched.length ? `；未匹配 ${unmatched.length} 张：${escapeHtml(unmatched.slice(0, 5).join("、"))}${unmatched.length > 5 ? "等" : ""}` : "。"}</span>
-      `;
-      result.style.display = "flex";
-      showNotice(unmatched.length ? "已上传匹配成功的照片，未匹配照片未上传。" : "照片已按名称自动匹配上传。", Boolean(unmatched.length));
     }
 
     async function uploadCategoryFiles(key, files, sourceForm = null) {
@@ -3787,20 +3859,40 @@ const $ = (selector) => document.querySelector(selector);
       else delete state.selectedPrintPhotos[key];
     }
 
-    function togglePhotoSelection(card) {
+    function togglePhotoSelection(card, shiftKey = false) {
       const input = card.querySelector("input[data-print-photo]");
       if (!input) return;
-      input.checked = !input.checked;
-      setPhotoSelected(input.dataset.category, input.dataset.printPhoto, input.checked);
-      card.classList.toggle("is-selected", input.checked);
+      const next = !input.checked;
+      const currentIndex = Number(card.dataset.photoIndex || 0);
+      if (shiftKey && state.photoSelectionAnchor >= 0) {
+        const start = Math.min(state.photoSelectionAnchor, currentIndex);
+        const end = Math.max(state.photoSelectionAnchor, currentIndex);
+        card.closest(".photos")?.querySelectorAll(".photo[data-photo-index]").forEach((item) => {
+          const index = Number(item.dataset.photoIndex || 0);
+          if (index < start || index > end) return;
+          const checkbox = item.querySelector("input[data-print-photo]");
+          if (!checkbox) return;
+          checkbox.checked = next;
+          setPhotoSelected(checkbox.dataset.category, checkbox.dataset.printPhoto, next);
+          item.classList.toggle("is-selected", next);
+        });
+      } else {
+        input.checked = next;
+        setPhotoSelected(input.dataset.category, input.dataset.printPhoto, input.checked);
+        card.classList.toggle("is-selected", input.checked);
+      }
+      state.photoSelectionAnchor = currentIndex;
+      updatePhotoSelectionBar();
     }
 
     function selectedPhotosForSection(sectionKey) {
-      const section = document.querySelector(`[data-photo-section="${CSS.escape(sectionKey || "")}"]`);
-      if (!section) return [];
-      return Array.from(section.querySelectorAll("input[data-print-photo]:checked"))
-        .map((input) => ({ category: input.dataset.category, photoId: input.dataset.printPhoto }))
-        .filter((item) => item.category && item.photoId);
+      const [categoryRaw, ...processParts] = String(sectionKey || photoSectionKey(state.activePhotoCategory, state.activeProcessName)).split("::");
+      const category = normalizePhotoCategory(categoryRaw);
+      const processName = processParts.join("::");
+      return photosForSection(category, processName)
+        .filter((photo) => state.selectedPrintPhotos[printSelectionKey(category, photo.id)])
+        .map((photo) => ({ category, photoId: String(photo.id || "") }))
+        .filter((item) => item.photoId);
     }
 
     async function deleteSelectedPhotos(sectionKey) {
@@ -3831,6 +3923,7 @@ const $ = (selector) => document.querySelector(selector);
         delete state.selectedPrintPhotos[printSelectionKey(item.category, item.photoId)];
       }
       state.photos = latestPhotos || [];
+      clearPhotoSelection(false);
       renderPhotos();
       await refreshAll();
       showNotice(`已删除 ${selected.length} 张照片。`);
@@ -4149,7 +4242,7 @@ const $ = (selector) => document.querySelector(selector);
       });
     });
     document.addEventListener("click", (event) => {
-      if (!event.target.closest(".support-wrap")) {
+      if (!$("#supportPanel")?.classList.contains("is-settings-embedded") && !event.target.closest(".support-wrap")) {
         $("#supportPanel").classList.remove("open");
         $("#supportPanel").setAttribute("aria-hidden", "true");
       }
@@ -4393,6 +4486,12 @@ const $ = (selector) => document.querySelector(selector);
     $("#engineeringProjectSelect").addEventListener("change", (event) => {
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
     });
+    $("#engineeringProjectSearch")?.addEventListener("change", commitEngineeringProjectSearch);
+    $("#engineeringProjectSearch")?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      commitEngineeringProjectSearch();
+    });
     $("#newEngineeringProjectBtn")?.addEventListener("click", openNewEngineeringProjectModal);
     $("#closeNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
     $("#cancelNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
@@ -4630,6 +4729,12 @@ const $ = (selector) => document.querySelector(selector);
     function setProjectImportMenu(open) {
       const menu = $("#projectImportMenu");
       const button = $("#projectImportMenuBtn");
+      if (menu?.classList.contains("settings-static-menu")) {
+        menu.classList.add("open");
+        menu.setAttribute("aria-hidden", "false");
+        button?.setAttribute("aria-expanded", "true");
+        return;
+      }
       const isOpen = Boolean(open);
       menu?.classList.toggle("open", isOpen);
       menu?.setAttribute("aria-hidden", isOpen ? "false" : "true");
@@ -4648,9 +4753,10 @@ const $ = (selector) => document.querySelector(selector);
         if (!el) return;
         if (name === except) return;
         if (name === "projectImportMenu") setProjectImportMenu(false);
+        else if (name === "supportPanel" && el.classList.contains("is-settings-embedded")) return;
         else el.classList.remove("open");
       });
-      if (except !== "supportPanel") $("#supportPanel")?.setAttribute("aria-hidden", "true");
+      if (except !== "supportPanel" && !$("#supportPanel")?.classList.contains("is-settings-embedded")) $("#supportPanel")?.setAttribute("aria-hidden", "true");
     }
     $("#printMenuBtn")?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -4659,13 +4765,14 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#settingsMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
-      closeTopMenus("settingsMenu");
-      $("#settingsMenu").classList.toggle("open");
+      closeTopMenus();
+      openProjectInfoModal();
     });
     $("#actionsMenuBtn").addEventListener("click", (event) => {
       event.stopPropagation();
       closeTopMenus("actionsMenu");
       $("#actionsMenu").classList.toggle("open");
+      $("#actionsMenuBtn").setAttribute("aria-expanded", $("#actionsMenu").classList.contains("open") ? "true" : "false");
     });
     $("#quickMenuBtn")?.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -4681,14 +4788,15 @@ const $ = (selector) => document.querySelector(selector);
     document.addEventListener("click", (event) => {
       if (!event.target.closest(".print-menu-wrap")) $("#printMenu")?.classList.remove("open");
       if (!event.target.closest(".settings-menu-wrap")) {
-        $("#settingsMenu").classList.remove("open");
-        $("#actionsMenu").classList.remove("open");
+        $("#settingsMenu")?.classList.remove("open");
+        $("#actionsMenu")?.classList.remove("open");
+        $("#actionsMenuBtn")?.setAttribute("aria-expanded", "false");
       }
       if (!event.target.closest(".quick-menu-wrap")) $("#quickMenu")?.classList.remove("open");
       if (!event.target.closest(".project-import-wrap")) setProjectImportMenu(false);
     });
     document.querySelectorAll("#settingsMenu button").forEach((button) => {
-      button.addEventListener("click", () => $("#settingsMenu").classList.remove("open"));
+      button.addEventListener("click", () => $("#settingsMenu")?.classList.remove("open"));
     });
     document.querySelectorAll("#actionsMenu button").forEach((button) => {
       button.addEventListener("click", () => $("#actionsMenu").classList.remove("open"));
@@ -4697,10 +4805,33 @@ const $ = (selector) => document.querySelector(selector);
       button.addEventListener("click", () => $("#quickMenu")?.classList.remove("open"));
     });
     document.querySelectorAll("#projectImportMenu button").forEach((button) => {
-      button.addEventListener("click", () => setProjectImportMenu(false));
+      button.addEventListener("click", () => {
+        if (!$("#projectImportMenu")?.classList.contains("settings-static-menu")) setProjectImportMenu(false);
+      });
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") setProjectImportMenu(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      const layers = [
+        ["#photoPreviewModal", closePhotoPreview],
+        ["#photoEditModal", closePhotoEdit],
+        ["#addProcessModal", closeAddProcessModal],
+        ["#uploadChoiceModal", closeUploadChoiceModal],
+        ["#projectInfoModal", closeProjectInfoModal],
+        ["#batchPrintModal", closeBatchPrint]
+      ];
+      const active = layers.find(([selector]) => $(selector)?.classList.contains("open"));
+      if (active) {
+        event.preventDefault();
+        active[1]();
+        return;
+      }
+      $("#unitMoreMenu")?.classList.remove("open");
+      $("#actionsMenu")?.classList.remove("open");
+      $("#unitMoreMenuBtn")?.setAttribute("aria-expanded", "false");
+      $("#actionsMenuBtn")?.setAttribute("aria-expanded", "false");
     });
     document.querySelectorAll("[data-open-batch-print]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -4784,7 +4915,8 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#closeUploadChoiceBtn").addEventListener("click", closeUploadChoiceModal);
     $("#uploadProjectSearch").addEventListener("input", renderUploadProjectPicker);
-    $("#uploadModalFiles").addEventListener("change", (event) => updateUploadModalFileSummary(event.target.files));
+    $("#uploadProcessSelect")?.addEventListener("change", renderUploadTargetSummary);
+    $("#uploadModalFiles").addEventListener("change", (event) => updateUploadModalFileSummary(event.target.files, true));
     $("#uploadModalForm").addEventListener("submit", (event) => {
       uploadFromModal(event).catch((error) => showNotice(error.message, true));
     });
@@ -4792,13 +4924,7 @@ const $ = (selector) => document.querySelector(selector);
       const files = Array.from(event.clipboardData?.files || []);
       if (!files.length) return;
       event.preventDefault();
-      uploadFromModal(event, files).catch((error) => showNotice(error.message, true));
-    });
-    $("#uploadModalForm").addEventListener("paste", (event) => {
-      const files = Array.from(event.clipboardData?.files || []);
-      if (!files.length) return;
-      event.preventDefault();
-      uploadFromModal(event, files).catch((error) => showNotice(error.message, true));
+      updateUploadModalFileSummary(files, true);
     });
     $("#autoMatchUploadBtn").addEventListener("click", () => {
       uploadAutoMatchFromModal().catch((error) => showNotice(error.message, true));
@@ -4825,8 +4951,7 @@ const $ = (selector) => document.querySelector(selector);
       event.stopPropagation();
       uploadModalDragDepth = 0;
       $("#uploadModalForm").classList.remove("is-dragging");
-      updateUploadModalFileSummary(event.dataTransfer.files);
-      uploadFromModal(event, event.dataTransfer.files).catch((error) => showNotice(error.message, true));
+      updateUploadModalFileSummary(event.dataTransfer.files, true);
     });
     $("#uploadChoiceModal").addEventListener("click", (event) => {
       if (event.target.id === "uploadChoiceModal") closeUploadChoiceModal();
@@ -4845,6 +4970,38 @@ const $ = (selector) => document.querySelector(selector);
       } else {
         openOverview("construction");
       }
+    });
+    $("#unitCategoryConstructionBtn")?.addEventListener("click", () => selectGalleryScope("construction", state.activeProcessName));
+    $("#unitCategorySupervisionBtn")?.addEventListener("click", () => selectGalleryScope("supervision", state.activeProcessName));
+    $("#galleryUploadBtn")?.addEventListener("click", () => openUnitUpload(state.activePhotoCategory, state.activeProcessName));
+    $("#gallerySelectBtn")?.addEventListener("click", () => {
+      if (state.photoSelectionMode) clearPhotoSelection();
+      else {
+        state.photoSelectionMode = true;
+        state.photoSelectionAnchor = -1;
+        renderPhotos();
+      }
+    });
+    $("#cancelPhotoSelectionBtn")?.addEventListener("click", () => clearPhotoSelection());
+    $("#selectAllCurrentPhotosBtn")?.addEventListener("click", () => {
+      const current = activeGalleryPhotos();
+      const allSelected = current.length > 0 && current.every((photo) => state.selectedPrintPhotos[printSelectionKey(state.activePhotoCategory, photo.id)]);
+      current.forEach((photo) => setPhotoSelected(state.activePhotoCategory, photo.id, !allSelected));
+      renderPhotos();
+    });
+    $("#deleteSelectedCurrentPhotosBtn")?.addEventListener("click", () => deleteSelectedPhotos(photoSectionKey(state.activePhotoCategory, state.activeProcessName)).catch((error) => showNotice(error.message, true)));
+    $("#printSelectedPhotosBtn")?.addEventListener("click", () => openUnitPrint(state.activePhotoCategory, state.activeProcessName, true));
+    $("#unitPrintCurrentBtn")?.addEventListener("click", () => openUnitPrint(state.activePhotoCategory, state.activeProcessName, false));
+    $("#unitMoreMenuBtn")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = $("#unitMoreMenu");
+      menu?.classList.toggle("open");
+      $("#unitMoreMenuBtn").setAttribute("aria-expanded", menu?.classList.contains("open") ? "true" : "false");
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.closest(".unit-more-wrap")) return;
+      $("#unitMoreMenu")?.classList.remove("open");
+      $("#unitMoreMenuBtn")?.setAttribute("aria-expanded", "false");
     });
     initPhotoForms();
 
@@ -4939,14 +5096,6 @@ const $ = (selector) => document.querySelector(selector);
         return;
       }
       action();
-    }
-
-    function exportSelectedCsv() {
-      requireSelected(() => { window.location.href = `/api/export/${encodeURIComponent(state.selectedCode)}/metadata.csv`; });
-    }
-
-    function exportSelectedJson() {
-      requireSelected(() => { window.location.href = `/api/export/${encodeURIComponent(state.selectedCode)}/metadata.json`; });
     }
 
     function exportSelectedZip() {
@@ -5157,12 +5306,24 @@ const $ = (selector) => document.querySelector(selector);
       }, 350);
     }
 
-    function openUnitPrint(category) {
+    function openUnitPrint(category = state.activePhotoCategory, processName = state.activeProcessName, selectionOnly = false) {
       requireSelected(() => {
         const url = new URL(`/print/${encodeURIComponent(category)}/${encodeURIComponent(state.selectedCode)}`, window.location.origin);
-        // 未进入多选时，明确固定为当前全部照片；这样后续新增照片不会混进“上次打印”。
-        const ids = selectedPrintIds(category);
-        const fixedIds = ids.length ? ids : categoryPhotos(category).map((photo) => String(photo.id || "")).filter(Boolean);
+        const current = photosForSection(category, processName);
+        const selectedIds = current
+          .filter((photo) => state.selectedPrintPhotos[printSelectionKey(category, photo.id)])
+          .map((photo) => String(photo.id || ""))
+          .filter(Boolean);
+        if (selectionOnly && !selectedIds.length) {
+          showNotice("请先选择要打印的照片。", true);
+          return;
+        }
+        // 固定本次当前可见图库，避免其它工序或后续新增照片混入预览。
+        const fixedIds = selectionOnly ? selectedIds : current.map((photo) => String(photo.id || "")).filter(Boolean);
+        if (!fixedIds.length) {
+          showNotice("当前图库没有可打印的照片。", true);
+          return;
+        }
         if (fixedIds.length) url.searchParams.set("ids", fixedIds.join(","));
         openPrintSetup(`${url.pathname}${url.search}`);
       });
@@ -5190,10 +5351,12 @@ const $ = (selector) => document.querySelector(selector);
     $("#deleteUnitBtn").addEventListener("click", () => deleteUnit().catch((error) => showNotice(error.message, true)));
     $("#exportPhotoStatsBtn").addEventListener("click", () => { window.location.href = "/api/export/photo-statistics.xlsx"; });
     $("#exportUnitStatsBtn").addEventListener("click", () => requireSelected(() => { window.location.href = `/api/export/photo-statistics.xlsx?codes=${encodeURIComponent(state.selectedCode)}`; }));
-    $("#addProcessBtn").addEventListener("click", () => addProcess().catch((error) => showNotice(error.message, true)));
-    $("#settingsProjectInfoBtn").addEventListener("click", openProjectInfoModal);
-    $("#settingsExportCsvBtn").addEventListener("click", exportSelectedCsv);
-    $("#settingsExportJsonBtn").addEventListener("click", exportSelectedJson);
+    $("#addProcessBtn").addEventListener("click", openAddProcessModal);
+    $("#closeAddProcessBtn")?.addEventListener("click", closeAddProcessModal);
+    $("#cancelAddProcessBtn")?.addEventListener("click", closeAddProcessModal);
+    $("#addProcessForm")?.addEventListener("submit", (event) => addProcess(event).catch((error) => showNotice(error.message, true)));
+    $("#addProcessModal")?.addEventListener("click", (event) => { if (event.target.id === "addProcessModal") closeAddProcessModal(); });
+    $("#settingsRefreshBtn")?.addEventListener("click", () => fullRefresh().catch((error) => showNotice(error.message, true)));
 
     setView("overview");
     const startupUnitCode = routeUnitCode();
@@ -5390,7 +5553,12 @@ const $ = (selector) => document.querySelector(selector);
 
       function start() {
         // 再等一帧让工作台各区域完成渲染、布局稳定
-        setTimeout(() => show(0), 600);
+        setTimeout(() => {
+          overlay.classList.add("active");
+          spot.style.display = "block";
+          pop.style.display = "block";
+          show(0);
+        }, 600);
       }
 
       const steps = [
@@ -5401,15 +5569,15 @@ const $ = (selector) => document.querySelector(selector);
           placement: "bottom"
         },
         {
-          target: "#actionsMenuBtn",
-          title: "操作菜单",
-          desc: "点这里的【操作】，可以上传照片、导入文件夹、批量打印等。",
+          target: "#globalUploadBtn",
+          title: "上传照片",
+          desc: "最常用的上传始终在顶部。选择单元、施工或监理及工序，确认后再开始上传。",
           placement: "bottom"
         },
         {
-          target: "#refreshBtn",
-          title: "刷新",
-          desc: "数据有变化时点这里刷新，能看到最新内容。",
+          target: "#engineeringProjectSelect",
+          title: "切换工程",
+          desc: "长工程名会自动省略；展开这里可查看全名、专业并切换工程。",
           placement: "bottom"
         },
         {
@@ -5419,21 +5587,23 @@ const $ = (selector) => document.querySelector(selector);
           placement: "right"
         },
         {
-          target: "#constructionOverviewBtn",
-          title: "总览统计",
-          desc: "中间这里是统计概览，点一下可快速进入对应内容。",
-          placement: "right"
+          target: "#settingsMenuBtn",
+          title: "统一设置中心",
+          desc: "项目划分、成员、账号会员、打印存储和更新都集中在这里。",
+          placement: "bottom"
         }
       ];
 
       let idx = 0;
       const overlay = document.createElement("div");
-      overlay.className = "guide-overlay active";
+      overlay.className = "guide-overlay";
       overlay.setAttribute("aria-hidden", "true");
       const spot = document.createElement("div");
       spot.className = "guide-spot";
+      spot.style.display = "none";
       const pop = document.createElement("div");
       pop.className = "guide-pop";
+      pop.style.display = "none";
       pop.setAttribute("role", "dialog");
       pop.innerHTML = `
         <span class="gp-title"></span>

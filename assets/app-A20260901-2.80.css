@@ -3509,6 +3509,7 @@
         min-height: 42px;
       }
     }
+
     @media (max-width: 520px) {
       .unit-image-toolbar { grid-template-columns: 1fr; }
       .unit-image-card { grid-template-columns: 1fr; }
@@ -7659,4 +7660,856 @@
         height: auto;
         max-height: none;
       }
+    }
+
+    /* ======================================================================
+       2026 四专业体验重构 · 最终界面规则
+       本段是新界面的唯一覆盖层：强调清晰层级、直接上传和单图库操作。
+       ====================================================================== */
+    :root {
+      --ux-ink: #122d35;
+      --ux-muted: #62777d;
+      --ux-line: #dce7e8;
+      --ux-soft: #f3f8f7;
+      --ux-panel: #ffffff;
+      --ux-brand: #08766f;
+      --ux-brand-deep: #07595a;
+      --ux-accent: #e0f4ef;
+      --ux-danger: #b42318;
+      --ux-shadow: 0 18px 50px rgba(12, 48, 55, .13);
+      --ux-ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+    button,
+    input,
+    select,
+    textarea { font: inherit; }
+    button { min-height: 40px; }
+    button:active { transform: scale(.97); }
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid rgba(8, 118, 111, .28);
+      outline-offset: 2px;
+    }
+
+    .topbar {
+      min-height: 68px;
+      padding: 10px 18px;
+      display: grid;
+      grid-template-columns: minmax(210px, auto) minmax(380px, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      color: #fff;
+      background: linear-gradient(115deg, #082f3c 0%, #07565b 54%, #08766f 100%);
+      border: 0;
+      box-shadow: 0 10px 28px rgba(2, 36, 45, .2);
+    }
+    .topbar .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar .brand-mark {
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 11px;
+      color: #073b42;
+      background: #dff7f0;
+      box-shadow: none;
+    }
+    .topbar .brand h1 {
+      margin: 0;
+      max-width: 190px;
+      overflow: hidden;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: .01em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .top-batch-actions {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .project-switcher {
+      min-width: 180px;
+      width: min(440px, 44vw);
+      max-width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 42px;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 12px;
+      background: rgba(255,255,255,.1);
+    }
+    .project-switcher .project-select {
+      width: 100%;
+      min-width: 0;
+      height: 40px;
+      padding: 0 32px 0 11px;
+      color: #133840;
+      background: #fff;
+      border: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .top-batch-actions .top-new-project-btn {
+      min-width: 42px;
+      width: 42px;
+      height: 40px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      color: #083e44;
+      background: #dff7f0;
+      box-shadow: none;
+      font-size: 22px;
+    }
+    .top-filter-group {
+      flex: 0 0 auto;
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid rgba(255,255,255,.17);
+      border-radius: 11px;
+      background: rgba(0, 30, 38, .18);
+    }
+    .top-filter-group button {
+      min-width: 58px;
+      height: 40px;
+      padding: 0 13px;
+      border: 0;
+      border-radius: 8px;
+      color: rgba(255,255,255,.78);
+      background: transparent;
+      box-shadow: none;
+    }
+    .top-filter-group button.active {
+      color: #083a40;
+      background: #fff;
+    }
+    .top-actions {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .top-actions > button,
+    .top-actions > .settings-menu-wrap > button {
+      height: 42px;
+      min-height: 42px;
+      padding: 0 15px;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 10px;
+      background: rgba(255,255,255,.09);
+      box-shadow: none;
+    }
+    .top-actions .top-upload-btn {
+      min-width: 120px;
+      color: #07383e;
+      border-color: #e8fff9;
+      background: #e8fff9;
+      font-weight: 750;
+      box-shadow: 0 8px 18px rgba(0, 28, 35, .2);
+    }
+    .top-actions .app-version-badge {
+      color: rgba(255,255,255,.7);
+      background: transparent;
+      border: 0;
+    }
+    .actions-menu-wrap { position: relative; }
+    .actions-menu-wrap .settings-menu {
+      top: calc(100% + 10px);
+      right: 0;
+      width: 190px;
+      padding: 7px;
+      border: 1px solid var(--ux-line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--ux-shadow);
+      z-index: 80;
+    }
+    .actions-menu-wrap .settings-menu button {
+      width: 100%;
+      min-height: 40px;
+      justify-content: flex-start;
+      color: var(--ux-ink);
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    .settings-portal-source { display: none !important; }
+    .side-tree-switch { display: none !important; }
+
+    .project-info-modal {
+      width: min(1120px, calc(100vw - 40px));
+      height: min(780px, calc(100vh - 40px));
+      max-height: none;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid var(--ux-line);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: var(--ux-shadow);
+    }
+    .project-info-modal .upload-choice-head {
+      padding: 20px 22px 16px;
+      border-bottom: 1px solid var(--ux-line);
+    }
+    .project-info-modal .project-settings-form {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) auto;
+      padding: 0;
+      gap: 0;
+    }
+    .project-info-modal .project-settings-tabs {
+      grid-row: 1 / 3;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 5px;
+      padding: 15px 12px;
+      overflow-y: auto;
+      border: 0;
+      border-right: 1px solid var(--ux-line);
+      background: #f5f9f8;
+    }
+    .project-info-modal .project-settings-tabs button {
+      width: 100%;
+      min-height: 43px;
+      padding: 0 13px;
+      justify-content: flex-start;
+      text-align: left;
+      color: #50676d;
+      border: 0;
+      border-radius: 10px;
+      background: transparent;
+      box-shadow: none;
+    }
+    .project-info-modal .project-settings-tabs button.active {
+      color: var(--ux-brand-deep);
+      background: #dff2ed;
+      font-weight: 750;
+    }
+    .project-info-modal .project-settings-body {
+      min-height: 0;
+      padding: 22px;
+      overflow-y: auto;
+      background: #fff;
+    }
+    .project-info-modal .project-settings-panel { display: none; }
+    .project-info-modal .project-settings-panel.active { display: block; }
+    .project-info-modal .project-settings-panel.active + .project-settings-panel.active { margin-top: 22px; }
+    .project-info-modal .project-settings-panel h4 {
+      margin: 0 0 14px;
+      color: var(--ux-ink);
+      font-size: 17px;
+    }
+    .project-info-modal .project-settings-actions {
+      grid-column: 2;
+      margin: 0;
+      padding: 12px 22px;
+      border-top: 1px solid var(--ux-line);
+      background: #fff;
+    }
+    .project-settings-form[data-active-tab="division"] .project-settings-actions,
+    .project-settings-form[data-active-tab="members"] .project-settings-actions,
+    .project-settings-form[data-active-tab="account"] .project-settings-actions,
+    .project-settings-form[data-active-tab="device"] .project-settings-actions { display: none; }
+    .settings-static-menu {
+      position: static !important;
+      display: grid !important;
+      width: auto !important;
+      max-width: none !important;
+      padding: 16px !important;
+      gap: 10px;
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: none !important;
+      border: 1px solid var(--ux-line) !important;
+      border-radius: 14px !important;
+      box-shadow: none !important;
+    }
+    .settings-static-menu #projectImportMenuBtn[hidden] { display: none !important; }
+    #printConstructionBtn[hidden],
+    #printSupervisionBtn[hidden] { display: none !important; }
+    .settings-account-host .support-panel.is-settings-embedded {
+      position: static !important;
+      display: block !important;
+      width: auto !important;
+      max-width: none !important;
+      max-height: none !important;
+      padding: 0 !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: none !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent !important;
+    }
+    .settings-account-host .support-panel.is-settings-embedded > h3 { display: none; }
+    .settings-account-host .support-settings-form {
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      gap: 18px;
+    }
+    .settings-account-host .support-settings-tabs {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .settings-account-host .support-settings-tabs button { width: 100%; justify-content: flex-start; }
+    .settings-device-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .settings-device-card {
+      position: relative;
+      min-height: 86px;
+      padding: 16px;
+      display: grid;
+      align-content: center;
+      justify-items: start;
+      gap: 5px;
+      text-align: left;
+      color: var(--ux-ink);
+      background: #f7faf9;
+      border: 1px solid var(--ux-line);
+      border-radius: 13px;
+      box-shadow: none;
+    }
+    .settings-device-card span { color: var(--ux-muted); font-size: 13px; }
+
+    #unitView .page-head {
+      position: sticky;
+      z-index: 12;
+      padding: 14px 4px;
+      border-bottom: 1px solid var(--ux-line);
+      background: rgba(247, 250, 249, .96);
+      backdrop-filter: blur(10px);
+    }
+    .unit-breadcrumbs {
+      max-width: min(720px, 70vw);
+      overflow: hidden;
+      color: var(--ux-brand);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #unitTitle {
+      max-width: min(760px, 70vw);
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .unit-more-wrap { position: relative; }
+    .unit-more-menu {
+      position: absolute;
+      top: calc(100% + 7px);
+      right: 0;
+      z-index: 50;
+      width: 170px;
+      padding: 7px;
+      display: none;
+      border: 1px solid var(--ux-line);
+      border-radius: 11px;
+      background: #fff;
+      box-shadow: var(--ux-shadow);
+    }
+    .unit-more-menu.open { display: grid; }
+    .unit-more-menu button {
+      width: 100%;
+      padding: 0 11px;
+      justify-content: flex-start;
+      color: var(--ux-ink);
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    .unit-more-menu button.danger { color: var(--ux-danger); }
+    .unit-gallery-shell {
+      margin-top: 14px;
+      overflow: clip;
+      border: 1px solid var(--ux-line);
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 12px 34px rgba(14, 50, 58, .07);
+    }
+    .unit-gallery-toolbar {
+      min-height: 62px;
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 1px solid var(--ux-line);
+      background: #fbfdfc;
+    }
+    .unit-gallery-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      border-radius: 11px;
+      background: #eaf2f0;
+    }
+    .unit-gallery-tabs button,
+    .unit-process-tabs button {
+      min-height: 38px;
+      padding: 0 12px;
+      color: #52696f;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      box-shadow: none;
+      white-space: nowrap;
+    }
+    .unit-gallery-tabs button.active,
+    .unit-process-tabs button.active {
+      color: var(--ux-brand-deep);
+      background: #fff;
+      box-shadow: 0 3px 10px rgba(19, 60, 67, .09);
+      font-weight: 750;
+    }
+    .unit-gallery-tabs button span,
+    .unit-process-tabs button span {
+      margin-left: 3px;
+      color: #7a8e92;
+      font-size: 12px;
+    }
+    .unit-process-tabs {
+      min-width: 0;
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .unit-gallery-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .unit-gallery-count { color: var(--ux-muted); font-size: 13px; white-space: nowrap; }
+    .photo-selection-bar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      min-height: 54px;
+      padding: 7px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #174b4b;
+      border-bottom: 1px solid #b9ddd5;
+      background: #eaf8f4;
+    }
+    .photo-selection-bar[hidden] { display: none; }
+    .photo-selection-bar strong { margin-right: auto; }
+    #unitView .unit-combined { display: block; }
+    #unitView .photo-side.photo-sections.is-single-gallery {
+      display: block;
+      padding: 0;
+    }
+    #unitView .active-photo-section {
+      min-height: 350px;
+      height: auto;
+      max-height: none;
+      display: block;
+      padding: 0 14px 18px;
+      border: 0;
+      border-radius: 0;
+      background: #fff;
+      box-shadow: none;
+    }
+    #unitView .active-photo-section .photo-section-head {
+      min-height: 68px;
+      padding: 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 0;
+    }
+    #unitView .active-photo-section .photo-section-head h3 { margin: 0 0 3px; }
+    #unitView .active-photo-section .photo-section-head p { margin: 0; color: var(--ux-muted); font-size: 13px; }
+    #unitView .active-photo-section .photos {
+      min-height: 250px;
+      height: auto;
+      max-height: none;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(205px, 1fr));
+      align-items: start;
+      gap: 12px;
+      overflow: visible;
+    }
+    #unitView .photo {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--ux-line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 5px 18px rgba(15, 48, 55, .06);
+    }
+    #unitView .photo.is-select-mode { cursor: pointer; user-select: none; }
+    #unitView .photo.is-selected {
+      border-color: var(--ux-brand);
+      box-shadow: 0 0 0 3px rgba(8,118,111,.16);
+    }
+    #unitView .photo-print-check {
+      position: absolute;
+      top: 9px;
+      left: 9px;
+      z-index: 4;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(7,69,72,.22);
+      border-radius: 8px;
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 3px 10px rgba(0,0,0,.1);
+    }
+    #unitView .photo-print-check input { width: 17px; height: 17px; margin: 0; accent-color: var(--ux-brand); }
+    .gallery-empty {
+      grid-column: 1 / -1;
+      min-height: 250px;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      gap: 8px;
+      color: var(--ux-muted);
+      text-align: center;
+      background: linear-gradient(180deg, #fbfdfc, #f5f9f8);
+      border: 1px dashed #bfd4d2;
+      border-radius: 13px;
+    }
+    .gallery-empty strong { color: var(--ux-ink); font-size: 16px; }
+
+    .upload-choice-modal {
+      width: min(940px, calc(100vw - 32px));
+      max-height: min(880px, calc(100vh - 32px));
+      overflow-y: auto;
+      border: 1px solid var(--ux-line);
+      border-radius: 18px;
+      background: #fff;
+      box-shadow: var(--ux-shadow);
+    }
+    .upload-flow-summary {
+      margin: 0 20px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--ux-brand-deep);
+      border: 1px solid #bfe2da;
+      border-radius: 11px;
+      background: #edf9f6;
+    }
+    .upload-flow-summary.is-empty { color: #7a5b13; border-color: #ead9a4; background: #fff9e9; }
+    .upload-flow-summary span { color: var(--ux-muted); font-size: 13px; }
+    .upload-choice-body {
+      padding: 14px 20px 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr minmax(190px, .8fr);
+      gap: 10px;
+    }
+    .upload-choice-card {
+      min-height: 72px;
+      padding: 12px;
+      display: grid;
+      align-content: center;
+      justify-items: start;
+      gap: 4px;
+      color: var(--ux-ink);
+      text-align: left;
+      border: 1px solid var(--ux-line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: none;
+    }
+    .upload-choice-card span { color: var(--ux-muted); font-size: 12px; }
+    .upload-choice-card.active { color: var(--ux-brand-deep); border-color: #68b8aa; background: #eef9f6; box-shadow: 0 0 0 2px rgba(8,118,111,.1); }
+    .upload-process-field { min-width: 0; display: grid; align-content: center; gap: 5px; color: var(--ux-muted); font-size: 12px; }
+    .upload-process-field select { width: 100%; min-height: 42px; }
+    .upload-modal-form { padding: 10px 20px 14px; display: grid; gap: 10px; }
+    .upload-modal-form .upload-drop-zone {
+      min-height: 126px;
+      padding: 18px;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      gap: 7px;
+      text-align: center;
+      border: 1.5px dashed #8dbdb6;
+      border-radius: 13px;
+      background: #f7fbfa;
+    }
+    .upload-modal-form.is-dragging .upload-drop-zone { border-color: var(--ux-brand); background: #e7f7f3; }
+    .upload-file-button {
+      position: relative;
+      min-height: 40px;
+      margin-top: 5px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      color: #fff;
+      border-radius: 9px;
+      background: var(--ux-brand);
+      cursor: pointer;
+    }
+    .upload-file-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+    .upload-file-queue { display: grid; gap: 6px; }
+    .upload-queue-item {
+      min-width: 0;
+      min-height: 44px;
+      padding: 6px 8px;
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr) auto minmax(72px, auto) 32px;
+      align-items: center;
+      gap: 8px;
+      color: var(--ux-ink);
+      border: 1px solid var(--ux-line);
+      border-radius: 9px;
+      background: #fbfdfc;
+    }
+    .upload-queue-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-queue-item small { color: var(--ux-muted); }
+    .upload-queue-item em { color: var(--ux-muted); font-size: 12px; font-style: normal; }
+    .upload-queue-item.is-uploading em { color: #8c6400; }
+    .upload-queue-item.is-success em { color: #197443; }
+    .upload-queue-item.is-failed em { color: var(--ux-danger); }
+    .upload-queue-item button { min-width: 32px; min-height: 32px; padding: 0; color: var(--ux-muted); border: 0; background: transparent; box-shadow: none; }
+    .upload-queue-index { width: 24px; height: 24px; display: grid; place-items: center; color: var(--ux-brand-deep); border-radius: 7px; background: #e3f3ef; font-size: 12px; }
+    .upload-extra-fields { border: 1px solid var(--ux-line); border-radius: 10px; background: #fbfdfc; }
+    .upload-extra-fields summary { padding: 11px 13px; color: var(--ux-muted); cursor: pointer; }
+    .upload-extra-grid { padding: 0 13px 13px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .upload-submit-row { display: flex; justify-content: flex-end; gap: 8px; }
+    .upload-submit-row #startUploadBtn { min-width: 130px; }
+    .upload-project-bar { padding: 14px 20px 8px; border-top: 1px solid var(--ux-line); }
+    .upload-choice-projects { margin: 0 20px 20px; max-height: 240px; border: 1px solid var(--ux-line); border-radius: 12px; }
+    .add-process-modal { width: min(500px, calc(100vw - 32px)); }
+
+    @media (hover: hover) and (pointer: fine) {
+      .top-actions > button:hover,
+      .top-actions > .settings-menu-wrap > button:hover { background: rgba(255,255,255,.17); }
+      .top-actions .top-upload-btn:hover { color: #052f35; background: #fff; }
+      .top-filter-group button:not(.active):hover { color: #fff; background: rgba(255,255,255,.1); }
+      .project-info-modal .project-settings-tabs button:hover,
+      .unit-process-tabs button:hover { color: var(--ux-brand-deep); background: rgba(8,118,111,.07); }
+      #unitView .photo:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,48,55,.11); }
+    }
+    #unitView .photo,
+    .top-actions button,
+    .top-filter-group button,
+    .project-settings-tabs button,
+    .unit-process-tabs button,
+    .upload-choice-card {
+      transition: transform 150ms var(--ux-ease-out), color 150ms var(--ux-ease-out), background-color 150ms var(--ux-ease-out), border-color 150ms var(--ux-ease-out), box-shadow 180ms var(--ux-ease-out);
+    }
+
+    @media (max-width: 1100px) {
+      .topbar { grid-template-columns: auto minmax(330px, 1fr) auto; gap: 10px; }
+      .topbar .brand h1 { display: none; }
+      .topbar .brand { min-width: 38px; }
+      .project-switcher { width: min(380px, 42vw); }
+      .top-actions .app-version-badge { display: none; }
+      .top-actions > button,
+      .top-actions > .settings-menu-wrap > button { padding-inline: 11px; }
+      .unit-gallery-toolbar { grid-template-columns: auto minmax(0, 1fr); }
+      .unit-gallery-actions { grid-column: 1 / -1; justify-content: flex-end; }
+    }
+    @media (max-width: 760px) {
+      .topbar {
+        min-height: auto;
+        padding: 8px 10px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+      .topbar .brand { display: none; }
+      .top-batch-actions { min-width: 0; gap: 6px; }
+      .project-switcher { min-width: 0; width: 100%; grid-template-columns: minmax(0, 1fr) 40px; }
+      .top-filter-group button { min-width: 48px; padding-inline: 8px; }
+      .top-actions { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+      .top-actions .top-upload-btn { width: 100%; }
+      .project-info-modal { width: 100vw; height: 100dvh; border-radius: 0; }
+      .project-info-modal .project-settings-form { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; }
+      .project-info-modal .project-settings-tabs {
+        grid-row: auto;
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--ux-line);
+      }
+      .project-info-modal .project-settings-tabs button { width: auto; flex: 0 0 auto; white-space: nowrap; }
+      .project-info-modal .project-settings-actions { grid-column: 1; }
+      .settings-account-host .support-settings-form { grid-template-columns: 1fr; }
+      .settings-account-host .support-settings-tabs { flex-direction: row; overflow-x: auto; }
+      .settings-account-host .support-settings-tabs button { width: auto; flex: 0 0 auto; }
+      .settings-device-grid { grid-template-columns: 1fr; }
+      #unitView .page-head { position: static; align-items: flex-start; }
+      #unitTitle, .unit-breadcrumbs { max-width: 90vw; }
+      .unit-gallery-toolbar { grid-template-columns: 1fr; gap: 8px; }
+      .unit-gallery-tabs { width: fit-content; }
+      .unit-gallery-actions { grid-column: auto; }
+      .photo-selection-bar { align-items: stretch; flex-wrap: wrap; }
+      .photo-selection-bar strong { width: 100%; }
+      #unitView .active-photo-section .photos { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .upload-choice-body { grid-template-columns: 1fr 1fr; }
+      .upload-process-field { grid-column: 1 / -1; }
+      .upload-extra-grid { grid-template-columns: 1fr; }
+      .upload-flow-summary { align-items: flex-start; flex-direction: column; }
+      .upload-queue-item { grid-template-columns: 26px minmax(0, 1fr) 32px; }
+      .upload-queue-item small,
+      .upload-queue-item em { grid-column: 2; }
+      .upload-queue-item button { grid-column: 3; grid-row: 1; }
+    }
+    @media (max-width: 430px) {
+      .top-filter-group { display: none; }
+      .top-actions { grid-template-columns: minmax(0, 1fr) auto auto; }
+      .top-actions > button,
+      .top-actions > .settings-menu-wrap > button { padding-inline: 10px; }
+      #unitView { scroll-margin-top: 180px; }
+      #unitView .active-photo-section .photos { grid-template-columns: 1fr !important; }
+      .upload-choice-body { grid-template-columns: 1fr; }
+      .upload-process-field { grid-column: auto; }
+      .upload-choice-modal { width: 100vw; max-height: 100dvh; border-radius: 0; }
+    }
+    @media (max-width: 760px) {
+      body.is-unit-view .sidebar { display: none !important; }
+      body.is-unit-view .layout {
+        display: block !important;
+        grid-template-areas: "main" !important;
+      }
+      body.is-unit-view .main { padding-top: 8px !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #unitView .photo,
+      .top-actions button,
+      .top-filter-group button,
+      .project-settings-tabs button,
+      .unit-process-tabs button,
+      .upload-choice-card { transition-duration: 1ms !important; }
+      #unitView .photo:hover { transform: none !important; }
+    }
+
+    #printConstructionBtn,
+    #printSupervisionBtn { display: none !important; }
+
+    /* 旧版视觉层含有高优先级声明；在最终层明确接管顶栏。 */
+    .topbar {
+      display: grid !important;
+      grid-template-columns: minmax(210px, auto) minmax(380px, 1fr) auto !important;
+      gap: 18px !important;
+      min-height: 68px !important;
+      padding: 10px 18px !important;
+      color: #fff !important;
+      background: linear-gradient(115deg, #082f3c 0%, #07565b 54%, #08766f 100%) !important;
+      border: 0 !important;
+    }
+    .topbar .brand h1 { color: #fff !important; }
+    .top-batch-actions {
+      flex: 1 1 auto !important;
+      justify-content: flex-start !important;
+      gap: 10px !important;
+    }
+    .project-switcher .project-select {
+      flex: 1 1 auto !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: none !important;
+      color: #133840 !important;
+      background: #fff !important;
+    }
+    .top-filter-group {
+      flex: 0 0 auto !important;
+      width: auto !important;
+      height: auto !important;
+      padding: 4px !important;
+      border-color: rgba(255,255,255,.17) !important;
+      background: rgba(0,30,38,.18) !important;
+      box-shadow: none !important;
+    }
+    .top-filter-group button {
+      height: 40px !important;
+      min-height: 40px !important;
+      min-width: 58px !important;
+      padding: 0 13px !important;
+      color: rgba(255,255,255,.78) !important;
+      background: transparent !important;
+    }
+    .top-filter-group button.active {
+      color: #083a40 !important;
+      background: #fff !important;
+      box-shadow: none !important;
+    }
+    .top-actions { flex: 0 0 auto !important; gap: 8px !important; }
+    .top-actions > button,
+    .top-actions > .settings-menu-wrap > button {
+      min-width: auto !important;
+      color: #fff !important;
+      border-color: rgba(255,255,255,.22) !important;
+      background: rgba(255,255,255,.09) !important;
+    }
+    .top-actions .top-upload-btn {
+      min-width: 120px !important;
+      color: #07383e !important;
+      border-color: #e8fff9 !important;
+      background: #e8fff9 !important;
+    }
+    .top-actions .app-version-badge { color: rgba(255,255,255,.7) !important; }
+    @media (max-width: 1100px) {
+      .topbar { grid-template-columns: auto minmax(330px, 1fr) auto !important; gap: 10px !important; }
+      .topbar .brand h1 { display: none !important; }
+    }
+    @media (max-width: 760px) {
+      .topbar {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        padding: 8px 10px !important;
+      }
+      .topbar .brand { display: none !important; }
+      .top-batch-actions { width: 100% !important; }
+      .top-actions { grid-column: 1 / -1; display: grid !important; grid-template-columns: minmax(0, 1fr) auto auto !important; }
+    }
+    /* 移动端旧样式曾强制总览常显，必须服从脚本当前视图。 */
+    #overviewView[style*="display: none"],
+    #partView[style*="display: none"],
+    #unitView[style*="display: none"],
+    #otherView[style*="display: none"] { display: none !important; }
+    @media (max-width: 1200px) {
+      #unitView .page-head {
+        display: flex !important;
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: 9px;
+      }
+      #unitView .page-head > div:first-child { width: 100%; min-width: 0; }
+      #unitView .page-head .actions {
+        width: 100%;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        justify-content: flex-end;
+      }
+      #unitTitle,
+      .unit-breadcrumbs { max-width: 100%; }
     }

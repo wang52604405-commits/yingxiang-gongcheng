@@ -1,0 +1,22 @@
+{
+  "site_name": "工程影像管理平台",
+  "brand_line": "水利、房建、市政、电力四大专业工程影像工具",
+  "download_url": "/download/工程影像管理平台-安装程序.exe",
+  "mini_program": {
+    "name": "工程影像微信小程序",
+    "description": "现场拍照、分类归档、待上传管理和云同步",
+    "screenshots": [
+      "assets/mini-home.png",
+      "assets/mini-library.png",
+      "assets/mini-capture.png",
+      "assets/mini-pending.png",
+      "assets/mini-profile.png"
+    ]
+  },
+  "industries": [
+    { "name": "水利工程", "status": "active" },
+    { "name": "房屋建筑工程", "status": "active" },
+    { "name": "市政工程", "status": "active" },
+    { "name": "电力工程", "status": "active" }
+  ]
+}

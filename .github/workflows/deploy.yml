@@ -196,3 +196,44 @@ jobs:
                 source_ref: 'main'
               }
             })
+
+  deploy-website:
+    name: 发布四专业宣传网站
+    needs: deploy
+    if: github.ref == 'refs/heads/main' && needs.deploy.result == 'success'
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 15
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 准备临时服务器凭据
+        shell: powershell
+        env:
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SSH_KEY_B64) { throw "缺少服务器密钥 Secret" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-site-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SITE_CREDENTIAL_DIR=$credentialDir"
+
+      - name: 校验并发布网站
+        shell: powershell
+        run: python deploy_website.py
+
+      - name: 清理临时服务器凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_SITE_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_SITE_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_SITE_CREDENTIAL_DIR -Recurse -Force
+          }

@@ -673,7 +673,8 @@ class DesktopSecurityContractTest(unittest.TestCase):
         from openpyxl import load_workbook
 
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn("项目划分 ▾", html)
+        self.assertIn('data-project-settings-tab="division"', html)
+        self.assertIn('data-project-settings-panel="division"', html)
         self.assertIn("下载项目划分模板（Excel）", html)
         self.assertIn("选择项目划分文件导入", html)
         self.assertIn('aria-controls="projectImportMenu"', html)
@@ -689,13 +690,46 @@ class DesktopSecurityContractTest(unittest.TestCase):
 
         script_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.js"))
         script = script_path.read_text(encoding="utf-8")
-        self.assertIn("setProjectImportMenu(willOpen)", script)
+        self.assertIn('menu?.classList.contains("settings-static-menu")', script)
         self.assertNotIn('$("#projectImportMenuBtn").addEventListener("click", (event) => {\n      event.stopPropagation();\n      $("#importFile").click();', script)
 
         styles_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.css"))
         styles = styles_path.read_text(encoding="utf-8")
-        narrow_styles = styles[styles.rfind("@media (max-width: 760px)") :]
-        self.assertNotIn(".project-import-wrap,\n      .top-filter-group {\n        display: none", narrow_styles)
+        self.assertRegex(
+            styles,
+            r"(?s)@media \(max-width: 760px\).*?\.project-info-modal \.project-settings-tabs",
+        )
+
+    def test_ux_redesign_keeps_upload_primary_and_removes_metadata_exports(self):
+        html = self.client.get("/").get_data(as_text=True)
+        upload_pos = html.index('id="globalUploadBtn"')
+        settings_pos = html.index('id="settingsMenuBtn"')
+        self.assertLess(upload_pos, settings_pos, "上传按钮必须直接出现在顶部主菜单")
+        self.assertIn('id="engineeringProjectSearch"', html)
+        self.assertIn('list="engineeringProjectOptions"', html)
+        for tab in ("info", "division", "members", "upload", "print", "account", "device"):
+            self.assertIn(f'data-project-settings-tab="{tab}"', html)
+        self.assertIn('id="unitCategoryConstructionBtn"', html)
+        self.assertIn('id="unitProcessTabs"', html)
+        self.assertIn('id="photoSelectionBar"', html)
+        self.assertIn('id="uploadFileQueue"', html)
+        self.assertIn('id="addProcessModal"', html)
+        self.assertNotIn('id="settingsExportCsvBtn"', html)
+        self.assertNotIn('id="settingsExportJsonBtn"', html)
+
+        routes = {rule.rule for rule in self.desktop.app.url_map.iter_rules()}
+        self.assertNotIn("/api/export/<path:project_code>/metadata.csv", routes)
+        self.assertNotIn("/api/export/<path:project_code>/metadata.json", routes)
+        self.assertIn("/api/export/<path:project_code>/zip", routes)
+        self.assertIn("/api/export/photo-statistics.xlsx", routes)
+        self.assertIn("/api/engineering-package/export", routes)
+
+        script_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.js"))
+        script = script_path.read_text(encoding="utf-8")
+        self.assertIn('form.append("process_name", processName)', script)
+        self.assertIn('state.uploadQueuedFiles', script)
+        self.assertNotIn("metadata.csv", script)
+        self.assertNotIn("metadata.json", script)
 
     def test_print_defaults_show_complete_photo_and_readable_photographer_caption(self):
         with self.desktop.app.test_request_context("/?style=default"):
