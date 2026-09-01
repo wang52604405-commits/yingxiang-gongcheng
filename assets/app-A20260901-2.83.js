@@ -3019,7 +3019,7 @@ const $ = (selector) => document.querySelector(selector);
           window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
         }, 0);
       }
-      if (tab === "upload") openUploadChoiceModal();
+      if (tab === "upload") openUploadChoiceModal(state.activePhotoCategory, state.activeProcessName, true);
       if (tab !== "upload" && state.pendingUploadCategory) {
         const category = state.pendingUploadCategory;
         state.pendingUploadCategory = "";
@@ -3091,15 +3091,13 @@ const $ = (selector) => document.querySelector(selector);
         : (uploader ? `上传者 ${uploader}` : "拍摄者未记录");
       const idLabel = photoIdTail(photo) || photoId;
       return `
-        <article class="photo is-${orientation}${isPrintSelected ? " is-selected" : ""}${isSelectMode ? " is-select-mode" : ""}" draggable="${isSelectMode ? "false" : "true"}" data-photo-id="${escapeHtml(photoId)}" data-photo-index="${index}" data-category="${key}" data-section-key="${escapeHtml(sectionKey)}">
+        <article class="photo is-${orientation}${isPrintSelected ? " is-selected" : ""}${isSelectMode ? " is-select-mode" : ""}" draggable="${isSelectMode ? "false" : "true"}" data-photo-id="${escapeHtml(photoId)}" data-photo-index="${index}" data-category="${key}" data-section-key="${escapeHtml(sectionKey)}"${isSelectMode ? ` role="button" tabindex="0" aria-pressed="${isPrintSelected ? "true" : "false"}" aria-label="${isPrintSelected ? "取消选择" : "选择"}${escapeHtml(title)}"` : ""}>
+          ${isSelectMode ? `<span class="photo-selection-state" aria-hidden="true">✓ 已选择</span>` : ""}
           <button class="photo-preview-trigger" type="button" data-preview-src="${escapeHtml(photo.url || "")}" data-preview-title="${escapeHtml(title)}">
             <img src="${escapeHtml(photo.thumb_url || THUMB_PLACEHOLDER)}" loading="lazy" decoding="async" alt="${escapeHtml(title)}">
           </button>
           <div class="photo-meta archive-info">
             <div class="photo-card-line">
-              ${isSelectMode ? `<label class="photo-print-check" title="勾选后只打印选中的照片">
-                <input type="checkbox" data-print-photo="${escapeHtml(photoId)}" data-category="${key}" ${isPrintSelected ? "checked" : ""}>
-              </label>` : ""}
               <button class="photo-title-button" type="button" data-edit-photo="${escapeHtml(photo.id || "")}" data-category="${key}" title="点击修改照片信息">
                 <strong class="photo-card-title" title="${escapeHtml(title)}">${escapeHtml(title)}</strong>
                 <span class="photo-card-details" title="${escapeHtml(`${idLabel} · ${date} · ${person}`)}">
@@ -3208,17 +3206,14 @@ const $ = (selector) => document.querySelector(selector);
           openPhotoEdit(button.dataset.category, button.dataset.editPhoto).catch((error) => showNotice(error.message, true));
         };
       });
-      root.querySelectorAll("input[data-print-photo]").forEach((input) => {
-        input.onclick = (event) => event.stopPropagation();
-        input.onchange = () => {
-          setPhotoSelected(input.dataset.category, input.dataset.printPhoto, input.checked);
-          input.closest(".photo")?.classList.toggle("is-selected", input.checked);
-          updatePhotoSelectionBar();
-        };
-      });
       root.querySelectorAll(".photo[data-photo-id]").forEach((card) => {
         card.onclick = (event) => {
-          if (!state.photoSelectionMode || event.target.closest("input, label")) return;
+          if (!state.photoSelectionMode) return;
+          event.preventDefault();
+          togglePhotoSelection(card, event.shiftKey);
+        };
+        card.onkeydown = (event) => {
+          if (!state.photoSelectionMode || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
           togglePhotoSelection(card, event.shiftKey);
         };
@@ -3392,9 +3387,12 @@ const $ = (selector) => document.querySelector(selector);
       summary.innerHTML = `<strong>${escapeHtml(projectName(state.selectedProject))}</strong><span>${escapeHtml(state.selectedCode)} · ${category} · ${escapeHtml(processName || "单元照片")}</span>`;
     }
 
-    async function openUploadChoiceModal(category = null, processName = null) {
-      $("#uploadChoiceSub").textContent = state.selectedCode
-        ? "归档位置已预填，确认后再开始上传。"
+    async function openUploadChoiceModal(category = null, processName = null, lockToCurrentUnit = false) {
+      const currentUnitOnly = Boolean(lockToCurrentUnit && state.selectedCode && state.selectedProject);
+      const modal = $("#uploadChoiceModal");
+      modal.classList.toggle("is-current-unit-upload", currentUnitOnly);
+      $("#uploadChoiceSub").textContent = currentUnitOnly
+        ? "当前单元已锁定，只需确认类别和工序后添加照片。"
         : "先选择归档单元，再添加照片。";
       $("#uploadProjectSearch").value = "";
       $("#uploadModalResult").style.display = "none";
@@ -3404,15 +3402,17 @@ const $ = (selector) => document.querySelector(selector);
       state.uploadQueueResults = [];
       renderUploadFileQueue();
       setUploadChoiceCategory(category || state.activePhotoCategory || state.uploadChoiceCategory || "construction");
-      $("#uploadProjectPickerBody").innerHTML = `<div class="unit-image-empty">正在加载单元工程…</div>`;
-      await ensureAllProjectsLoaded();
-      syncSelectedProjectFromList();
+      if (!currentUnitOnly) {
+        $("#uploadProjectPickerBody").innerHTML = `<div class="unit-image-empty">正在加载单元工程…</div>`;
+        await ensureAllProjectsLoaded();
+        syncSelectedProjectFromList();
+        renderUploadProjectPicker();
+      }
       renderUploadProcessOptions(processName === null ? state.activeProcessName : processName);
-      renderUploadProjectPicker();
       renderUploadTargetSummary();
-      $("#uploadChoiceModal").classList.add("open");
-      $("#uploadChoiceModal").setAttribute("aria-hidden", "false");
-      setTimeout(() => (state.selectedCode ? $("#uploadModalFiles") : $("#uploadProjectSearch"))?.focus(), 0);
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+      setTimeout(() => (currentUnitOnly ? $("#uploadModalFiles") : $("#uploadProjectSearch"))?.focus(), 0);
     }
 
     function openUnitUpload(category, processName = state.activeProcessName) {
@@ -3420,7 +3420,7 @@ const $ = (selector) => document.querySelector(selector);
         showNotice("请先选择单元工程。", true);
         return;
       }
-      openUploadChoiceModal(normalizePhotoCategory(category), processName).catch((error) => showNotice(error.message, true));
+      openUploadChoiceModal(normalizePhotoCategory(category), processName, true).catch((error) => showNotice(error.message, true));
     }
 
     function closeUploadChoiceModal() {
@@ -3439,7 +3439,7 @@ const $ = (selector) => document.querySelector(selector);
       clearPhotoSelection(false);
       setView("unit");
       renderPhotos();
-      await openUploadChoiceModal(state.activePhotoCategory, state.activeProcessName);
+      await openUploadChoiceModal(state.activePhotoCategory, state.activeProcessName, true);
     }
 
     function normalizeImageFiles(files) {
@@ -3876,10 +3876,18 @@ const $ = (selector) => document.querySelector(selector);
       else delete state.selectedPrintPhotos[key];
     }
 
+    function syncPhotoCardSelection(card, selected) {
+      card.classList.toggle("is-selected", selected);
+      card.setAttribute("aria-pressed", selected ? "true" : "false");
+      const title = card.querySelector(".photo-card-title")?.textContent?.trim() || "照片";
+      card.setAttribute("aria-label", `${selected ? "取消选择" : "选择"}${title}`);
+    }
+
     function togglePhotoSelection(card, shiftKey = false) {
-      const input = card.querySelector("input[data-print-photo]");
-      if (!input) return;
-      const next = !input.checked;
+      const category = card.dataset.category || state.activePhotoCategory;
+      const photoId = card.dataset.photoId || "";
+      if (!photoId) return;
+      const next = !Boolean(state.selectedPrintPhotos[printSelectionKey(category, photoId)]);
       const currentIndex = Number(card.dataset.photoIndex || 0);
       if (shiftKey && state.photoSelectionAnchor >= 0) {
         const start = Math.min(state.photoSelectionAnchor, currentIndex);
@@ -3887,16 +3895,12 @@ const $ = (selector) => document.querySelector(selector);
         card.closest(".photos")?.querySelectorAll(".photo[data-photo-index]").forEach((item) => {
           const index = Number(item.dataset.photoIndex || 0);
           if (index < start || index > end) return;
-          const checkbox = item.querySelector("input[data-print-photo]");
-          if (!checkbox) return;
-          checkbox.checked = next;
-          setPhotoSelected(checkbox.dataset.category, checkbox.dataset.printPhoto, next);
-          item.classList.toggle("is-selected", next);
+          setPhotoSelected(item.dataset.category, item.dataset.photoId, next);
+          syncPhotoCardSelection(item, next);
         });
       } else {
-        input.checked = next;
-        setPhotoSelected(input.dataset.category, input.dataset.printPhoto, input.checked);
-        card.classList.toggle("is-selected", input.checked);
+        setPhotoSelected(category, photoId, next);
+        syncPhotoCardSelection(card, next);
       }
       state.photoSelectionAnchor = currentIndex;
       updatePhotoSelectionBar();
@@ -3915,7 +3919,7 @@ const $ = (selector) => document.querySelector(selector);
     async function deleteSelectedPhotos(sectionKey) {
       const selected = selectedPhotosForSection(sectionKey);
       if (!selected.length) {
-        showNotice("请先勾选要删除的照片。", true);
+        showNotice("请先选择要删除的照片。", true);
         return;
       }
       if (!state.auth.user) {
@@ -4928,7 +4932,7 @@ const $ = (selector) => document.querySelector(selector);
       if (event.target.id === "photoEditModal") closePhotoEdit();
     });
     $("#globalUploadBtn").addEventListener("click", () => {
-      openUploadChoiceModal();
+      openUploadChoiceModal(null, null, state.viewMode === "unit");
     });
     $("#closeUploadChoiceBtn").addEventListener("click", closeUploadChoiceModal);
     $("#uploadProjectSearch").addEventListener("input", renderUploadProjectPicker);

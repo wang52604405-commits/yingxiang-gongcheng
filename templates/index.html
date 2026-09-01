@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260901-2.82.css">
+  <link rel="stylesheet" href="/assets/app-A20260901-2.83.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -407,43 +407,55 @@
               </div>
               <button class="ghost" type="button" id="closeUploadChoiceBtn">关闭</button>
             </div>
-            <div class="upload-flow-summary" id="uploadTargetSummary">尚未选择归档单元</div>
-            <div class="upload-choice-body">
-              <button class="upload-choice-card" type="button" data-upload-choice="construction">
-                <strong>施工影像</strong>
-                <span>施工过程、成品外观、关键节点</span>
-              </button>
-              <button class="upload-choice-card" type="button" data-upload-choice="supervision">
-                <strong>监理影像</strong>
-                <span>旁站、验收、见证记录</span>
-              </button>
-              <label class="upload-process-field">归档层级<select id="uploadProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
-            </div>
-            <form id="uploadModalForm" class="upload-modal-form">
-              <div id="uploadModalDrop" class="upload-drop-zone" tabindex="0">
-                <strong>选择、拖入或粘贴照片</strong>
-                <span id="uploadModalFileSummary">支持 JPG、JPEG、PNG，可一次选择多张。</span>
-                <label class="upload-file-button">选择照片<input id="uploadModalFiles" type="file" accept=".jpg,.jpeg,.png" multiple></label>
-              </div>
-              <div id="uploadFileQueue" class="upload-file-queue" aria-live="polite"></div>
-              <details class="upload-extra-fields">
-                <summary>补充照片信息（可选）</summary>
-                <div class="upload-extra-grid">
-                  <label>题名<input id="uploadModalTitle" type="text" placeholder="默认从文件名识别"></label>
-                  <label>时间<input id="uploadModalDate" type="date" title="留空则读取文件名或照片信息"></label>
-                  <label>摄影者<input id="uploadModalPhotographer" type="text" placeholder="默认使用当前账号"></label>
+            <div class="upload-workspace">
+              <div class="upload-main-column">
+                <div class="upload-step-label"><b>归档位置</b><span>确认当前单元、类别和工序</span></div>
+                <div class="upload-flow-summary" id="uploadTargetSummary">尚未选择归档单元</div>
+                <div class="upload-choice-body">
+                  <button class="upload-choice-card" type="button" data-upload-choice="construction">
+                    <strong>施工影像</strong>
+                    <span>施工过程、成品外观、关键节点</span>
+                  </button>
+                  <button class="upload-choice-card" type="button" data-upload-choice="supervision">
+                    <strong>监理影像</strong>
+                    <span>旁站、验收、见证记录</span>
+                  </button>
+                  <label class="upload-process-field">归档层级<select id="uploadProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
                 </div>
-              </details>
-              <div class="upload-submit-row">
-                <button class="secondary" type="button" id="autoMatchUploadBtn">自动匹配其它单元</button>
-                <button type="submit" id="startUploadBtn">开始上传</button>
+                <form id="uploadModalForm" class="upload-modal-form">
+                  <div class="upload-step-label"><b>添加照片</b><span>支持多选、拖入或直接粘贴</span></div>
+                  <div id="uploadModalDrop" class="upload-drop-zone" tabindex="0">
+                    <strong>选择、拖入或粘贴照片</strong>
+                    <span id="uploadModalFileSummary">支持 JPG、JPEG、PNG，可一次选择多张。</span>
+                    <label class="upload-file-button">选择照片<input id="uploadModalFiles" type="file" accept=".jpg,.jpeg,.png" multiple></label>
+                  </div>
+                  <div id="uploadFileQueue" class="upload-file-queue" aria-live="polite"></div>
+                  <details class="upload-extra-fields">
+                    <summary>补充照片信息（可选）</summary>
+                    <div class="upload-extra-grid">
+                      <label>题名<input id="uploadModalTitle" type="text" placeholder="默认从文件名识别"></label>
+                      <label>时间<input id="uploadModalDate" type="date" title="留空则读取文件名或照片信息"></label>
+                      <label>摄影者<input id="uploadModalPhotographer" type="text" placeholder="默认使用当前账号"></label>
+                    </div>
+                  </details>
+                  <div id="uploadModalResult" class="upload-modal-result"></div>
+                  <div class="upload-submit-row">
+                    <button class="secondary" type="button" id="autoMatchUploadBtn">自动匹配其它单元</button>
+                    <button type="submit" id="startUploadBtn">开始上传</button>
+                  </div>
+                </form>
               </div>
-              <div id="uploadModalResult" class="upload-modal-result"></div>
-            </form>
-            <div class="upload-project-bar">
-              <label>搜索单元名称、编号或缩略词<input id="uploadProjectSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
+              <aside class="upload-target-column" aria-label="选择归档单元">
+                <div class="upload-target-head">
+                  <strong>选择归档单元</strong>
+                  <span>仅从顶部全局上传进入时需要选择</span>
+                </div>
+                <div class="upload-project-bar">
+                  <label>搜索单元名称、编号或缩略词<input id="uploadProjectSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
+                </div>
+                <div id="uploadProjectPickerBody" class="upload-choice-projects"></div>
+              </aside>
             </div>
-            <div id="uploadProjectPickerBody" class="upload-choice-projects"></div>
           </section>
         </div>
 
@@ -987,6 +999,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260901-2.82.js"></script>
+  <script defer src="/assets/app-A20260901-2.83.js"></script>
 </body>
 </html>

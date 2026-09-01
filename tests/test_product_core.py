@@ -713,6 +713,12 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('id="unitProcessTabs"', html)
         self.assertIn('id="photoSelectionBar"', html)
         self.assertIn('id="uploadFileQueue"', html)
+        self.assertIn('class="upload-workspace"', html)
+        self.assertIn('class="upload-target-column"', html)
+        self.assertEqual(html.count('class="print-style-schematic"'), 6)
+        self.assertIn('ps-paper ps-landscape ps-grid4', html)
+        self.assertIn('ps-paper ps-portrait ps-stack2', html)
+        self.assertIn('ps-paper ps-landscape ps-pair2', html)
         self.assertIn('id="addProcessModal"', html)
         self.assertNotIn('id="settingsExportCsvBtn"', html)
         self.assertNotIn('id="settingsExportJsonBtn"', html)
@@ -730,6 +736,11 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('state.uploadQueuedFiles', script)
         self.assertIn('class="recent-upload-thumb', script)
         self.assertIn('rec.thumb_url', script)
+        self.assertIn('modal.classList.toggle("is-current-unit-upload", currentUnitOnly)', script)
+        self.assertIn('openUploadChoiceModal(normalizePhotoCategory(category), processName, true)', script)
+        self.assertIn('class="photo-selection-state"', script)
+        self.assertIn('syncPhotoCardSelection(card, next)', script)
+        self.assertNotIn('data-print-photo=', script)
         self.assertNotIn("metadata.csv", script)
         self.assertNotIn("metadata.json", script)
 
@@ -738,6 +749,10 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn(".recent-upload-thumb img", styles)
         self.assertIn("--ux-hover-soft", styles)
         self.assertIn('button[type="submit"]:not(.secondary)', styles)
+        self.assertIn("#uploadChoiceModal.is-current-unit-upload .upload-target-column", styles)
+        self.assertIn(".print-style-schematic", styles)
+        self.assertIn(".print-mode-card.print-style-card:not(:disabled):not(.active):hover", styles)
+        self.assertIn("#unitView .photo-selection-state", styles)
         self.assertRegex(
             styles,
             r"(?s)@media \(max-width: 760px\).*?\.overview-grid > \.overview-board\s*\{.*?grid-column: 1 !important;.*?grid-row: auto !important;",

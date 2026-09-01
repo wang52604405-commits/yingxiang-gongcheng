@@ -8636,3 +8636,372 @@
         grid-row: auto !important;
       }
     }
+
+    /* 2.83：上传按入口分流，打印方案可视化，照片选择只保留整卡交互。 */
+    #uploadChoiceModal .upload-choice-modal {
+      width: min(1120px, calc(100vw - 24px)) !important;
+      height: min(800px, calc(100dvh - 24px));
+      max-height: calc(100dvh - 24px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden !important;
+    }
+    #uploadChoiceModal .upload-choice-head {
+      position: relative;
+      z-index: 3;
+      min-height: 72px;
+      border-bottom: 1px solid var(--ux-line);
+      background: #fff;
+    }
+    .upload-workspace {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      overflow: hidden;
+    }
+    .upload-main-column {
+      min-width: 0;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      background: #fff;
+    }
+    .upload-step-label {
+      min-width: 0;
+      padding: 15px 20px 8px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .upload-step-label b { color: var(--ux-ink); font-size: 14px; }
+    .upload-step-label span { color: var(--ux-muted); font-size: 12px; }
+    #uploadChoiceModal .upload-flow-summary {
+      min-width: 0;
+      margin: 0 20px;
+    }
+    #uploadChoiceModal .upload-flow-summary strong,
+    #uploadChoiceModal .upload-flow-summary span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #uploadChoiceModal .upload-choice-body {
+      min-width: 0;
+      padding: 12px 20px 4px;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(170px, .75fr) !important;
+      align-items: stretch;
+    }
+    #uploadChoiceModal .upload-choice-card,
+    #uploadChoiceModal .upload-process-field { min-width: 0; }
+    #uploadChoiceModal .upload-modal-form {
+      min-width: 0;
+      padding: 8px 20px 14px;
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) !important;
+      gap: 10px;
+      background: #fff;
+    }
+    #uploadChoiceModal .upload-modal-form > * {
+      min-width: 0;
+      grid-column: 1 !important;
+    }
+    #uploadChoiceModal .upload-modal-form > .upload-step-label { padding: 3px 0 0; }
+    #uploadChoiceModal .upload-drop-zone {
+      width: auto;
+      min-height: 150px;
+      margin: 0;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .upload-extra-fields {
+      width: 100%;
+      margin: 0;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .upload-extra-fields summary {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .upload-extra-grid {
+      width: 100%;
+      padding: 0 13px 13px;
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      gap: 10px;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .upload-extra-grid label {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) !important;
+      gap: 6px;
+      color: var(--ux-muted);
+      font-size: 12px;
+      white-space: normal;
+    }
+    #uploadChoiceModal .upload-extra-grid input {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .upload-submit-row {
+      position: sticky;
+      bottom: -14px;
+      z-index: 4;
+      min-height: 64px;
+      margin: 2px -20px -14px;
+      padding: 11px 20px 13px;
+      display: flex !important;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      border-top: 1px solid var(--ux-line);
+      background: rgba(255,255,255,.97);
+      box-sizing: border-box;
+      backdrop-filter: blur(8px);
+    }
+    #uploadChoiceModal .upload-submit-row button { min-height: 42px; }
+    .upload-target-column {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+      border-left: 1px solid var(--ux-line);
+      background: #f7faf9;
+    }
+    .upload-target-head {
+      padding: 16px 16px 8px;
+      display: grid;
+      gap: 3px;
+    }
+    .upload-target-head strong { color: var(--ux-ink); font-size: 15px; }
+    .upload-target-head span { color: var(--ux-muted); font-size: 12px; }
+    #uploadChoiceModal .upload-project-bar {
+      min-width: 0;
+      padding: 8px 14px 12px;
+      border: 0;
+    }
+    #uploadChoiceModal .upload-project-bar label { min-width: 0; }
+    #uploadChoiceModal .upload-project-bar input { width: 100%; min-width: 0; box-sizing: border-box; }
+    #uploadChoiceModal .upload-choice-projects {
+      min-width: 0;
+      min-height: 0;
+      max-height: none;
+      height: auto;
+      margin: 0 14px 14px;
+      padding: 8px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      border-radius: 12px;
+      background: #fff;
+      box-sizing: border-box;
+    }
+    #uploadChoiceModal .picker-projects {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: start;
+    }
+    #uploadChoiceModal .picker-contract,
+    #uploadChoiceModal .picker-unit,
+    #uploadChoiceModal .picker-part,
+    #uploadChoiceModal .picker-project {
+      min-width: 0;
+      height: auto;
+      position: relative;
+    }
+    #uploadChoiceModal.is-current-unit-upload .upload-choice-modal {
+      width: min(780px, calc(100vw - 24px)) !important;
+      height: min(620px, calc(100dvh - 24px));
+    }
+    #uploadChoiceModal.is-current-unit-upload .upload-workspace { grid-template-columns: minmax(0, 1fr); }
+    #uploadChoiceModal.is-current-unit-upload .upload-target-column,
+    #uploadChoiceModal.is-current-unit-upload #autoMatchUploadBtn { display: none !important; }
+
+    /* 多选时整张卡片就是唯一选择控件，不再叠加复选框。 */
+    #unitView .photo-selection-state {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 5;
+      min-height: 30px;
+      padding: 0 10px;
+      display: none;
+      align-items: center;
+      color: #fff;
+      border-radius: 999px;
+      background: var(--ux-brand);
+      box-shadow: 0 4px 12px rgba(7, 69, 72, .2);
+      font-size: 12px;
+      font-weight: 750;
+      pointer-events: none;
+    }
+    #unitView .photo.is-selected .photo-selection-state { display: inline-flex; }
+    #unitView .photo.is-select-mode { outline: none; }
+    #unitView .photo.is-select-mode:focus-visible {
+      border-color: var(--ux-brand);
+      box-shadow: 0 0 0 3px rgba(8,118,111,.2);
+    }
+    #unitView .photo.is-selected {
+      border-color: var(--ux-brand) !important;
+      background: #f1faf7;
+      box-shadow: 0 0 0 3px rgba(8,118,111,.16) !important;
+    }
+
+    /* 打印方案直接展示纸张方向和照片排布；悬停始终保持浅色反馈。 */
+    .print-setup-modal { width: min(96vw, 980px); }
+    .print-style-grid { gap: 12px; }
+    .print-mode-card.print-style-card {
+      min-height: 138px;
+      padding: 13px;
+      display: grid;
+      grid-template-columns: 108px minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      align-items: center;
+      column-gap: 14px;
+      row-gap: 5px;
+      color: var(--ux-ink) !important;
+      border-color: var(--ux-line) !important;
+      background: #fbfdfc !important;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .print-mode-card.print-style-card > strong {
+      grid-column: 2;
+      align-self: end;
+      color: var(--ux-ink);
+      font-size: 16px;
+    }
+    .print-mode-card.print-style-card > .print-style-desc {
+      grid-column: 2;
+      align-self: start;
+      color: var(--ux-muted);
+      line-height: 1.55;
+    }
+    .print-style-schematic {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      width: 108px;
+      height: 96px;
+      display: grid !important;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid #d5e5e2;
+      border-radius: 10px;
+      background: #eef5f3;
+    }
+    .print-mode-card span.ps-paper {
+      position: relative;
+      padding: 5px;
+      display: grid;
+      gap: 4px;
+      overflow: hidden;
+      border: 1px solid #a9c3bf;
+      border-radius: 2px;
+      background: #fff;
+      box-shadow: 0 3px 8px rgba(18, 58, 62, .12);
+      box-sizing: border-box;
+    }
+    .print-mode-card span.ps-landscape { width: 84px; height: 59px; }
+    .print-mode-card span.ps-portrait { width: 59px; height: 84px; }
+    .print-mode-card span.ps-grid4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    .print-mode-card span.ps-stack2 { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .print-mode-card span.ps-pair2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+    .print-mode-card span.ps-single { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .print-mode-card span.ps-slot {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      display: block;
+      overflow: hidden;
+      border: 1px solid #63aa9e;
+      border-radius: 2px;
+      background:
+        linear-gradient(145deg, transparent 45%, rgba(255,255,255,.58) 46% 58%, transparent 59%),
+        linear-gradient(160deg, #bde0d8 0 54%, #6eaa9a 55% 74%, #397c73 75% 100%);
+      box-sizing: border-box;
+    }
+    .print-mode-card span.ps-slot::after {
+      content: "";
+      position: absolute;
+      left: 2px;
+      right: 2px;
+      bottom: 2px;
+      height: 2px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.82);
+    }
+    .print-mode-card span.ps-custom::before,
+    .print-mode-card span.ps-custom::after {
+      content: "";
+      position: absolute;
+      border: 1px dashed #5b9f94;
+      border-radius: 2px;
+      background: rgba(119,190,178,.18);
+    }
+    .print-mode-card span.ps-custom::before { inset: 7px 7px 45px; }
+    .print-mode-card span.ps-custom::after { inset: 43px 7px 7px 22px; }
+    .print-mode-card.print-style-card.active {
+      color: var(--ux-brand-deep) !important;
+      border-color: #68b8aa !important;
+      background: #eaf7f4 !important;
+      box-shadow: 0 0 0 2px rgba(8,118,111,.1) !important;
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .print-mode-card.print-style-card:not(:disabled):not(.active):hover,
+      .print-mode-card.print-style-card.active:hover {
+        color: var(--ux-brand-deep) !important;
+        border-color: var(--ux-hover-line) !important;
+        background: var(--ux-hover-soft) !important;
+        box-shadow: var(--ux-hover-shadow) !important;
+        transform: none !important;
+      }
+      #unitView .photo.is-select-mode:not(.is-selected):hover {
+        border-color: var(--ux-hover-line);
+        background: var(--ux-hover-soft);
+        box-shadow: var(--ux-hover-shadow);
+        transform: none;
+      }
+    }
+
+    @media (max-width: 900px) {
+      #uploadChoiceModal .upload-choice-modal {
+        width: min(100vw, 760px) !important;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+      }
+      .upload-workspace {
+        display: block;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+      .upload-main-column { overflow: visible; }
+      .upload-target-column {
+        min-height: 420px;
+        max-height: 58dvh;
+        border-top: 1px solid var(--ux-line);
+        border-left: 0;
+      }
+      #uploadChoiceModal.is-current-unit-upload .upload-choice-modal { width: min(100vw, 780px) !important; }
+      .print-mode-card.print-style-card { grid-template-columns: 96px minmax(0, 1fr); }
+      .print-style-schematic { width: 96px; }
+    }
+    @media (max-width: 620px) {
+      #uploadChoiceModal .upload-choice-body { grid-template-columns: minmax(0, 1fr) !important; }
+      #uploadChoiceModal .upload-extra-grid { grid-template-columns: minmax(0, 1fr) !important; }
+      #uploadChoiceModal .upload-flow-summary { align-items: flex-start; }
+      #uploadChoiceModal .upload-flow-summary strong,
+      #uploadChoiceModal .upload-flow-summary span { white-space: normal; }
+      #uploadChoiceModal .upload-submit-row { align-items: stretch; flex-direction: column-reverse; }
+      #uploadChoiceModal .upload-submit-row button { width: 100%; }
+      .print-mode-grid.print-style-grid { grid-template-columns: minmax(0, 1fr); }
+      .print-mode-card.print-style-card { min-height: 128px; }
+    }
