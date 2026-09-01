@@ -281,10 +281,20 @@ describe('原图优先落盘与账号隔离队列', () => {
 
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
-    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'local_ready', preparation_pending: false, error: undefined })
+    expect(queueRuntime.state.photos[0]).toMatchObject({
+      status: 'local_ready',
+      preparation_pending: false,
+      error: undefined,
+      remote_batch_id: undefined,
+    })
+    expect(queueRuntime.state.photos[0].draft.transfer_profile).toBeUndefined()
+    expect(queueRuntime.state.batches[0]).toMatchObject({ remote_batch_id: undefined })
+    expect(queueRuntime.state.batches[0].draft.transfer_profile).toBeUndefined()
     await queueRuntime.resume('manual')
     await vi.waitFor(() => expect(queueRuntime.state.photos[0]?.status).toBe('desktop_pending'))
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('preview-batch', '/user/32-transfer.jpg', expect.any(Object), expect.any(Function))
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('preview-batch', '/user/32-original.jpg', expect.objectContaining({
+      original_size_bytes: 3_000_000,
+    }), expect.any(Function))
     expect(mocks.preparePreview).not.toHaveBeenCalled()
     expect(mocks.persistPreparedPreview).not.toHaveBeenCalled()
     expect(unlink).toHaveBeenCalledWith('/user/32-original.jpg')
@@ -528,12 +538,11 @@ describe('原图优先落盘与账号隔离队列', () => {
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-transfer.jpg', expect.objectContaining({
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('19', '/user/32-original.jpg', expect.objectContaining({
       sha256: '',
-      original_size_bytes: 900_000,
+      original_size_bytes: 3_000_000,
       original_filename: '32.jpg',
       original_mime_type: 'image/jpeg',
-      transfer_profile: 'jpeg_1m',
     }), expect.any(Function))
     const metadata = mocks.uploadPhoto.mock.calls[0][2]
     expect(metadata).not.toHaveProperty('preview_sha256')
@@ -785,7 +794,10 @@ describe('原图优先落盘与账号隔离队列', () => {
     await queueRuntime.resume('network-restored')
 
     expect(mocks.updateBatchArchiveInfo).toHaveBeenCalledWith('18', completedAssignment)
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('18', '/user/32-transfer.jpg', expect.objectContaining({ photo_uuid: repair.photo_uuid }), expect.any(Function))
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('18', '/user/32-original.jpg', expect.objectContaining({
+      photo_uuid: repair.photo_uuid,
+      original_size_bytes: 3_000_000,
+    }), expect.any(Function))
     expect(mocks.updateBatchArchiveInfo.mock.invocationCallOrder[0]).toBeLessThan(mocks.uploadPhoto.mock.invocationCallOrder[0])
     expect(queueRuntime.state.batches[0]).toMatchObject({ committed: true })
     expect(queueRuntime.state.batches[0].archive_info_sync_pending).toBeUndefined()
@@ -976,7 +988,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches[0].analyzed).toBe(true)
   })
 
-  it('恰好 1MiB 的 JPEG 归档图可直传，超过边界才拒绝', async () => {
+  it('遗留的 1MiB 归档图不再优先于本机原图', async () => {
     const photo = localPhoto('32', 'one-mib-photo')
     photo.status = 'local_ready'
     photo.transfer_size = 1024 * 1024
@@ -996,10 +1008,9 @@ describe('原图优先落盘与账号隔离队列', () => {
     const { queueRuntime } = await import('@/services/queue-runtime')
     queueRuntime.setOwner('32')
     await queueRuntime.resume('app-show')
-    expect(mocks.uploadPhoto).toHaveBeenCalledWith('one-mib-batch', '/user/32-transfer.jpg', expect.objectContaining({
+    expect(mocks.uploadPhoto).toHaveBeenCalledWith('one-mib-batch', '/user/32-original.jpg', expect.objectContaining({
       photo_uuid: 'one-mib-photo',
-      original_size_bytes: 1024 * 1024,
-      transfer_profile: 'jpeg_1m',
+      original_size_bytes: 3_000_000,
     }), expect.any(Function))
     expect(mocks.uploadPhotoInChunks).not.toHaveBeenCalled()
     expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')

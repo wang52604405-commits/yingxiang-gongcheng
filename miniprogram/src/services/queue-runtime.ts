@@ -521,14 +521,19 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     markUploadSourceInvalid(photo)
     return
   }
-  const legacyTransfer = hasValidTransfer(photo)
-  const filePath = legacyTransfer ? photo.transfer_path! : photo.original_path
+  // 从 V1.4.3 起，只要本机还留有原图就绝不再走旧的 1MB 传输图。
+  // 旧包曾把“压缩预览 / 归档 JPEG”的中间结果写进同一队列；该文件即使
+  // 完整，也可能把服务器批次锁回 jpeg_1m，导致真正的原图上传根本不启动。
+  // 只有原图已经被安全清理的历史记录，才允许以旧传输图作为最后的恢复兜底。
+  const uploadOriginal = hasValidOriginal(photo)
+  const legacyTransfer = !uploadOriginal && hasValidTransfer(photo)
+  const filePath = uploadOriginal ? photo.original_path! : photo.transfer_path!
   try {
     beginAutomaticRetryAttempt(photo)
     setStatus(photo, 'uploading')
     photo.progress = 1
     persist(owner)
-    const size = Number(legacyTransfer ? photo.transfer_size : photo.original_size)
+    const size = Number(uploadOriginal ? photo.original_size : photo.transfer_size)
     const useChunkedUpload = requiresChunkedUpload(size)
     // 只有超过 10MB 的断点续传需要手机先计算 SHA-256，以校验最终组装结果。
     // 普通直传由服务器在接收流时计算并校验，避免部分真机在纯 JS 全图哈希
@@ -542,14 +547,14 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       photo_uuid: photo.photo_uuid,
       client_captured_at: photo.client_captured_at,
       orientation: photo.orientation,
-      width: Number(legacyTransfer ? (photo.transfer_width || photo.width) : photo.width),
-      height: Number(legacyTransfer ? (photo.transfer_height || photo.height) : photo.height),
+      width: Number(uploadOriginal ? photo.width : (photo.transfer_width || photo.width)),
+      height: Number(uploadOriginal ? photo.height : (photo.transfer_height || photo.height)),
       sha256: useChunkedUpload
         ? (legacyTransfer ? photo.transfer_sha256! : photo.original_sha256)
         : '',
       original_size_bytes: size,
-      original_filename: legacyTransfer ? photo.transfer_filename! : photo.original_filename,
-      original_mime_type: legacyTransfer ? 'image/jpeg' as const : originalMimeType(photo),
+      original_filename: uploadOriginal ? photo.original_filename! : photo.transfer_filename!,
+      original_mime_type: uploadOriginal ? originalMimeType(photo) : 'image/jpeg' as const,
       title: photo.title,
       photo_date: photo.photo_date,
       capture_source: photo.draft.capture_source,
@@ -854,8 +859,10 @@ function hydrate(): void {
   const storedPhotos = stored?.owner_account_id === owner && Array.isArray(stored.photos) ? stored.photos : []
   const storedBatches = stored?.owner_account_id === owner && Array.isArray(stored.batches) ? stored.batches : []
   const migratedPhotos = storedPhotos.filter((photo) => String(photo.owner_account_id) === owner).map((photo) => {
-    // 旧版本会把手机压缩卡住的照片留在“正在准备 1MB 上传图”。升级后，
-    // 只要本机原图还在，就直接改走原图分片上传，不要求用户删除或重拍。
+    // 旧版本会把手机压缩卡住的照片留在“正在准备 1MB 上传图”。只要本机
+    // 原图仍在且尚未进入服务器侧状态，就强制废弃旧批次和 1MB 中间图，
+    // 从“原图直传”重新开始。否则本地虽然显示待上传，实际上仍会被旧批次
+    // 的 jpeg_1m 配置拦在上传前，服务器完全收不到 POST。
     const legacyPreviewTimeout = Boolean(
       photo.status === 'failed'
       && photo.failure_code === 'IMAGE_PROCESS_TIMEOUT'
@@ -875,8 +882,17 @@ function hydrate(): void {
       && photo.transfer_filename
       && isTransferWithinLimit(Number(photo.transfer_size || 0))
     )
-    const originalOnly = Boolean(photo.original_path && !hasValidTransfer(photo))
-    const recoverOriginal = Boolean(originalOnly && (
+    const originalAvailable = hasValidOriginal(photo)
+    const legacyTransferAvailable = hasValidTransfer(photo)
+    const remoteSettled = ['server_saved', 'analyzing', 'needs_review', 'desktop_pending', 'desktop_imported', 'local_deleted'].includes(photo.status)
+    const legacyOneMegFailure = /(?:1\s*MB|归档图|上传图).*(?:准备|不完整|超过|限制)|(?:准备|不完整|超过|限制).*(?:1\s*MB|归档图|上传图)/i.test(String(photo.error || ''))
+    const forceOriginal = Boolean(originalAvailable && !remoteSettled && (
+      photo.preparation_pending
+      || legacyPreviewTimeout
+      || legacyCompressionModuleFailure
+      || legacyOneMegFailure
+    ))
+    const recoverOriginal = Boolean(forceOriginal && (
       photo.preparation_pending
       || legacyPreviewTimeout
       || legacyCompressionModuleFailure
@@ -886,18 +902,25 @@ function hydrate(): void {
     const recoveredStatus = recoverInterruptedStatus(photo.status)
     return {
       ...photo,
-      draft: originalOnly ? { ...photo.draft, transfer_profile: undefined } : { ...photo.draft },
-      status: (previewOnlyTimeout || recoverOriginal) ? 'local_ready' : recoveredStatus,
+      draft: forceOriginal ? { ...photo.draft, transfer_profile: undefined } : { ...photo.draft },
+      remote_batch_id: forceOriginal ? undefined : photo.remote_batch_id,
+      status: (previewOnlyTimeout || recoverOriginal || forceOriginal) ? 'local_ready' : recoveredStatus,
       progress: photo.status === 'uploading' ? 0 : photo.progress,
       preparation_pending: false,
-      error: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.error,
-      retryable: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.retryable,
-      retry_from: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.retry_from,
-      failure_code: (previewOnlyTimeout || recoverOriginal) ? undefined : photo.failure_code,
+      error: (previewOnlyTimeout || recoverOriginal || forceOriginal) ? undefined : photo.error,
+      retryable: (previewOnlyTimeout || recoverOriginal || forceOriginal) ? undefined : photo.retryable,
+      retry_from: (previewOnlyTimeout || recoverOriginal || forceOriginal) ? undefined : photo.retry_from,
+      failure_code: (previewOnlyTimeout || recoverOriginal || forceOriginal) ? undefined : photo.failure_code,
     }
   })
-  const originalOnlyBatchIds = new Set(migratedPhotos.filter((photo) => photo.original_path && !hasValidTransfer(photo)).map((photo) => photo.client_batch_id))
-  const legacyTransferBatchIds = new Set(migratedPhotos.filter(hasValidTransfer).map((photo) => photo.client_batch_id))
+  const originalOnlyBatchIds = new Set(migratedPhotos.filter((photo) => (
+    hasValidOriginal(photo)
+    && photo.status === 'local_ready'
+    && !photo.remote_batch_id
+  )).map((photo) => photo.client_batch_id))
+  const legacyTransferBatchIds = new Set(migratedPhotos.filter((photo) => (
+    hasValidTransfer(photo) && !hasValidOriginal(photo)
+  )).map((photo) => photo.client_batch_id))
   for (const photo of migratedPhotos) {
     if (originalOnlyBatchIds.has(photo.client_batch_id) && !legacyTransferBatchIds.has(photo.client_batch_id)) photo.remote_batch_id = undefined
   }
