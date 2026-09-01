@@ -1007,11 +1007,12 @@
       overflow: auto;
     }
     .recent-upload-item {
-      display: flex;
+      display: grid;
+      grid-template-columns: 68px minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: space-between;
       gap: 10px;
-      padding: 8px 10px;
+      min-height: 66px;
+      padding: 7px 10px 7px 7px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
@@ -1019,6 +1020,35 @@
       transition: border-color .15s ease, background .15s ease;
     }
     .recent-upload-item:hover { border-color: var(--click-line); background: var(--click); }
+    .recent-upload-item:focus-visible {
+      outline: 3px solid rgba(8, 118, 111, .2);
+      outline-offset: 2px;
+      border-color: #64aa9f;
+    }
+    .recent-upload-thumb {
+      position: relative;
+      width: 68px;
+      aspect-ratio: 4 / 3;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: #52706f;
+      border: 1px solid #cfdfdc;
+      border-radius: 7px;
+      background: linear-gradient(145deg, #edf6f4, #dfece9);
+    }
+    .recent-upload-thumb img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+    .recent-upload-thumb.is-fallback::before {
+      content: "照片";
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .08em;
+    }
     .recent-upload-main {
       min-width: 0;
       display: grid;
@@ -1049,6 +1079,17 @@
       color: var(--muted);
     }
     .recent-upload-who { color: #0c6b6e; font-weight: 700; }
+    @media (max-width: 520px) {
+      .recent-upload-item { grid-template-columns: 62px minmax(0, 1fr); }
+      .recent-upload-thumb { width: 62px; }
+      .recent-upload-info {
+        grid-column: 2;
+        grid-row: 2;
+        display: flex;
+        gap: 8px;
+        text-align: left;
+      }
+    }
     .overview-board .panel-body {
       min-height: 0;
       overflow: auto;
@@ -8512,4 +8553,86 @@
       }
       #unitTitle,
       .unit-breadcrumbs { max-width: 100%; }
+    }
+
+    /* 2.82：二、三级界面统一交互色。主按钮为深绿，次要操作为浅绿，危险操作只用红色。 */
+    :root {
+      --ux-hover-primary: #065e59;
+      --ux-hover-soft: #e7f4f1;
+      --ux-hover-line: #83beb4;
+      --ux-hover-shadow: 0 6px 16px rgba(8, 95, 89, .12);
+      --ux-hover-danger: #9f2219;
+      --ux-hover-danger-soft: #fff0ee;
+      --ux-hover-danger-line: #e7aaa4;
+    }
+    @media (hover: hover) and (pointer: fine) {
+      /* 普通次级按钮、关闭按钮和页面工具按钮统一为浅绿色反馈。 */
+      :is(#partView, #unitView, .modal-backdrop, .support-panel, .project-import-menu) button.secondary:hover,
+      :is(#partView, #unitView, .modal-backdrop, .support-panel, .project-import-menu) button.ghost:hover,
+      .project-import-menu .secondary-tool:hover,
+      .unit-more-menu button:not(.danger):hover,
+      .actions-menu-wrap .settings-menu button:hover,
+      .quick-menu button:hover,
+      .upload-queue-item button:hover {
+        color: var(--ux-brand-deep) !important;
+        border-color: var(--ux-hover-line) !important;
+        background: var(--ux-hover-soft) !important;
+        box-shadow: var(--ux-hover-shadow) !important;
+      }
+
+      /* 设置导航、类别与工序标签使用同一套浅绿色悬停，不覆盖当前选中状态。 */
+      .project-info-modal .project-settings-tabs button:not(.active):hover,
+      .settings-account-host .support-settings-tabs button:not(.active):hover,
+      .unit-gallery-tabs button:not(.active):hover,
+      .unit-process-tabs button:not(.active):hover,
+      .level-filter button:not(.active):hover,
+      .upload-choice-card:not(.active):hover,
+      .settings-device-card:hover {
+        color: var(--ux-brand-deep) !important;
+        border-color: var(--ux-hover-line) !important;
+        background: var(--ux-hover-soft) !important;
+        box-shadow: var(--ux-hover-shadow) !important;
+      }
+
+      /* 上传、保存、确认等主操作只加深，不在不同页面变成蓝色或灰色。 */
+      :is(#partView, #unitView, .modal-backdrop, .support-panel) button[type="submit"]:not(.secondary):not(.ghost):not(.danger):hover,
+      #unitView #galleryUploadBtn:hover,
+      #unitView button[data-unit-upload]:hover,
+      #batchPrintSubmitBtn:hover,
+      #confirmPrintSetupBtn:hover,
+      #createProjectInviteBtn:hover,
+      #startPhotoOptimizationBtn:hover,
+      #confirmFolderReviewBtn:hover,
+      .project-import-menu button[type="submit"]:hover,
+      .project-import-menu .file-label:hover {
+        color: #fff !important;
+        border-color: var(--ux-hover-primary) !important;
+        background: var(--ux-hover-primary) !important;
+        box-shadow: var(--ux-hover-shadow) !important;
+      }
+
+      /* 删除、清空、退出等危险操作始终保持红色语义。 */
+      :is(#partView, #unitView, .modal-backdrop, .support-panel, .project-import-menu) button.danger:hover,
+      #cloudLogoutBtn:hover,
+      .project-import-menu .danger-tool:hover,
+      .unit-more-menu button.danger:hover {
+        color: #fff !important;
+        border-color: var(--ux-hover-danger) !important;
+        background: var(--ux-hover-danger) !important;
+        box-shadow: 0 6px 16px rgba(159, 34, 25, .16) !important;
+      }
+
+      .recent-upload-item:hover {
+        border-color: var(--ux-hover-line);
+        background: var(--ux-hover-soft);
+        box-shadow: var(--ux-hover-shadow);
+      }
+    }
+
+    @media (max-width: 760px) {
+      /* 旧桌面布局给两块面板写了固定列号；窄屏必须同时清掉列号，避免生成隐式第二列。 */
+      .overview-grid > .overview-board {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+      }
     }

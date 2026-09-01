@@ -26,7 +26,7 @@ except Exception:  # pragma: no cover - 托盘不可用时退化为静默
 
 
 APP_TITLE = "工程影像管理平台"
-APP_VERSION = "A20260901-2.80"
+APP_VERSION = "A20260901-2.82"
 UPDATE_URL = "https://api.shuiliyingxiang.cn/update/version.json"
 UPDATE_TIMEOUT = 6
 SERVER_EXE_NAME = "album_server.exe"

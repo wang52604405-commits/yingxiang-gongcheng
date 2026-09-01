@@ -2718,7 +2718,10 @@ const $ = (selector) => document.querySelector(selector);
           return;
         }
         list.innerHTML = records.map((rec) => `
-          <div class="recent-upload-item" data-code="${escapeHtml(rec.project_code)}">
+          <div class="recent-upload-item" data-code="${escapeHtml(rec.project_code)}" role="button" tabindex="0">
+            <span class="recent-upload-thumb${rec.thumb_url ? "" : " is-fallback"}" aria-hidden="true">
+              ${rec.thumb_url ? `<img src="${escapeHtml(rec.thumb_url)}" alt="" loading="lazy" decoding="async">` : ""}
+            </span>
             <div class="recent-upload-main">
               <strong class="recent-upload-title" title="${escapeHtml(rec.title)}">${escapeHtml(rec.title || "未命名照片")}</strong>
               <span class="recent-upload-meta">
@@ -2732,8 +2735,22 @@ const $ = (selector) => document.querySelector(selector);
             </span>
           </div>
         `).join("");
+        list.querySelectorAll(".recent-upload-thumb img").forEach((image) => {
+          const showFallback = () => {
+            const thumbnail = image.closest(".recent-upload-thumb");
+            image.remove();
+            thumbnail?.classList.add("is-fallback");
+          };
+          if (image.complete && !image.naturalWidth) showFallback();
+          else image.addEventListener("error", showFallback, { once: true });
+        });
         list.querySelectorAll("[data-code]").forEach((row) => {
           row.addEventListener("click", () => loadProject(row.dataset.code, "detail").catch((error) => showNotice(error.message, true)));
+          row.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            row.click();
+          });
         });
       } catch (error) {
         // 静默失败，不阻塞主界面

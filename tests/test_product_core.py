@@ -728,8 +728,58 @@ class DesktopSecurityContractTest(unittest.TestCase):
         script = script_path.read_text(encoding="utf-8")
         self.assertIn('form.append("process_name", processName)', script)
         self.assertIn('state.uploadQueuedFiles', script)
+        self.assertIn('class="recent-upload-thumb', script)
+        self.assertIn('rec.thumb_url', script)
         self.assertNotIn("metadata.csv", script)
         self.assertNotIn("metadata.json", script)
+
+        styles_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.css"))
+        styles = styles_path.read_text(encoding="utf-8")
+        self.assertIn(".recent-upload-thumb img", styles)
+        self.assertIn("--ux-hover-soft", styles)
+        self.assertIn('button[type="submit"]:not(.secondary)', styles)
+        self.assertRegex(
+            styles,
+            r"(?s)@media \(max-width: 760px\).*?\.overview-grid > \.overview-board\s*\{.*?grid-column: 1 !important;.*?grid-row: auto !important;",
+        )
+
+    def test_recent_uploads_return_thumbnail_urls_for_frontend_cards(self):
+        from PIL import Image
+        from werkzeug.datastructures import FileStorage
+
+        with self.client.session_transaction() as session:
+            session["username"] = "缩略图验收员"
+        project = self.desktop.manager.create_project(
+            "RECENT-THUMB-001",
+            "最近上传缩略图验收单元",
+            source_fields={
+                "合同工程名称": "缩略图验收合同",
+                "单位工程名称": "缩略图验收单位工程",
+                "分部工程名称": "缩略图验收分部",
+                "单元工程名称": "最近上传缩略图验收单元",
+                "单元工程编码": "RECENT-THUMB-001",
+            },
+        )
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), (36, 112, 105)).save(raw, "JPEG")
+        raw.seek(0)
+        self.desktop.manager.add_photos(
+            project["project_code"],
+            [FileStorage(stream=raw, filename="最近上传缩略图.jpg")],
+            title="最近上传缩略图",
+            photo_date="2026-09-01",
+            uploaded_by="缩略图验收员",
+        )
+
+        response = self.client.get("/api/recent-uploads?limit=100&scope=construction")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        records = response.get_json()["records"]
+        record = next(item for item in records if item["project_code"] == project["project_code"])
+        self.assertTrue(record["thumb_url"].startswith(f"/thumbs/{project['project_code']}/"))
+        thumbnail = self.client.get(record["thumb_url"])
+        self.assertEqual(thumbnail.status_code, 200)
+        self.assertEqual(thumbnail.mimetype, "image/webp")
+        thumbnail.close()
 
     def test_print_defaults_show_complete_photo_and_readable_photographer_caption(self):
         with self.desktop.app.test_request_context("/?style=default"):
