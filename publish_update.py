@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import build_all  # 复用 step1-4
@@ -42,14 +43,75 @@ PUBLIC_UPDATE_BASE = os.environ.get(
 
 INSTALLER = build_all.INSTALLER  # 客户可发送安装包-Win10/发给客户/安装程序.exe
 
+SSH_OPTIONS = [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=10",
+    "-o", "ConnectionAttempts=3",
+    "-o", "ServerAliveInterval=10",
+    "-o", "ServerAliveCountMax=3",
+]
+
+
+def _is_transport_failure(result: subprocess.CompletedProcess) -> bool:
+    return result.returncode == 255
+
+
+def _run_with_transport_retry(
+    cmd: list[str],
+    *,
+    timeout: int,
+    attempts: int = 3,
+) -> subprocess.CompletedProcess:
+    """只对 SSH 传输层错误重试；远端业务命令失败立即返回。"""
+    last_result = subprocess.CompletedProcess(cmd, 255, "", "transport unavailable")
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(
+                cmd,
+                255,
+                "",
+                f"transport timed out after {timeout} seconds",
+            )
+        last_result = result
+        if not _is_transport_failure(result) or attempt == attempts:
+            return result
+        delay = 2 ** attempt
+        print(f"  ! SSH 网络中断，第 {attempt}/{attempts} 次，{delay} 秒后重试")
+        time.sleep(delay)
+    return last_result
+
 
 def ssh_cmd(args: list[str], check=True) -> subprocess.CompletedProcess:
     """在本机执行 ssh 到服务器跑命令。"""
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-           "-i", str(SSH_KEY), SERVER_HOST, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    cmd = ["ssh", *SSH_OPTIONS, "-i", str(SSH_KEY), SERVER_HOST, *args]
+    result = _run_with_transport_retry(cmd, timeout=90)
     if check and result.returncode != 0:
         raise SystemExit(f"SSH 失败: {args}\n{result.stderr}")
+    return result
+
+
+def scp_upload(source: str | Path, destination: str) -> subprocess.CompletedProcess:
+    """上传到远端临时文件；长安装包允许重试且绝不直接覆盖正式文件。"""
+    cmd = [
+        "scp",
+        "-O",
+        "-q",
+        *SSH_OPTIONS,
+        "-i", str(SSH_KEY),
+        str(source),
+        f"{SERVER_HOST}:{destination}",
+    ]
+    result = _run_with_transport_retry(cmd, timeout=1200)
+    if result.returncode != 0:
+        raise SystemExit(f"上传失败（已重试）：{result.stderr}")
     return result
 
 
@@ -84,16 +146,11 @@ DRY_RUN = os.environ.get("DRY_RUN") == "1"
 def upload_installer() -> None:
     """scp 上传本地安装包到服务器（中文文件名）。"""
     remote_tmp = f"{REMOTE_UPDATES}/.{REMOTE_EXE_NAME}.uploading"
-    cmd = ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-           "-i", str(SSH_KEY), str(INSTALLER),
-           f"{SERVER_HOST}:{remote_tmp}"]
     print(f"\n[上传] {INSTALLER.name} ({INSTALLER.stat().st_size/1024/1024:.1f} MB)")
     if DRY_RUN:
         print("[DRY_RUN] 跳过上传")
         return
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    if result.returncode != 0:
-        raise SystemExit(f"上传失败: {result.stderr}")
+    scp_upload(INSTALLER, remote_tmp)
     expected = hashlib.sha256(INSTALLER.read_bytes()).hexdigest()
     remote_hash = ssh_cmd(["sha256sum", remote_tmp]).stdout.split()[0].lower()
     if remote_hash != expected:
@@ -159,12 +216,7 @@ def write_remote_version(new_version: str, note: str) -> None:
         ssh_cmd(["cp", f"{REMOTE_UPDATES}/version.json",
                  f"{REMOTE_UPDATES}/version.json.bak"], check=False)
         remote_tmp = f"{REMOTE_UPDATES}/.version.json.uploading"
-        cmd = ["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-               "-i", str(SSH_KEY), tmp,
-               f"{SERVER_HOST}:{remote_tmp}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-        if result.returncode != 0:
-            raise SystemExit(f"version.json 上传失败: {result.stderr}")
+        scp_upload(tmp, remote_tmp)
         ssh_cmd(["mv", remote_tmp, f"{REMOTE_UPDATES}/version.json"])
         ssh_cmd(["cp", f"{REMOTE_UPDATES}/version.json", "/opt/album-auth/data/version.json"])
     finally:
