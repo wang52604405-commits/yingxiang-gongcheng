@@ -99,10 +99,9 @@ def ssh_cmd(args: list[str], check=True) -> subprocess.CompletedProcess:
 
 
 def scp_upload(source: str | Path, destination: str) -> subprocess.CompletedProcess:
-    """上传到远端临时文件；长安装包允许重试且绝不直接覆盖正式文件。"""
+    """上传到远端临时文件；兼容旧版 scp，失败可重试且不覆盖正式文件。"""
     cmd = [
         "scp",
-        "-O",
         "-q",
         *SSH_OPTIONS,
         "-i", str(SSH_KEY),

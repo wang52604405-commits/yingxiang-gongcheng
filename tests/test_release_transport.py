@@ -45,7 +45,7 @@ class ReleaseTransportTest(unittest.TestCase):
         runner.assert_called_once()
         pause.assert_not_called()
 
-    def test_upload_uses_legacy_scp_timeouts_and_a_temporary_target(self):
+    def test_upload_supports_old_scp_timeouts_and_a_temporary_target(self):
         passed = subprocess.CompletedProcess(["scp"], 0, "", "")
         with patch.object(
             publish_update,
@@ -55,7 +55,7 @@ class ReleaseTransportTest(unittest.TestCase):
             publish_update.scp_upload(Path("installer.exe"), "/tmp/.installer.uploading")
 
         command = runner.call_args.args[0]
-        self.assertIn("-O", command)
+        self.assertNotIn("-O", command)
         self.assertIn("ServerAliveInterval=10", command)
         self.assertEqual(runner.call_args.kwargs["timeout"], 1200)
         self.assertTrue(command[-1].endswith(":/tmp/.installer.uploading"))
