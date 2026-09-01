@@ -749,7 +749,9 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('rec.thumb_url', script)
         self.assertIn('modal.classList.toggle("is-current-unit-upload", currentUnitOnly)', script)
         self.assertNotIn('$("#gateRegisterBtn").addEventListener', script)
-        self.assertIn('if (manual || !state.auth.user) renderManualUpdate(data)', script)
+        self.assertNotIn('if (manual || !state.auth.user) renderManualUpdate(data)', script)
+        self.assertIn('versionBadge?.classList.toggle("update-available", Boolean(hasUpdate))', script)
+        self.assertIn('// 新版本对登录前后都必须明显可见', script)
         self.assertIn('openUploadChoiceModal(normalizePhotoCategory(category), processName, true)', script)
         self.assertIn('class="photo-selection-state"', script)
         self.assertIn('syncPhotoCardSelection(card, next)', script)
@@ -767,6 +769,10 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn(".print-mode-card.print-style-card:not(:disabled):not(.active):hover", styles)
         self.assertIn("#unitView .photo-selection-state", styles)
         self.assertIn(".auth-register-link", styles)
+        self.assertIn('#checkUpdateBtn.update-available', styles)
+        self.assertIn('.app-version-badge.update-available::after', styles)
+        self.assertIn('.update-overlay[data-mode="manual"] .update-actions .button-link', styles)
+        self.assertIn('content: " · 可更新"', styles)
         self.assertRegex(
             styles,
             r"\.guide-overlay\s*\{[^}]*pointer-events:\s*none;",

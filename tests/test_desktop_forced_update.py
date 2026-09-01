@@ -389,6 +389,8 @@ class DesktopForcedUpdateTest(unittest.TestCase):
         self.assertIn('id="downloadUpdateLink"', html)
         self.assertIn("function setUpdateAvailable", javascript)
         self.assertIn("function renderManualUpdate", javascript)
+        self.assertIn('$("#updateTitle").textContent = "发现新版本，建议立即更新"', javascript)
+        self.assertIn("renderManualUpdate(data);", javascript)
         self.assertIn('setUpdateAvailable(true)', javascript)
         update_function = javascript[javascript.index("async function checkForUpdate"):javascript.index("async function ensureAuthenticated")]
         self.assertNotIn("confirm(", update_function)

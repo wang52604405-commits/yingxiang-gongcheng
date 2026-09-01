@@ -7459,17 +7459,43 @@
     }
     .update-notice-dot {
       position: absolute;
-      top: 5px;
-      right: 5px;
-      width: 8px;
-      height: 8px;
+      top: 4px;
+      right: 4px;
+      width: 11px;
+      height: 11px;
       border: 2px solid #fff;
       border-radius: 999px;
       background: #e5484d;
-      box-shadow: 0 1px 4px rgba(147, 22, 35, .34);
+      box-shadow: 0 0 0 4px rgba(229, 72, 77, .13), 0 2px 8px rgba(147, 22, 35, .34);
       pointer-events: none;
     }
     .update-notice-dot[hidden] { display: none; }
+    #checkUpdateBtn.update-available {
+      border-color: #ef8a8e;
+      background: #fff6f6;
+      box-shadow: inset 4px 0 0 #e5484d, 0 8px 22px rgba(147, 22, 35, .09);
+    }
+    #checkUpdateBtn.update-available strong::after {
+      content: "有新版本";
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: #fff;
+      background: #d9363e;
+      font-size: 11px;
+      font-weight: 850;
+      vertical-align: 1px;
+    }
+    .app-version-badge.update-available {
+      color: #fff !important;
+      background: #d9363e !important;
+      box-shadow: 0 0 0 4px rgba(229, 72, 77, .16), 0 5px 14px rgba(116, 24, 31, .26);
+    }
+    .app-version-badge.update-available::after {
+      content: " · 可更新";
+      font-weight: 850;
+    }
     .update-panel {
       width: min(460px, 100%);
       padding: 30px;
@@ -7479,6 +7505,53 @@
       background: #fff;
       box-shadow: 0 28px 80px rgba(4, 20, 34, .32);
       text-align: center;
+    }
+    .update-overlay[data-mode="manual"] {
+      background: rgba(5, 24, 38, .82);
+    }
+    .update-overlay[data-mode="manual"] .update-panel {
+      position: relative;
+      width: min(520px, 100%);
+      overflow: hidden;
+      padding: 36px 34px 30px;
+      border: 2px solid rgba(56, 189, 173, .62);
+      box-shadow: 0 30px 90px rgba(2, 16, 28, .46), 0 0 0 8px rgba(56, 189, 173, .09);
+    }
+    .update-overlay[data-mode="manual"] .update-panel::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 7px;
+      background: linear-gradient(90deg, #0b78a5, #16a394 62%, #f0a43c);
+    }
+    .update-overlay[data-mode="manual"] .update-mark {
+      width: 66px;
+      height: 66px;
+      margin-bottom: 15px;
+      border-radius: 20px;
+      background: linear-gradient(145deg, #0b78a5, #16a394);
+      box-shadow: 0 14px 34px rgba(11, 120, 165, .3);
+    }
+    .update-overlay[data-mode="manual"] .update-mark-arrow { font-size: 34px; }
+    .update-overlay[data-mode="manual"] .update-required-label {
+      padding: 5px 12px;
+      border: 1px solid #f6c46f;
+      color: #884800;
+      background: #fff3d6;
+      font-size: 13px;
+    }
+    .update-overlay[data-mode="manual"] .update-panel h2 {
+      margin-top: 14px;
+      font-size: 28px;
+    }
+    .update-overlay[data-mode="manual"] .update-version {
+      display: inline-flex;
+      margin-top: 5px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      color: #075985;
+      background: #eaf6fc;
+      font-size: 15px;
     }
     .update-mark {
       display: grid;
@@ -7617,6 +7690,38 @@
       font-size: 12px;
       line-height: 1.5;
     }
+    .update-overlay[data-mode="manual"] .update-actions {
+      align-items: stretch;
+      margin-top: 20px;
+    }
+    .update-overlay[data-mode="manual"] .update-actions .button-link {
+      flex: 1 1 auto;
+      min-height: 52px;
+      padding: 14px 22px;
+      border-color: #0b78a5;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0b78a5, #12998d);
+      box-shadow: 0 12px 26px rgba(11, 120, 165, .24);
+      font-size: 16px;
+    }
+    .update-overlay[data-mode="manual"] .update-actions .secondary {
+      min-width: 122px;
+      color: #40556a;
+      background: #fff;
+      border-color: #bdccd7;
+      box-shadow: none;
+    }
+    .update-overlay[data-mode="manual"] .update-actions .secondary:active { transform: scale(.97); }
+    @media (hover: hover) and (pointer: fine) {
+      .update-overlay[data-mode="manual"] .update-actions .button-link:hover {
+        background: linear-gradient(135deg, #09698f, #0d867b);
+      }
+      .update-overlay[data-mode="manual"] .update-actions .secondary:hover {
+        color: #24465d !important;
+        background: #f1f6f8 !important;
+        border-color: #9cb2c1 !important;
+      }
+    }
     .update-overlay[data-state="failed"] .update-mark { background: #b42318; }
     .update-overlay[data-state="installed"] .update-mark { background: #15803d; }
     .update-overlay[data-mode="development"] {
@@ -7631,6 +7736,11 @@
       .update-overlay { padding: 12px; }
       .update-panel { padding: 24px 18px; border-radius: 14px; }
       .update-panel h2 { font-size: 21px; }
+      .update-overlay[data-mode="manual"] .update-panel { padding: 30px 18px 22px; }
+      .update-overlay[data-mode="manual"] .update-panel h2 { font-size: 23px; }
+      .update-overlay[data-mode="manual"] .update-actions { flex-direction: column; }
+      .update-overlay[data-mode="manual"] .update-actions .button-link,
+      .update-overlay[data-mode="manual"] .update-actions .secondary { width: 100%; }
     }
     @media (prefers-reduced-motion: reduce) {
       .update-mark-arrow { animation: none !important; }

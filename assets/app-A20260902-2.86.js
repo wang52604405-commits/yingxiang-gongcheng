@@ -1822,9 +1822,12 @@ const $ = (selector) => document.querySelector(selector);
     function setUpdateAvailable(hasUpdate) {
       const button = $("#checkUpdateBtn");
       const dot = $("#updateNoticeDot");
+      const versionBadge = $("#appVersionBadge");
       if (dot) dot.hidden = !hasUpdate;
       button?.classList.toggle("update-available", Boolean(hasUpdate));
+      versionBadge?.classList.toggle("update-available", Boolean(hasUpdate));
       button?.setAttribute("title", hasUpdate ? "发现新版本，点击下载安装包" : "检查软件新版本");
+      versionBadge?.setAttribute("title", hasUpdate ? "发现新版本，请尽快更新" : "当前软件版本");
     }
 
     function openUpdateOverlay(mode = "mandatory") {
@@ -1857,8 +1860,8 @@ const $ = (selector) => document.querySelector(selector);
       openUpdateOverlay("manual");
       const overlay = $("#updateOverlay");
       overlay.dataset.state = "available";
-      $("#updateRequiredLabel").textContent = "发现新版本";
-      $("#updateTitle").textContent = "下载后手动安装";
+      $("#updateRequiredLabel").textContent = "重要更新";
+      $("#updateTitle").textContent = "发现新版本，建议立即更新";
       $("#updateVersion").textContent = `${manifest.current_version || $("#appVersionBadge")?.textContent || "当前版本"} → ${manifest.latest_version}`;
       $("#updateMessage").textContent = "请下载安装包，关闭软件后双击安装即可覆盖升级。";
       $("#updateProgress").hidden = true;
@@ -2032,9 +2035,8 @@ const $ = (selector) => document.querySelector(selector);
         }
         state.update.manifest = data;
         setUpdateAvailable(true);
-        // 未登录用户看不到工作台里的更新红点，必须直接显示下载提示；
-        // 已登录用户仍保留“设置 → 检查更新”的非打扰式提醒。
-        if (manual || !state.auth.user) renderManualUpdate(data);
+        // 新版本对登录前后都必须明显可见；用户仍可选择“稍后提醒我”继续使用。
+        renderManualUpdate(data);
         return data;
       })();
       try {

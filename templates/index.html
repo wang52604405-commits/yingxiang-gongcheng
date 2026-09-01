@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260901-2.85.css">
+  <link rel="stylesheet" href="/assets/app-A20260902-2.86.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -974,8 +974,8 @@
       <div class="update-mark" aria-hidden="true">
         <span class="update-mark-arrow">↓</span>
       </div>
-      <span class="update-required-label" id="updateRequiredLabel">发现新版本</span>
-      <h2 id="updateTitle">下载后手动安装</h2>
+      <span class="update-required-label" id="updateRequiredLabel">重要更新</span>
+      <h2 id="updateTitle">发现新版本，建议立即更新</h2>
       <p class="update-version" id="updateVersion">正在读取版本信息…</p>
       <p class="update-message" id="updateMessage">请下载安装包，关闭软件后双击安装即可覆盖升级。</p>
       <div class="update-progress" id="updateProgress" role="progressbar" aria-label="更新下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -992,13 +992,13 @@
       </ol>
       <div class="update-error" id="updateError" role="alert" hidden></div>
       <div class="update-actions update-dev-actions" id="updateDownloadActions">
-        <a class="button-link" id="downloadUpdateLink" href="/api/cloud/download-update" target="_blank" rel="noopener">下载安装版</a>
-        <button class="secondary" type="button" id="dismissUpdateBtn">稍后安装</button>
+        <a class="button-link" id="downloadUpdateLink" href="/api/cloud/download-update" target="_blank" rel="noopener">立即下载新版本</a>
+        <button class="secondary" type="button" id="dismissUpdateBtn">稍后提醒我</button>
       </div>
       <p class="update-footnote" id="updateFootnote">安装前先关闭工程影像管理平台；工程资料不会被覆盖或删除。</p>
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260901-2.85.js"></script>
+  <script defer src="/assets/app-A20260902-2.86.js"></script>
 </body>
 </html>
