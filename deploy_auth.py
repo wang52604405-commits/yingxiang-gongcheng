@@ -17,7 +17,11 @@ import subprocess
 import sys
 import os
 import base64
+import hashlib
 import shlex
+import tarfile
+import tempfile
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -137,6 +141,65 @@ def run(cmd, check=True):
     if check and result.returncode != 0:
         raise SystemExit(f"命令失败: {' '.join(str(c) for c in cmd)}\n{result.stderr}")
     return result
+
+
+def scp_file(source: Path, destination: str, *, attempts: int = 3):
+    """上传单个文件；网络闪断时限时重试，避免发布任务无限挂起。"""
+    command = [
+        "scp",
+        "-q",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=10",
+        "-o", "ConnectionAttempts=3",
+        "-o", "ServerAliveInterval=10",
+        "-o", "ServerAliveCountMax=3",
+        "-i", str(SSH_KEY),
+        str(source),
+        f"{SERVER_HOST}:{destination}",
+    ]
+    last_error = "unknown failure"
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return result
+            last_error = (result.stderr or result.stdout or "scp failed").strip()
+        except subprocess.TimeoutExpired:
+            last_error = "transfer timed out after 120 seconds"
+        if attempt < attempts:
+            delay = 2 ** attempt
+            print(f"  ! 上传中断，第 {attempt}/{attempts} 次，{delay} 秒后重试")
+            time.sleep(delay)
+    raise SystemExit(f"SCP 上传失败（已重试 {attempts} 次）：{last_error[:500]}")
+
+
+def build_release_archive(target: Path, validator_source: Path) -> list[str]:
+    """只打包白名单发布文件，减少反复建立 SSH 连接造成的闪断。"""
+    members: list[tuple[Path, str]] = []
+    for name in CODE_FILES:
+        source = REPO / "server" / name
+        if source.is_file():
+            members.append((source, f"server/{name}"))
+    for name in DEPLOY_FILES:
+        source = REPO / "server" / "deploy" / name
+        if source.is_file():
+            members.append((source, f"server/deploy/{name}"))
+    for name in TEMPLATE_FILES:
+        source = REPO / "server" / "templates" / name
+        if source.is_file():
+            members.append((source, f"server/templates/{name}"))
+    members.append((validator_source, "validate_mobile_migration.py"))
+
+    with tarfile.open(target, "w:gz") as archive:
+        for source, archive_name in members:
+            archive.add(source, arcname=archive_name, recursive=False)
+    return [archive_name for _, archive_name in members]
 
 
 def ssh(cmd_str: str, check=True):
@@ -273,33 +336,20 @@ def main() -> int:
     if backup_cron_state not in {"present", "absent"}:
         raise SystemExit(f"无法确认自动备份计划状态：{backup_cron_state!r}")
 
-    print("[2/9] 上传代码、迁移验证器和服务 drop-in 到灰度目录")
-    for fname in CODE_FILES:
-        src = REPO / "server" / fname
-        if src.exists():
-            run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{stage_server}/"])
-            print(f"  + {fname}")
-    for fname in DEPLOY_FILES:
-        src = REPO / "server" / "deploy" / fname
-        if src.exists():
-            run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{stage_deploy}/"])
-            print(f"  + deploy/{fname}")
-    for source, destination in ((validator_source, stage_validator),):
-        run([
-            "scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-            "-i", str(SSH_KEY), str(source), f"{SERVER_HOST}:{destination}",
-        ])
-        print(f"  + {source.name}")
+    print("[2/9] 打包并上传白名单发布文件到灰度目录")
+    remote_archive = f"{release_root}/payload.tar.gz"
+    with tempfile.TemporaryDirectory(prefix="album-auth-release-") as temp_dir:
+        local_archive = Path(temp_dir) / "payload.tar.gz"
+        archive_members = build_release_archive(local_archive, validator_source)
+        archive_sha256 = hashlib.sha256(local_archive.read_bytes()).hexdigest()
+        scp_file(local_archive, remote_archive)
+        ssh(
+            f"printf '%s  %s\\n' {archive_sha256} {remote_archive} | sha256sum -c - && "
+            f"tar -xzf {remote_archive} -C {release_root} && rm -f -- {remote_archive}"
+        )
+    print(f"  + 已校验并解包 {len(archive_members)} 个文件")
 
-    print("[3/9] 上传模板并执行灰度静态检查")
-    for fname in TEMPLATE_FILES:
-        src = REPO / "server" / "templates" / fname
-        if src.exists():
-            run(["scp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                 "-i", str(SSH_KEY), str(src), f"{SERVER_HOST}:{stage_templates}/"])
-            print(f"  + templates/{fname}")
+    print("[3/9] 执行灰度静态检查")
     compile_targets = " ".join(f"server/{name}" for name in CODE_FILES if name.endswith(".py"))
     ssh(
         f"cd {release_root} && {REMOTE_PYTHON} -m py_compile "

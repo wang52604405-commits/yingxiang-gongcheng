@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 import importlib.util
+import tarfile
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -102,6 +104,43 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("[IO.File]::AppendAllText", workflow)
         self.assertIn("[Text.UTF8Encoding]::new($false)", workflow)
         self.assertNotIn("git diff --name-only HEAD^ HEAD", workflow)
+
+    def test_production_payload_is_one_whitelisted_verified_archive(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "payload.tar.gz"
+            members = deploy_auth.build_release_archive(
+                target,
+                ROOT / "validate_mobile_migration.py",
+            )
+            with tarfile.open(target, "r:gz") as archive:
+                archived = archive.getnames()
+
+        self.assertEqual(archived, members)
+        self.assertIn("server/app.py", archived)
+        self.assertIn("server/deploy/album-auth-backup.cron", archived)
+        self.assertIn("server/templates/admin.html", archived)
+        self.assertIn("validate_mobile_migration.py", archived)
+        self.assertTrue(all(not name.startswith(("/", "..")) for name in archived))
+
+        deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        self.assertIn("sha256sum -c -", deployer)
+        self.assertIn("ServerAliveInterval=10", deployer)
+        self.assertIn("timeout=120", deployer)
+        self.assertIn("attempts: int = 3", deployer)
+
+    def test_scp_file_retries_a_transient_disconnect(self):
+        failed = SimpleNamespace(returncode=1, stdout="", stderr="lost connection")
+        passed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(
+            deploy_auth.subprocess,
+            "run",
+            side_effect=[failed, passed],
+        ) as transfer, patch.object(deploy_auth.time, "sleep") as pause:
+            result = deploy_auth.scp_file(Path("payload.tar.gz"), "/tmp/payload.tar.gz")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(transfer.call_count, 2)
+        pause.assert_called_once_with(2)
 
     def test_successful_production_deploy_dispatches_exact_wechat_source(self):
         deploy_workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
