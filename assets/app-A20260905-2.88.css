@@ -9151,26 +9151,110 @@
 
 
 /* photo-management-20260905 */
-.unit-filter-toolbar{
-  display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:0 0 16px;
-  padding:12px 14px;border:1px solid rgba(148,163,184,.26);border-radius:14px;background:rgba(248,250,252,.72)
+
+/* photo-management controls: intentionally inherit the product's existing density and tokens */
+#partView > .page-head {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 480px) auto;
+  align-items: center;
+  gap: 12px;
 }
-.unit-filter-toolbar label{display:grid;gap:6px;font-size:12px;font-weight:700;color:#475569}
-.unit-filter-toolbar .unit-filter-search{min-width:min(360px,100%);flex:1}
-.unit-filter-toolbar input,.unit-filter-toolbar select{min-height:40px;border:1px solid #cbd5e1;border-radius:10px;padding:0 11px;background:#fff;color:#0f172a}
-.unit-card-photo-counts b.has-photos,.unit-photo-total.has-photos{color:#dc2626!important;font-weight:900}
-.unit-card-photo-counts b.has-photos{background:#fff1f2;border:1px solid #fecdd3;border-radius:999px;padding:1px 7px;box-shadow:0 0 0 2px rgba(220,38,38,.05)}
-#unitProcessTabs .process-tab-item{display:inline-flex;align-items:center;gap:4px;margin-right:6px}
-#unitProcessTabs .process-tab-item>button[data-gallery-process]{margin-right:0}
-#unitProcessTabs .process-manage-actions{display:inline-flex;gap:2px}
-#unitProcessTabs .process-manage-btn{min-width:28px;height:28px;padding:0 6px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;color:#475569;font-size:12px;cursor:pointer}
-#unitProcessTabs .process-manage-btn:hover{border-color:#64748b;color:#0f172a}
-#unitProcessTabs .process-manage-btn.danger:hover{border-color:#ef4444;color:#dc2626;background:#fff1f2}
-.photo-move-open{border-color:#fca5a5!important;color:#b91c1c!important;background:#fff7f7!important}
-.photo-move-modal{width:min(720px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 32px));overflow:auto}
-.photo-move-form{display:grid;gap:14px;padding-top:4px}
-.photo-move-form label{display:grid;gap:7px;font-size:13px;font-weight:700;color:#334155}
-.photo-move-form input,.photo-move-form select{width:100%;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;padding:10px 11px}
-#photoMoveTargetSelect{min-height:210px}
-.photo-move-summary{padding:12px 14px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;line-height:1.55}
-@media(max-width:720px){.unit-filter-toolbar{align-items:stretch}.unit-filter-toolbar label{width:100%}.photo-move-modal{width:calc(100vw - 20px)}}
+#partView > .page-head .unit-filter-toolbar {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 126px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+#partView > .page-head .unit-filter-toolbar input,
+#partView > .page-head .unit-filter-toolbar select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+#partView > .page-head .unit-filter-toolbar input {
+  border-color: var(--line);
+  background: #fff;
+  color: var(--text);
+}
+#partView > .page-head .unit-filter-toolbar select {
+  padding: 6px 8px;
+}
+
+/* Uploaded counts keep the exact original box/size/background; only the numeral color changes. */
+.unit-card-photo-counts b.has-photos { color: #d92d20 !important; }
+
+/* Process actions behave like the existing lightweight/ghost controls. */
+#unitProcessTabs .process-tab-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+#unitProcessTabs .process-tab-item > button[data-gallery-process] { margin: 0; }
+#unitProcessTabs .process-manage-actions { display: inline-flex; gap: 1px; }
+#unitProcessTabs .process-manage-btn {
+  min-width: 26px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+#unitProcessTabs .process-manage-btn:hover {
+  color: var(--ux-brand-deep, #075e59);
+  background: rgba(8,118,111,.07);
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+#unitProcessTabs .process-manage-btn.danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Move-photo UI reuses machine-id modal, standard form controls and secondary/primary buttons. */
+.photo-move-modal { overflow: auto; }
+.photo-move-form { display: grid; gap: 12px; }
+.photo-move-form label { margin: 0; }
+.photo-move-form input { min-height: 36px; }
+.photo-move-form select { width: 100%; }
+#photoMoveTargetSelect { min-height: 196px; }
+.photo-move-summary {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  line-height: 1.55;
+}
+
+@media (max-width: 1100px) {
+  #partView > .page-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  #partView > .page-head .unit-filter-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+@media (max-width: 720px) {
+  #partView > .page-head { grid-template-columns: 1fr; }
+  #partView > .page-head .unit-filter-toolbar {
+    grid-column: 1;
+    grid-row: auto;
+    grid-template-columns: minmax(0, 1fr) 112px;
+  }
+  #partView > .page-head #backOverviewBtn { width: 100%; }
+}
+

@@ -142,7 +142,12 @@ class FrontendPhotoManagementContractTest(unittest.TestCase):
         for marker in ("renameProcess", "deleteProcess", "confirmPhotoMove", "data-process-rename", "data-process-delete"):
             self.assertIn(marker, js)
         self.assertIn("unit-card-photo-counts b.has-photos", css)
-        self.assertIn("color:#dc2626", css)
+        self.assertIn("color: #d92d20", css)
+        self.assertNotIn("background:#fff1f2", css)
+        self.assertNotIn("box-shadow:0 0 0 2px", css)
+        self.assertIn("#partView > .page-head .unit-filter-toolbar", css)
+        self.assertLess(html.index("unitListSearchInput"), html.index("part-scroll-panel"))
+        self.assertIn('class="orientation-select" size="7"', html)
 
 
 if __name__ == "__main__":

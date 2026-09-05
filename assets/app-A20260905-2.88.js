@@ -3004,7 +3004,7 @@ const $ = (selector) => document.querySelector(selector);
             </span>
           </span>
           <span class="unit-card-meta">
-            <span class="unit-photo-total ${Number(project.photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.photo_count || 0)} 张照片</span>
+            <span class="unit-photo-total">${Number(project.photo_count || 0)} 张照片</span>
             <span>${escapeHtml(project.latest_upload || "-")}</span>
           </span>
         </button>
@@ -3311,7 +3311,7 @@ const $ = (selector) => document.querySelector(selector);
       processTabs.innerHTML = [{ name: "", label: "单元照片" }, ...processList.map((name) => ({ name, label: name }))].map((item) => {
         const count = photosForSection(category, item.name).length;
         const manage = item.name
-          ? `<span class="process-manage-actions"><button type="button" class="process-manage-btn" data-process-rename="${escapeHtml(item.name)}" title="重命名工序">改</button><button type="button" class="process-manage-btn danger" data-process-delete="${escapeHtml(item.name)}" title="删除空工序">删</button></span>`
+          ? `<span class="process-manage-actions"><button type="button" class="process-manage-btn" data-process-rename="${escapeHtml(item.name)}" title="重命名工序" aria-label="重命名工序">改</button><button type="button" class="process-manage-btn danger" data-process-delete="${escapeHtml(item.name)}" title="删除空工序" aria-label="删除空工序">删</button></span>`
           : "";
         return `<span class="process-tab-item"><button type="button" class="${item.name === processName ? "active" : ""}" data-gallery-process="${escapeHtml(item.name)}" title="${escapeHtml(item.label)}">${escapeHtml(item.label)} <span>${count}</span></button>${manage}</span>`;
       }).join("");
