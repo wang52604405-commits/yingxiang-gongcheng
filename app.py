@@ -1825,11 +1825,11 @@ class AlbumManager:
                 digits = 3
             seq = f"{int(sequence):0{digits}d}"
             cat = "JY" if category == "supervision" else "SY"
-            unit_code = safe_project_code(
-                data.get("display_project_code") or data.get("project_code")
-            )
-            process_segment = f"-{safe_project_code(process_code)}" if process_code else ""
-            return f"{unit_code}{process_segment}-{cat}{'GX' if process_code else 'DY'}{seq}"
+            # 两级照片编号不再重复携带单元工程编码。单元归属由父目录/元数据
+            # 唯一确定；打印、同步与跨单元移动均同时携带 project_code + photo_uuid。
+            # 单元级：SYDY001 / JYDY001；工序级：GY001-SYGX001 / GY001-JYGX001。
+            process_segment = f"{safe_project_code(process_code)}-" if process_code else ""
+            return f"{process_segment}{cat}{'GX' if process_code else 'DY'}{seq}"
         settings = read_engineering_settings()
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
@@ -2120,8 +2120,12 @@ class AlbumManager:
                     if process_code != expected_code:
                         photo["process_code"] = expected_code
                         needs_repair = True
-                # 仅识别旧版系统自动生成的短编号；不触碰用户自己输入的其它编号。
-                if has_processes and re.fullmatch(r"(?:SY|JY)(?:DY|GX)\d{1,8}", archive_id):
+                # 新版以短编号为标准。仅识别旧版自动生成、且带当前单元工程
+                # 编码前缀的编号；用户自定义编号不参与迁移。
+                legacy_unit_prefix = safe_project_code(
+                    data.get("display_project_code") or data.get("project_code")
+                ).upper()
+                if has_processes and legacy_unit_prefix and archive_id.startswith(legacy_unit_prefix + "-"):
                     needs_repair = True
             if not needs_repair:
                 return 0
@@ -2398,6 +2402,207 @@ class AlbumManager:
                     self._renumber_after_change(project_code, data)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
+
+
+    def rename_process(self, project_code, process_name, new_name):
+        """Rename one process while preserving its order/code and all photo ownership."""
+        old_name = str(process_name or "").strip()
+        next_name = str(new_name or "").strip()
+        if not old_name:
+            raise ValueError("原工序名称不能为空")
+        if not next_name:
+            raise ValueError("新工序名称不能为空")
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            processes = [str(item or "").strip() for item in (data.get("processes") or []) if str(item or "").strip()]
+            if old_name not in processes:
+                raise ValueError("工序不存在")
+            if next_name != old_name and next_name in processes:
+                raise ValueError("同名单元工序已存在")
+            if next_name == old_name:
+                return data
+            index = processes.index(old_name)
+            processes[index] = next_name
+            data["processes"] = processes
+            for photo in data.get("photos", []):
+                if str(photo.get("process_name") or "").strip() != old_name:
+                    continue
+                photo["process_name"] = next_name
+                # 工序顺序不变，GY 编码因此保持不变。
+                photo["process_code"] = self._process_code(data, next_name)
+            self._renumber_after_change(data["project_code"], data)
+            return data
+
+    def move_photo(self, source_project_code, photo_id, target_project_code, category="", target_process_name=""):
+        """Move one photo to another unit without changing its permanent photo_uuid.
+
+        The source and destination unit locks are acquired in deterministic order.
+        The source file is staged before any renumbering so the source namespace is
+        free for compaction. If a later step fails, the method performs best-effort
+        rollback from the staged original instead of deleting the only full image.
+        """
+        source_code = self._safe_code(source_project_code)
+        target_code = self._safe_code(target_project_code)
+        target_process_name = str(target_process_name or "").strip()
+        if not source_code or not target_code:
+            raise ValueError("源单元和目标单元不能为空")
+        if source_code == target_code:
+            # 同一单元只改变工序归属，沿用既有安全重编号逻辑。
+            return self.update_photo(source_code, photo_id, process_name=target_process_name)
+
+        first_code, second_code = sorted((source_code, target_code))
+        first_lock = self._project_write_lock(first_code)
+        second_lock = self._project_write_lock(second_code)
+        with first_lock:
+            with second_lock:
+                source = self.get_project(source_code)
+                target = self.get_project(target_code)
+                target_processes = [str(item or "").strip() for item in (target.get("processes") or [])]
+                if target_process_name and target_process_name not in target_processes:
+                    raise ValueError("目标工序不存在，请重新选择")
+
+                requested_category = self._normalize_category(category) if str(category or "").strip() else ""
+                source_photos = source.get("photos", [])
+                source_index = -1
+                source_photo = None
+                for index, item in enumerate(source_photos):
+                    if str(item.get("id") or "") != str(photo_id or ""):
+                        continue
+                    if requested_category and self._normalize_category(item.get("category")) != requested_category:
+                        continue
+                    source_index = index
+                    source_photo = item
+                    break
+                if source_photo is None:
+                    raise ValueError("照片不存在")
+
+                photo_uuid = str(source_photo.get("photo_uuid") or "").strip() or uuid.uuid4().hex
+                source_photo["photo_uuid"] = photo_uuid
+                source_filename = str(source_photo.get("filename") or "").strip()
+                source_path = self._photos_dir(source_code) / source_filename
+                if not source_filename or not source_path.is_file():
+                    raise ValueError("照片文件不存在，无法移动")
+
+                stage_root = self.root / "_move_staging" / uuid.uuid4().hex
+                stage_root.mkdir(parents=True, exist_ok=False)
+                stage_photo = stage_root / ("photo" + (source_path.suffix or ".jpg"))
+                stage_backup = None
+                stage_thumb = None
+                moved = None
+                source_removed = False
+                target_added = False
+                dest_temp_path = None
+                dest_backup_temp_path = None
+                original_source = dict(source_photo)
+                rollback_errors = []
+
+                try:
+                    # Stage the only source copy first. This frees the old filename so
+                    # source renumbering can close gaps without colliding with it.
+                    shutil.move(str(source_path), str(stage_photo))
+                    source_thumb = self._photos_dir(source_code) / self._thumb_filename(source_filename)
+                    if source_thumb.is_file():
+                        stage_thumb = stage_root / "thumb.jpg"
+                        shutil.move(str(source_thumb), str(stage_thumb))
+                    backup_name = str(source_photo.get("original_backup") or "").strip()
+                    if backup_name:
+                        backup_path = self._originals_dir(source_code) / backup_name
+                        if backup_path.is_file():
+                            stage_backup = stage_root / ("original" + (backup_path.suffix or source_path.suffix or ".jpg"))
+                            shutil.move(str(backup_path), str(stage_backup))
+
+                    source_photos.pop(source_index)
+                    source_removed = True
+                    self._renumber_after_change(source_code, source)
+
+                    target_photos_dir = self._photos_dir(target_code)
+                    target_photos_dir.mkdir(parents=True, exist_ok=True)
+                    temp_name = f".move-{uuid.uuid4().hex}{stage_photo.suffix or '.jpg'}"
+                    dest_temp_path = target_photos_dir / temp_name
+                    shutil.copy2(stage_photo, dest_temp_path)
+
+                    moved = dict(original_source)
+                    moved["filename"] = temp_name
+                    moved["photo_uuid"] = photo_uuid
+                    moved["process_name"] = target_process_name
+                    moved["process_code"] = self._process_code(target, target_process_name) if target_process_name else ""
+                    if stage_backup and stage_backup.is_file():
+                        self._originals_dir(target_code).mkdir(parents=True, exist_ok=True)
+                        backup_temp_name = f".move-{uuid.uuid4().hex}{stage_backup.suffix or '.jpg'}"
+                        dest_backup_temp_path = self._originals_dir(target_code) / backup_temp_name
+                        shutil.copy2(stage_backup, dest_backup_temp_path)
+                        moved["original_backup"] = backup_temp_name
+                    else:
+                        moved["original_backup"] = ""
+
+                    target.setdefault("photos", []).append(moved)
+                    target_added = True
+                    self._renumber_after_change(target_code, target)
+                    return self._photo_item(target, moved)
+                except Exception as exc:
+                    # If the target already owns the staged record, first move that
+                    # file out of its numbering namespace, then compact the target.
+                    if target_added and moved is not None:
+                        try:
+                            moved_path = self._photos_dir(target_code) / str(moved.get("filename") or "")
+                            if moved_path.is_file():
+                                failed_target = stage_root / ("failed-target" + (moved_path.suffix or ".jpg"))
+                                shutil.move(str(moved_path), str(failed_target))
+                            moved_thumb = self._photos_dir(target_code) / self._thumb_filename(str(moved.get("filename") or ""))
+                            moved_thumb.unlink(missing_ok=True)
+                            moved_backup_name = str(moved.get("original_backup") or "").strip()
+                            if moved_backup_name:
+                                moved_backup = self._originals_dir(target_code) / moved_backup_name
+                                if moved_backup.is_file():
+                                    failed_backup = stage_root / ("failed-target-original" + (moved_backup.suffix or ".jpg"))
+                                    shutil.move(str(moved_backup), str(failed_backup))
+                            target["photos"] = [
+                                item for item in target.get("photos", [])
+                                if str(item.get("photo_uuid") or "") != photo_uuid
+                            ]
+                            self._renumber_after_change(target_code, target)
+                        except Exception as rollback_exc:
+                            rollback_errors.append(f"目标单元回滚失败：{rollback_exc}")
+                    else:
+                        try:
+                            if dest_temp_path:
+                                dest_temp_path.unlink(missing_ok=True)
+                            if dest_backup_temp_path:
+                                dest_backup_temp_path.unlink(missing_ok=True)
+                        except Exception as rollback_exc:
+                            rollback_errors.append(f"目标临时文件清理失败：{rollback_exc}")
+
+                    if source_removed:
+                        try:
+                            rollback_name = f".rollback-{uuid.uuid4().hex}{stage_photo.suffix or '.jpg'}"
+                            rollback_path = self._photos_dir(source_code) / rollback_name
+                            shutil.copy2(stage_photo, rollback_path)
+                            restored = dict(original_source)
+                            restored["filename"] = rollback_name
+                            restored["photo_uuid"] = photo_uuid
+                            if stage_backup and stage_backup.is_file():
+                                rollback_backup_name = f".rollback-{uuid.uuid4().hex}{stage_backup.suffix or '.jpg'}"
+                                rollback_backup = self._originals_dir(source_code) / rollback_backup_name
+                                shutil.copy2(stage_backup, rollback_backup)
+                                restored["original_backup"] = rollback_backup_name
+                            else:
+                                restored["original_backup"] = ""
+                            current = [
+                                item for item in source.get("photos", [])
+                                if str(item.get("photo_uuid") or "") != photo_uuid
+                            ]
+                            current.insert(min(source_index, len(current)), restored)
+                            source["photos"] = current
+                            self._renumber_after_change(source_code, source)
+                        except Exception as rollback_exc:
+                            rollback_errors.append(f"源单元回滚失败：{rollback_exc}")
+
+                    message = f"照片移动失败：{exc}"
+                    if rollback_errors:
+                        message += "；" + "；".join(rollback_errors)
+                    raise RuntimeError(message) from exc
+                finally:
+                    shutil.rmtree(stage_root, ignore_errors=True)
 
     def reorder_photo(self, project_code, photo_id, direction="up", category=""):
         with self._project_write_lock(project_code):
@@ -7332,7 +7537,7 @@ def api_upload_auto_match():
 @app.route("/api/photos/<path:project_code>")
 def api_photos(project_code):
     try:
-        # 每次进入单元时安全修复一次历史“单元照片误用工序号”的数据。
+        # 每次进入单元时安全迁移历史工序归属和旧版带单元前缀编号。
         # 只调整编号和文件名，不会删除、压缩或改动照片内容与说明。
         manager.repair_legacy_process_photo_scopes(project_code)
         project = manager.get_project(project_code)
@@ -7365,6 +7570,29 @@ def api_add_process(project_code):
         return json_error(str(exc), 500)
 
 
+
+@app.route("/api/photos/<path:project_code>/processes/<path:process_name>", methods=["PATCH"])
+def api_rename_process(project_code, process_name):
+    """重命名工序；保留原顺序/GY 编码，并同步该工序下全部照片。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    new_name = str(data.get("name") or "").strip()
+    try:
+        project = manager.rename_process(project_code, process_name, new_name)
+        sync_cloud_preview_async()
+        return jsonify({
+            "ok": True,
+            "processes": project.get("processes") or [],
+            "photos": manager.get_photos(project_code),
+        })
+    except ValueError as exc:
+        return json_error(str(exc))
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
 @app.route("/api/photos/<path:project_code>/processes/<path:process_name>", methods=["DELETE"])
 def api_delete_process(project_code, process_name):
     """删除单元下的工序（仅允许删除没有照片的空工序）。"""
@@ -7385,6 +7613,38 @@ def api_delete_process(project_code, process_name):
             data["processes"] = processes
             manager._renumber_after_change(project_code, data)
         return jsonify({"ok": True, "processes": data["processes"], "photos": manager.get_photos(project_code)})
+    except Exception as exc:
+        return json_error(str(exc), 500)
+
+
+
+@app.route("/api/photos/<path:project_code>/<photo_id>/move", methods=["POST"])
+def api_move_photo(project_code, photo_id):
+    """跨单元移动照片；保留永久 UUID、题名、日期、原图备份和拍摄信息。"""
+    user, error = login_required_json()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    target_project_code = str(data.get("target_project_code") or "").strip()
+    if not target_project_code:
+        return json_error("请选择目标单元")
+    try:
+        photo = manager.move_photo(
+            project_code,
+            photo_id,
+            target_project_code,
+            category=str(data.get("category") or ""),
+            target_process_name=str(data.get("target_process_name") or ""),
+        )
+        sync_cloud_preview_async()
+        return jsonify({
+            "ok": True,
+            "photo": photo,
+            "source_project_code": project_code,
+            "target_project_code": target_project_code,
+        })
+    except ValueError as exc:
+        return json_error(str(exc))
     except Exception as exc:
         return json_error(str(exc), 500)
 

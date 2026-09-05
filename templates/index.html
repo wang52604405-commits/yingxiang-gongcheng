@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260902-2.86.css">
+  <link rel="stylesheet" href="/assets/app-A20260905-2.87.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -297,6 +297,14 @@
           </div>
           <section class="panel part-scroll-panel">
             <div class="panel-head"><h3>单元工程</h3><span id="partCount" class="pill">0 条</span></div>
+            <div class="unit-filter-toolbar" aria-label="单元工程筛选">
+              <label class="unit-filter-search">搜索单元<input id="unitListSearchInput" type="search" placeholder="输入单元编号或名称"></label>
+              <label>上传状态<select id="unitUploadFilter">
+                <option value="all">全部单元</option>
+                <option value="uploaded">已上传单元</option>
+                <option value="empty">未上传单元</option>
+              </select></label>
+            </div>
             <div id="unitRows" class="unit-card-grid"></div>
           </section>
         </section>
@@ -617,7 +625,7 @@
             <div class="upload-choice-head">
               <div>
                 <h3 id="photoEditTitle">修改照片信息</h3>
-                <p id="photoEditSub">修改题名和日期，照片文件和编号不变。</p>
+                <p id="photoEditSub">修改题名、日期和工序，也可安全移动到其它单元。</p>
               </div>
               <button class="ghost" type="button" id="closePhotoEditBtn">关闭</button>
             </div>
@@ -632,6 +640,7 @@
                 <button class="secondary" type="button" id="viewOriginalPhotoBtn">查看原图备份</button>
                 <button class="secondary" type="button" id="restoreOriginalPhotoBtn">恢复原图</button>
                 <button class="secondary" type="button" id="optimizePhotoBtn">重新优化</button>
+                <button class="secondary photo-move-open" type="button" id="movePhotoBtn">移动到其它单元</button>
               </div>
               <div class="photo-edit-actions">
                 <button class="secondary" type="button" id="cancelPhotoEditBtn">取消</button>
@@ -853,6 +862,29 @@
     </section>
   </div>
 
+
+  <div id="photoMoveModal" class="modal-backdrop" aria-hidden="true">
+    <section class="machine-id-modal photo-move-modal" role="dialog" aria-modal="true" aria-labelledby="photoMoveTitle">
+      <div class="upload-choice-head">
+        <div>
+          <h3 id="photoMoveTitle">移动照片到其它单元</h3>
+          <p>永久照片 UUID、题名、日期和原图备份都会保留；目标单元会按自身规则重新编号。</p>
+        </div>
+        <button class="ghost" type="button" id="closePhotoMoveBtn">关闭</button>
+      </div>
+      <div class="photo-move-form">
+        <label>搜索目标单元<input id="photoMoveSearchInput" type="search" placeholder="输入单元编号或名称"></label>
+        <label>目标单元<select id="photoMoveTargetSelect" size="7"></select></label>
+        <label>目标工序<select id="photoMoveProcessSelect"><option value="">单元照片</option></select></label>
+        <div id="photoMoveSummary" class="photo-move-summary">请选择目标单元。</div>
+        <div class="photo-edit-actions">
+          <button class="secondary" type="button" id="cancelPhotoMoveBtn">取消</button>
+          <button type="button" id="confirmPhotoMoveBtn">确认移动</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
   <div id="addProcessModal" class="modal-backdrop" aria-hidden="true">
     <section class="machine-id-modal add-process-modal" role="dialog" aria-modal="true" aria-labelledby="addProcessTitle">
       <div class="upload-choice-head">
@@ -999,6 +1031,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260902-2.86.js"></script>
+  <script defer src="/assets/app-A20260905-2.87.js"></script>
 </body>
 </html>

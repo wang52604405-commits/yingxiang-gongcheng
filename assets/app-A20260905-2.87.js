@@ -22,6 +22,9 @@ const $ = (selector) => document.querySelector(selector);
       overviewScope: "construction",
       treeLevelFilter: "all",
       unitPage: 1,
+      unitListQuery: "",
+      unitUploadFilter: "all",
+      moveTargets: [],
       pageSize: 20,
       photoPage: { construction: 1, supervision: 1 },
       photoPageSize: 18,
@@ -2965,7 +2968,19 @@ const $ = (selector) => document.querySelector(selector);
       $("#partSub").textContent = `${parentName}${part.code ? " / " + part.code : ""} · 四列显示，点击单元进入详情`;
       $("#partCount").textContent = `${Number(part.unitCount || part.projects.length)} 条`;
 
-      const rows = part.projects;
+      const unitQuery = String(state.unitListQuery || "").trim().toLowerCase();
+      const uploadFilter = state.unitUploadFilter || "all";
+      const rows = part.projects.filter((project) => {
+        const total = Number(project.photo_count || 0);
+        if (uploadFilter === "uploaded" && total <= 0) return false;
+        if (uploadFilter === "empty" && total > 0) return false;
+        if (!unitQuery) return true;
+        const haystack = `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)}`.toLowerCase();
+        return haystack.includes(unitQuery);
+      });
+      $("#partCount").textContent = rows.length === part.projects.length
+        ? `${rows.length} 条`
+        : `${rows.length} / ${part.projects.length} 条`;
       const unitRows = $("#unitRows");
       unitRows.className = "unit-card-grid";
       $("#partSub").textContent = `${parentName}${part.code ? " / " + part.code : ""} · 统一卡片显示，点击单元进入详情`;
@@ -2984,12 +2999,12 @@ const $ = (selector) => document.querySelector(selector);
           <span class="unit-card-main">
             <strong>${escapeHtml(projectName(project))}</strong>
             <span class="unit-card-photo-counts" aria-label="施工和监理照片数量">
-              <span><small>施工</small><b>${Number(project.construction_photo_count || 0)}</b></span>
-              <span><small>监理</small><b>${Number(project.supervision_photo_count || 0)}</b></span>
+              <span><small>施工</small><b class="${Number(project.construction_photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.construction_photo_count || 0)}</b></span>
+              <span><small>监理</small><b class="${Number(project.supervision_photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.supervision_photo_count || 0)}</b></span>
             </span>
           </span>
           <span class="unit-card-meta">
-            <span>${Number(project.photo_count || 0)} 张照片</span>
+            <span class="unit-photo-total ${Number(project.photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.photo_count || 0)} 张照片</span>
             <span>${escapeHtml(project.latest_upload || "-")}</span>
           </span>
         </button>
@@ -3052,6 +3067,41 @@ const $ = (selector) => document.querySelector(selector);
     function closeAddProcessModal() {
       $("#addProcessModal").classList.remove("open");
       $("#addProcessModal").setAttribute("aria-hidden", "true");
+    }
+
+
+    async function renameProcess(processName) {
+      if (!state.selectedCode || !processName) return;
+      if (!(await ensureAuthenticated("重命名工序"))) return;
+      const value = window.prompt("请输入新的工序名称", processName);
+      if (value === null) return;
+      const nextName = value.trim();
+      if (!nextName) return showNotice("工序名称不能为空。", true);
+      if (nextName === processName) return;
+      const currentCode = state.selectedCode;
+      await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nextName })
+      });
+      if (state.activeProcessName === processName) state.activeProcessName = nextName;
+      await loadProject(currentCode, "detail");
+      showNotice(`工序已重命名为“${nextName}”。`);
+    }
+
+    async function deleteProcess(processName) {
+      if (!state.selectedCode || !processName) return;
+      if (!(await ensureAuthenticated("删除工序"))) return;
+      const count = photosForSection(state.activePhotoCategory, processName).length;
+      const hint = count > 0
+        ? `“${processName}”下当前可见有 ${count} 张照片。删除工序只允许空工序，请先把照片移动到其它工序或单元。`
+        : `确定删除空工序“${processName}”吗？`;
+      if (!window.confirm(hint)) return;
+      const currentCode = state.selectedCode;
+      await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, { method: "DELETE" });
+      if (state.activeProcessName === processName) state.activeProcessName = "";
+      await loadProject(currentCode, "detail");
+      showNotice(`工序“${processName}”已删除。`);
     }
 
     async function addProcess(event) {
@@ -3260,10 +3310,25 @@ const $ = (selector) => document.querySelector(selector);
       const processTabs = $("#unitProcessTabs");
       processTabs.innerHTML = [{ name: "", label: "单元照片" }, ...processList.map((name) => ({ name, label: name }))].map((item) => {
         const count = photosForSection(category, item.name).length;
-        return `<button type="button" class="${item.name === processName ? "active" : ""}" data-gallery-process="${escapeHtml(item.name)}" title="${escapeHtml(item.label)}">${escapeHtml(item.label)} <span>${count}</span></button>`;
+        const manage = item.name
+          ? `<span class="process-manage-actions"><button type="button" class="process-manage-btn" data-process-rename="${escapeHtml(item.name)}" title="重命名工序">改</button><button type="button" class="process-manage-btn danger" data-process-delete="${escapeHtml(item.name)}" title="删除空工序">删</button></span>`
+          : "";
+        return `<span class="process-tab-item"><button type="button" class="${item.name === processName ? "active" : ""}" data-gallery-process="${escapeHtml(item.name)}" title="${escapeHtml(item.label)}">${escapeHtml(item.label)} <span>${count}</span></button>${manage}</span>`;
       }).join("");
       processTabs.querySelectorAll("[data-gallery-process]").forEach((button) => {
         button.onclick = () => selectGalleryScope(category, button.dataset.galleryProcess || "");
+      });
+      processTabs.querySelectorAll("[data-process-rename]").forEach((button) => {
+        button.onclick = (event) => {
+          event.stopPropagation();
+          renameProcess(button.dataset.processRename || "").catch((error) => showNotice(error.message, true));
+        };
+      });
+      processTabs.querySelectorAll("[data-process-delete]").forEach((button) => {
+        button.onclick = (event) => {
+          event.stopPropagation();
+          deleteProcess(button.dataset.processDelete || "").catch((error) => showNotice(error.message, true));
+        };
       });
 
       host.className = "photo-side photo-sections is-single-gallery";
@@ -3801,6 +3866,97 @@ const $ = (selector) => document.querySelector(selector);
       renderPhotos();
       closePhotoEdit();
       showNotice(action === "restore-original" ? "已恢复原图。" : "照片已重新优化。");
+    }
+
+
+    function closePhotoMoveModal() {
+      const modal = $("#photoMoveModal");
+      if (!modal) return;
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    function filteredMoveTargets() {
+      const query = String($("#photoMoveSearchInput")?.value || "").trim().toLowerCase();
+      return (state.moveTargets || []).filter((project) => {
+        if (!query) return true;
+        return `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)}`.toLowerCase().includes(query);
+      });
+    }
+
+    async function refreshPhotoMoveProcesses() {
+      const targetCode = $("#photoMoveTargetSelect")?.value || "";
+      const processSelect = $("#photoMoveProcessSelect");
+      const summary = $("#photoMoveSummary");
+      if (!targetCode) {
+        if (processSelect) processSelect.innerHTML = '<option value="">单元照片</option>';
+        if (summary) summary.textContent = "请选择目标单元。";
+        return;
+      }
+      const data = await apiJson(`/api/photos/${encodeURIComponent(targetCode)}`);
+      const project = data.project || {};
+      const processes = Array.isArray(project.processes) ? project.processes : [];
+      if (processSelect) {
+        processSelect.innerHTML = ['<option value="">单元照片</option>', ...processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)].join("");
+      }
+      if (summary) {
+        summary.textContent = `从 ${projectDisplayCode(state.selectedProject || {}) || state.selectedCode} 移动到 ${projectDisplayCode(project) || targetCode} · ${projectName(project) || "未命名单元"}`;
+      }
+    }
+
+    async function renderPhotoMoveTargets() {
+      const select = $("#photoMoveTargetSelect");
+      if (!select) return;
+      const previous = select.value;
+      const targets = filteredMoveTargets();
+      select.innerHTML = targets.length
+        ? targets.map((project) => `<option value="${escapeHtml(projectCode(project))}">${escapeHtml(projectDisplayCode(project))} · ${escapeHtml(projectName(project))}</option>`).join("")
+        : '<option value="">未找到匹配单元</option>';
+      if (previous && targets.some((project) => projectCode(project) === previous)) select.value = previous;
+      await refreshPhotoMoveProcesses();
+    }
+
+    async function openPhotoMoveModal() {
+      const photo = currentEditingPhoto();
+      if (!photo || !state.selectedCode) return showNotice("请先打开要移动的照片。", true);
+      if (!(await ensureAuthenticated("移动照片"))) return;
+      const data = await apiJson("/api/projects?slim=1");
+      state.moveTargets = (data.projects || []).filter((project) => projectCode(project) && projectCode(project) !== state.selectedCode);
+      $("#photoMoveSearchInput").value = "";
+      await renderPhotoMoveTargets();
+      $("#photoMoveModal").classList.add("open");
+      $("#photoMoveModal").setAttribute("aria-hidden", "false");
+      setTimeout(() => $("#photoMoveSearchInput")?.focus(), 0);
+    }
+
+    async function confirmPhotoMove() {
+      const photo = currentEditingPhoto();
+      if (!photo || !state.selectedCode) return;
+      if (!(await ensureAuthenticated("移动照片"))) return;
+      const sourceCode = state.selectedCode;
+      const targetCode = $("#photoMoveTargetSelect")?.value || "";
+      const targetProcess = $("#photoMoveProcessSelect")?.value || "";
+      if (!targetCode) return showNotice("请选择目标单元。", true);
+      const targetProject = (state.moveTargets || []).find((project) => projectCode(project) === targetCode);
+      const targetLabel = `${projectDisplayCode(targetProject || {}) || targetCode} · ${projectName(targetProject || {}) || "未命名单元"}`;
+      if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : "\n归属：单元照片"}？`)) return;
+      await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/${encodeURIComponent(photo.id)}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: normalizePhotoCategory(photo.category),
+          target_project_code: targetCode,
+          target_process_name: targetProcess
+        })
+      });
+      closePhotoMoveModal();
+      closePhotoEdit();
+      await loadProject(sourceCode, "detail");
+      if (state.selectedPart) {
+        state.selectedPart.loaded = false;
+        await loadPartPage(state.selectedPart, 1);
+      }
+      showNotice(`照片已移动到 ${targetLabel}${targetProcess ? ` / ${targetProcess}` : ""}。`);
     }
 
     async function savePhotoEdit(event) {
@@ -4840,6 +4996,7 @@ const $ = (selector) => document.querySelector(selector);
       if (event.key !== "Escape") return;
       const layers = [
         ["#photoPreviewModal", closePhotoPreview],
+        ["#photoMoveModal", closePhotoMoveModal],
         ["#photoEditModal", closePhotoEdit],
         ["#addProcessModal", closeAddProcessModal],
         ["#uploadChoiceModal", closeUploadChoiceModal],
@@ -4986,6 +5143,21 @@ const $ = (selector) => document.querySelector(selector);
     document.querySelectorAll("[data-unit-upload]").forEach((button) => {
       button.addEventListener("click", () => openUnitUpload(button.dataset.unitUpload));
     });
+    $("#unitListSearchInput")?.addEventListener("input", (event) => {
+      state.unitListQuery = event.target.value || "";
+      renderPart();
+    });
+    $("#unitUploadFilter")?.addEventListener("change", (event) => {
+      state.unitUploadFilter = event.target.value || "all";
+      renderPart();
+    });
+    $("#movePhotoBtn")?.addEventListener("click", () => openPhotoMoveModal().catch((error) => showNotice(error.message, true)));
+    $("#closePhotoMoveBtn")?.addEventListener("click", closePhotoMoveModal);
+    $("#cancelPhotoMoveBtn")?.addEventListener("click", closePhotoMoveModal);
+    $("#photoMoveSearchInput")?.addEventListener("input", () => renderPhotoMoveTargets().catch((error) => showNotice(error.message, true)));
+    $("#photoMoveTargetSelect")?.addEventListener("change", () => refreshPhotoMoveProcesses().catch((error) => showNotice(error.message, true)));
+    $("#confirmPhotoMoveBtn")?.addEventListener("click", () => confirmPhotoMove().catch((error) => showNotice(error.message, true)));
+    $("#photoMoveModal")?.addEventListener("click", (event) => { if (event.target.id === "photoMoveModal") closePhotoMoveModal(); });
     $("#backOverviewBtn").addEventListener("click", openOverview);
     $("#backPartBtn").addEventListener("click", () => {
       if (state.selectedPart) {
