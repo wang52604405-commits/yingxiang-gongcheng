@@ -717,7 +717,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertLess(upload_pos, settings_pos, "上传按钮必须直接出现在顶部主菜单")
         self.assertIn('id="engineeringProjectSearch"', html)
         self.assertIn('list="engineeringProjectOptions"', html)
-        self.assertIn('id="gateRegisterBtn" href="/license?register=1"', html)
+        self.assertIn('id="gateRegisterBtn" href="https://shuiliyingxiang.cn/member#register"', html)
         for tab in ("info", "division", "members", "upload", "print", "account", "device"):
             self.assertIn(f'data-project-settings-tab="{tab}"', html)
         self.assertIn('id="unitCategoryConstructionBtn"', html)

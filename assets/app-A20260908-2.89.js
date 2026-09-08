@@ -4764,7 +4764,7 @@ const $ = (selector) => document.querySelector(selector);
     $("#gateMachineIdBtn")?.addEventListener("click", () => openMachineIdModal().catch((error) => showNotice(error.message, true)));
     $("#closeMachineIdBtn").addEventListener("click", closeMachineIdModal);
     $("#copyMachineIdBtn").addEventListener("click", () => copyMachineId().catch((error) => showNotice(error.message, true)));
-    $("#openLicensePageBtn").addEventListener("click", () => window.open("/license", "_blank"));
+    $("#openLicensePageBtn").addEventListener("click", () => window.open("https://shuiliyingxiang.cn/member", "_blank", "noopener"));
     $("#machineIdModal").addEventListener("click", (event) => {
       if (event.target.id === "machineIdModal") closeMachineIdModal();
     });
@@ -4823,43 +4823,8 @@ const $ = (selector) => document.querySelector(selector);
         loadSharePoints();
       } catch (e) { showNotice(e.message || "登录失败", true); }
     });
-    $("#cloudRegBtn").addEventListener("click", async () => {
-      const user = $("#cloudUser").value.trim();
-      const pass = $("#cloudPass").value;
-      const invite = $("#cloudInvite").value.trim();
-      const email = $("#cloudEmail").value.trim();
-      const deletePass = $("#cloudDeletePass").value;
-      const deletePassConfirm = $("#cloudDeletePassConfirm").value;
-      if (!user || !pass) { showNotice("请输入账号和登录密码", true); return; }
-      if (pass.length < 8 || !/[A-Za-z]/.test(pass) || !/\d/.test(pass)) {
-        showNotice("登录密码至少 8 位，并同时包含字母和数字。", true);
-        return;
-      }
-      if (deletePass.length < 6) { showNotice("请设置至少 6 位的工程删除密码。", true); return; }
-      if (deletePass !== deletePassConfirm) { showNotice("两次输入的工程删除密码不一致。", true); return; }
-      try {
-        const data = await apiJson("/api/cloud/register", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: user,
-            password: pass,
-            email,
-            invite_code: invite,
-            delete_password: deletePass,
-            delete_password_confirm: deletePassConfirm
-          })
-        });
-        if (!data.ok) { showNotice(data.error || "注册失败", true); return; }
-        showNotice("注册成功。工程删除密码已安全保存，请牢记；现在可以登录。 ");
-        $("#cloudInvite").value = "";
-        $("#cloudEmail").value = "";
-        $("#cloudDeletePass").value = "";
-        $("#cloudDeletePassConfirm").value = "";
-        const projectData = await apiJson("/api/project-info");
-        state.projectInfo = projectData.project_info || state.projectInfo;
-        state.engineeringProjects = projectData.engineering_projects || state.engineeringProjects;
-        state.activeEngineeringProjectId = projectData.active_engineering_project_id || state.activeEngineeringProjectId;
-      } catch (e) { showNotice(e.message || "注册失败", true); }
+    $("#cloudRegBtn").addEventListener("click", () => {
+      window.open("https://shuiliyingxiang.cn/member#register", "_blank", "noopener");
     });
     $("#cloudLogoutBtn").addEventListener("click", async () => {
       try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (e) {}
