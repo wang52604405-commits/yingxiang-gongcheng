@@ -35,7 +35,7 @@ import time as _time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
+from flask import Flask, g, jsonify, render_template, request, send_file, send_from_directory
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -319,6 +319,12 @@ def _token_for(
     显式标记 mobile，不能访问电脑原图接口。
     """
     payload = {"uid": user_id, "scope": str(scope or "desktop")}
+    conn = db.connect()
+    try:
+        access = conn.execute("SELECT version FROM admin_account_access WHERE account_id=?", (user_id,)).fetchone()
+        payload["access_version"] = access["version"] if access else 0
+    finally:
+        conn.close()
     normalized_machine_id = str(machine_id or "").strip().upper()
     if normalized_machine_id:
         payload["machine_id"] = normalized_machine_id
@@ -345,6 +351,9 @@ def _user_from_token(token: str):
         if not row:
             return None
         user = dict(row)
+        access = conn.execute("SELECT version FROM admin_account_access WHERE account_id=?", (user["id"],)).fetchone()
+        if user["status"] != "active" or data.get("access_version", 0) != (access["version"] if access else 0):
+            return None
         token_scope = str(data.get("scope") or "legacy")
         if token_scope == "mobile":
             binding_id = int(data.get("binding_id") or 0)
@@ -375,6 +384,7 @@ def _require_user():
     user = _user_from_token(token)
     if not user or user["status"] != "active":
         return None
+    g.activity_user = user
     return user
 
 
@@ -647,6 +657,8 @@ def create_app():
     app.json.ensure_ascii = False
 
     db.init_db()
+    from .admin_ops import register_admin_ops
+    register_admin_ops(app, _require_admin, _user_from_token)
     if config.ADMIN_USERNAME and config.ADMIN_PASSWORD:
         _ensure_admin(config.ADMIN_USERNAME, config.ADMIN_PASSWORD)
 
@@ -1122,6 +1134,9 @@ def create_app():
             result = []
             for row in rows:
                 account = dict(row)
+                account.pop("password_hash", None)
+                audit = conn.execute("SELECT status,note,created_at FROM admin_account_audit WHERE account_id=? ORDER BY id DESC LIMIT 1", (account["id"],)).fetchone()
+                account["last_status_change"] = dict(audit) if audit else None
                 # 邀请关系：谁通过该账号邀请码注册的（被邀请人列表）
                 invitees = conn.execute(
                     "SELECT a.username, i.status, i.qualified_at FROM invites i JOIN accounts a ON a.id = i.invitee_account_id "
