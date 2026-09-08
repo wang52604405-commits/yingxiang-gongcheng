@@ -8,6 +8,29 @@ import sqlite3
 from . import config
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS admin_account_access (
+    account_id INTEGER PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS admin_account_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    actor_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admin_usage_daily (
+    day TEXT NOT NULL,
+    account_id INTEGER NOT NULL,
+    channel TEXT NOT NULL,
+    first_seen INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    PRIMARY KEY(day, account_id, channel)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_usage_last ON admin_usage_daily(last_seen);
+CREATE TABLE IF NOT EXISTS admin_metrics_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT OR IGNORE INTO admin_metrics_meta VALUES ('started_at', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
 CREATE TABLE IF NOT EXISTS accounts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT UNIQUE NOT NULL,
