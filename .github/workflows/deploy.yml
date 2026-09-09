@@ -51,9 +51,9 @@ jobs:
         shell: powershell
         run: |
           python -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "完整回归测试失败（退出码 $LASTEXITCODE）" }
+          if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
           python verify_release.py
-          if ($LASTEXITCODE -ne 0) { throw "发布校验失败（退出码 $LASTEXITCODE）" }
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
       - name: 构建并部署 5088
         shell: powershell
@@ -123,9 +123,9 @@ jobs:
         shell: powershell
         run: |
           python -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "完整回归测试失败（退出码 $LASTEXITCODE）" }
+          if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
           python verify_release.py
-          if ($LASTEXITCODE -ne 0) { throw "发布校验失败（退出码 $LASTEXITCODE）" }
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
       - name: 判断是否需要部署服务器
         id: check
