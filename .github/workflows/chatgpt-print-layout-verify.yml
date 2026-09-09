@@ -6,6 +6,7 @@ on:
       - chatgpt/print-grid-autofill-20260909
     paths:
       - tools/chatgpt_print_patch_20260909.py
+      - tools/chatgpt_print_patch_fix_runner.py
       - .github/workflows/chatgpt-print-layout-verify.yml
 
 permissions:
@@ -28,7 +29,7 @@ jobs:
 
       - name: 应用受控打印补丁
         shell: powershell
-        run: python tools/chatgpt_print_patch_20260909.py
+        run: python tools/chatgpt_print_patch_fix_runner.py
 
       - name: 打印专项回归
         shell: powershell
@@ -47,7 +48,7 @@ jobs:
         run: |
           git config user.name "wang52604405-commits"
           git config user.email "wang52604405@gmail.com"
-          git rm -f --ignore-unmatch tools/chatgpt_print_patch_20260909.py .github/workflows/chatgpt-print-layout-verify.yml
+          git rm -f --ignore-unmatch tools/chatgpt_print_patch_20260909.py tools/chatgpt_print_patch_fix_runner.py .github/workflows/chatgpt-print-layout-verify.yml
           git add -A
           if (git diff --cached --quiet) {
             Write-Host "NO_CHANGES_TO_COMMIT"
