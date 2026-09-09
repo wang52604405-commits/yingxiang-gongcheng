@@ -52,7 +52,7 @@ function Get-SafeProcessCommandLine($process) {
 
 function Test-IsVerifiedLegacySourceAppProcess($process, $pythonExecutable, $expectedVersion, $listenPort) {
     try {
-        if (-not $process -or -not $pythonExecutable -or -not $expectedVersion) { return $false }
+        if (-not $process -or -not $pythonExecutable) { return $false }
         $executable = [string]$process.ExecutablePath
         if (-not $executable) { return $false }
         $fullExecutable = [IO.Path]::GetFullPath($executable)
@@ -62,12 +62,30 @@ function Test-IsVerifiedLegacySourceAppProcess($process, $pythonExecutable, $exp
         }
         $commandLine = [string]$process.CommandLine
         if ($commandLine -notmatch '(?i)(?:^|[\s"\\/])run\.py(?:"|\s|$)') { return $false }
-        $bootstrap = Invoke-RestMethod -Uri "http://127.0.0.1:$listenPort/api/bootstrap" -Method Get -TimeoutSec 3
+
+        # 旧源码实例可能早于 app_version 字段，因此不能只靠版本号识别。
+        # 必须同时命中本项目独有的 bootstrap 结构签名；若存在 app_version，则记录版本供审计。
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$listenPort/api/bootstrap" -UseBasicParsing -TimeoutSec 5
+        if (-not $response -or $response.StatusCode -ne 200) { return $false }
+        $bootstrap = $response.Content | ConvertFrom-Json
         if (-not $bootstrap -or $bootstrap.ok -ne $true) { return $false }
-        if ([string]$bootstrap.app_version -ne [string]$expectedVersion) { return $false }
         $propertyNames = @($bootstrap.PSObject.Properties.Name)
-        return (($propertyNames -contains "revision") -and ($propertyNames -contains "optimization_status"))
+        $hasProductSignature = (
+            ($propertyNames -contains "revision") -and
+            ($propertyNames -contains "dashboard") -and
+            ($propertyNames -contains "hierarchy") -and
+            ($propertyNames -contains "optimization_status")
+        )
+        if (-not $hasProductSignature) { return $false }
+        $runningVersion = [string]$bootstrap.app_version
+        if ($runningVersion) {
+            Write-Host "    旧源码实例产品签名已确认，版本=$runningVersion，目标版本=$expectedVersion"
+        } else {
+            Write-Host "    旧源码实例产品签名已确认（旧接口无 app_version）"
+        }
+        return $true
     } catch {
+        Write-Host "    旧源码实例产品签名校验失败：$($_.Exception.Message)"
         return $false
     }
 }
@@ -131,7 +149,7 @@ Write-Host ""
 Write-Host "[5/7] 停止 $port 与桌面启动器"
 
 # 旧版曾通过 autostart_album.ps1 使用“python run.py”占用 5088。
-# 仅当 Python 路径、run.py 命令行、以及本机 /api/bootstrap 的产品版本和结构全部匹配时才关闭；
+# 仅当 Python 路径、run.py 命令行、以及本机 /api/bootstrap 的本产品结构签名全部匹配时才关闭；
 # 任一条件不满足都仍按外部程序处理并 fail-closed。
 $legacyListenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
