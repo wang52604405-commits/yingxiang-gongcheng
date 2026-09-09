@@ -1,0 +1,69 @@
+name: Publish desktop package without local service deployment
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Verified source commit to package
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: desktop-package-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 30
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+      UPDATE_NOTE: 修复历史照片补传、自动归类及待分类影像管理
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
+      - name: Prepare existing release credentials
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw 'Missing release credentials' }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-package-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir 'release_guard_private_key.pem'
+          $sshKey = Join-Path $credentialDir 'server_key'
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content $env:GITHUB_ENV "ALBUM_SIGN_KEY=$signKey"
+          Add-Content $env:GITHUB_ENV "ALBUM_SSH_KEY=$sshKey"
+          Add-Content $env:GITHUB_ENV "ALBUM_PACKAGE_CREDENTIAL_DIR=$credentialDir"
+      - name: Verify source and release contract
+        shell: powershell
+        run: |
+          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
+          if ($LASTEXITCODE -ne 0) { throw 'Asset normalization failed' }
+          python -m unittest discover -s tests
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+          python verify_release.py
+          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
+      - name: Build, sign and publish installer only
+        shell: powershell
+        run: |
+          python publish_update.py
+          if ($LASTEXITCODE -ne 0) { throw 'Package publication failed' }
+      - name: Remove only this run's temporary credentials
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_PACKAGE_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_PACKAGE_CREDENTIAL_DIR)) {
+            $targetPath = [IO.Path]::GetFullPath($env:ALBUM_PACKAGE_CREDENTIAL_DIR)
+            $allowedRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+            if (-not $targetPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Credential path outside runner temp' }
+            Remove-Item -LiteralPath $targetPath -Recurse -Force
+          }
