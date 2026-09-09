@@ -1,3 +1,4 @@
+# Fresh-checkout verification after canonical gzip commit.
 name: ChatGPT Asset EOL Verify
 
 on:
@@ -36,22 +37,19 @@ jobs:
               raw = source.read_bytes()
               if b"\r\n" in raw:
                   raise SystemExit(f"CRLF_PRESENT_IN_CANONICAL_SOURCE {name}")
-              packed.write_bytes(gzip.compress(raw, compresslevel=9, mtime=0))
-              inflated = gzip.decompress(packed.read_bytes())
-              if raw != inflated:
-                  raise SystemExit(f"BYTE_MISMATCH_AFTER_REBUILD {name}")
-              print(f"BYTE_MATCH {name} bytes={len(raw)}")
+              before = packed.read_bytes()
+              rebuilt = gzip.compress(raw, compresslevel=9, mtime=0)
+              if gzip.decompress(before) != raw:
+                  raise SystemExit(f"COMMITTED_GZIP_MISMATCH {name}")
+              if rebuilt != before:
+                  raise SystemExit(f"COMMITTED_GZIP_NOT_DETERMINISTIC {name}")
+              print(f"FRESH_CHECKOUT_BYTE_MATCH {name} bytes={len(raw)}")
           '@ | python -
 
-      - name: Commit canonical gzip payload when needed
+      - name: Confirm no gzip rewrite is needed
         shell: pwsh
         run: |
-          git config user.name "wang52604405-commits"
-          git config user.email "wang52604405@gmail.com"
-          git add assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz
-          if (git diff --cached --quiet) {
-            Write-Host "GZIP_ALREADY_CANONICAL"
-            exit 0
+          if (-not (git diff --quiet -- assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz)) {
+            throw "GZIP_CHANGED_DURING_FRESH_CHECKOUT_VERIFY"
           }
-          git commit -m "fix: rebuild 2.90 compressed assets from canonical bytes"
-          git push origin HEAD:chatgpt/fix-asset-eol-20260909
+          Write-Host "GZIP_ALREADY_CANONICAL"
