@@ -194,7 +194,7 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
       <text class="archive-target">归档项目：{{ activeProject.name }}</text>
       <view class="edit-card card">
         <text class="section-title">固定工程水印</text>
-        <text class="copy-note">左下角 · 浅蓝色块80%透明 · 约占画面1/6</text>
+        <text class="copy-note">左下角 · 浅蓝色块80%透明 · 紧凑水印 · 约占画面1/10</text>
         <text class="field-label">企业标志</text><picker :range="logoNames" :value="logoIndex" :disabled="busy" @change="logoIndex = Number($event.detail.value)"><view class="input date-input">{{ logoNames[logoIndex] }}</view></picker>
         <text class="field-label">项目名称</text><view class="readonly-value">{{ form.project }}</view>
         <view class="field-heading"><text class="field-label">项目划分</text><button class="text-button pressable" :disabled="busy" @tap="chooseHierarchy">选择工程部位</button></view>

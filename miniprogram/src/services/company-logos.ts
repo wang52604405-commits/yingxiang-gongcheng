@@ -1,4 +1,4 @@
-/** Official website assets. Provenance: docs/company-logo-sources.md. */
+/** Official assets with the user-selected CRCC variant. See docs/company-logo-sources.md. */
 export interface CompanyLogo {
   id: string
   name: string
@@ -17,10 +17,10 @@ export const COMPANY_LOGOS: CompanyLogo[] = [
   },
   {
     "id": "crcc",
-    "symbolCrop": { "x": 17, "y": 1, "width": 157, "height": 107 },
+    "symbolCrop": { "x": 33, "y": 19, "width": 97, "height": 67 },
     "name": "中国铁建",
-    "path": "/static/company-logos/crcc.png",
-    "sourceUrl": "https://www.crcc.cn/cms_files/filemanager/49/picture/20263/B69EA7594F818C8BE30542F7E56F999E.png"
+    "path": "/static/company-logos/crcc-user-reference.png",
+    "sourceUrl": "user-provided-reference-20260909"
   },
   {
     "id": "cscec",

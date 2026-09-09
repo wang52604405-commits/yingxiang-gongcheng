@@ -154,10 +154,10 @@ export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
 export function layoutFixedWatermark(width: number, height: number, fields: PhotoWatermarkFields, measureAtSize: (text: string, fontSize: number) => number, logoSize?: { width: number; height: number }) {
   if (width < 160 || height < 120) throw new WatermarkError('照片尺寸过小，无法清楚添加水印', 'IMAGE_TOO_SMALL')
   const margin = Math.max(6, Math.round(Math.min(width, height) * .02))
-  const panelWidth = Math.min(width - margin * 2, Math.max(160, Math.round(width * .46)))
-  const targetArea = width * height / 6
-  const maxArea = width * height * .22
-  const preferredMinFont = Math.max(10, Math.round(Math.min(width, height) / 55))
+  const panelWidth = Math.min(width - margin * 2, Math.max(160, Math.round(width * (width >= height ? .36 : .44))))
+  const targetArea = width * height / 10
+  const maxArea = width * height * .13
+  const preferredMinFont = Math.max(10, Math.round(Math.min(width, height) / 70))
   let fontSize = Math.max(10, Math.min(54, Math.round(Math.min(width, height) / 38)))
   while (true) {
     const padding = Math.max(5, Math.round(fontSize * .38))
