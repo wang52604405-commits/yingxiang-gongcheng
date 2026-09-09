@@ -3,6 +3,7 @@
   "enablePullDownRefresh": true,
   "usingComponents": {
     "app-header": "../../components/AppHeader",
-    "ui-icon": "../../components/UiIcon"
+    "ui-icon": "../../components/UiIcon",
+    "stable-photo-image": "../../components/StablePhotoImage"
   }
 }

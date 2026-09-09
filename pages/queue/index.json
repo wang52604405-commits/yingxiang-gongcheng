@@ -1,6 +1,7 @@
 {
   "navigationStyle": "custom",
   "usingComponents": {
+    "delete-password-dialog": "../../components/DeletePasswordDialog",
     "app-header": "../../components/AppHeader"
   }
 }

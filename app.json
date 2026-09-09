@@ -7,6 +7,7 @@
     "pages/queue/index",
     "pages/profile/index",
     "pages/project/select",
+    "pages/project/watermark-settings",
     "pages/project/members",
     "pages/project/applications",
     "pages/project/request-status",
@@ -14,6 +15,7 @@
     "pages/project/join",
     "pages/destination/select",
     "pages/upload/confirm",
+    "pages/photo/watermark",
     "pages/photo/detail",
     "pages/requirements/index"
   ],
@@ -49,9 +51,19 @@
       }
     ]
   },
+  "requiredPrivateInfos": [
+    "getLocation",
+    "chooseLocation"
+  ],
   "permission": {
     "scope.camera": {
       "desc": "用于拍摄现场工程影像"
+    },
+    "scope.userLocation": {
+      "desc": "用于现场照片水印定位，以及按所在地日出日落切换白天与夜间界面"
+    },
+    "scope.writePhotosAlbum": {
+      "desc": "仅在您点击保存水印照片时，将生成的照片副本保存到手机相册"
     }
   },
   "usingComponents": {}

@@ -1,0 +1,10 @@
+{
+  "navigationStyle": "custom",
+  "pageOrientation": "auto",
+  "backgroundColor": "#070b0d",
+  "animationType": "none",
+  "usingComponents": {
+    "ui-icon": "../../components/UiIcon",
+    "page-header": "../../components/PageHeader"
+  }
+}
