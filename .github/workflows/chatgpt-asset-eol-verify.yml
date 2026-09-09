@@ -24,7 +24,7 @@ jobs:
           if ($jsAttr -notmatch 'text: unset') { throw "JS_TEXT_ATTRIBUTE_NOT_UNSET: $jsAttr" }
           if ($cssAttr -notmatch 'text: unset') { throw "CSS_TEXT_ATTRIBUTE_NOT_UNSET: $cssAttr" }
 
-      - name: Regenerate deterministic gzip from canonical source bytes
+      - name: Verify committed gzip from canonical source bytes
         shell: pwsh
         run: |
           @'
@@ -46,10 +46,12 @@ jobs:
               print(f"FRESH_CHECKOUT_BYTE_MATCH {name} bytes={len(raw)}")
           '@ | python -
 
-      - name: Confirm no gzip rewrite is needed
+      - name: Confirm clean gzip working tree
         shell: pwsh
         run: |
-          if (-not (git diff --quiet -- assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz)) {
+          git diff --quiet -- assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz
+          if ($LASTEXITCODE -ne 0) {
+            git status --short -- assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz
             throw "GZIP_CHANGED_DURING_FRESH_CHECKOUT_VERIFY"
           }
           Write-Host "GZIP_ALREADY_CANONICAL"
