@@ -98,8 +98,12 @@ jobs:
           git -C "${release_dir}" config user.name "github-actions[bot]"
           git -C "${release_dir}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C "${release_dir}" add --all
-          git -C "${release_dir}" commit -m "build: 微信开发者工具包 ${SOURCE_COMMIT:0:7}"
-          git -C "${release_dir}" push origin HEAD:codex/wechat-mp-release
+          if git -C "${release_dir}" diff --cached --quiet; then
+            echo "Release package already matches; continue to upload."
+          else
+            git -C "${release_dir}" commit -m "build: 微信开发者工具包 ${SOURCE_COMMIT:0:7}"
+            git -C "${release_dir}" push origin HEAD:codex/wechat-mp-release
+          fi
 
   upload-wechat-development:
     name: 上传微信小程序开发版本

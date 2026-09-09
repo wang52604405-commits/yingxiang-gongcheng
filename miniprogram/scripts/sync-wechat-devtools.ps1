@@ -33,7 +33,7 @@ function Start-WechatDevTools {
   $installRoot = Split-Path -Parent $CliPath
   $candidate = Get-ChildItem -LiteralPath $installRoot -Filter '*.exe' -File | Where-Object { $_.Length -gt 100MB } | Select-Object -First 1
   if (-not $candidate) { throw 'WeChat DevTools executable was not found.' }
-  Start-Process -FilePath $candidate.FullName -ArgumentList @($ProjectPath) | Out-Null
+  Start-Process -FilePath $candidate.FullName -ArgumentList @($ProjectPath) -WindowStyle Hidden | Out-Null
 }
 
 function Test-WechatCliProfile {
@@ -48,8 +48,15 @@ function Invoke-WechatCliChecked {
     [string[]]$Arguments,
     [string]$ActionName
   )
-  $lines = @(& $CliPath @Arguments 2>&1)
-  $exitCode = $LASTEXITCODE
+  $previousErrorPreference = $ErrorActionPreference
+  try {
+    # Node/DevTools writes progress and warnings to stderr even on success.
+    $ErrorActionPreference = 'Continue'
+    $lines = @(& $CliPath @Arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorPreference
+  }
   $text = ($lines | ForEach-Object { "$_" }) -join "`n"
   $lines | ForEach-Object { Write-Host "$_" }
   if ($exitCode -ne 0 -or $text -match '(?i)\[error\]|service port disabled|upload failed') {
