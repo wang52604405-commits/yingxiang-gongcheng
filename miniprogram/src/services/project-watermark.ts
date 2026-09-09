@@ -1,4 +1,4 @@
-import { mobileApi } from '@/api/mobile'
+import { apiRequest } from '@/api/client'
 
 export interface ProjectWatermarkSettings {
   logo_id: string
@@ -43,14 +43,14 @@ export function cachedProjectWatermark(projectId: string): ProjectWatermarkRespo
 export async function readProjectWatermark(projectId: string): Promise<ProjectWatermarkResponse> {
   const id = String(projectId || '')
   if (!id) return defaults()
-  const response = normalize(await mobileApi.get<ServerWatermarkResponse>(`/projects/${encodeURIComponent(id)}/watermark-settings`))
+  const response = normalize(await apiRequest<ServerWatermarkResponse>('GET', `/projects/${encodeURIComponent(id)}/watermark-settings`))
   cache.set(id, response)
   return response
 }
 export async function saveProjectWatermark(projectId: string, settings: ProjectWatermarkSettings): Promise<ProjectWatermarkResponse> {
   const id = String(projectId || '')
   if (!id) throw new Error('请先选择工程')
-  const raw = await mobileApi.patch<ServerWatermarkResponse>(`/projects/${encodeURIComponent(id)}/watermark-settings`, { logo_id: settings.logo_id, contractor: packContractor(settings) })
+  const raw = await apiRequest<ServerWatermarkResponse>('PATCH', `/projects/${encodeURIComponent(id)}/watermark-settings`, { logo_id: settings.logo_id, contractor: packContractor(settings) })
   const response = normalize(raw)
   cache.set(id, response)
   return response
