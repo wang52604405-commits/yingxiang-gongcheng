@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像管理平台</title>
-  <link rel="stylesheet" href="/assets/app-A20260908-2.89.css">
+  <link rel="stylesheet" href="/assets/app-A20260909-2.90.css">
 </head>
 <body>
   <!-- 首屏冷启动加载动画：仅在登录进入工作台后由脚本显示，登录页保持隐藏 -->
@@ -518,59 +518,56 @@
               <button class="ghost" type="button" id="closePrintSetupBtn">关闭</button>
             </div>
             <div class="print-setup-body">
+              <div class="print-choice-stack">
+                <div class="print-segment-row">
+                  <span class="print-choice-label">纸张方向</span>
+                  <div class="top-filter-group print-segment-group" id="printLayoutToggle" role="group" aria-label="纸张方向">
+                    <button type="button" class="active" data-print-layout="landscape" aria-pressed="true">横版</button>
+                    <button type="button" data-print-layout="portrait" aria-pressed="false">竖版</button>
+                  </div>
+                </div>
+                <div class="print-segment-row">
+                  <span class="print-choice-label">标签输出</span>
+                  <div class="top-filter-group print-segment-group" id="printCaptionModeToggle" role="group" aria-label="标签输出方式">
+                    <button type="button" class="active" data-print-caption-mode="inline" aria-pressed="true">照片下方</button>
+                    <button type="button" data-print-caption-mode="separate" aria-pressed="false">标签另页</button>
+                  </div>
+                  <small>标签另页时，照片页只放照片；对应标签单独输出一张说明页。</small>
+                </div>
+              </div>
+              <input id="printSetupLayout" type="hidden" value="landscape">
+              <input id="printSetupCaptionMode" type="hidden" value="inline">
               <div class="print-mode-grid print-style-grid">
-                <button class="print-mode-card print-style-card" type="button" id="lastPrintStyleBtn" data-print-style="last" aria-pressed="false" disabled>
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span>
-                  </span>
-                  <strong>上次打印</strong>
-                  <span class="print-style-desc" id="lastPrintStyleDesc">本工程暂无可重打照片</span>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="one" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span></span>
+                  <strong>一张纸 · 1 张图</strong>
+                  <span class="print-style-desc">照片按当前纸张方向自动铺满可用区域并居中</span>
                 </button>
-                <button class="print-mode-card print-style-card active" type="button" data-print-style="default" aria-pressed="true">
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-landscape ps-grid4"><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span></span>
-                  </span>
-                  <strong>默认打印</strong>
-                  <span class="print-style-desc">A4 横版 · 每页4张（2×2）· 5寸照片 · 紧凑页边距</span>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="two" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-pair2"><span class="ps-slot"></span><span class="ps-slot"></span></span></span>
+                  <strong>两宫格 · 2 张图</strong>
+                  <span class="print-style-desc">横版左右两张；竖版上下两张，标签不会挤出下一张</span>
                 </button>
-                <button class="print-mode-card print-style-card" type="button" data-print-style="portrait2" aria-pressed="false">
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-portrait ps-stack2"><span class="ps-slot"></span><span class="ps-slot"></span></span>
-                  </span>
-                  <strong>竖版 · 上下双图</strong>
-                  <span class="print-style-desc">A4 竖版 · 每页2张 · 横版照片 · 上半一张、下半一张</span>
-                </button>
-                <button class="print-mode-card print-style-card" type="button" data-print-style="landscape2" aria-pressed="false">
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-landscape ps-pair2"><span class="ps-slot"></span><span class="ps-slot"></span></span>
-                  </span>
-                  <strong>横版 · 左右双图</strong>
-                  <span class="print-style-desc">A4 横版 · 每页2张 · 左右并排 · 5寸照片</span>
-                </button>
-                <button class="print-mode-card print-style-card" type="button" data-print-style="single" aria-pressed="false">
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span>
-                  </span>
-                  <strong>横版 · 大图单张</strong>
-                  <span class="print-style-desc">A4 横版 · 每页1张 · 大幅展示</span>
+                <button class="print-mode-card print-style-card" type="button" data-print-style="four" aria-pressed="false">
+                  <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-grid4"><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span></span></span>
+                  <strong>四宫格 · 4 张图</strong>
+                  <span class="print-style-desc">2×2 自动铺满 A4 可用区域，横版竖版均自适应</span>
                 </button>
                 <button class="print-mode-card print-style-card" type="button" data-print-style="custom" aria-pressed="false">
-                  <span class="print-style-schematic" aria-hidden="true">
-                    <span class="ps-paper ps-portrait ps-custom"></span>
-                  </span>
-                  <strong>用户自定义</strong>
-                  <span class="print-style-desc">可调整照片尺寸、每页数量、文字标签位置、字号、页边距、间距和裁切方式。</span>
+                  <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-custom"><span class="ps-slot"></span><span class="ps-slot"></span><span class="ps-slot"></span></span></span>
+                  <strong>自定义</strong>
+                  <span class="print-style-desc">自定义每页数量、标签、页边距和间距；照片仍自动铺满并居中</span>
                 </button>
               </div>
               <div id="printCustomPanel" class="print-custom-panel">
                 <div class="print-custom-grid">
-                  <label>纸张方向<select id="printSetupLayout"><option value="landscape">A4 横版</option><option value="portrait">A4 竖版</option></select></label>
+                  
                   <label>每页照片数量<input id="printSetupPageSize" type="number" min="1" max="12" step="1" value="4"></label>
-                  <label>单张打印位置<select id="printSetupSingleAlignment"><option value="center">页面居中</option><option value="top">靠上排列</option></select></label>
-                  <label>照片规格<select id="printSetupPreset"><option value="4inch">4寸 10.2×7.6cm</option><option value="5inch" selected>5寸 12.7×8.9cm</option><option value="6inch">6寸 15.2×10.2cm</option><option value="custom">自定义尺寸</option></select></label>
+                  <label class="print-legacy-size-field">单张打印位置<select id="printSetupSingleAlignment"><option value="center">页面居中</option><option value="top">靠上排列</option></select></label>
+                  <label class="print-legacy-size-field">照片规格<select id="printSetupPreset"><option value="4inch">4寸 10.2×7.6cm</option><option value="5inch" selected>5寸 12.7×8.9cm</option><option value="6inch">6寸 15.2×10.2cm</option><option value="custom">自定义尺寸</option></select></label>
                   <label>图片填充<select id="printSetupImageFit"><option value="contain" selected>完整显示（可留白）</option><option value="cover">铺满裁切</option></select></label>
-                  <label>照片宽度(cm)<input id="printSetupPhotoWidth" type="number" min="1" max="30" step="0.1" value="12.7"></label>
-                  <label>照片高度(cm)<input id="printSetupPhotoHeight" type="number" min="1" max="30" step="0.1" value="8.9"></label>
+                  <label class="print-legacy-size-field">照片宽度(cm)<input id="printSetupPhotoWidth" type="number" min="1" max="30" step="0.1" value="12.7"></label>
+                  <label class="print-legacy-size-field">照片高度(cm)<input id="printSetupPhotoHeight" type="number" min="1" max="30" step="0.1" value="8.9"></label>
                   <label>文字标签位置<select id="printSetupCaptionPosition"><option value="bottom" selected>照片下方</option><option value="top">照片上方</option><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="hidden">不显示标签</option></select></label>
                   <label>标签区域宽/高(mm)<input id="printSetupCaptionSize" type="number" min="4" max="60" step="0.5" value="7.5"></label>
                   <label>标签字号(px)<input id="printSetupCaptionFont" type="number" min="5" max="14" step="0.1" value="10"></label>
@@ -1031,6 +1028,6 @@
     </section>
   </div>
 
-  <script defer src="/assets/app-A20260908-2.89.js"></script>
+  <script defer src="/assets/app-A20260909-2.90.js"></script>
 </body>
 </html>

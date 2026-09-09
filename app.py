@@ -164,6 +164,8 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_height_cm": 8.9,
     "print_caption_font_size": 10.0,
     "print_caption_position": "bottom",
+    "print_caption_mode": "inline",
+    "print_auto_fill": True,
     "print_caption_size_mm": 7.5,
     "print_margin_top_mm": 6.0,
     "print_margin_right_mm": 6.0,
@@ -810,6 +812,8 @@ def _normalize_engineering_settings(settings):
     except (TypeError, ValueError):
         settings["print_caption_font_size"] = 10.0
     settings["print_caption_position"] = settings.get("print_caption_position") if settings.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else "bottom"
+    settings["print_caption_mode"] = settings.get("print_caption_mode") if settings.get("print_caption_mode") in {"inline", "separate"} else "inline"
+    settings["print_auto_fill"] = bool(settings.get("print_auto_fill", True))
     for field, default_value, minimum, maximum in [
         ("print_caption_size_mm", 7.5, 4.0, 60.0),
         ("print_margin_top_mm", 6.0, 0.0, 30.0),
@@ -913,6 +917,10 @@ def write_engineering_settings(payload):
     except (TypeError, ValueError) as exc:
         raise ValueError("照片说明字号必须是数字") from exc
     current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else current.get("print_caption_position", "bottom")
+    requested_caption_mode = payload.get("print_caption_mode", current.get("print_caption_mode", "inline"))
+    current["print_caption_mode"] = requested_caption_mode if requested_caption_mode in {"inline", "separate"} else "inline"
+    if "print_auto_fill" in payload:
+        current["print_auto_fill"] = bool(payload.get("print_auto_fill"))
     for field, default_value, minimum, maximum in [
         ("print_caption_size_mm", 7.5, 4.0, 60.0),
         ("print_margin_top_mm", 6.0, 0.0, 30.0),
@@ -3637,10 +3645,11 @@ def add_share_points(target, note=""):
 def print_layout_from_request():
     style = str(request.args.get("style") or "").strip().lower()
     style_defaults = PRINT_STYLE_DEFAULTS.get(style)
+    saved_layout = read_engineering_settings().get("print_layout", "landscape")
     default_layout = (
-        style_defaults["print_layout"]
+        style_defaults.get("print_layout", saved_layout)
         if style_defaults
-        else read_engineering_settings().get("print_layout", "landscape")
+        else saved_layout
     )
     layout = str(request.args.get("layout") or default_layout).strip().lower()
     return "portrait" if layout == "portrait" else "landscape"
@@ -3669,79 +3678,72 @@ PRINT_PHOTO_PRESETS_CM = {
 
 
 PRINT_STYLE_DEFAULTS = {
-    "default": {
-        "print_layout": "landscape",
-        "print_page_size": 4,
-        "print_photo_preset": "5inch",
-        "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.5,
-        "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 4.0,
-        "print_margin_right_mm": 4.0,
-        "print_margin_bottom_mm": 4.0,
-        "print_margin_left_mm": 4.0,
-        "print_horizontal_gap_mm": 2.0,
-        "print_vertical_gap_mm": 2.0,
-        "print_image_fit": "contain",
-        "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
-    },
-    "portrait2": {
-        "print_layout": "portrait",
-        "print_page_size": 2,
-        "print_photo_preset": "custom",
-        "print_photo_width_cm": 18.5,
-        "print_photo_height_cm": 12.3,
-        "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.5,
-        "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 12.0,
-        "print_margin_right_mm": 12.0,
-        "print_margin_bottom_mm": 12.0,
-        "print_margin_left_mm": 12.0,
-        "print_horizontal_gap_mm": 2.0,
-        "print_vertical_gap_mm": 4.0,
-        "print_image_fit": "contain",
-        "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
-    },
-    "landscape2": {
-        "print_layout": "landscape",
-        "print_page_size": 2,
-        "print_photo_preset": "5inch",
-        "print_caption_position": "bottom",
-        "print_caption_size_mm": 7.5,
-        "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 12.0,
-        "print_margin_right_mm": 12.0,
-        "print_margin_bottom_mm": 12.0,
-        "print_margin_left_mm": 12.0,
-        "print_horizontal_gap_mm": 2.0,
-        "print_vertical_gap_mm": 2.0,
-        "print_image_fit": "contain",
-        "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
-    },
-    "single": {
-        "print_layout": "landscape",
+    # New visible print presets. Paper direction and caption output mode are
+    # intentionally NOT baked into these presets; the UI sends those as two
+    # independent segmented choices.
+    "one": {
         "print_page_size": 1,
         "print_single_alignment": "center",
         "print_photo_preset": "custom",
-        "print_photo_width_cm": 26.0,
-        "print_photo_height_cm": 17.2,
+        "print_photo_width_cm": 1.0,
+        "print_photo_height_cm": 1.0,
         "print_caption_position": "bottom",
         "print_caption_size_mm": 7.5,
         "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 10.0,
-        "print_margin_right_mm": 10.0,
-        "print_margin_bottom_mm": 10.0,
-        "print_margin_left_mm": 10.0,
+        "print_margin_top_mm": 6.0,
+        "print_margin_right_mm": 6.0,
+        "print_margin_bottom_mm": 6.0,
+        "print_margin_left_mm": 6.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 2.0,
         "print_image_fit": "contain",
         "print_show_page_title": True,
-        "print_caption_fields": ["title", "id", "part_name", "photo_date", "photographer"],
+        "print_auto_fill": True,
     },
+    "two": {
+        "print_page_size": 2,
+        "print_single_alignment": "center",
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 1.0,
+        "print_photo_height_cm": 1.0,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
+        "print_margin_top_mm": 6.0,
+        "print_margin_right_mm": 6.0,
+        "print_margin_bottom_mm": 6.0,
+        "print_margin_left_mm": 6.0,
+        "print_horizontal_gap_mm": 3.0,
+        "print_vertical_gap_mm": 3.0,
+        "print_image_fit": "contain",
+        "print_show_page_title": True,
+        "print_auto_fill": True,
+    },
+    "four": {
+        "print_page_size": 4,
+        "print_single_alignment": "center",
+        "print_photo_preset": "custom",
+        "print_photo_width_cm": 1.0,
+        "print_photo_height_cm": 1.0,
+        "print_caption_position": "bottom",
+        "print_caption_size_mm": 7.5,
+        "print_caption_font_size": 10.0,
+        "print_margin_top_mm": 5.0,
+        "print_margin_right_mm": 5.0,
+        "print_margin_bottom_mm": 5.0,
+        "print_margin_left_mm": 5.0,
+        "print_horizontal_gap_mm": 3.0,
+        "print_vertical_gap_mm": 3.0,
+        "print_image_fit": "contain",
+        "print_show_page_title": True,
+        "print_auto_fill": True,
+    },
+    # Compatibility aliases for old saved/bookmarked links. They now use the
+    # safe cell allocator instead of fixed 18.5x12.3cm dimensions.
+    "default": {"print_layout": "landscape", "print_page_size": 4, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 5.0, "print_margin_right_mm": 5.0, "print_margin_bottom_mm": 5.0, "print_margin_left_mm": 5.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "portrait2": {"print_layout": "portrait", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "landscape2": {"print_layout": "landscape", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "single": {"print_layout": "landscape", "print_page_size": 1, "print_single_alignment": "center", "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 2.0, "print_vertical_gap_mm": 2.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
 }
 
 
@@ -3778,6 +3780,10 @@ def print_settings_from_request():
 
     position = str(request.args.get("caption_position") or settings.get("print_caption_position") or "bottom")
     settings["print_caption_position"] = position if position in {"hidden", "left", "right", "top", "bottom"} else "bottom"
+    caption_mode = str(request.args.get("caption_mode") or settings.get("print_caption_mode") or "inline").strip().lower()
+    settings["print_caption_mode"] = caption_mode if caption_mode in {"inline", "separate"} else "inline"
+    auto_fill_raw = str(request.args.get("auto_fill", "1" if settings.get("print_auto_fill", True) else "0")).strip().lower()
+    settings["print_auto_fill"] = auto_fill_raw not in {"0", "false", "no", "off"}
     settings["print_caption_font_size"] = request_float("caption_font_size", settings.get("print_caption_font_size", 10.0), 5.0, 14.0)
     settings["print_caption_size_mm"] = request_float("caption_size_mm", settings.get("print_caption_size_mm", 7.5), 4.0, 60.0)
     for side in ("top", "right", "bottom", "left"):
@@ -4095,19 +4101,18 @@ def _print_caption_h(photo, single_line=False):
 
 
 def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_width_mm=None, photo_height_mm=None, print_settings=None):
-    """按所选照片尺寸自动排版：
-    支持 4/5/6 寸及自定义尺寸，竖版照片自动加 90° 旋转横放；
-    说明文字排在照片下方（照片之外）；
-    每页 2 张（标准页边距、说明多行）或每页 4 张（2x2，最小页边距、说明一行）；
-    返回 [{照片信息..., _left, _top, _w, _h, _block_h, _caption_h, _rotate}, ...] 的页列表。
+    """Lay out photos by allocating A4 cells first, then fitting each item inside.
+
+    This removes the old failure mode where a fixed photo size plus a bottom
+    caption exceeded the sheet and silently forced the second photo onto a new
+    page. For 1/2/4 presets the grid is deterministic; custom counts choose the
+    grid that best fits a 4:3 photo. Every block is centered inside its cell.
     """
-    try:
-        page_size = int(page_size)
-    except (TypeError, ValueError):
-        page_size = 2
-    if not 1 <= page_size <= 12:
-        page_size = 4
     settings = print_settings or {}
+    try:
+        page_size = max(1, min(12, int(page_size or 4)))
+    except (TypeError, ValueError):
+        page_size = 4
     margin_top = float(settings.get("print_margin_top_mm", 6.0))
     margin_right = float(settings.get("print_margin_right_mm", 6.0))
     margin_bottom = float(settings.get("print_margin_bottom_mm", 6.0))
@@ -4115,88 +4120,126 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
     horizontal_gap = float(settings.get("print_horizontal_gap_mm", PRINT_FIXED_GAP))
     vertical_gap = float(settings.get("print_vertical_gap_mm", PRINT_FIXED_GAP))
     caption_position = str(settings.get("print_caption_position") or "bottom")
+    caption_mode = str(settings.get("print_caption_mode") or "inline")
     caption_size = float(settings.get("print_caption_size_mm", 7.5))
     show_page_title = bool(settings.get("print_show_page_title", True))
     single_alignment = str(settings.get("print_single_alignment") or "center")
+    auto_fill = bool(settings.get("print_auto_fill", True))
+
     if layout == "portrait":
         paper_w, paper_h = 210.0, 297.0
     else:
         paper_w, paper_h = 297.0, 210.0
     page_w = max(20.0, paper_w - margin_left - margin_right)
-    # 4 张 5 寸照片 + 7.5mm 说明区需要完整落在横向 A4 内；
-    # 7mm 标题区仍能容纳单元名称，同时避免底部说明被裁掉。
     title_h = 7.0 if show_page_title else 0.0
     page_h = max(20.0, paper_h - margin_top - margin_bottom - title_h)
+
+    if page_size == 1:
+        cols, rows = 1, 1
+    elif page_size == 2:
+        cols, rows = ((1, 2) if layout == "portrait" else (2, 1))
+    elif page_size == 4:
+        cols, rows = 2, 2
+    else:
+        best = None
+        for candidate_cols in range(1, page_size + 1):
+            candidate_rows = (page_size + candidate_cols - 1) // candidate_cols
+            cell_w = (page_w - horizontal_gap * (candidate_cols - 1)) / candidate_cols
+            cell_h = (page_h - vertical_gap * (candidate_rows - 1)) / candidate_rows
+            if cell_w <= 0 or cell_h <= 0:
+                continue
+            # Score by the largest 4:3 image that can fit in the cell, then area.
+            scale = min(cell_w / 4.0, cell_h / 3.0)
+            score = (scale, cell_w * cell_h)
+            if best is None or score > best[0]:
+                best = (score, candidate_cols, candidate_rows)
+        _, cols, rows = best or ((0, 0), 1, page_size)
+
+    cell_w = max(10.0, (page_w - horizontal_gap * (cols - 1)) / cols)
+    cell_h = max(10.0, (page_h - vertical_gap * (rows - 1)) / rows)
+    requested_w = float(photo_width_mm or PHOTO_5IN_LANDSCAPE[0])
+    requested_h = float(photo_height_mm or PHOTO_5IN_LANDSCAPE[1])
     single_line = page_size >= 4
     pages = []
-    current = []
-    row_y = 0.0
-    row_h = 0.0
-    x = 0.0
-    for photo in photos:
-        width = float(photo_width_mm or PHOTO_5IN_LANDSCAPE[0])
-        height = float(photo_height_mm or PHOTO_5IN_LANDSCAPE[1])
-        has_caption = bool(photo.get("detail_rows")) and caption_position != "hidden"
-        # 说明区按实际行数预留空间。以前 2 张/页仍固定给 7.5mm，
-        # 四项信息会被裁掉；现在宁可自动多分页，也不压字。
-        caption_extent = max(
-            caption_size,
-            _print_caption_h(photo, single_line=single_line),
-        ) if has_caption else 0.0
-        if caption_position in {"left", "right"}:
-            # 左右标签至少保留可读列宽；兼容旧工程里 7.5mm 的遗留设置。
-            caption_extent = max(caption_extent, 32.0)
-            block_w = width + caption_extent
-            block_h = height
-            caption_h = height
-            caption_w = caption_extent
-        else:
-            block_w = width
-            block_h = height + caption_extent
-            caption_h = caption_extent
-            caption_w = width
-        rotate = int(photo.get("rotation") or 0) % 360
-        if str(photo.get("orientation") or "landscape") == "portrait":
-            rotate = (rotate + 90) % 360
-        if x > 0 and x + block_w > page_w + 0.5:
-            row_y += row_h + vertical_gap
-            x = 0.0
-            row_h = 0.0
-        if (row_y + block_h > page_h + 0.5 or len(current) >= page_size) and current:
+
+    for page_start in range(0, len(photos), page_size):
+        current = []
+        page_photos = photos[page_start:page_start + page_size]
+        for slot, photo in enumerate(page_photos):
+            row = slot // cols
+            col = slot % cols
+            cell_left = col * (cell_w + horizontal_gap)
+            cell_top = row * (cell_h + vertical_gap)
+
+            detail_rows = photo.get("detail_rows") or []
+            has_inline_caption = bool(detail_rows) and caption_mode != "separate" and caption_position != "hidden"
+            caption_extent = max(
+                caption_size,
+                _print_caption_h(photo, single_line=single_line),
+            ) if has_inline_caption else 0.0
+
+            if has_inline_caption and caption_position in {"left", "right"}:
+                caption_w = min(max(32.0, caption_extent), max(0.0, cell_w * 0.38))
+                caption_h = cell_h
+                available_w = max(10.0, cell_w - caption_w)
+                available_h = cell_h
+            elif has_inline_caption:
+                caption_h = min(caption_extent, max(0.0, cell_h * 0.35))
+                caption_w = cell_w
+                available_w = cell_w
+                available_h = max(10.0, cell_h - caption_h)
+            else:
+                caption_w = 0.0
+                caption_h = 0.0
+                available_w = cell_w
+                available_h = cell_h
+
+            if auto_fill:
+                width = available_w
+                height = available_h
+            else:
+                width = min(max(10.0, requested_w), available_w)
+                height = min(max(10.0, requested_h), available_h)
+
+            if has_inline_caption and caption_position in {"left", "right"}:
+                # Caption follows the actual custom photo height if the user opted
+                # out of auto-fill; in auto-fill it naturally equals the cell.
+                caption_h = height
+                block_w = width + caption_w
+                block_h = height
+            elif has_inline_caption:
+                caption_w = width
+                block_w = width
+                block_h = height + caption_h
+            else:
+                block_w = width
+                block_h = height
+
+            x = cell_left + max(0.0, (cell_w - block_w) / 2.0)
+            y = cell_top + max(0.0, (cell_h - block_h) / 2.0)
+            if page_size == 1 and single_alignment == "top" and not auto_fill:
+                y = cell_top
+
+            rotate = int(photo.get("rotation") or 0) % 360
+            if str(photo.get("orientation") or "landscape") == "portrait":
+                rotate = (rotate + 90) % 360
+
+            item = dict(photo)
+            item["_left"] = round(x, 1)
+            item["_top"] = round(y, 1)
+            item["_w"] = round(block_w, 1)
+            item["_h"] = round(height, 1)
+            item["_photo_w"] = round(width, 1)
+            item["_caption_w"] = round(caption_w, 1)
+            item["_block_h"] = round(block_h, 1)
+            item["_caption_h"] = round(caption_h, 1)
+            item["_caption_position"] = caption_position
+            item["_rotate"] = rotate
+            item["_cell_w"] = round(cell_w, 1)
+            item["_cell_h"] = round(cell_h, 1)
+            current.append(item)
+        if current:
             pages.append(current)
-            current = []
-            row_y = 0.0
-            x = 0.0
-            row_h = 0.0
-        # 单张时让“照片 + 标签”作为整体置中；旧版只能横向居中，
-        # 小尺寸照片仍会贴在页面上方，视觉上不是真正居中。
-        if page_size == 1:
-            x = max(0.0, (page_w - block_w) / 2)
-            if single_alignment == "center":
-                row_y = max(0.0, (page_h - block_h) / 2)
-        item = dict(photo)
-        item["_left"] = round(x, 1)
-        item["_top"] = round(row_y, 1)
-        item["_w"] = round(block_w, 1)
-        item["_h"] = height
-        item["_photo_w"] = width
-        item["_caption_w"] = round(caption_w, 1)
-        item["_block_h"] = round(block_h, 1)
-        item["_caption_h"] = caption_h
-        item["_caption_position"] = caption_position
-        item["_rotate"] = rotate
-        current.append(item)
-        if page_size == 1:
-            pages.append(current)
-            current = []
-            row_y = 0.0
-            x = 0.0
-            row_h = 0.0
-            continue
-        x += block_w + horizontal_gap
-        row_h = max(row_h, block_h)
-    if current:
-        pages.append(current)
     return pages
 
 
