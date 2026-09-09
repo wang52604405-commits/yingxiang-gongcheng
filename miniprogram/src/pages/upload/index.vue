@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { setWatermarkContext } from '@/services/watermark-context'
 import { consumePhotoEditDestination, flattenDestinations, reconcileDestination, destinationLabel as fullDestinationLabel } from '@/services/destination-history'
 import { captureDraftStorage, captureOverrides, localDate, type CaptureItem } from '@/services/capture-draft'
@@ -415,6 +416,7 @@ onUnload(persistDraft)
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs capture-page">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">采集影像</text>

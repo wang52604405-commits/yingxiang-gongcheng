@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref } from 'vue'
 import { onLoad, onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -63,6 +64,7 @@ onPullDownRefresh(() => { if (!busyId.value) void load(); else uni.stopPullDownR
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs applications-page">
     <PageHeader title="加入申请" :subtitle="project.name" />
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">正在读取申请…</text></view>

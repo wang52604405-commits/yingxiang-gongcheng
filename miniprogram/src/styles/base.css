@@ -204,7 +204,7 @@ uni-button::after {
 }
 
 .primary-button {
-  color: #041a1a;
+  color: var(--on-primary, #041a1a);
   background: var(--primary-strong);
 }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle, setThemeLocation } from '@/services/theme'
 import { beginWatermarkDivision, consumeWatermarkDivision, watermarkDivisionFields } from '@/services/watermark-division'
 import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onReady, onShow, onHide, onResize, onUnload } from '@dcloudio/uni-app'
@@ -168,6 +169,7 @@ async function getLocation() {
     requireContext()
     const location = await getCurrentWatermarkLocation()
     requireContext()
+    setThemeLocation(location.latitude, location.longitude)
     form.locationText = location.text
     locationLabel.value = '当前定位'
     manualLocation.value = false
@@ -258,6 +260,7 @@ onReady(() => { if (cameraMode.value) clockTimer = setInterval(() => { if (liveC
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs watermark-page">
     <PageHeader :title="liveCamera ? '水印相机' : previewOnly ? '水印预览图' : '水印照片'" />
     <template v-if="context">

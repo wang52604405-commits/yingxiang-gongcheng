@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { setWatermarkContext } from '@/services/watermark-context'
 import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
 import { photoActions } from '@/services/photo-actions'
@@ -140,6 +141,7 @@ onLoad((query) => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs detail-page">
     <PageHeader title="照片详情" />
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>

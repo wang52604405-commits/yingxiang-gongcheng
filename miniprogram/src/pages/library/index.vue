@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref, toRefs } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
@@ -92,6 +93,7 @@ onReachBottom(() => { void loadPhotos(false) })
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">影像库</text>

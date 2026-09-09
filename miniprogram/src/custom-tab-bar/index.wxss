@@ -66,3 +66,9 @@
   .tab-button { transition: opacity 1ms linear; }
   .tab-button.pressed { transform: none; opacity: 0.78; }
 }
+
+.tabbar.light { background: #f6f9fa; border-top-color: #bacdd2; }
+.tabbar.light .tab-button { color: #4e6970; }
+.tabbar.light .tab-button.active, .tabbar.light .tab-button.primary .tab-label { color: #087568; }
+.tabbar.light .tab-button.primary { color: #041a1a; }
+.tabbar.light .badge { border-color: #f6f9fa; }

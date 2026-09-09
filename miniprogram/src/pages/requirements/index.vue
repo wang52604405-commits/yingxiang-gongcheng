@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -59,6 +60,7 @@ onLoad(load)
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs requirements-page">
     <PageHeader title="专业采集清单" />
     <scroll-view scroll-x class="filter-scroll">

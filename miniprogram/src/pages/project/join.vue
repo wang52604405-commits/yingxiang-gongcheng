@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref, watch } from 'vue'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -114,6 +115,7 @@ onUnload(() => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs join-page">
     <PageHeader title="加入项目" />
     <text class="field-label code-label">邀请码</text>

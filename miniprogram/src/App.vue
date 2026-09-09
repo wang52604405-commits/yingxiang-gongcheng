@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onAppHide, onLaunch, onAppShow } from '@dcloudio/uni-app'
+import { startTheme, stopTheme } from '@/services/theme'
 import { BUILD_CHANNEL } from '@/config/env'
 import { createSessionLifecycle } from '@/services/session-lifecycle'
 import { ensureSession, sessionState } from '@/services/auth'
@@ -16,11 +17,13 @@ onLaunch((options) => {
 })
 
 onAppShow((options) => {
+  startTheme()
   rememberLaunchInvite(options, 'show')
   void sessionLifecycle.activate()
 })
 
 onAppHide(() => {
+  stopTheme()
   sessionLifecycle.hide()
 })
 </script>
@@ -28,8 +31,8 @@ onAppHide(() => {
 <style>
 page {
   min-height: 100%;
-  background: #0c181b;
-  color: #f5fbfa;
+  background: var(--bg);
+  color: var(--text);
 }
 
 /* #ifdef H5 */

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -128,6 +129,7 @@ onShow(() => { if (!loading.value) void load() })
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs members-page">
     <PageHeader title="项目成员" :subtitle="project.name" />
     <button v-if="canManage" class="application-entry card pressable" @tap="openApplications"><text>加入申请</text><view class="application-entry-trailing"><text v-if="pendingCount" class="application-count">{{ pendingCount }} 人待审核</text><text v-else>查看</text><text>›</text></view></button>
@@ -155,10 +157,10 @@ onShow(() => { if (!loading.value) void load() })
 .member-list { overflow: hidden; }
 .member-item { border-bottom: 1rpx solid var(--line); }
 .member-item:last-child { border-bottom: 0; }
-.remove-member { display: block; margin: 0 20rpx 14rpx auto; padding: 10rpx 18rpx; min-height: 64rpx; background: transparent; color: #ff9188; font-size: 23rpx; }
+.remove-member { display: block; margin: 0 20rpx 14rpx auto; padding: 10rpx 18rpx; min-height: 64rpx; background: transparent; color: var(--danger); font-size: 23rpx; }
 .member-row { display: grid; grid-template-columns: 72rpx minmax(0, 1fr) auto; align-items: center; gap: 16rpx; width: 100%; min-height: 104rpx; padding: 15rpx 20rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
 .member-row:last-child { border-bottom: 0; }
-.member-row[disabled] { opacity: 1; }
+.member-row, button.member-row[disabled] { opacity: 1; background: var(--surface) !important; color: var(--text) !important; }
 .member-avatar { display: grid; place-items: center; width: 68rpx; height: 68rpx; border-radius: 21rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 28rpx; font-weight: 700; }
 .member-copy { min-width: 0; }
 .member-name { display: block; overflow: hidden; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }

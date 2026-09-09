@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref } from 'vue'
 import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -50,6 +51,7 @@ onLoad(() => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs invite-page">
     <PageHeader title="邀请成员" :subtitle="project.name" />
     <template v-if="!invite">

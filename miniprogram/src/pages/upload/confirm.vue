@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -124,6 +125,7 @@ onShow(() => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs confirm-page">
     <PageHeader :title="archiveRepair ? '完善归档信息' : '确认归档位置'" />
 

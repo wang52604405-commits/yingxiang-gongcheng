@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
@@ -66,6 +67,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell home-page">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="openProject" />
     <view class="project-context">

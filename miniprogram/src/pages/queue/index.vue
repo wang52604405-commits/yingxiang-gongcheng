@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
 import { photoActions } from '@/services/photo-actions'
 import type { LocalPhoto } from '@/types/domain'
@@ -85,6 +86,7 @@ onShow(() => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <view class="title-row">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeStyle } from '@/services/theme'
 import { matchesDivisionKeywords, resolveWatermarkDivision, saveWatermarkDivision } from '@/services/watermark-division'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
@@ -109,6 +110,7 @@ onLoad((query) => {
 </script>
 
 <template>
+  <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs destination-page" :class="{ 'has-process-sheet': hasProcessSheet }">
     <PageHeader :title="returnTarget === 'library' && scope === 'engineering' ? '选择单元' : scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
     <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="搜索名称、编码或多个关键词" placeholder-class="input-placeholder" /><button v-if="keyword" class="clear-search pressable" @tap="keyword = ''">清除</button></view>
