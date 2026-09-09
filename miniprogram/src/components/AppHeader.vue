@@ -51,7 +51,7 @@ const headerStyle: Record<string, string> = {
   left: 0;
   right: 0;
   padding-left: 30rpx;
-  color: #efffff;
+  color: var(--header-text, #efffff);
   background: var(--top);
   box-shadow: 0 1rpx 0 rgba(255, 255, 255, 0.06);
 }

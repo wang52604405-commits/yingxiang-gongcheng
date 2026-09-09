@@ -25,7 +25,7 @@ describe('按当地日出日落切换', () => {
     expect(themeState.latitude).toBe(36.6)
     refreshTheme(new Date('2026-03-20T19:00:00+08:00')); expect(themeState.resolved).toBe('dark')
     setThemeMode('light'); refreshTheme(new Date('2026-03-20T19:00:00+08:00')); expect(themeState.resolved).toBe('light')
-    expect(themeStyle.value).toContain('--surface:#f6f9fa')
+    expect(themeStyle.value).toContain('--surface:#ffffff')
   })
   it('两种皮肤的主文字、次文字、操作文字与卡片均达到可读对比度', () => {
     for (const c of Object.values(THEME_COLORS)) {

@@ -6,8 +6,8 @@ const KEY = 'engineering-image:appearance:v1'
 const TAB_KEY = 'engineering-image:resolved-theme:v1'
 export const themeState = reactive({ mode: 'auto' as ThemeMode, resolved: 'dark' as 'light' | 'dark', latitude: null as number | null, longitude: null as number | null, locating: false })
 export const THEME_COLORS = {
-  dark: { bg:'#0c181b', surface:'#122024', 'surface-2':'#17282d', top:'#0f444d', primary:'#2db9aa', 'primary-strong':'#42d7c2', 'primary-soft':'rgba(45,185,170,.14)', text:'#f5fbfa', muted:'#9eb1b4', line:'#2b4247', warning:'#f1b34b', danger:'#ff6b66', success:'#37c58e', 'on-primary':'#041a1a' },
-  light: { bg:'#e9f0f2', surface:'#f6f9fa', 'surface-2':'#e0eaed', top:'#0f5861', primary:'#087c70', 'primary-strong':'#087568', 'primary-soft':'rgba(8,117,104,.10)', text:'#183238', muted:'#4e6970', line:'#bacdd2', warning:'#805000', danger:'#b52e28', success:'#087443', 'on-primary':'#ffffff' },
+  dark: { bg:'#0c181b', surface:'#122024', 'surface-2':'#17282d', top:'#0f444d', 'header-text':'#ffffff', 'header-muted':'#c0d4d7', primary:'#2db9aa', 'primary-strong':'#42d7c2', 'primary-soft':'rgba(45,185,170,.14)', text:'#f5fbfa', muted:'#9eb1b4', line:'#2b4247', warning:'#f1b34b', danger:'#ff6b66', success:'#37c58e', 'on-primary':'#041a1a' },
+  light: { bg:'#ffffff', surface:'#ffffff', 'surface-2':'#f3f5f6', top:'#ffffff', 'header-text':'#183238', 'header-muted':'#4e6970', primary:'#087c70', 'primary-strong':'#087568', 'primary-soft':'rgba(8,117,104,.10)', text:'#183238', muted:'#4e6970', line:'#d5dde0', warning:'#805000', danger:'#b52e28', success:'#087443', 'on-primary':'#ffffff' },
 }
 export const themeStyle = computed(() => Object.entries(THEME_COLORS[themeState.resolved]).map(([key,value]) => `--${key}:${value}`).join(';') + ';background:var(--bg);color:var(--text)')
 export const themeLabel = computed(() => themeState.mode === 'light' ? '白天' : themeState.mode === 'dark' ? '夜间' : themeState.latitude === null ? '自动 · 待定位' : '自动 · 日出日落')

@@ -97,7 +97,7 @@ describe('采集权限入口覆盖', () => {
   it('产品版本与页面显示保持一致', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.6.2')
+    expect(pkg.version).toBe('1.6.3')
     expect(manifest.versionName).toBe(pkg.version)
     expect(source('src/pages/profile/index.vue')).toContain(`工程影像 V${pkg.version}`)
   })

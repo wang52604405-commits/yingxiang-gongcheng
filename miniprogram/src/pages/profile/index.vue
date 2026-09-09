@@ -91,7 +91,7 @@ onShow(() => {
     </view>
 
     <button v-if="authenticated" class="account-button pressable" @tap="confirmSignOut">切换账号</button>
-      <text class="version">工程影像 V1.6.2</text>
+      <text class="version">工程影像 V1.6.3</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->
