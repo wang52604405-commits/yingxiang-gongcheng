@@ -111,7 +111,8 @@ jobs:
       - name: 拉取发布工具
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.source_sha || github.sha }}
+          # Release scripts follow the workflow revision, even when rebuilding older app source.
+          ref: ${{ github.sha }}
           path: source
 
       - name: 拉取刚编译的微信包
