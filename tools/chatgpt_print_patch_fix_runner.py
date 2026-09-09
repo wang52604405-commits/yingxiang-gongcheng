@@ -24,6 +24,28 @@ text = text.replace(old_call, new_call, 1)
 path.write_text(text, encoding="utf-8")
 subprocess.run([sys.executable, str(path)], check=True)
 
+# Paper direction is independent of the 1/2/4 layout preset. New presets deliberately
+# do not bake in a direction, so request parsing must tolerate a style without one.
+app_path = Path("app.py")
+app_text = app_path.read_text(encoding="utf-8")
+old_layout = '''    default_layout = (
+        style_defaults["print_layout"]
+        if style_defaults
+        else read_engineering_settings().get("print_layout", "landscape")
+    )
+'''
+new_layout = '''    saved_layout = read_engineering_settings().get("print_layout", "landscape")
+    default_layout = (
+        style_defaults.get("print_layout", saved_layout)
+        if style_defaults
+        else saved_layout
+    )
+'''
+if old_layout not in app_text:
+    raise SystemExit("print_layout_from_request contract not found")
+app_text = app_text.replace(old_layout, new_layout, 1)
+app_path.write_text(app_text, encoding="utf-8")
+
 # Two older regression assertions intentionally described the superseded print UX.
 # Update only those contracts: the new requirement is a fixed A4 grid whose captions
 # stay inside each cell, and exactly four visible layout choices.
@@ -40,3 +62,21 @@ if old_geometry not in test:
     raise SystemExit("legacy caption-overflow contract not found")
 test = test.replace(old_geometry, new_geometry, 1)
 test_path.write_text(test, encoding="utf-8")
+
+# Extend the generated print-specific suite with request-layer direction checks.
+ztest_path = Path("tests/test_z_print_layout_modes.py")
+ztest = ztest_path.read_text(encoding="utf-8")
+anchor = '''    def test_one_two_four_fit_both_landscape_and_portrait_with_inline_labels(self):\n'''
+addition = '''    def test_layout_preset_does_not_override_independent_paper_direction(self):
+        with self.appmod.app.test_request_context("/?style=two&layout=portrait"):
+            self.assertEqual(self.appmod.print_layout_from_request(), "portrait")
+            self.assertEqual(self.appmod.print_page_size_from_request(), 2)
+        with self.appmod.app.test_request_context("/?style=four&layout=landscape"):
+            self.assertEqual(self.appmod.print_layout_from_request(), "landscape")
+            self.assertEqual(self.appmod.print_page_size_from_request(), 4)
+
+'''
+if anchor not in ztest:
+    raise SystemExit("print-specific test insertion anchor not found")
+ztest = ztest.replace(anchor, addition + anchor, 1)
+ztest_path.write_text(ztest, encoding="utf-8")
