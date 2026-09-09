@@ -39,18 +39,22 @@ jobs:
         shell: powershell
         run: python -m unittest discover -s tests -v
 
-      - name: 准备临时发布校验密钥
+      - name: 准备临时发布校验凭据
         shell: powershell
         env:
           SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          if (-not $env:SIGN_KEY_B64) { throw "缺少发布校验密钥 Secret" }
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布校验密钥 Secret" }
           $credentialDir = Join-Path $env:RUNNER_TEMP "album-print-verify-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
           $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
+          $sshKey = Join-Path $credentialDir "server_key"
           [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
           icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_PRINT_VERIFY_CREDENTIAL_DIR=$credentialDir"
 
       - name: 发布完整性校验
@@ -71,7 +75,7 @@ jobs:
           git commit -m "feat: simplify A4 print layouts and separate labels"
           git push origin HEAD:chatgpt/print-grid-autofill-20260909
 
-      - name: 清理临时发布校验密钥
+      - name: 清理临时发布校验凭据
         if: always()
         shell: powershell
         run: |
