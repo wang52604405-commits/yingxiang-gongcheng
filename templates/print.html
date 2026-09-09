@@ -14,6 +14,7 @@
 {% set photo_height_cm = print_settings.get("print_photo_height_cm", 8.9) %}
 {% set caption_font_size = print_settings.get("print_caption_font_size", 10) or 10 %}
 {% set caption_position = print_settings.get("print_caption_position", "bottom") %}
+{% set caption_mode = print_settings.get("print_caption_mode", "inline") %}
 {% set margin_top = print_settings.get("print_margin_top_mm", 6) %}
 {% set margin_right = print_settings.get("print_margin_right_mm", 6) %}
 {% set margin_bottom = print_settings.get("print_margin_bottom_mm", 6) %}
@@ -27,7 +28,7 @@
 {% set title_height = 7 if show_page_title else 0 %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
 {% set has_books = has_project_groups and (project_groups|selectattr("level")|list|length > 0) %}
-{% set style_labels = {"default": "默认 2×2", "portrait2": "竖版 · 上下双图", "landscape2": "横版 · 左右双图", "single": "横版 · 大图单张"} %}
+{% set style_labels = {"one": "一张纸 1 张图", "two": "两宫格", "four": "四宫格", "default": "四宫格", "portrait2": "两宫格", "landscape2": "两宫格", "single": "一张纸 1 张图"} %}
 {% set print_style = request.args.get("style", "") %}
 <head>
   <meta charset="utf-8">
@@ -184,6 +185,36 @@
       overflow-wrap: anywhere;
     }
     .empty { width: 210mm; margin: 12px auto; padding: 24mm; background: #fff; color: #6b7280; text-align: center; }
+    .caption-sheet-body {
+      height: calc(100% - {{ title_height }}mm);
+      padding: 2mm 0 0;
+      display: grid;
+      grid-template-columns: repeat(var(--caption-cols, 1), minmax(0, 1fr));
+      grid-auto-rows: minmax(0, 1fr);
+      gap: 3mm;
+      overflow: hidden;
+    }
+    .caption-sheet-item {
+      min-height: 0;
+      padding: 4mm;
+      border: 1px solid #9ca3af;
+      background: #fff;
+      overflow: hidden;
+    }
+    .caption-sheet-number {
+      margin: 0 0 2mm;
+      padding-bottom: 1.5mm;
+      border-bottom: 1px solid #d1d5db;
+      font-size: 11pt;
+      font-weight: 700;
+    }
+    .caption-sheet-row {
+      margin: 0 0 1.5mm;
+      font-size: 10pt;
+      line-height: 1.45;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
     @media print {
       body { background: #fff; }
       .toolbar { display: none; }
@@ -210,7 +241,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}。系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
@@ -235,7 +266,7 @@
                 <img class="pr-{{ item._rotate or 0 }}" src="{{ item.url }}" alt="">
                 {% if watermark_text %}<div class="watermark"><span>{{ watermark_text }}</span></div>{% endif %}
               </div>
-              {% if item.detail_rows %}
+              {% if caption_mode != "separate" and item.detail_rows %}
               <div class="photo-caption">
                 {% if page_size >= 4 %}
                 <div class="row">{% for row in item.detail_rows %}{% if not loop.first %}｜{% endif %}{{ row.label }}：{{ row.value }}{% endfor %}</div>
@@ -250,6 +281,25 @@
             {% endfor %}
           </div>
         </section>
+        {% if caption_mode == "separate" and page_items %}
+        {% set caption_cols = 1 if (page_items|length) <= 2 else (2 if (page_items|length) <= 6 else 3) %}
+        <section class="page caption-sheet">
+          {% if show_page_title %}<div class="title">
+            <h1>{{ page_unit }}{% if group.level %} · {{ group.level }}{% endif %} · 照片标签</h1>
+            <div class="meta">工程页 {{ "%03d"|format(page.print_page_number or loop.index) }} · 标签页</div>
+          </div>{% endif %}
+          <div class="caption-sheet-body" style="--caption-cols: {{ caption_cols }};">
+            {% for item in page_items %}
+            <div class="caption-sheet-item">
+              <div class="caption-sheet-number">{{ item.id or ("照片 " ~ loop.index) }}</div>
+              {% for row in item.detail_rows or [] %}
+              <div class="caption-sheet-row"><b>{{ row.label }}：</b><span>{{ row.value }}</span></div>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </section>
+        {% endif %}
         {% endfor %}
       {% else %}
         <div class="empty">{{ label }}暂无照片。</div>

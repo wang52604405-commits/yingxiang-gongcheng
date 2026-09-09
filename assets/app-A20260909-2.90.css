@@ -9258,3 +9258,71 @@
   #partView > .page-head #backOverviewBtn { width: 100%; }
 }
 
+
+
+/* print-grid-autofill-20260909 */
+.print-choice-stack {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.print-segment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.print-choice-label {
+  min-width: 64px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.print-segment-row small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.print-segment-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+}
+.print-segment-group button {
+  min-width: 82px;
+  min-height: 32px;
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  font-weight: 700;
+}
+.print-segment-group button:hover {
+  color: var(--top-dark);
+  background: var(--click);
+  box-shadow: none;
+  transform: none;
+}
+.print-segment-group button.active {
+  color: #fff;
+  background: var(--primary);
+}
+.print-segment-group button.active:hover { color: #fff; background: var(--top-dark); }
+.print-legacy-size-field { display: none !important; }
+@media (max-width: 720px) {
+  .print-segment-row { align-items: flex-start; }
+  .print-choice-label { width: 100%; }
+  .print-segment-group { width: 100%; }
+  .print-segment-group button { flex: 1; }
+}

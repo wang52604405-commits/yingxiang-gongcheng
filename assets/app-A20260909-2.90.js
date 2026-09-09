@@ -5264,11 +5264,9 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
-      default: { style: "default", layout: "landscape", page_size: "4", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "4", margin_right_mm: "4", margin_bottom_mm: "4", margin_left_mm: "4", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      portrait2: { style: "portrait2", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "18.5", photo_height_cm: "12.3", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "4", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      landscape2: { style: "landscape2", layout: "landscape", page_size: "2", single_alignment: "center", photo_preset: "5inch", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "12", margin_right_mm: "12", margin_bottom_mm: "12", margin_left_mm: "12", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      single: { style: "single", layout: "landscape", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "26.0", photo_height_cm: "17.2", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      last: null,
+      one: { style: "one", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      two: { style: "two", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      four: { style: "four", page_size: "4", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "5", margin_right_mm: "5", margin_bottom_mm: "5", margin_left_mm: "5", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
       custom: null
     };
 
@@ -5322,23 +5320,17 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function selectPrintStyle(style) {
-      const savedLast = lastPrintSettings();
-      const savedJob = lastPrintJob();
-      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) && (style !== "last" || (savedLast && savedJob)) ? style : "custom";
+      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "custom";
       document.querySelectorAll("[data-print-style]").forEach((button) => {
         const active = button.dataset.printStyle === state.printStyle;
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", active ? "true" : "false");
       });
-      const isCustom = state.printStyle === "custom" || state.printStyle === "last";
+      const isCustom = state.printStyle === "custom";
       $("#printCustomPanel").classList.toggle("open", isCustom);
-      if (state.printStyle === "last") {
-        state.pendingPrintUrl = "/print/last";
-        applyPrintSetupValues(savedLast);
-      } else {
-        state.pendingPrintUrl = state.printSourceUrl || state.pendingPrintUrl;
-        if (!isCustom) applyPrintStyleToPanel(state.printStyle);
-      }
+      state.pendingPrintUrl = state.printSourceUrl || state.pendingPrintUrl;
+      if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      syncPrintSegmentButtons();
     }
 
     function applyPrintStyleToPanel(style) {
@@ -5367,9 +5359,39 @@ const $ = (selector) => document.querySelector(selector);
       input.closest("label")?.classList.toggle("is-disabled", !enabled);
     }
 
+
+    function syncPrintSegmentButtons() {
+      const layout = $("#printSetupLayout")?.value || "landscape";
+      const captionMode = $("#printSetupCaptionMode")?.value || "inline";
+      document.querySelectorAll("[data-print-layout]").forEach((button) => {
+        const active = button.dataset.printLayout === layout;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+      document.querySelectorAll("[data-print-caption-mode]").forEach((button) => {
+        const active = button.dataset.printCaptionMode === captionMode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    function setPrintLayoutChoice(layout) {
+      const value = layout === "portrait" ? "portrait" : "landscape";
+      $("#printSetupLayout").value = value;
+      syncPrintSegmentButtons();
+    }
+
+    function setPrintCaptionModeChoice(mode) {
+      const value = mode === "separate" ? "separate" : "inline";
+      $("#printSetupCaptionMode").value = value;
+      syncPrintSegmentButtons();
+    }
+
     function loadPrintSetupValues() {
       const settings = state.engineeringSettings || {};
       $("#printSetupLayout").value = settings.print_layout || "landscape";
+      $("#printSetupCaptionMode").value = settings.print_caption_mode || "inline";
+      syncPrintSegmentButtons();
       $("#printSetupPageSize").value = String(settings.print_page_size || 4);
       $("#printSetupSingleAlignment").value = settings.print_single_alignment || "center";
       $("#printSetupPreset").value = settings.print_photo_preset || "5inch";
@@ -5397,8 +5419,9 @@ const $ = (selector) => document.querySelector(selector);
       state.pendingPrintUrl = url;
       state.printSourceUrl = url;
       loadPrintSetupValues();
-      // 工程设置是默认值，不应被“默认打印”预设静默覆盖。
-      selectPrintStyle("custom");
+      const savedPageSize = Number(state.engineeringSettings?.print_page_size || 4);
+      const openingStyle = savedPageSize === 1 ? "one" : savedPageSize === 2 ? "two" : savedPageSize === 4 ? "four" : "custom";
+      selectPrintStyle(openingStyle);
       $("#printSetupModal").classList.add("open");
       $("#printSetupModal").setAttribute("aria-hidden", "false");
     }
@@ -5411,11 +5434,18 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function printSetupParams() {
-      if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) return new URLSearchParams(PRINT_STYLES[state.printStyle]);
+      if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) {
+        const params = new URLSearchParams(PRINT_STYLES[state.printStyle]);
+        params.set("layout", $("#printSetupLayout").value || "landscape");
+        params.set("caption_mode", $("#printSetupCaptionMode").value || "inline");
+        return params;
+      }
       const pageSize = Math.max(1, Math.min(12, Number($("#printSetupPageSize").value || 4)));
       const fields = Array.from(document.querySelectorAll("[data-print-caption-field]:checked")).map((input) => input.value);
       return new URLSearchParams({
         layout: $("#printSetupLayout").value,
+        caption_mode: $("#printSetupCaptionMode").value || "inline",
+        auto_fill: "1",
         page_size: String(pageSize),
         single_alignment: $("#printSetupSingleAlignment").value,
         photo_preset: $("#printSetupPreset").value,
@@ -5491,6 +5521,8 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     document.querySelectorAll("[data-print-style]").forEach((button) => button.addEventListener("click", () => selectPrintStyle(button.dataset.printStyle)));
+    document.querySelectorAll("[data-print-layout]").forEach((button) => button.addEventListener("click", () => setPrintLayoutChoice(button.dataset.printLayout)));
+    document.querySelectorAll("[data-print-caption-mode]").forEach((button) => button.addEventListener("click", () => setPrintCaptionModeChoice(button.dataset.printCaptionMode)));
     $("#printSetupPreset").addEventListener("change", syncPrintSetupPreset);
     $("#printSetupPageSize").addEventListener("input", syncPrintSingleAlignment);
     $("#printSetupCaptionPosition").addEventListener("change", () => {

@@ -726,10 +726,13 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('id="uploadFileQueue"', html)
         self.assertIn('class="upload-workspace"', html)
         self.assertIn('class="upload-target-column"', html)
-        self.assertEqual(html.count('class="print-style-schematic"'), 6)
+        self.assertEqual(html.count('class="print-style-schematic"'), 4)
+        self.assertIn('data-print-layout="landscape"', html)
+        self.assertIn('data-print-layout="portrait"', html)
+        self.assertIn('data-print-caption-mode="separate"', html)
         self.assertIn('ps-paper ps-landscape ps-grid4', html)
-        self.assertIn('ps-paper ps-portrait ps-stack2', html)
         self.assertIn('ps-paper ps-landscape ps-pair2', html)
+        self.assertIn('ps-paper ps-landscape ps-single', html)
         self.assertIn('id="addProcessModal"', html)
         self.assertNotIn('id="settingsExportCsvBtn"', html)
         self.assertNotIn('id="settingsExportJsonBtn"', html)
@@ -1030,17 +1033,20 @@ class DesktopSecurityContractTest(unittest.TestCase):
             photo_height_mm=89,
             print_settings=settings,
         )
-        self.assertEqual(len(pages), 2, "说明区不足时应自动分页，不能把文字压进照片")
-        self.assertGreaterEqual(pages[0][0]["_caption_h"], 11.0)
+        self.assertEqual(len(pages), 1, "四宫格必须固定留在同一张 A4 内，标签只能压缩照片可用区，不能把下一张挤出页面")
+        self.assertEqual(len(pages[0]), 4)
+        self.assertGreaterEqual(pages[0][0]["_caption_h"], 7.5)
+        for item in pages[0]:
+            self.assertLessEqual(item["_top"] + item["_block_h"], 195.5)
 
         groups = [
-            {"project_code": "U-1", "project_name": "一号单元", "level": "单元照片", "pages": [pages[0], pages[1]]},
+            {"project_code": "U-1", "project_name": "一号单元", "level": "单元照片", "pages": [pages[0]]},
             {"project_code": "U-2", "project_name": "二号单元", "level": "工序照片", "pages": [[detailed_photo]]},
         ]
         numbered = self.desktop.assign_unique_print_page_numbers(groups)
         all_pages = [page for group in numbered for page in group["pages"]]
-        self.assertEqual([page["print_page_number"] for page in all_pages], [1, 2, 3])
-        self.assertEqual([page["unit_page_number"] for page in all_pages], [1, 2, 1])
+        self.assertEqual([page["print_page_number"] for page in all_pages], [1, 2])
+        self.assertEqual([page["unit_page_number"] for page in all_pages], [1, 1])
 
         normalized = self.desktop._normalize_engineering_settings({
             "last_print_settings": {"page_size": "1", "photo_preset": "6inch", "unknown": "discard"},
