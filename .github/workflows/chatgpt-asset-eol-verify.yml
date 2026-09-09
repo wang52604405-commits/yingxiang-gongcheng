@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - chatgpt/fix-asset-eol-20260909
-    paths:
-      - .gitattributes
-      - .github/workflows/chatgpt-asset-eol-verify.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -26,7 +23,7 @@ jobs:
           if ($jsAttr -notmatch 'text: unset') { throw "JS_TEXT_ATTRIBUTE_NOT_UNSET: $jsAttr" }
           if ($cssAttr -notmatch 'text: unset') { throw "CSS_TEXT_ATTRIBUTE_NOT_UNSET: $cssAttr" }
 
-      - name: Verify gzip payload equals checked-out source byte-for-byte
+      - name: Regenerate deterministic gzip from canonical source bytes
         shell: pwsh
         run: |
           @'
@@ -37,10 +34,24 @@ jobs:
               source = Path("assets") / name
               packed = Path("assets") / f"{name}.gz"
               raw = source.read_bytes()
+              if b"\r\n" in raw:
+                  raise SystemExit(f"CRLF_PRESENT_IN_CANONICAL_SOURCE {name}")
+              packed.write_bytes(gzip.compress(raw, compresslevel=9, mtime=0))
               inflated = gzip.decompress(packed.read_bytes())
               if raw != inflated:
-                  raise SystemExit(f"BYTE_MISMATCH {name}: source={len(raw)} gzip={len(inflated)}")
-              if b"\r\n" in raw:
-                  raise SystemExit(f"CRLF_PRESENT {name}")
+                  raise SystemExit(f"BYTE_MISMATCH_AFTER_REBUILD {name}")
               print(f"BYTE_MATCH {name} bytes={len(raw)}")
           '@ | python -
+
+      - name: Commit canonical gzip payload when needed
+        shell: pwsh
+        run: |
+          git config user.name "wang52604405-commits"
+          git config user.email "wang52604405@gmail.com"
+          git add assets/app-A20260909-2.90.js.gz assets/app-A20260909-2.90.css.gz
+          if (git diff --cached --quiet) {
+            Write-Host "GZIP_ALREADY_CANONICAL"
+            exit 0
+          }
+          git commit -m "fix: rebuild 2.90 compressed assets from canonical bytes"
+          git push origin HEAD:chatgpt/fix-asset-eol-20260909
