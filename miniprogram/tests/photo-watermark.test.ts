@@ -85,12 +85,12 @@ describe('独立水印副本与手动定位', () => {
     expect(result.height).toBe(3000)
     expect(ctx.drawImage).toHaveBeenCalledTimes(2)
     expect(ctx.fillRect).toHaveBeenCalledTimes(3)
-    expect(ctx.fillText.mock.calls.map((call: any) => call[0]).some((text: string) => text.startsWith('时间：'))).toBe(false)
+    expect(ctx.fillText.mock.calls.map((call: any) => call[0])).toContain('时间：未取得拍摄日期')
     expect(ctx.textBaseline).toBe('middle')
   })
 
-  it('固定模板左下角、统一字号且约占八分之一，施工内容为单元加手填文字，并彻底去掉时间行', () => {
-    const fields = { project:'水库除险加固工程',unitProjectName:'拦河闸单位工程',partName:'闸室分部工程',unitName:'底板钢筋单元',constructionContent:'钢筋间距与保护层验收',photographer:'张三',contractor:'中国建筑某施工单位' }
+  it('固定模板保留日期但不显示时分秒，并保持文字垂直居中', () => {
+    const fields = { project:'水库除险加固工程',unitProjectName:'拦河闸单位工程',partName:'闸室分部工程',unitName:'底板钢筋单元',constructionContent:'钢筋间距与保护层验收',capturedAt:'2026-09-10T06:58:32+08:00',photographer:'张三',contractor:'中国建筑某施工单位' }
     const layout = layoutFixedWatermark(2048,1536,fields,measure,{width:305,height:56})
     expect(layout.areaRatio).toBeLessThanOrEqual(.145)
     expect(layout.headerFontSize).toBe(layout.fontSize)
@@ -99,7 +99,8 @@ describe('独立水印副本与手动定位', () => {
     expect(layout.x).toBeLessThan(100)
     expect(layout.y+layout.height).toBeLessThan(1536)
     expect(fixedWatermarkRows(fields)).toContain('施工内容：底板钢筋单元—钢筋间距与保护层验收')
-    expect(fixedWatermarkRows(fields).some((row) => row.startsWith('时间：'))).toBe(false)
+    expect(fixedWatermarkRows(fields)).toContain('时间：2026-09-10')
+    expect(fixedWatermarkRows(fields).some((row) => /\d{2}:\d{2}/.test(row))).toBe(false)
   })
 
   it('导出器若错误返回原图路径则拒绝当作水印成功', async () => {
