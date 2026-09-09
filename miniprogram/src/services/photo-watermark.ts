@@ -137,6 +137,17 @@ export function layoutWatermark(width: number, height: number, fields: PhotoWate
 
 const ORIENTATIONS: Record<string, number> = { up: 1, 'up-mirrored': 2, down: 3, 'down-mirrored': 4, 'left-mirrored': 5, right: 6, 'right-mirrored': 7, left: 8 }
 
+function capturedDateLabel(value?: string): string {
+  const raw = String(value || '').trim()
+  const direct = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (direct) return `${direct[1]}-${direct[2]}-${direct[3]}`
+  if (!raw) return '未取得拍摄日期'
+  const date = new Date(raw)
+  if (!Number.isFinite(date.getTime())) return '未取得拍摄日期'
+  const two = (number: number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`
+}
+
 export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
   const content = fields.constructionContent?.trim() || fields.sitePart?.trim() || fields.title?.trim() || ''
   const construction = [fields.unitName?.trim(), content].filter(Boolean).join('—')
@@ -145,6 +156,7 @@ export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
     `单位工程：${fields.unitProjectName?.trim() || '未填写'}`,
     `施工区域：${fields.partName?.trim() || '未填写'}`,
     `施工内容：${construction || '未填写'}`,
+    `时间：${capturedDateLabel(fields.capturedAt || fields.photoDate)}`,
     `拍摄者：${fields.photographer?.trim() || '未填写'}`,
     `位置：${location || '未添加位置'}`,
   ]
