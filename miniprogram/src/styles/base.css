@@ -68,7 +68,8 @@ uni-button.pressable {
   line-height: 1.25;
 }
 
-button::after {
+button::after,
+uni-button::after {
   border: 0;
 }
 
@@ -147,7 +148,7 @@ uni-button::after {
   gap: 6rpx;
   padding: 6rpx;
   border-radius: 20rpx;
-  background: #081316;
+  background: var(--segment-bg, var(--surface-2));
 }
 
 .segment-button {
@@ -167,8 +168,9 @@ uni-button::after {
 }
 
 .segment-button.active {
-  color: var(--text);
-  background: var(--surface-2);
+  color: var(--primary-strong);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1rpx var(--line);
 }
 
 .field-label {
@@ -309,7 +311,7 @@ uni-button::after {
   justify-content: center;
   padding: 40rpx;
   color: var(--text);
-  background: rgba(4, 15, 18, 0.9);
+  background: var(--loading-bg, var(--surface));
   opacity: 1;
   transition: opacity 180ms var(--ease-out);
 }

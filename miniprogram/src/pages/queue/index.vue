@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
 import { photoActions } from '@/services/photo-actions'
 import type { LocalPhoto } from '@/types/domain'
@@ -87,7 +88,7 @@ onShow(() => {
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell">
+  <view class="page-shell" :style="themeStyle">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <view class="title-row">
       <text class="page-title">同步记录</text>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref } from 'vue'
 import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -52,7 +53,7 @@ onLoad(() => {
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs invite-page">
+  <view class="page-shell no-tabs invite-page" :style="themeStyle">
     <PageHeader title="邀请成员" :subtitle="project.name" />
     <template v-if="!invite">
       <text class="field-label role-label">审批通过后的角色</text>

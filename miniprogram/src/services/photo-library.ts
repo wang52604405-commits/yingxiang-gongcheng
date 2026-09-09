@@ -20,17 +20,25 @@ export function createPhotoLibrary(
   const state = reactive({ photos: [] as CloudPhoto[], totalCount: 0, nextCursor: '', loading: false, loadingMore: false, error: '' })
   let version = 0
   let activeKey = ''
+  let refreshedAt = 0
   async function load(reset = true): Promise<void> {
     const current = snapshot()
     const key = JSON.stringify(current)
-    if (key !== activeKey) reset = true
+    const contextChanged = key !== activeKey
+    if (contextChanged) reset = true
+    if (!contextChanged && reset && state.loading) return
     if (!reset && (state.loading || state.loadingMore || !state.nextCursor)) return
     if (reset) {
       version += 1
       activeKey = key
-      state.photos = []
-      state.totalCount = 0
-      state.nextCursor = ''
+      // Keep mounted images during a refresh. A different account/project/filter
+      // must clear immediately so previous project photos never leak into it.
+      if (contextChanged) {
+        state.photos = []
+        state.totalCount = 0
+        state.nextCursor = ''
+        refreshedAt = 0
+      }
       state.loadingMore = false
       state.error = ''
     }
@@ -44,13 +52,26 @@ export function createPhotoLibrary(
       const cursor = reset ? undefined : state.nextCursor
       const response = await fetchPage({ ...current.query, cursor, limit: 60 })
       if (!stillCurrent()) return
+      const unchangedHead = reset && response.total === state.totalCount
+        && response.photos.length > 0
+        && response.photos.every((photo, index) => state.photos[index]?.photo_uuid === photo.photo_uuid)
+      const savedCursor = state.nextCursor
+      if (reset) {
+        const previous = new Map(state.photos.map((photo) => [photo.photo_uuid, photo]))
+        const incoming = response.photos.map((photo) => {
+          const old = previous.get(photo.photo_uuid)
+          return old && JSON.stringify(old) === JSON.stringify(photo) ? old : photo
+        })
+        state.photos = unchangedHead ? [...incoming, ...state.photos.slice(incoming.length)] : incoming
+      }
       const existing = new Set(state.photos.map((photo) => photo.photo_uuid))
       for (const photo of response.photos) {
         if (existing.has(photo.photo_uuid)) continue
         state.photos.push(photo)
         existing.add(photo.photo_uuid)
       }
-      state.nextCursor = response.next_cursor || ''
+      state.nextCursor = unchangedHead ? savedCursor : response.next_cursor || ''
+      refreshedAt = Date.now()
       state.totalCount = response.total
       if (cursor && cursor === state.nextCursor) {
         state.nextCursor = ''
@@ -62,5 +83,9 @@ export function createPhotoLibrary(
       if (stillCurrent()) { state.loading = false; state.loadingMore = false }
     }
   }
-  return { state, load }
+  async function refreshIfStale(maxAgeMs = 30_000): Promise<void> {
+    if (JSON.stringify(snapshot()) === activeKey && refreshedAt && Date.now() - refreshedAt < maxAgeMs) return
+    await load(true)
+  }
+  return { state, load, refreshIfStale }
 }

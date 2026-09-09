@@ -2667,6 +2667,52 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.route("/api/mobile/v1/projects/<project_id>/watermark-settings", methods=["GET", "PATCH"])
+    def mobile_project_watermark_settings(project_id):
+        current = user()
+        conn = db.connect()
+        try:
+            editing = request.method == "PATCH"
+            if editing:
+                conn.execute("BEGIN IMMEDIATE")
+            project = project_for(conn, current["id"], project_id,
+                                  MANAGE_MEMBER_ROLES if editing else PROJECT_ROLES)
+            key = (int(project["account_id"]), project["project_id"])
+            row = conn.execute(
+                "SELECT logo_id, contractor FROM project_watermark_settings "
+                "WHERE project_owner_account_id = ? AND project_id = ?", key
+            ).fetchone()
+            settings = dict(row) if row else {"logo_id": "crec", "contractor": ""}
+            if editing:
+                data = json_body()
+                if set(data) - {"logo_id", "contractor"}:
+                    raise ApiProblem("invalid_watermark_settings", "仅可设置公司图标和施工单位", 400)
+                if "logo_id" in data:
+                    if not isinstance(data["logo_id"], str) or data["logo_id"] not in {"crec", "crcc", "cscec", "powerchina", "ceec", "cccc"}:
+                        raise ApiProblem("invalid_watermark_settings", "请选择有效的公司图标", 400)
+                    settings["logo_id"] = data["logo_id"]
+                if "contractor" in data:
+                    value = data["contractor"]
+                    if not isinstance(value, str) or len(value) > 120 or any(ord(char) < 32 for char in value):
+                        raise ApiProblem("invalid_watermark_settings", "施工单位须为不超过120字的单行文字", 400)
+                    settings["contractor"] = value.strip()
+                conn.execute(
+                    "INSERT INTO project_watermark_settings "
+                    "(project_owner_account_id,project_id,logo_id,contractor,updated_by_account_id,updated_at) "
+                    "VALUES (?,?,?,?,?,?) ON CONFLICT(project_owner_account_id,project_id) DO UPDATE SET "
+                    "logo_id=excluded.logo_id,contractor=excluded.contractor,"
+                    "updated_by_account_id=excluded.updated_by_account_id,updated_at=excluded.updated_at",
+                    (*key, settings["logo_id"], settings["contractor"], int(current["id"]), now()),
+                )
+                conn.commit()
+            return jsonify({"ok": True, "settings": settings,
+                            "can_manage": project["access_role"] in MANAGE_MEMBER_ROLES and bool(project["upload_allowed"])})
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     @blueprint.get("/api/mobile/v1/projects/<project_id>/members")
     def mobile_project_members(project_id):
         current = user()

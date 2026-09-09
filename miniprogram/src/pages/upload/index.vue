@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { setWatermarkContext } from '@/services/watermark-context'
 import { consumePhotoEditDestination, flattenDestinations, reconcileDestination, destinationLabel as fullDestinationLabel } from '@/services/destination-history'
 import { captureDraftStorage, captureOverrides, localDate, type CaptureItem } from '@/services/capture-draft'
@@ -40,6 +41,7 @@ const scopeOwner = ref('')
 const scopeProject = ref('')
 const restoring = ref(false)
 const showAdvanced = ref(false)
+const showMetadata = ref(false)
 const tree = ref<ProjectNode[]>([])
 let treeRequest = 0
 async function refreshTree() {
@@ -159,15 +161,32 @@ function editDestination() {
   saveEdits()
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=photo-edit` })
 }
+async function removeCandidates(paths: string[]) {
+  if (submitting.value || choosing.value) return
+  const owner = scopeOwner.value
+  const projectId = scopeProject.value
+  if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) return
+  const removedPaths = new Set(paths)
+  const keptSelection = new Set(selected.value.map(index => items.value[index]?.path).filter(path => path && !removedPaths.has(path)))
+  const removed = items.value.filter(item => removedPaths.has(item.path))
+  items.value = items.value.filter(item => !removedPaths.has(item.path))
+  selected.value = items.value.flatMap((item, index) => keptSelection.has(item.path) ? [index] : [])
+  persistDraft()
+  // Only our saved draft copy is discarded; the phone album original is untouched.
+  if (!draftWarning.value) await Promise.allSettled(removed.map(item => discardCaptureOriginal(item.path, owner, projectId)))
+}
+function removePhoto(index: number) {
+  const item = items.value[index]
+  if (item) void removeCandidates([item.path])
+}
 function removeSelected() {
   if (submitting.value || choosing.value) return
+  const paths = selected.value.map(index => items.value[index]?.path).filter(Boolean)
+  const owner = scopeOwner.value
+  const projectId = scopeProject.value
   uni.showModal({ title: `移除选中的 ${selected.value.length} 张？`, content: '仅从本次选择中移除，手机相册不受影响。', success: async ({ confirm }) => {
-    if (!confirm) return
-    const removed = items.value.filter((_, index) => selected.value.includes(index))
-    items.value = items.value.filter((_, index) => !selected.value.includes(index))
-    selected.value = []
-    persistDraft()
-    if (!draftWarning.value) await Promise.allSettled(removed.map(item => discardCaptureOriginal(item.path, scopeOwner.value, scopeProject.value)))
+    if (!confirm || owner !== scopeOwner.value || projectId !== scopeProject.value) return
+    await removeCandidates(paths)
   } })
 }
 function openWatermark() {
@@ -337,6 +356,7 @@ async function submitCapture() {
     return
   }
   if (items.value.some(item => !captureOverrides(item, batchTitle.value, photographer.value).photographer?.trim())) {
+    showMetadata.value = true
     uni.showToast({ title: '请填写拍摄者，或点击本人', icon: 'none' }); return
   }
   const submitOwner = scopeOwner.value
@@ -417,21 +437,24 @@ onUnload(persistDraft)
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs capture-page">
+  <view class="page-shell no-tabs capture-page" :style="themeStyle">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
-    <text class="page-title">采集影像</text>
+    <view class="upload-heading"><text class="page-title">上传照片</text><text class="page-subtitle">选好照片，确认信息，即可上传</text></view>
 
     <view class="media-card card">
-      <view class="media-head"><text class="media-title">{{ items.length ? `${items.length} 张照片` : '添加照片' }}</text><button class="text-button pressable" :disabled="choosing || submitting" @tap="reuseLast">沿用上一批</button></view>
+      <view class="media-head"><text class="media-title">{{ items.length ? `待上传 · ${items.length} 张` : '添加照片' }}</text><button class="text-button pressable" :disabled="choosing || submitting" @tap="reuseLast">沿用上一批</button></view>
       <view v-if="items.length || pendingPaths.length" class="photo-grid">
         <view v-for="(item, index) in items" :key="item.path" class="photo-tile" :class="{ selected: selected.includes(index) }">
           <image :src="item.path" mode="aspectFill" @tap="previewPhoto(index)" />
           <button class="select-photo pressable" :aria-label="`选择第 ${index + 1} 张`" @tap="togglePhoto(index)">{{ selected.includes(index) ? '✓' : index + 1 }}</button>
+          <button class="remove-photo" :disabled="choosing || submitting" :aria-label="`移除第 ${index + 1} 张候选照片`" @tap.stop="removePhoto(index)">×</button>
           <text class="photo-date" :class="{ warning: !(item.overrides.photo_date || item.date) }">{{ item.overrides.photo_date || item.date || '日期待确认' }}</text>
           <text v-if="item.overrides.assignment || item.overrides.title || item.overrides.photographer" class="photo-custom">单独设置</text>
         </view>
         <view v-for="path in pendingPaths" :key="path" class="photo-tile"><image :src="path" mode="aspectFill" /><text class="photo-date">正在保存…</text></view>
       </view>
+      <view v-else class="empty-media"><view class="empty-media-icon"><UiIcon name="gallery" :size="28" /></view><text>从手机相册选择照片</text><text class="empty-media-note">保留原图，支持一次选择多张</text></view>
+      <text v-if="items.length" class="photo-hint">点照片预览 · 点左上角多选 · × 仅移除本次候选</text>
       <text v-if="choosing" class="saving-note">正在保存照片，完成后可继续添加</text><view class="add-actions"><button class="secondary-button pressable" :disabled="choosing || submitting" @tap="pickMedia('camera')">{{ items.length ? '继续拍照' : '拍照' }}</button><button class="secondary-button pressable" :disabled="choosing || submitting" @tap="pickMedia('album')">{{ items.length ? '继续添加' : '选照片' }}</button></view>
       <view v-if="items.length" class="selection-tools"><text>{{ selectedLabel }}</text><button class="text-button pressable" @tap="selected = selected.length === items.length ? [] : items.map((_, i) => i)">{{ selected.length === items.length ? '取消全选' : '全选' }}</button></view>
       <view v-if="selected.length" class="selection-actions"><button class="secondary-button pressable" @tap="editSelected">修改 {{ selected.length }} 张</button><button class="text-button pressable" @tap="openWatermark">编辑水印</button><button class="text-button pressable" @tap="removeSelected">移除</button></view>
@@ -471,19 +494,23 @@ onUnload(persistDraft)
       <text v-if="mode === 'auto'" class="auto-note">归档位置先确定，上传后再辅助识别。</text>
     </view>
     <view class="metadata-card card">
-      <text class="media-title">本批照片信息</text>
+      <button class="metadata-toggle" @tap="showMetadata = !showMetadata"><view class="metadata-toggle-copy"><text class="media-title">本批照片信息</text><text v-if="!showMetadata" class="metadata-summary">{{ batchTitle || '题名随工序' }} · {{ photographer || '拍摄者待填写' }}{{ missingDates ? ` · ${missingDates} 张日期待确认` : '' }}</text></view><text class="fold-label">{{ showMetadata ? '收起' : '编辑' }}</text></button>
+      <view v-show="showMetadata">
       <text class="field-label">题名</text><input v-model="batchTitle" class="metadata-input" maxlength="120" placeholder="留空使用当前工序名称" />
       <scroll-view scroll-x :show-scrollbar="false" class="title-scroll"><view class="title-chips"><button v-for="title in commonTitles" :key="title" class="small-chip pressable" @tap="batchTitle = title">{{ title }}</button></view></scroll-view>
       <view class="field-heading"><text class="field-label">拍摄者</text><button class="text-button pressable" @tap="useMyName">本人</button></view>
       <input v-model="photographer" class="metadata-input" maxlength="60" placeholder="填写实际拍摄者" />
       <view class="date-summary"><text>拍摄日期</text><text :class="{ warning: missingDates }">{{ missingDates ? `${missingDates} 张待确认` : '保留各自拍摄日期' }}</text></view>
       <button v-if="missingDates" class="text-button pressable" @tap="selected = items.map((item, i) => !(item.overrides.photo_date || item.date) ? i : -1).filter(i => i >= 0); editSelected()">补充缺失日期</button>
+      </view>
       <text v-if="draftWarning" class="warning">{{ draftWarning }}</text>
     </view>
 
     <view v-if="queueRuntime.queueBytes.value > 0" class="queue-status"><view class="queue-copy"><text>本机待上传</text><text>{{ formatBytes(queueRuntime.queueBytes.value) }} / 160MB</text></view><view class="usage-track"><view class="usage-fill" :style="{ transform: `scaleX(${queueRuntime.queueUsagePercent.value / 100})` }" /></view></view>
-    <text v-if="!canCaptureProject(project)" class="saving-note">当前仅可查看和制作本地水印，勾选照片后点“编辑水印”。</text>
-    <button v-if="canCaptureProject(project)" class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button>
+    <view class="upload-footer">
+      <template v-if="canCaptureProject(project)"><view class="footer-summary"><text>{{ items.length ? `已选 ${items.length} 张` : '还未选择照片' }}</text><text class="footer-note">{{ items.length ? '候选照片暂存本机' : '支持批量上传' }}</text></view><button class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button></template>
+      <text v-else class="saving-note">当前可制作本地水印，勾选一张照片后点“编辑水印”。</text>
+    </view>
     <view v-if="editing" class="editor-mask" @tap="editing = false"><view class="editor-sheet card" @tap.stop>
       <view class="media-head"><text class="media-title">修改选中的 {{ selected.length }} 张</text><button class="text-button pressable" @tap="editing = false">取消</button></view>
       <text class="field-label">题名</text><input v-model="editor.title" class="metadata-input" maxlength="120" placeholder="留空保持原值" />
@@ -507,11 +534,11 @@ onUnload(persistDraft)
 .text-button { margin:0; min-height:44px; padding:8rpx 12rpx; display:flex; align-items:center; justify-content:center; color:var(--primary-strong); font-size:24rpx; background:transparent; line-height:1.4; }
 .title-scroll :deep(::-webkit-scrollbar) { display:none; width:0; height:0; }
 .title-scroll { margin-top:12rpx; white-space:nowrap; }.title-chips { display:inline-flex; gap:12rpx; }.small-chip { flex:none; min-height:40px; padding:10rpx 20rpx; border-radius:12rpx; background:var(--surface-2); color:var(--muted); font-size:23rpx; line-height:1.5; display:flex; align-items:center; }
-.photo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12rpx; margin-top:18rpx; }.photo-tile { position:relative; min-width:0; border:2px solid transparent; border-radius:16rpx; overflow:hidden; background:var(--surface-2); }.photo-tile.selected { border-color:var(--primary-strong); }.photo-tile image { width:100%; height:172rpx; display:block; }.select-photo { position:absolute; top:4rpx; right:4rpx; min-width:44px; min-height:44px; padding:0; background:rgba(0,0,0,.55); color:white; line-height:44px; font-size:24rpx; border-radius:50%; }.selected .select-photo { background:var(--primary-strong); color:var(--surface); }.photo-date { display:block; text-align:center; font-size:20rpx; padding:10rpx 0; color:var(--muted); }.photo-custom { position:absolute; bottom:48rpx; left:0; background:rgba(0,0,0,.6); color:white; padding:4rpx 8rpx; font-size:19rpx; }.warning { color:var(--warning); }
+.photo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12rpx; margin-top:18rpx; }.photo-tile { position:relative; min-width:0; border:2px solid transparent; border-radius:16rpx; overflow:hidden; background:var(--surface-2); }.photo-tile.selected { border-color:var(--primary-strong); }.photo-tile image { width:100%; height:172rpx; display:block; }.select-photo { position:absolute; top:4rpx; left:4rpx; width:32px; height:32px; min-width:32px; min-height:32px; padding:0; background:rgba(0,0,0,.55); color:white; line-height:32px; font-size:24rpx; border-radius:50%; }.selected .select-photo { background:var(--primary-strong); color:var(--surface); }.photo-date { display:block; text-align:center; font-size:20rpx; padding:10rpx 0; color:var(--muted); }.photo-custom { position:absolute; bottom:48rpx; left:0; background:rgba(0,0,0,.6); color:white; padding:4rpx 8rpx; font-size:19rpx; }.warning { color:var(--warning); }
 .add-actions { display:grid; grid-template-columns:1fr 1fr; gap:14rpx; margin-top:22rpx; }.add-actions button,.selection-actions button { font-size:25rpx; min-height:44px; }.selection-tools { font-size:22rpx; color:var(--muted); margin-top:12rpx; }.selection-actions { display:flex; flex-wrap:wrap; gap:20rpx; align-items:center; }
 .editor-mask { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.55); display:flex; align-items:flex-end; }.editor-sheet { width:100%; max-height:85vh; overflow-y:auto; padding:28rpx 28rpx calc(30rpx + env(safe-area-inset-bottom)); border-radius:28rpx 28rpx 0 0; }.editor-actions { margin-top:24rpx; }.editor-actions .primary-button { flex:1; min-height:48px; font-size:26rpx; }.picker-date { display:flex; align-items:center; }
 
-.capture-page { padding-bottom: calc(54rpx + var(--safe-bottom)); }
+.capture-page { padding-bottom: calc(180rpx + var(--safe-bottom)); }
 .media-card { margin-top: 24rpx; padding: 24rpx; }
 .media-head { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
 .media-title { display: block; color: var(--text); font-size: 28rpx; font-weight: 700; }
@@ -541,7 +568,22 @@ onUnload(persistDraft)
 .queue-copy { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 21rpx; }
 .usage-track { height: 8rpx; margin-top: 10rpx; overflow: hidden; border-radius: 999rpx; background: var(--surface-2); }
 .usage-fill { width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: var(--primary-strong); transition: transform 180ms var(--ease-out); }
-.submit-button { margin-top: 26rpx; }
+.submit-button { margin:0; flex:1; max-width:440rpx; min-height:48px; font-size:28rpx; }
+.upload-heading { padding-top:12rpx; }
+.page-subtitle { display:block; margin-top:8rpx; color:var(--muted); font-size:24rpx; }
+.remove-photo { position:absolute; top:4rpx; right:4rpx; width:32px; height:32px; min-height:32px; margin:0; padding:0; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; background:rgba(12,21,24,.72); font-family:Arial,sans-serif; font-size:25px; line-height:1; }
+.remove-photo::after,.select-photo::after,.metadata-toggle::after { border:0; }
+.remove-photo:active { background:rgba(12,21,24,.92); }
+.photo-hint { display:block; color:var(--muted); font-size:21rpx; margin-top:16rpx; line-height:1.5; }
+.empty-media-note { font-size:22rpx; font-weight:400; color:var(--muted); }
+.metadata-toggle { display:flex; align-items:center; justify-content:space-between; width:100%; min-height:44px; padding:0; margin:0; text-align:left; background:transparent; line-height:1.5; }
+.metadata-toggle-copy { flex:1; min-width:0; }
+.metadata-summary { display:block; font-size:23rpx; color:var(--muted); margin-top:8rpx; white-space:normal; }
+.fold-label { flex:none; margin-left:18rpx; color:var(--primary-strong); font-size:24rpx; }
+.upload-footer { position:fixed; bottom:0; left:0; right:0; z-index:35; display:flex; align-items:center; justify-content:space-between; gap:24rpx; padding:20rpx 28rpx calc(20rpx + env(safe-area-inset-bottom)); background:var(--surface); border-top:1rpx solid var(--line); }
+.footer-summary { display:flex; flex-direction:column; gap:5rpx; color:var(--text); font-size:27rpx; }
+.footer-note { color:var(--muted); font-size:21rpx; }
+.upload-footer .saving-note { margin:0; line-height:1.6; }
 .requirement-context { margin-top: 22rpx; padding: 18rpx 20rpx; border: 1rpx solid rgba(38, 181, 167, 0.35); border-radius: 18rpx; background: var(--primary-soft); }
 .requirement-context-kicker { display:block; color:var(--primary-strong); font-size:22rpx; }
 .requirement-context-title { display: block; margin-top: 8rpx; color: var(--text); font-size: 26rpx; font-weight: 700; }

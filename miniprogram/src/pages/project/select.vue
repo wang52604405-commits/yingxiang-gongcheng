@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -41,7 +42,7 @@ onLoad(load)
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs">
+  <view class="page-shell no-tabs" :style="themeStyle">
     <PageHeader title="选择工程" />
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="projects.length" class="project-list card">

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle, themeState, themeLabel, setThemeMode, locateTheme } from '@/services/theme'
+import { usePageTheme, themeState, themeLabel, setThemeMode, locateTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { pendingJoinRequest } from '@/services/project-join-request'
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
@@ -59,7 +60,7 @@ onShow(() => {
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell">
+  <view class="page-shell" :style="themeStyle">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">我的</text>
 
@@ -91,7 +92,7 @@ onShow(() => {
     </view>
 
     <button v-if="authenticated" class="account-button pressable" @tap="confirmSignOut">切换账号</button>
-      <text class="version">工程影像 V1.6.3</text>
+      <text class="version">工程影像 V1.6.4</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->

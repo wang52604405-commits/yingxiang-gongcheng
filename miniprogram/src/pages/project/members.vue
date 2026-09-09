@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -60,6 +61,8 @@ async function load() {
     loading.value = false
   }
 }
+
+function openWatermarkSettings() { if(canManage.value) uni.navigateTo({url:'/pages/project/watermark-settings'}) }
 
 function openInvite() {
   if (canManage.value) uni.navigateTo({ url: '/pages/project/invite' })
@@ -130,9 +133,10 @@ onShow(() => { if (!loading.value) void load() })
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs members-page">
+  <view class="page-shell no-tabs members-page" :style="themeStyle">
     <PageHeader title="项目成员" :subtitle="project.name" />
     <button v-if="canManage" class="application-entry card pressable" @tap="openApplications"><text>加入申请</text><view class="application-entry-trailing"><text v-if="pendingCount" class="application-count">{{ pendingCount }} 人待审核</text><text v-else>查看</text><text>›</text></view></button>
+    <button v-if="canManage" class="application-entry card pressable" @tap="openWatermarkSettings"><text>图标与施工单位</text><view class="application-entry-trailing"><text>统一设置</text><text>›</text></view></button>
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="members.length" class="member-list card">
       <view v-for="member in members" :key="member.account_id" class="member-item">

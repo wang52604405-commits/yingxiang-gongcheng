@@ -126,6 +126,15 @@ ON client_error_logs(fingerprint, created_at DESC);
 # 移动端 V1 采用纯增量表。表名与旧 cloud_projects/cloud_thumbs 分开，避免
 # 改写既有云预览数据；所有业务唯一键都包含 account_id，保证租户隔离。
 MOBILE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS project_watermark_settings (
+    project_owner_account_id INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    logo_id TEXT NOT NULL DEFAULT 'crec',
+    contractor TEXT NOT NULL DEFAULT '',
+    updated_by_account_id INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_owner_account_id, project_id)
+);
 CREATE TABLE IF NOT EXISTS project_photo_security (
     project_owner_account_id INTEGER NOT NULL, project_id TEXT NOT NULL,
     delete_password_hash TEXT NOT NULL, updated_at TEXT NOT NULL,

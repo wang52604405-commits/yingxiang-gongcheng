@@ -48,10 +48,10 @@ describe('共享工程角色与选择状态', () => {
     ;(globalThis as any).uni.navigateTo = navigateTo
     ;(globalThis as any).uni.showActionSheet = ({ success }: any) => success({ tapIndex: 0 })
     expect(await launchCapture()).toBe(true)
-    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/photo/watermark?camera=1' })
+    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/photo/watermark?camera=1', animationType: 'none' })
     ;(globalThis as any).uni.showActionSheet = ({ success }: any) => success({ tapIndex: 1 })
     await launchCapture()
-    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/upload/index?source=album&autopick=1' })
+    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/upload/index?source=album&autopick=1', animationType: 'none' })
   })
 
   it('角色显示简洁且成员数有安全默认值', () => {
@@ -97,7 +97,7 @@ describe('采集权限入口覆盖', () => {
   it('产品版本与页面显示保持一致', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.6.3')
+    expect(pkg.version).toBe('1.6.4')
     expect(manifest.versionName).toBe(pkg.version)
     expect(source('src/pages/profile/index.vue')).toContain(`工程影像 V${pkg.version}`)
   })

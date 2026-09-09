@@ -27,7 +27,7 @@ function activate(tab: typeof tabs[number]) {
 .h5-tab.active { color: var(--primary-strong); }
 .h5-icon { position: relative; display: grid; place-items: center; width: 42rpx; height: 42rpx; line-height: 1; }
 .h5-tab.primary { height: calc(100% + 34rpx); margin-top: -34rpx; color: var(--primary-strong); }
-.h5-tab.primary .h5-icon { position: absolute; top: 0; left: 50%; display: grid; place-items: center; width: 82rpx; height: 82rpx; border: 7rpx solid var(--surface); border-radius: 27rpx; color: #041a1a; background: var(--primary-strong); transform: translateX(-50%); }
+.h5-tab.primary .h5-icon { position: absolute; top: 0; left: 50%; display: grid; place-items: center; width: 82rpx; height: 82rpx; border: 7rpx solid var(--surface); border-radius: 27rpx; color: var(--on-primary); background: var(--primary-strong); transform: translateX(-50%); }
 .h5-tab.primary > text { position: absolute; top: 102rpx; left: 0; right: 0; text-align: center; }
 .h5-badge { position: absolute; top: -8rpx; right: -14rpx; display: grid; place-items: center; min-width: 28rpx; min-height: 28rpx; padding: 3rpx 7rpx; border-radius: 999rpx; color: #241700; background: var(--warning); font-size: 17rpx; font-weight: 700; line-height: 1; }
 </style>

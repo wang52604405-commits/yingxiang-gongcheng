@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref } from 'vue'
 import { onShow, onUnload } from '@dcloudio/uni-app'
 import { normalizeInviteCode, peekPendingInvite, rememberPendingInvite } from '@/services/pending-invite'
@@ -114,7 +115,7 @@ function backToAccount(): void {
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs auth-page">
+  <view class="page-shell no-tabs auth-page" :style="themeStyle">
     <PageHeader title="工程影像" :back="false" />
 
     <view v-if="sessionState.stage === 'checking'" class="auth-status">

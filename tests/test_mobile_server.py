@@ -4711,6 +4711,53 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertEqual([e["action"] for e in feed["changes"]],["edit","delete"])
         self.assertNotIn("safe123",json.dumps(feed))
 
+    def test_project_watermark_settings_are_shared_only_with_authorized_members(self):
+        project_id = "watermark-" + uuid.uuid4().hex[:8]
+        self._snapshot(self.desktop_token_a, "共享水印工程", project_id=project_id)
+        self._snapshot(self.desktop_token_b, "另一个同编号工程", project_id=project_id, desktop_machine_id="MACHINE-B")
+        conn = self.db.connect()
+        owner = conn.execute("SELECT id FROM accounts WHERE username='tenant_a'").fetchone()["id"]
+        member = conn.execute("SELECT id FROM accounts WHERE username='tenant_b'").fetchone()["id"]
+        conn.close()
+        path = f"/api/mobile/v1/projects/{owner}:{project_id}/watermark-settings"
+        other_path = f"/api/mobile/v1/projects/{member}:{project_id}/watermark-settings"
+        initial = self.client.get(path, headers=self._headers(self.token_a))
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.get_json()["settings"], {"logo_id": "crec", "contractor": ""})
+        self.assertTrue(initial.get_json()["can_manage"])
+        for method in (self.client.get, self.client.patch):
+            response = method(path, headers=self._headers(self.token_b))
+            self.assertEqual(response.status_code, 404)
+        saved = self.client.patch(path, json={"logo_id": "crcc", "contractor": " 中铁某工程局 "}, headers=self._headers(self.token_a))
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertEqual(saved.get_json()["settings"]["contractor"], "中铁某工程局")
+        conn = self.db.connect()
+        conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,status,joined_at,updated_at) VALUES(?,?,?,'viewer','active','2026-09-10','2026-09-10')", (owner, project_id, member))
+        conn.commit(); conn.close()
+        shared = self.client.get(path, headers=self._headers(self.token_b)).get_json()
+        self.assertEqual(shared["settings"], saved.get_json()["settings"])
+        self.assertFalse(shared["can_manage"])
+        self.assertEqual(self.client.patch(path, json={"contractor": "冒充单位"}, headers=self._headers(self.token_b)).status_code, 403)
+        isolated = self.client.get(other_path, headers=self._headers(self.token_b)).get_json()
+        self.assertEqual(isolated["settings"], {"logo_id": "crec", "contractor": ""})
+        for body in ({"logo_id": "invalid"}, {"project_name": "任意工程"}, {"contractor": "x" * 121}, {"contractor": "x\ny"}):
+            self.assertEqual(self.client.patch(path, json=body, headers=self._headers(self.token_a)).status_code, 400)
+        conn = self.db.connect()
+        conn.execute("UPDATE project_members SET role='admin' WHERE project_owner_account_id=? AND project_id=? AND member_account_id=?", (owner, project_id, member))
+        conn.commit(); conn.close()
+        admin = self.client.patch(path, json={"contractor": "管理员设置"}, headers=self._headers(self.token_b))
+        self.assertEqual(admin.status_code, 200)
+        self.assertEqual(admin.get_json()["settings"]["logo_id"], "crcc")
+        conn = self.db.connect()
+        conn.execute("UPDATE licenses SET active=0 WHERE account_id=?", (owner,)); conn.commit(); conn.close()
+        try:
+            self.assertFalse(self.client.get(path, headers=self._headers(self.token_b)).get_json()["can_manage"])
+            denied = self.client.patch(path, json={"contractor": "失效会员"}, headers=self._headers(self.token_b))
+            self.assertEqual(denied.get_json()["code"], "membership_required")
+        finally:
+            conn = self.db.connect()
+            conn.execute("UPDATE licenses SET active=1 WHERE account_id=?", (owner,)); conn.commit(); conn.close()
+
     def test_paid_project_inheritance_never_unlocks_other_projects(self):
         name="free-"+uuid.uuid4().hex[:8];self._register(name,"FreeMember2026")
         token=self._login(name,"FreeMember2026")

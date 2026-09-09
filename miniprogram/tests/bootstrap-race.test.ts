@@ -46,3 +46,23 @@ describe('late bootstrap responses', () => {
     expect(bootstrapState.projects).toEqual([])
   })
 })
+
+
+it('deduplicates startup/page requests and reuses only a recent same-account view', async () => {
+  let finish!: (value: unknown) => void
+  mocks.bootstrap.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+  const { loadBootstrap, bootstrapState, clearBootstrapView } = await import('@/stores/bootstrap')
+  const first = loadBootstrap('A')
+  const second = loadBootstrap('A')
+  expect(mocks.bootstrap).toHaveBeenCalledTimes(1)
+  finish(response('A'))
+  await Promise.all([first, second])
+  expect(bootstrapState.currentProject?.id).toBe('A:project')
+  await loadBootstrap('A', '', () => true, 30_000)
+  expect(mocks.bootstrap).toHaveBeenCalledTimes(1)
+  clearBootstrapView()
+  mocks.bootstrap.mockResolvedValue(response('B'))
+  await loadBootstrap('B', '', () => true, 30_000)
+  expect(mocks.bootstrap).toHaveBeenCalledTimes(2)
+  expect(bootstrapState.currentProject?.id).toBe('B:project')
+})

@@ -296,3 +296,16 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     return { tempFilePath: String(result.tempFilePath), originalPath: sourcePath, width, height }
   } finally { canvas.width = 1; canvas.height = 1 }
 }
+
+/** Native map picker returns a human-readable place; never substitute raw coordinates. */
+export async function chooseWatermarkLocation(latitude?: number, longitude?: number) {
+  return authorizedAction('location', async (api) => {
+    if (!api.chooseLocation) throw new WatermarkError('当前微信版本不支持地图选点，请手填地点', 'UNSUPPORTED')
+    const center = Number.isFinite(latitude) && Number.isFinite(longitude) ? {latitude,longitude} : {}
+    const value = await callback<any>((success,fail) => api.chooseLocation({...center,success,fail}),120000)
+    const address = String(value.address || '').trim(), name = String(value.name || '').trim()
+    const text = address && name && !address.includes(name) ? `${address} · ${name}` : address || name
+    if (!text) throw new WatermarkError('没有取得地名，请选择地图上的地点', 'INVALID_LOCATION')
+    return {latitude:Number(value.latitude),longitude:Number(value.longitude),text,label:'拍摄位置' as const}
+  })
+}

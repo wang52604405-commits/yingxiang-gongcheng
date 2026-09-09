@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref, watch } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -57,7 +58,7 @@ watch(() => sessionState.stage, (stage) => { if (stage === 'authenticated') void
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs request-page">
+  <view class="page-shell no-tabs request-page" :style="themeStyle">
     <PageHeader title="加入申请" :back="false" />
     <view class="request-card card">
       <text class="status-title">{{ statusTitle }}</text>

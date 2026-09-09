@@ -43,6 +43,7 @@
         "navigationStyle": "custom"
       }
     },
+    { "path": "pages/project/watermark-settings", "style": { "navigationStyle": "custom" } },
     {
       "path": "pages/project/members",
       "style": {
@@ -88,7 +89,7 @@
     },
     {
       "path": "pages/photo/watermark",
-      "style": { "navigationStyle": "custom", "pageOrientation": "auto" }
+      "style": { "navigationStyle": "custom", "pageOrientation": "auto", "backgroundColor": "#070b0d", "animationType": "none" }
     },
     {
       "path": "pages/photo/detail",

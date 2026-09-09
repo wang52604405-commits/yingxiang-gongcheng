@@ -39,6 +39,6 @@ export async function launchCapture(options: CaptureLaunchOptions = {}): Promise
     mode: options.mode || 'direct',
     requirement: options.requirement,
   })
-  uni.navigateTo({ url: source === 'camera' ? '/pages/photo/watermark?camera=1' : '/pages/upload/index?source=album&autopick=1' })
+  uni.navigateTo({ url: source === 'camera' ? '/pages/photo/watermark?camera=1' : '/pages/upload/index?source=album&autopick=1', animationType: 'none' })
   return true
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { setWatermarkContext } from '@/services/watermark-context'
 import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
 import { photoActions } from '@/services/photo-actions'
@@ -142,7 +143,7 @@ onLoad((query) => {
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell no-tabs detail-page">
+  <view class="page-shell no-tabs detail-page" :style="themeStyle">
     <PageHeader title="照片详情" />
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <template v-else-if="local || cloud">

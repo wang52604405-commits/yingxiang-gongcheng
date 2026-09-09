@@ -70,3 +70,54 @@ describe('全部影像与持续分页', () => {
     expect(library.state.photos).toEqual([])
   })
 })
+
+
+describe('tab revisit without blanking mounted photos', () => {
+  it('retains previous photos during refresh and when refresh fails', async () => {
+    const later = deferred<LibraryPhotoPage>()
+    const fetch = vi.fn().mockResolvedValueOnce({ photos: [photo(1)], total: 2, next_cursor: 'more' })
+      .mockReturnValueOnce(later.promise).mockRejectedValueOnce(new Error('offline'))
+    const library = createPhotoLibrary(() => ({ owner: 'A', query: { project_id: 'A:P' } }), fetch)
+    await library.load()
+    const pending = library.load()
+    expect(library.state.photos.map((item) => item.photo_uuid)).toEqual(['1'])
+    expect(library.state.totalCount).toBe(2)
+    later.resolve({ photos: [photo(2)], total: 1, next_cursor: '' })
+    await pending
+    expect(library.state.photos.map((item) => item.photo_uuid)).toEqual(['2'])
+    await library.load()
+    expect(library.state.photos.map((item) => item.photo_uuid)).toEqual(['2'])
+    expect(library.state.error).toBe('offline')
+  })
+
+  it('keeps already loaded pages on unchanged refresh and skips rapid tab revisits', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce({ photos: [photo(1)], total: 3, next_cursor: '2' })
+      .mockResolvedValueOnce({ photos: [photo(2)], total: 3, next_cursor: '3' })
+      .mockResolvedValueOnce({ photos: [photo(1)], total: 3, next_cursor: '2' })
+    const library = createPhotoLibrary(() => ({ owner: 'A', query: { project_id: 'A:P' } }), fetch)
+    await library.load()
+    await library.load(false)
+    await library.refreshIfStale()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await library.load()
+    expect(library.state.photos.map((item) => item.photo_uuid)).toEqual(['1', '2'])
+    expect(library.state.nextCursor).toBe('3')
+  })
+
+  it('coalesces concurrent first-page loads and clears old project photos immediately', async () => {
+    const later = deferred<LibraryPhotoPage>()
+    let project = 'A:P'
+    const fetch = vi.fn().mockResolvedValueOnce({ photos: [photo(1)], total: 1, next_cursor: '' })
+      .mockReturnValueOnce(later.promise)
+    const library = createPhotoLibrary(() => ({ owner: 'A', query: { project_id: project } }), fetch)
+    await library.load()
+    project = 'A:Q'
+    const pending = library.load()
+    expect(library.state.photos).toEqual([])
+    await library.load()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    later.resolve({ photos: [photo(3)], total: 1, next_cursor: '' })
+    await pending
+    expect(library.state.photos[0].photo_uuid).toBe('3')
+  })
+})

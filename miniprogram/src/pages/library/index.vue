@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref, toRefs } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import H5TabBar from '@/components/H5TabBar.vue'
 import UiIcon from '@/components/UiIcon.vue'
+import StablePhotoImage from '@/components/StablePhotoImage.vue'
 import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { syncTabBar } from '@/services/navigation'
@@ -21,6 +23,7 @@ const activeDestination = computed(() => selectedDestination.value?.scope === sc
   && selectedDestination.value?.project_id === project.value.id ? selectedDestination.value : null)
 const uniApi = uni
 let choosingDestination = false
+let returningFromPhoto = false
 let lastContext = ''
 const library = createPhotoLibrary(() => ({
   owner: selectionStorage.getOwner(),
@@ -58,6 +61,11 @@ function changeCategory(next: PhotoCategory | 'all') {
   void loadPhotos()
 }
 
+function openPhoto(photoUuid: string) {
+  returningFromPhoto = true
+  uni.navigateTo({ url: `/pages/photo/detail?id=${photoUuid}`, fail: () => { returningFromPhoto = false } })
+}
+
 function chooseDestination() {
   if (scope.value === 'all') return
   choosingDestination = true
@@ -86,7 +94,9 @@ onShow(() => {
   selectedDestination.value = selectionStorage.getLibraryFilter()
   if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) scope.value = selectedDestination.value.scope
   choosingDestination = false
-  void loadPhotos()
+  if (returningFromPhoto) void loadPhotos()
+  else void library.refreshIfStale()
+  returningFromPhoto = false
 })
 onPullDownRefresh(() => loadPhotos(true))
 onReachBottom(() => { void loadPhotos(false) })
@@ -94,7 +104,7 @@ onReachBottom(() => { void loadPhotos(false) })
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell">
+  <view class="page-shell" :style="themeStyle">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="uniApi.navigateTo({ url: '/pages/project/select' })" />
     <text class="page-title">影像库</text>
 
@@ -118,12 +128,12 @@ onReachBottom(() => { void loadPhotos(false) })
       </view>
     </view>
 
-    <view class="section-head unit-head"><text class="section-title">{{ listTitle }}</text><text class="count-copy">{{ loading ? '读取中…' : error && !photos.length ? '读取失败' : `云端 ${totalCount} 张` }}</text></view>
+    <view class="section-head unit-head"><text class="section-title">{{ listTitle }}</text><text class="count-copy">{{ loading ? '读取中…' : error && !photos.length ? '读取失败' : `${scope === 'all' && !activeDestination ? '全部' : '当前筛选'} ${totalCount} 张` }}</text></view>
 
     <view v-if="loading && !photos.length" class="loading-inline"><view class="loading-spinner" /><text>加载中…</text></view>
     <view v-else-if="photos.length" class="gallery">
-      <button v-for="(photo, index) in photos" :key="photo.photo_uuid" class="photo-tile pressable" @tap="uniApi.navigateTo({ url: `/pages/photo/detail?id=${photo.photo_uuid}` })">
-        <image v-if="photo.thumb_url || photo.image_url" class="tile-image" :src="photo.thumb_url || photo.image_url" mode="aspectFill" lazy-load />
+      <button v-for="(photo, index) in photos" :key="photo.photo_uuid" class="photo-tile pressable" @tap="openPhoto(photo.photo_uuid)">
+        <view v-if="photo.thumb_url || photo.image_url" class="tile-image"><StablePhotoImage :src="photo.thumb_url || photo.image_url || ''" :identity="`${selectionStorage.getOwner()}:${project.id}:${photo.photo_uuid}`" lazy-load /></view>
         <view v-else class="tile-placeholder" :class="`tone-${index % 4}`"><text>{{ photo.unit_name?.slice(-3) || photo.other_node_name?.slice(-3) || '现场' }}</text></view>
         <view class="tile-overlay">
           <text class="tile-title">{{ photo.title }}</text>

@@ -60,6 +60,6 @@ const headerStyle: Record<string, string> = {
 .project-line { display: flex; align-items: center; justify-content: flex-start; width: 100%; min-height: 36rpx; }
 .project-name { display: block; flex: 1; min-width: 0; overflow: hidden; font-size: 29rpx; font-weight: 600; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .chevron { flex: 0 0 auto; width: 13rpx; height: 13rpx; margin: -6rpx 0 0 13rpx; border-right: 2rpx solid currentColor; border-bottom: 2rpx solid currentColor; transform: rotate(45deg); }
-.offline-state { display: flex; flex: 0 0 auto; align-items: center; gap: 7rpx; margin-left: 14rpx; color: #ffd28b; font-size: 21rpx; white-space: nowrap; }
+.offline-state { display: flex; flex: 0 0 auto; align-items: center; gap: 7rpx; margin-left: 14rpx; color: var(--warning); font-size: 21rpx; white-space: nowrap; }
 .offline-dot { width: 11rpx; height: 11rpx; border-radius: 50%; background: #f1b34b; box-shadow: 0 0 0 5rpx rgba(241, 179, 75, 0.13); }
 </style>

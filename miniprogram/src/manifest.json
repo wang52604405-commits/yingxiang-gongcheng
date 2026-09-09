@@ -2,8 +2,8 @@
   "name": "工程影像",
   "appid": "__UNI__ENGINEERING_IMAGE_V1",
   "description": "水利、房建、市政、电力工程现场影像采集、同步与归档",
-  "versionName": "1.6.3",
-  "versionCode": "163",
+  "versionName": "1.6.4",
+  "versionCode": "164",
   "transformPx": false,
   "mp-weixin": {
     "appid": "",
@@ -17,7 +17,8 @@
     },
     "usingComponents": true,
     "requiredPrivateInfos": [
-      "getLocation"
+      "getLocation",
+      "chooseLocation"
     ],
     "permission": {
       "scope.camera": {

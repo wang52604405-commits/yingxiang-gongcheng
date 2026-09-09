@@ -1,4 +1,5 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
 import { solarDaylight } from './solar-theme'
 import { getCurrentWatermarkLocation } from './photo-watermark'
 export type ThemeMode = 'auto' | 'light' | 'dark'
@@ -6,8 +7,8 @@ const KEY = 'engineering-image:appearance:v1'
 const TAB_KEY = 'engineering-image:resolved-theme:v1'
 export const themeState = reactive({ mode: 'auto' as ThemeMode, resolved: 'dark' as 'light' | 'dark', latitude: null as number | null, longitude: null as number | null, locating: false })
 export const THEME_COLORS = {
-  dark: { bg:'#0c181b', surface:'#122024', 'surface-2':'#17282d', top:'#0f444d', 'header-text':'#ffffff', 'header-muted':'#c0d4d7', primary:'#2db9aa', 'primary-strong':'#42d7c2', 'primary-soft':'rgba(45,185,170,.14)', text:'#f5fbfa', muted:'#9eb1b4', line:'#2b4247', warning:'#f1b34b', danger:'#ff6b66', success:'#37c58e', 'on-primary':'#041a1a' },
-  light: { bg:'#ffffff', surface:'#ffffff', 'surface-2':'#f3f5f6', top:'#ffffff', 'header-text':'#183238', 'header-muted':'#4e6970', primary:'#087c70', 'primary-strong':'#087568', 'primary-soft':'rgba(8,117,104,.10)', text:'#183238', muted:'#4e6970', line:'#d5dde0', warning:'#805000', danger:'#b52e28', success:'#087443', 'on-primary':'#ffffff' },
+  dark: { 'segment-bg':'#17282d', 'loading-bg':'rgba(12,24,27,.92)', bg:'#0c181b', surface:'#122024', 'surface-2':'#17282d', top:'#0f444d', 'header-text':'#ffffff', 'header-muted':'#c0d4d7', primary:'#2db9aa', 'primary-strong':'#42d7c2', 'primary-soft':'rgba(45,185,170,.14)', text:'#f5fbfa', muted:'#9eb1b4', line:'#2b4247', warning:'#f1b34b', danger:'#ff6b66', success:'#37c58e', 'on-primary':'#041a1a' },
+  light: { 'segment-bg':'#f1f4f5', 'loading-bg':'rgba(255,255,255,.94)', bg:'#ffffff', surface:'#ffffff', 'surface-2':'#f3f5f6', top:'#ffffff', 'header-text':'#183238', 'header-muted':'#4e6970', primary:'#087c70', 'primary-strong':'#087568', 'primary-soft':'rgba(8,117,104,.10)', text:'#183238', muted:'#4e6970', line:'#d5dde0', warning:'#805000', danger:'#b52e28', success:'#087443', 'on-primary':'#ffffff' },
 }
 export const themeStyle = computed(() => Object.entries(THEME_COLORS[themeState.resolved]).map(([key,value]) => `--${key}:${value}`).join(';') + ';background:var(--bg);color:var(--text)')
 export const themeLabel = computed(() => themeState.mode === 'light' ? '白天' : themeState.mode === 'dark' ? '夜间' : themeState.latitude === null ? '自动 · 待定位' : '自动 · 日出日落')
@@ -22,7 +23,7 @@ export function refreshTheme(date = new Date()) {
   try { fallback = String((uni.getSystemInfoSync() as any).theme || 'dark') } catch {}
   themeState.resolved = themeState.mode === 'auto' ? daylight === null ? fallback === 'light' ? 'light' : 'dark' : daylight ? 'light' : 'dark' : themeState.mode
   uni.setStorageSync(TAB_KEY, themeState.resolved)
-  try { const pages = getCurrentPages(); const page = pages[pages.length-1] as any; page?.getTabBar?.()?.setData?.({ theme: themeState.resolved }) } catch {}
+  try { for (const page of getCurrentPages() as any[]) page?.getTabBar?.()?.setData?.({ theme: themeState.resolved }) } catch {}
 }
 export function setThemeLocation(latitude: number, longitude: number) {
   if (solarDaylight(new Date(),latitude,longitude) === null) return
@@ -37,13 +38,23 @@ export async function locateTheme() {
   try { const value = await getCurrentWatermarkLocation(); if (active) setThemeLocation(value.latitude,value.longitude) }
   finally { themeState.locating = false }
 }
-export function startTheme() {
-  active = true
+export function initializeTheme() {
   const stored = uni.getStorageSync(KEY) || {}
   themeState.mode = ['auto','light','dark'].includes(stored.mode) ? stored.mode : 'auto'
   if (typeof stored.latitude === 'number' && typeof stored.longitude === 'number' && solarDaylight(new Date(),stored.latitude,stored.longitude) !== null) {
     themeState.latitude = stored.latitude; themeState.longitude = stored.longitude
   }
+  refreshTheme()
+}
+export function usePageTheme() {
+  const pageStyle = ref(themeStyle.value)
+  watch(themeStyle, value => { pageStyle.value=value })
+  onShow(() => { initializeTheme(); pageStyle.value=themeStyle.value+';--theme-revision:'+Date.now() })
+  return pageStyle
+}
+export function startTheme() {
+  active = true
+  initializeTheme()
   refreshTheme(); clearInterval(timer); timer = setInterval(refreshTheme,60000)
   if (themeState.mode === 'auto' && Date.now()-lastLocationAt > 30*60000) {
     const wxApi = (globalThis as any).wx

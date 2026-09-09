@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { themeStyle } from '@/services/theme'
+import { usePageTheme } from '@/services/theme'
+const themeStyle = usePageTheme()
 import { computed, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import H5TabBar from '@/components/H5TabBar.vue'
 import UiIcon from '@/components/UiIcon.vue'
+import StablePhotoImage from '@/components/StablePhotoImage.vue'
 import { queueRuntime } from '@/services/queue-runtime'
 import { sessionState } from '@/services/auth'
 import { bootstrapState, loadBootstrap } from '@/stores/bootstrap'
@@ -32,7 +34,7 @@ async function loadHome() {
   if (!account) return
   loading.value = true
   try {
-    await loadBootstrap(account.id)
+    await loadBootstrap(account.id, '', () => sessionState.account?.id === account.id, 30_000)
     fallbackProject.value = bootstrapState.currentProject || selectionStorage.getProject()
   } catch {
     fallbackProject.value = selectionStorage.getProject()
@@ -68,7 +70,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
 
 <template>
   <page-meta :page-style="themeStyle" />
-  <view class="page-shell home-page">
+  <view class="page-shell home-page" :style="themeStyle">
     <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="openProject" />
     <view class="project-context">
       <text class="context-title">工作台</text>
@@ -81,7 +83,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
     <view class="section-head"><text class="section-title">最近影像</text><button class="section-action pressable" @tap="uniApi.switchTab({ url: '/pages/library/index' })">查看全部</button></view>
     <view v-if="recent.length" class="recent-list">
       <button v-for="(photo, index) in recent" :key="photo.photo_uuid" class="recent-item pressable" @tap="uniApi.navigateTo({ url: `/pages/photo/detail?id=${photo.photo_uuid}` })">
-        <image v-if="photo.thumb_url || photo.image_url" class="recent-thumb" :src="photo.thumb_url || photo.image_url" mode="aspectFill" lazy-load />
+        <view v-if="photo.thumb_url || photo.image_url" class="recent-thumb recent-photo"><StablePhotoImage :src="photo.thumb_url || photo.image_url || ''" :identity="`${selectionStorage.getOwner()}:${project.id}:${photo.photo_uuid}`" lazy-load /></view>
         <view v-else class="recent-thumb" :class="`scene-${index % 3}`"><text>{{ photo.unit_name?.slice(-3) || photo.other_node_name?.slice(-3) || '现场' }}</text></view>
         <view class="recent-copy"><text class="recent-title">{{ photo.title }}</text><text class="recent-meta">{{ photo.unit_name || photo.other_node_name }} · {{ photo.category === 'supervision' ? '监理影像' : photo.scope === 'other' ? '其它影像' : '施工影像' }}</text></view>
         <view class="recent-state"><UiIcon class="cloud-symbol" :name="photo.status === 'desktop_imported' ? 'check' : 'upload'" :size="17" /><text>{{ shortTime(photo.created_at) }}</text></view>
@@ -112,7 +114,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
 .recent-item { display: grid; grid-template-columns: 108rpx 1fr auto; align-items: center; gap: 18rpx; width: 100%; min-height: 112rpx; padding: 12rpx 16rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
 .recent-item:last-child { border-bottom: 0; }
 .recent-thumb { width: 108rpx; height: 86rpx; overflow: hidden; border-radius: 17rpx; background: #9fcfd8; }
-view.recent-thumb { display: flex; align-items: flex-end; padding: 8rpx; color: #09262a; background: linear-gradient(155deg, #9cd7e3 0 38%, #d6c69e 39% 60%, #668876 61%); font-size: 20rpx; font-weight: 700; }
+view.recent-thumb:not(.recent-photo) { display: flex; align-items: flex-end; padding: 8rpx; color: #09262a; background: linear-gradient(155deg, #9cd7e3 0 38%, #d6c69e 39% 60%, #668876 61%); font-size: 20rpx; font-weight: 700; }
 view.recent-thumb.scene-1 { background: linear-gradient(105deg, #86ccde 0 44%, #b5b9b4 45% 67%, #517c6d 68%); }
 view.recent-thumb.scene-2 { background: linear-gradient(160deg, #9bdbe8 0 34%, #c5b98d 35% 61%, #6e8f69 62%); }
 .recent-copy { min-width: 0; }

@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { fixedWatermarkRows, generatePhotoWatermark, getCurrentWatermarkLocation, layoutFixedWatermark, layoutWatermark, saveWatermarkToAlbum, watermarkOrientationTransform, watermarkTextRows, wrapWatermarkText } from '@/services/photo-watermark'
+import { chooseWatermarkLocation, fixedWatermarkRows, generatePhotoWatermark, getCurrentWatermarkLocation, layoutFixedWatermark, layoutWatermark, saveWatermarkToAlbum, watermarkOrientationTransform, watermarkTextRows, wrapWatermarkText } from '@/services/photo-watermark'
 
 const measure = (text: string, size: number) => Array.from(text).length * size
 function mockWechat(orientation = 'up') {
@@ -14,6 +14,7 @@ function mockWechat(orientation = 'up') {
     getImageInfo: vi.fn(({ src, success }: any) => success({ path: src, width: 4000, height: 3000, orientation })),
     canvasToTempFilePath: vi.fn(({ success }: any) => success({ tempFilePath: '/tmp/watermarked-copy.jpg' })),
     requirePrivacyAuthorize: vi.fn(({ success }: any) => success()),
+    chooseLocation: vi.fn(({success}:any)=>success({latitude:36.6,longitude:114.5,address:'邯郸市永年区',name:'龙泉工程项目部'})),
     getLocation: vi.fn(({ success }: any) => success({ latitude: 30.5, longitude: 120.5, accuracy: 12 })),
     saveImageToPhotosAlbum: vi.fn(({ success }: any) => success()),
     openSetting: vi.fn(), onAppHide: vi.fn(), offAppHide: vi.fn(),
@@ -131,6 +132,15 @@ describe('独立水印副本与手动定位', () => {
     api.requirePrivacyAuthorize.mockImplementation(({ success }: any) => { (api.onAppHide.mock.calls.at(-1) as any)[0](); success() })
     await expect(getCurrentWatermarkLocation()).rejects.toMatchObject({ code: 'BACKGROUND' })
     expect(api.getLocation).not.toHaveBeenCalled()
+  })
+
+  it('地图选点显示地点名称而非经纬度，空地点不伪造地址', async () => {
+    const {api}=mockWechat()
+    const result=await chooseWatermarkLocation(36.6,114.5)
+    expect(result.text).toBe('邯郸市永年区 · 龙泉工程项目部')
+    expect(api.chooseLocation.mock.calls[0][0]).toMatchObject({latitude:36.6,longitude:114.5})
+    api.chooseLocation.mockImplementation(({success}:any)=>success({latitude:36.6,longitude:114.5}))
+    await expect(chooseWatermarkLocation()).rejects.toMatchObject({code:'INVALID_LOCATION'})
   })
 
   it('保存只由显式API执行，授权拒绝可恢复且不打开系统设置', async () => {
