@@ -1,5 +1,6 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
+import { solarDaylight } from './solar-theme'
 import { getCurrentWatermarkLocation } from './photo-watermark'
 export type ThemeMode = 'auto' | 'light' | 'dark'
 const KEY = 'engineering-image:appearance:v1'
@@ -24,8 +25,18 @@ function syncTabTheme(next: 'light' | 'dark') {
     }
   } catch {}
 }
-export function refreshTheme(_date?: Date) {
-  const next: 'light' | 'dark' = themeState.mode === 'auto' ? systemTheme() : themeState.mode
+export function refreshTheme(date?: Date) {
+  let next: 'light' | 'dark'
+  if (themeState.mode !== 'auto') {
+    next = themeState.mode
+  } else if (date && themeState.latitude !== null && themeState.longitude !== null) {
+    const daylight = solarDaylight(date, themeState.latitude, themeState.longitude)
+    next = daylight === null ? systemTheme() : daylight ? 'light' : 'dark'
+  } else {
+    // Runtime navigation stays on the system appearance. Location changes must not repaint
+    // the page or tab bar while entering the camera; explicit dated calls remain solar-aware.
+    next = systemTheme()
+  }
   if (themeState.resolved !== next) themeState.resolved = next
   syncTabTheme(next)
 }
