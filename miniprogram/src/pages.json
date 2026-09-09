@@ -88,7 +88,7 @@
     },
     {
       "path": "pages/photo/watermark",
-      "style": { "navigationStyle": "custom" }
+      "style": { "navigationStyle": "custom", "pageOrientation": "auto" }
     },
     {
       "path": "pages/photo/detail",

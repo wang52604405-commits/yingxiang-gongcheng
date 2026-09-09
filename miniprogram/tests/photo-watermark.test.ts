@@ -60,6 +60,17 @@ describe('独立水印副本与手动定位', () => {
     expect(api.saveImageToPhotosAlbum).not.toHaveBeenCalled()
   })
 
+  it('取景水印使用同一绘制器导出透明PNG，不读取或覆盖照片画面', async () => {
+    const { api, ctx } = mockWechat()
+    const result = await generatePhotoWatermark('camera-pending', { project: '取景工程', photographer: '张三' }, { overlaySize: { width: 900, height: 1200 } })
+    expect(api.getImageInfo).not.toHaveBeenCalled()
+    expect(ctx.drawImage).not.toHaveBeenCalled()
+    expect(ctx.fillRect.mock.calls.some((c: any[]) => c[0] === 0 && c[1] === 0 && c[2] === 900 && c[3] === 1200)).toBe(false)
+    expect(api.canvasToTempFilePath.mock.calls[0][0].fileType).toBe('png')
+    expect(result).toMatchObject({ width: 900, height: 1200 })
+    expect(api.saveImageToPhotosAlbum).not.toHaveBeenCalled()
+  })
+
   it('原图方向right旋转90度且保留画幅，水印在旋转后的图片上绘制', async () => {
     const { ctx } = mockWechat('right')
     const result = await generatePhotoWatermark('/user/photo.jpg', { title: '竖图' })

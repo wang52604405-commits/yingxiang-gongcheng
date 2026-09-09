@@ -4,7 +4,7 @@ export interface PhotoWatermarkFields {
   constructionContent?: string; capturedAt?: string; contractor?: string
   title?: string; sitePart?: string; photographer?: string; photoDate?: string; location?: WatermarkLocationText; note?: string
 }
-export interface PhotoWatermarkOptions { maxEdge?: 2048 | 4096; logoPath?: string; logoCrop?: { x: number; y: number; width: number; height: number }; position?: 'bottom-left' | 'bottom-right'; fontScale?: .85 | 1 | 1.2; opacity?: .55 | .75 | .9 }
+export interface PhotoWatermarkOptions { overlaySize?: { width: number; height: number }; maxEdge?: 2048 | 4096; logoPath?: string; logoCrop?: { x: number; y: number; width: number; height: number }; position?: 'bottom-left' | 'bottom-right'; fontScale?: .85 | 1 | 1.2; opacity?: .55 | .75 | .9 }
 export interface WatermarkedPhoto { tempFilePath: string; originalPath: string; width: number; height: number }
 export class WatermarkError extends Error {
   constructor(message: string, public code: string, public canOpenSettings = false) { super(message); this.name = 'WatermarkError' }
@@ -212,10 +212,10 @@ export function watermarkOrientationTransform(orientation: number, width: number
 }
 
 export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWatermarkFields, options: PhotoWatermarkOptions = {}): Promise<WatermarkedPhoto> {
-  if (!sourcePath || /^https?:\/\//i.test(sourcePath)) throw new WatermarkError('请先选择本机照片', 'INVALID_PATH')
+  if ((!sourcePath && !options.overlaySize) || /^https?:\/\//i.test(sourcePath)) throw new WatermarkError('请先选择本机照片', 'INVALID_PATH')
   const api = wechat()
   if (!api.createOffscreenCanvas || !api.canvasToTempFilePath || !api.getImageInfo) throw new WatermarkError('当前微信版本不支持生成水印照片，请升级微信', 'UNSUPPORTED')
-  const info = await callback<any>((success, fail) => api.getImageInfo({ src: sourcePath, success, fail }))
+  const info = options.overlaySize ? { ...options.overlaySize, orientation: 'up', path: '' } : await callback<any>((success, fail) => api.getImageInfo({ src: sourcePath, success, fail }))
   let sourceWidth = Number(info.width)
   let sourceHeight = Number(info.height)
   if (!(sourceWidth > 0 && sourceHeight > 0)) throw new WatermarkError('照片尺寸读取失败', 'INVALID_IMAGE')
@@ -223,7 +223,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
   const canvas = api.createOffscreenCanvas({ type: '2d', width: 1, height: 1 })
   try {
     const image = canvas.createImage()
-    await callback<void>((success, fail) => { image.onload = () => success(); image.onerror = fail; image.src = info.path || sourcePath })
+    if (!options.overlaySize) await callback<void>((success, fail) => { image.onload = () => success(); image.onerror = fail; image.src = info.path || sourcePath })
     // Some decoders already apply the quarter-turn; use decoded bounds to avoid a second turn.
     if (orientation >= 5 && sourceWidth !== sourceHeight && Number(image.width) === sourceHeight && Number(image.height) === sourceWidth) {
       sourceWidth = Number(image.width); sourceHeight = Number(image.height); orientation = 1
@@ -248,11 +248,13 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     }
     canvas.width = width; canvas.height = height
     const ctx = canvas.getContext('2d')
+    if (!options.overlaySize) {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
     ctx.save()
     ctx.transform(...watermarkOrientationTransform(orientation, drawWidth, drawHeight))
     ctx.drawImage(image, 0, 0, drawWidth, drawHeight)
     ctx.restore()
+    }
     const layout = layoutFixedWatermark(width, height, fields, (text, size) => { ctx.font = `${size}px sans-serif`; return ctx.measureText(text).width }, logoSize)
     // Fixed template: 80% transparent means alpha 0.2, never opacity 0.8.
     const bodyY = layout.y + layout.headerHeight + layout.gap
@@ -289,7 +291,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     ctx.font = `${layout.fontSize}px sans-serif`
     drawLines(layout.bodyLines, layout.x + layout.padding, bodyY + layout.padding)
     drawLines(layout.footerLines, layout.x + layout.padding, footerY + layout.padding)
-    const result = await callback<any>((success, fail) => api.canvasToTempFilePath({ canvas, fileType: 'jpg', quality: .94, destWidth: width, destHeight: height, success, fail }))
+    const result = await callback<any>((success, fail) => api.canvasToTempFilePath({ canvas, fileType: options.overlaySize ? 'png' : 'jpg', quality: .94, destWidth: width, destHeight: height, success, fail }))
     if (!result?.tempFilePath || result.tempFilePath === sourcePath || result.tempFilePath === info.path) throw new WatermarkError('未能生成独立水印副本，请重试', 'INVALID_OUTPUT')
     return { tempFilePath: String(result.tempFilePath), originalPath: sourcePath, width, height }
   } finally { canvas.width = 1; canvas.height = 1 }

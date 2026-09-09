@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { beginWatermarkDivision, consumeWatermarkDivision, watermarkDivisionFields } from '@/services/watermark-division'
 import { computed, reactive, ref, watch } from 'vue'
-import { onLoad, onReady, onShow, onUnload } from '@dcloudio/uni-app'
+import { onLoad, onReady, onShow, onHide, onResize, onUnload } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
 import { selectionStorage } from '@/stores/selection'
 import { sessionState } from '@/services/auth'
@@ -13,6 +13,19 @@ import { canCaptureProject, capturePermissionMessage } from '@/services/project-
 import { mobileApi } from '@/api/mobile'
 import type { ProjectSummary } from '@/types/domain'
 
+const cameraMode = ref(false)
+const shotTaken = ref(false)
+const editingCamera = ref(false)
+const cameraReady = ref(false)
+const cameraActive = ref(true)
+const shooting = ref(false)
+const cameraPosition = ref<'back' | 'front'>('back')
+const cameraFlash = ref<'off' | 'auto'>('off')
+const cameraWidth = ref(343)
+const cameraHeight = ref(457)
+const liveCamera = computed(() => cameraMode.value && !shotTaken.value)
+let overlayTimer: ReturnType<typeof setTimeout> | undefined
+let clockTimer: ReturnType<typeof setInterval> | undefined
 const context = ref<WatermarkContext | null>(null)
 const activeProject = ref(selectionStorage.getProject())
 const form = reactive({ project: '', title: '', photographer: '', photoDate: '', sitePart: '', locationText: '', unitProjectName: '', partName: '', unitName: '', unitCode: '', constructionContent: '', capturedAt: '', contractor: '' })
@@ -29,7 +42,7 @@ const saving = ref(false)
 const locating = ref(false)
 const uploading = ref(false)
 const uploadedBatchId = ref('')
-const busy = computed(() => rendering.value || saving.value || locating.value || uploading.value)
+const busy = computed(() => shooting.value || rendering.value || saving.value || locating.value || uploading.value)
 const error = ref('')
 const showSettings = ref(false)
 const preview = ref<{ tempFilePath: string; width: number; height: number } | null>(null)
@@ -85,11 +98,14 @@ async function renderLatest() {
     location: form.locationText.trim() ? { label: locationLabel.value, text: form.locationText.trim() } : undefined,
   }, {
     maxEdge: largeExport.value ? 4096 : 2048,
+    overlaySize: liveCamera.value ? { width: Math.round(cameraWidth.value * 3), height: Math.round(cameraHeight.value * 3) } : undefined,
     logoPath: logoIndex.value ? COMPANY_LOGOS[logoIndex.value - 1]?.path : undefined,
     logoCrop: logoIndex.value ? COMPANY_LOGOS[logoIndex.value - 1]?.symbolCrop : undefined,
   })
   requireContext()
+  const oldOverlay = liveCamera.value ? preview.value?.tempFilePath : ''
   preview.value = result
+  if (oldOverlay && oldOverlay !== result.tempFilePath) { try { (globalThis as any).wx?.getFileSystemManager().unlink({ filePath: oldOverlay, fail() {} }) } catch {} }
   dirty.value = false
   return result
 }
@@ -102,7 +118,7 @@ async function updatePreview() {
   finally { rendering.value = false }
 }
 async function savePhoto() {
-  if (busy.value) return
+  if (busy.value || liveCamera.value) return
   saving.value = true
   error.value = ''
   showSettings.value = false
@@ -116,7 +132,7 @@ async function savePhoto() {
   finally { saving.value = false }
 }
 async function uploadAuto() {
-  if (busy.value || uploadedBatchId.value) return
+  if (busy.value || liveCamera.value || uploadedBatchId.value) return
   uploading.value = true
   error.value = ''
   showSettings.value = false
@@ -162,8 +178,10 @@ function clearLocation() { form.locationText = ''; locationLabel.value = '手填
 function previewLarge() { if (previewImage.value) uni.previewImage({ current: previewImage.value, urls: [previewImage.value] }) }
 function openSettings() { uni.openSetting({}) }
 function changeExportQuality(event: any) { largeExport.value = Boolean(event?.detail?.value) }
-onLoad(() => {
-  const value = consumeWatermarkContext(selectionStorage.getOwner(), String(selectionStorage.getProject().id || ''))
+onLoad((query) => {
+  cameraMode.value = query?.camera === '1'
+  resizeCamera()
+  const value: WatermarkContext | null = cameraMode.value ? { owner: selectionStorage.getOwner(), projectId: String(activeProject.value.id || ''), sourcePath: 'camera-pending', sourceQuality: 'original', sourceKind: 'camera', project: activeProject.value.name, title: '', photographer: '', photoDate: '', capturedAt: new Date().toISOString(), scope: selectionStorage.getUploadPreset()?.scope || 'engineering', category: selectionStorage.getUploadPreset()?.category || 'construction' } : consumeWatermarkContext(selectionStorage.getOwner(), String(selectionStorage.getProject().id || ''))
   if (!value || String(sessionState.account?.id || '') !== value.owner) { error.value = '照片已失效，请返回重新选择'; return }
   context.value = value
   Object.assign(form, { project: activeProject.value.name, constructionContent: value.title === value.unitName ? '' : value.title,
@@ -175,32 +193,90 @@ onLoad(() => {
   form.contractor = String(pref.contractor || '').slice(0, 100)
 
 })
-onReady(async () => { await refreshIdentity(); if (context.value?.sourceKind === 'camera' && sameContext() && photographerVerified.value && queueRuntime.state.foreground) await getLocation(); if (!manualPhoto.value) await updatePreview() })
+onReady(async () => { await refreshIdentity(); if (!manualPhoto.value) await updatePreview(); if (context.value?.sourceKind === 'camera' && sameContext() && photographerVerified.value && queueRuntime.state.foreground) { await getLocation(); if (liveCamera.value) await updatePreview() } })
 onShow(() => {
+  cameraActive.value = true
   activeProject.value = selectionStorage.getProject()
   if (choosingHierarchy && context.value && sameContext()) {
     choosingHierarchy = false
     const selected = consumeWatermarkDivision(selectionStorage.getOwner(), String(activeProject.value.id))
     if (selected) Object.assign(form, watermarkDivisionFields(selected.assignment))
   }
+  if (liveCamera.value) scheduleOverlay()
   if (context.value && !sameContext()) { context.value = null; preview.value = null; form.locationText = ''; error.value = '账号或工程已切换，请返回重新选择照片' }
 })
-onUnload(() => { alive = false; form.locationText = '' })
-watch([form, locationLabel, logoIndex, largeExport], () => { dirty.value = true; uploadedBatchId.value = '' }, { deep: true })
+onHide(() => { cameraActive.value = false; cameraReady.value = false; clearTimeout(overlayTimer) })
+onResize(resizeCamera)
+onUnload(() => { alive = false; form.locationText = ''; clearTimeout(overlayTimer); clearInterval(clockTimer) })
+watch([form, locationLabel, logoIndex, largeExport], () => { dirty.value = true; uploadedBatchId.value = ''; scheduleOverlay() }, { deep: true })
 watch([manualDate, manualTime], () => { if (manualPhoto.value) { form.photoDate = manualDate.value; form.capturedAt = manualDate.value && manualTime.value ? manualDate.value + 'T' + manualTime.value + ':00' : '' } })
 watch([logoIndex, () => form.contractor], () => { if (context.value && sameContext()) uni.setStorageSync(preferenceKey(), { logoId: COMPANY_LOGOS[logoIndex.value - 1]?.id || '', contractor: form.contractor }) })
+
+function resizeCamera() {
+  const size = uni.getSystemInfoSync()
+  const landscape = size.windowWidth > size.windowHeight
+  cameraWidth.value = landscape ? Math.max(180, Math.min(size.windowWidth - 32, (size.windowHeight - 170) * 4 / 3)) : Math.min(size.windowWidth - 32, Math.max(180, (size.windowHeight - 230) * 3 / 4))
+  cameraHeight.value = cameraWidth.value * (landscape ? 3 / 4 : 4 / 3)
+  scheduleOverlay()
+}
+function scheduleOverlay() {
+  clearTimeout(overlayTimer)
+  if (!alive || !liveCamera.value || !cameraActive.value || editingCamera.value) return
+  overlayTimer = setTimeout(() => { if (busy.value) scheduleOverlay(); else void updatePreview() }, 350)
+}
+function editCameraWatermark() { editingCamera.value = true; cameraReady.value = false; clearTimeout(overlayTimer) }
+function returnToCamera() { editingCamera.value = false; form.capturedAt = new Date().toISOString(); scheduleOverlay(); uni.pageScrollTo({ scrollTop: 0, duration: 0 }) }
+function onCameraError(event: any) { cameraReady.value = false; error.value = event?.detail?.errMsg || '相机未能打开，请允许相机权限后重试'; showSettings.value = true }
+async function takeWatermarkPhoto() {
+  if (busy.value || !cameraReady.value || !photographerVerified.value) return
+  shooting.value = true; error.value = ''; clearTimeout(overlayTimer)
+  try {
+    requireContext()
+    const capturedAt = new Date().toISOString()
+    const result = await new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('拍照超时，请重试')), 20000)
+      uni.createCameraContext().takePhoto({ quality: 'high', success: result => { clearTimeout(timer); resolve(result) }, fail: reason => { clearTimeout(timer); reject(new Error(reason.errMsg || '拍照失败，请重试')) } })
+    })
+    requireContext()
+    if (!result.tempImagePath) throw new Error('未取得照片，请重新拍摄')
+    context.value!.sourcePath = result.tempImagePath
+    context.value!.capturedAt = capturedAt
+    form.capturedAt = capturedAt
+    form.photoDate = new Date(capturedAt).toLocaleDateString('sv-SE')
+    shotTaken.value = true; preview.value = null; dirty.value = true
+    await renderLatest()
+  } catch (reason) { if (alive) showError(reason) }
+  finally { shooting.value = false }
+}
+function continueCamera() {
+  if (busy.value) return
+  shotTaken.value = false; cameraReady.value = false; preview.value = null; uploadedBatchId.value = ''; dirty.value = true
+  context.value!.sourcePath = 'camera-pending'; form.capturedAt = new Date().toISOString(); scheduleOverlay()
+}
+onReady(() => { if (cameraMode.value) clockTimer = setInterval(() => { if (liveCamera.value && cameraActive.value && !busy.value) form.capturedAt = new Date().toISOString() }, 15000) })
+
 </script>
 
 <template>
   <view class="page-shell no-tabs watermark-page">
-    <PageHeader :title="previewOnly ? '水印预览图' : '水印照片'" />
+    <PageHeader :title="liveCamera ? '水印相机' : previewOnly ? '水印预览图' : '水印照片'" />
     <template v-if="context">
-      <button class="watermark-preview pressable" @tap="previewLarge"><image :src="previewImage" mode="aspectFit" /><text v-if="rendering" class="preview-badge">正在生成预览…</text><text v-else-if="dirty && preview" class="preview-badge">设置已更改，请更新预览</text></button>
-      <view class="preview-caption"><text>{{ preview ? `${preview.width} × ${preview.height}` : '原始画面' }}</text><button class="text-button pressable" :disabled="busy" @tap="updatePreview">更新预览</button></view>
+      <template v-if="liveCamera">
+        <view v-if="!editingCamera" class="camera-stage" :style="{ width: cameraWidth + 'px', height: cameraHeight + 'px' }">
+          <camera v-if="cameraActive" id="watermark-camera" class="live-camera" mode="normal" resolution="high" :device-position="cameraPosition" :flash="cameraFlash" @initdone="cameraReady = true" @error="onCameraError" @stop="cameraReady = false">
+            <cover-image v-if="preview" class="camera-overlay" :src="preview.tempFilePath" @tap="editCameraWatermark" />
+          </camera>
+        </view>
+        <view v-if="!editingCamera" class="camera-tools"><button class="secondary-button" :disabled="busy" @tap="cameraPosition = cameraPosition === 'back' ? 'front' : 'back'">翻转</button><button class="primary-button camera-edit" :disabled="busy" @tap="editCameraWatermark">编辑水印</button><button class="secondary-button" :disabled="busy" @tap="cameraFlash = cameraFlash === 'off' ? 'auto' : 'off'">{{ cameraFlash === 'off' ? '闪光关' : '闪光自动' }}</button></view>
+        <button v-if="!editingCamera" class="primary-button camera-shutter" :disabled="busy || !cameraReady || !photographerVerified" @tap="takeWatermarkPhoto">{{ shooting ? '正在拍摄…' : '拍照' }}</button>
+        <button v-else class="primary-button" :disabled="busy" @tap="returnToCamera">完成编辑 · 返回拍摄</button>
+      </template>
+      <button v-if="!liveCamera" class="watermark-preview pressable" @tap="previewLarge"><image :src="previewImage" mode="aspectFit" /><text v-if="rendering" class="preview-badge">正在生成预览…</text><text v-else-if="dirty && preview" class="preview-badge">设置已更改，请更新预览</text></button>
+      <view v-if="!liveCamera" class="preview-caption"><text>{{ preview ? `${preview.width} × ${preview.height}` : '原始画面' }}</text><button class="text-button pressable" :disabled="busy" @tap="updatePreview">更新预览</button></view>
       <text v-if="previewOnly" class="quality-note">当前使用预览图，保存和上传的清晰度均受预览图限制。</text>
-      <text class="copy-note">生成带水印的副本，原照片保持不变。</text>
+      <text v-if="!liveCamera" class="copy-note">生成带水印的副本，原照片保持不变。</text>
       <text class="archive-target">归档项目：{{ activeProject.name }}</text>
-      <view class="edit-card card">
+      <view v-if="!liveCamera || editingCamera" class="edit-card card">
         <text class="section-title">固定工程水印</text>
         <text class="copy-note">左下角 · 浅蓝色块80%透明 · 紧凑水印 · 约占画面1/8</text>
         <text class="field-label">企业标志</text><picker :range="logoNames" :value="logoIndex" :disabled="busy" @change="logoIndex = Number($event.detail.value)"><view class="input date-input">{{ logoNames[logoIndex] }}</view></picker>
@@ -222,19 +298,28 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
         <text class="field-label">施工单位名称（底部色块）</text><input v-model="form.contractor" class="input" maxlength="100" placeholder="手填施工单位全称" :disabled="busy" />
         <view class="export-row"><text>高清导出</text><switch :checked="largeExport" :disabled="busy || previewOnly" @change="changeExportQuality" /></view>
       </view>
+      <button v-if="cameraMode && shotTaken" class="secondary-button album-button" :disabled="busy" @tap="continueCamera">继续拍照</button>
     </template>
     <view v-if="error" class="error-card" role="alert"><text>{{ error }}</text><button v-if="showSettings" class="text-button pressable" @tap="openSettings">打开权限设置</button></view>
     <template v-if="context">
-      <text class="classify-note">上传后自动归类到施工单元；识别不到的照片送电脑端待分类，供人工筛选。</text>
+      <text v-if="!liveCamera" class="classify-note">上传后自动归类到施工单元；识别不到的照片送电脑端待分类，供人工筛选。</text>
       <text v-if="!canCaptureProject(activeProject)" class="copy-note">当前可制作水印并保存到手机，本项目未开通上传权限。</text>
-      <button v-if="canCaptureProject(activeProject)" class="primary-button pressable save-button" :disabled="busy || Boolean(uploadedBatchId)" @tap="uploadAuto">{{ uploading ? '正在准备上传…' : uploadedBatchId ? '已加入上传归类队列' : previewOnly ? '上传水印预览并归类' : '上传并自动归类' }}</button>
-      <button class="secondary-button pressable album-button" :disabled="busy" @tap="savePhoto">{{ saveLabel }}</button>
+      <button v-if="!liveCamera && canCaptureProject(activeProject)" class="primary-button pressable save-button" :disabled="busy || Boolean(uploadedBatchId)" @tap="uploadAuto">{{ uploading ? '正在准备上传…' : uploadedBatchId ? '已加入上传归类队列' : previewOnly ? '上传水印预览并归类' : '上传并自动归类' }}</button>
+      <button v-if="!liveCamera" class="secondary-button pressable album-button" :disabled="busy" @tap="savePhoto">{{ saveLabel }}</button>
       <button v-if="uploadedBatchId" class="text-button queue-link pressable" @tap="openQueue">查看同步记录</button>
     </template>
   </view>
 </template>
 
 <style scoped>
+.camera-stage { margin: 12px auto; position: relative; background: #000; overflow: hidden; border-radius: 12px; }
+.live-camera, .camera-overlay { width: 100%; height: 100%; }
+.camera-overlay { position: absolute; top: 0; left: 0; }
+.camera-tools { display: flex; align-items:center; gap: 12px; margin: 12px 0; }
+.camera-tools button { flex:1; font-size: 14px; padding: 0 8px; }
+.camera-tools .camera-edit { flex: 1.5; }
+.camera-shutter { width: 96px; height: 64px; border-radius: 32px; margin: 16px auto; font-size: 20px; }
+
 .manual-datetime { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; }
 .division-search { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12rpx; }
 .readonly-value { color:var(--text); font-size:26rpx; line-height:1.5; padding:14rpx 0; }.hierarchy-row { display:grid; grid-template-columns:130rpx 1fr; gap:12rpx; padding:15rpx 0; border-bottom:1rpx solid var(--line); font-size:24rpx; line-height:1.5; }.hierarchy-row text:first-child { color:var(--muted); }

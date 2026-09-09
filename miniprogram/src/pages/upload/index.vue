@@ -267,6 +267,7 @@ async function readOriginalCapturedAt(path: string): Promise<string> {
   } catch { return '' }
 }
 async function pickMedia(nextSource: CaptureSource = source.value) {
+  if (nextSource === 'camera') { uni.navigateTo({ url: '/pages/photo/watermark?camera=1' }); return }
   if (choosing.value || submitting.value || !ensureCapturePermission()) return
   const owner = scopeOwner.value
   const projectId = scopeProject.value
@@ -281,7 +282,7 @@ async function pickMedia(nextSource: CaptureSource = source.value) {
     if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) return
     pendingPaths.value = paths
     const captureReturnedAt = new Date().toISOString()
-    const dates = paths.map(async path => (await readOriginalCapturedAt(path)) || (nextSource === 'camera' ? captureReturnedAt : ''))
+    const dates = paths.map(async path => (await readOriginalCapturedAt(path)) || '')
     for (const [pathIndex, path] of paths.entries()) {
       if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) break
       if (items.value.some(item => item.sourcePath === path || item.path === path)) { uni.showToast({ title: '已跳过本批重复照片', icon: 'none' }); continue }
@@ -294,7 +295,6 @@ async function pickMedia(nextSource: CaptureSource = source.value) {
         dates[pathIndex],
       ])
       if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) break
-      if (nextSource === 'camera' && !photographer.value) useMyName()
       items.value.push({ path: saved.originalPath, sourcePath: path, size: saved.originalSize, date: capturedAt ? localDate(new Date(capturedAt)) : '', capturedAt, source: nextSource, overrides: {} })
       pendingPaths.value = pendingPaths.value.filter(value => value !== path)
       persistDraft()

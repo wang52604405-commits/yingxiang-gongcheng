@@ -1,3 +1,4 @@
+import { launchCapture } from '@/services/capture-entry'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -38,6 +39,19 @@ describe('共享工程角色与选择状态', () => {
     expect(canCaptureProject(project({ upload_allowed: true, access_role: 'capturer', can_capture: true }))).toBe(true)
     expect(canCaptureProject(project({ upload_allowed: true, access_role: 'viewer', can_capture: false }))).toBe(false)
     expect(canManageProjectMembers(project({ upload_allowed: false, access_role: 'owner' }))).toBe(false)
+  })
+
+  it('免费会员现场拍照进入可编辑水印的内嵌相机，相册保留选片入口', async () => {
+    selectionStorage.setOwner('A')
+    selectionStorage.setProject(project({ upload_allowed: false, can_capture: false }))
+    const navigateTo = vi.fn()
+    ;(globalThis as any).uni.navigateTo = navigateTo
+    ;(globalThis as any).uni.showActionSheet = ({ success }: any) => success({ tapIndex: 0 })
+    expect(await launchCapture()).toBe(true)
+    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/photo/watermark?camera=1' })
+    ;(globalThis as any).uni.showActionSheet = ({ success }: any) => success({ tapIndex: 1 })
+    await launchCapture()
+    expect(navigateTo).toHaveBeenLastCalledWith({ url: '/pages/upload/index?source=album&autopick=1' })
   })
 
   it('角色显示简洁且成员数有安全默认值', () => {
@@ -83,7 +97,7 @@ describe('采集权限入口覆盖', () => {
   it('产品版本与页面显示保持一致', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.6.1')
+    expect(pkg.version).toBe('1.6.2')
     expect(manifest.versionName).toBe(pkg.version)
     expect(source('src/pages/profile/index.vue')).toContain(`工程影像 V${pkg.version}`)
   })
