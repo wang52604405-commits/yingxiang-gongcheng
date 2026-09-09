@@ -137,14 +137,6 @@ export function layoutWatermark(width: number, height: number, fields: PhotoWate
 
 const ORIENTATIONS: Record<string, number> = { up: 1, 'up-mirrored': 2, down: 3, 'down-mirrored': 4, 'left-mirrored': 5, right: 6, 'right-mirrored': 7, left: 8 }
 
-function capturedTimeLabel(value?: string): string {
-  if (!value?.trim()) return '未取得原始拍摄时间'
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value} 00:00:00` : '未取得原始拍摄时间'
-  const two = (number: number) => String(number).padStart(2, '0')
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`
-}
-
 export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
   const content = fields.constructionContent?.trim() || fields.sitePart?.trim() || fields.title?.trim() || ''
   const construction = [fields.unitName?.trim(), content].filter(Boolean).join('—')
@@ -153,7 +145,6 @@ export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
     `单位工程：${fields.unitProjectName?.trim() || '未填写'}`,
     `施工区域：${fields.partName?.trim() || '未填写'}`,
     `施工内容：${construction || '未填写'}`,
-    `时间：${capturedTimeLabel(fields.capturedAt || fields.photoDate)}`,
     `拍摄者：${fields.photographer?.trim() || '未填写'}`,
     `位置：${location || '未添加位置'}`,
   ]
@@ -259,9 +250,9 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
         layout.y + Math.max(layout.padding, (layout.headerHeight - layout.brandHeight - layout.logo.height - layout.padding) / 2), layout.logo.width, layout.logo.height)
     }
     ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)
-    ctx.font = `${layout.fontSize}px sans-serif`; ctx.textBaseline = 'top'; ctx.lineJoin = 'round'
+    ctx.font = `${layout.fontSize}px sans-serif`; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'
     const drawLines = (lines: string[], x: number, y: number, lineHeight = layout.lineHeight) => lines.forEach((line, index) => {
-      const top = y + lineHeight * index; ctx.strokeText?.(line, x, top); ctx.fillText(line, x, top)
+      const centerY = y + lineHeight * (index + .5); ctx.strokeText?.(line, x, centerY); ctx.fillText(line, x, centerY)
     })
     ctx.font = `${layout.brandFontSize}px sans-serif`
     ctx.textAlign = 'center'; ctx.fillStyle = '#141414'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1
