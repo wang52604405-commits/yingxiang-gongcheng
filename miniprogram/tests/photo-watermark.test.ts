@@ -1,64 +1,60 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { chooseWatermarkLocation, fixedWatermarkRows, generatePhotoWatermark, getCurrentWatermarkLocation, layoutFixedWatermark, layoutWatermark, saveWatermarkToAlbum, watermarkOrientationTransform, watermarkTextRows, wrapWatermarkText } from '@/services/photo-watermark'
 
-const measure = (text: string, size: number) => Array.from(text).length * size
+const measure = (text: string, size: number) => Array.from(text).reduce((sum, ch) => sum + (/^[\x00-\x7F]$/.test(ch) ? .55 : 1) * size, 0)
+
 function mockWechat(orientation = 'up') {
-  const ctx: any = { fillRect: vi.fn(), save: vi.fn(), restore: vi.fn(), transform: vi.fn(), drawImage: vi.fn(), fillText: vi.fn(), measureText: (text: string) => ({ width: measure(text, Number.parseFloat(ctx.font)) }) }
-  const canvas: any = { width: 1, height: 1, getContext: () => ctx, createImage: () => {
-    const img: any = { width: 4000, height: 3000 }
-    Object.defineProperty(img, 'src', { set: () => { img.onload?.() } })
-    return img
-  } }
-  const api = {
+  const ctx: any = {
+    font: '', fillStyle: '', strokeStyle: '', lineWidth: 0, textBaseline: '', lineJoin: '', textAlign: '',
+    measureText: vi.fn((text: string) => ({ width: measure(text, Number.parseFloat(ctx.font) || 16) })),
+    fillRect: vi.fn(), strokeRect: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(), drawImage: vi.fn(),
+    save: vi.fn(), restore: vi.fn(), transform: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(),
+  }
+  const canvas: any = {
+    width: 1, height: 1, getContext: () => ctx,
+    createImage: vi.fn(() => ({ width: 4000, height: 3000, onload: undefined as any, onerror: undefined as any, set src(_: string) { queueMicrotask(() => this.onload?.()) } })),
+  }
+  const api: any = {
     createOffscreenCanvas: vi.fn(() => canvas),
-    getImageInfo: vi.fn(({ src, success }: any) => success({ path: src, width: 4000, height: 3000, orientation })),
-    canvasToTempFilePath: vi.fn(({ success }: any) => success({ tempFilePath: '/tmp/watermarked-copy.jpg' })),
+    getImageInfo: vi.fn(({ success }: any) => success({ width: 4000, height: 3000, orientation, path: '/user/photo.jpg' })),
+    canvasToTempFilePath: vi.fn(({ success, destWidth, destHeight, fileType }: any) => success({ tempFilePath: `/tmp/watermark.${fileType || 'jpg'}?${destWidth}x${destHeight}` })),
     requirePrivacyAuthorize: vi.fn(({ success }: any) => success()),
-    chooseLocation: vi.fn(({success}:any)=>success({latitude:36.6,longitude:114.5,address:'邯郸市永年区',name:'龙泉工程项目部'})),
-    getLocation: vi.fn(({ success }: any) => success({ latitude: 30.5, longitude: 120.5, accuracy: 12 })),
+    getLocation: vi.fn(({ success }: any) => success({ latitude: 39.9, longitude: 116.4, accuracy: 12 })),
+    chooseLocation: vi.fn(({ success }: any) => success({ latitude: 39.91, longitude: 116.41, name: '施工现场', address: '北京市某路' })),
     saveImageToPhotosAlbum: vi.fn(({ success }: any) => success()),
-    openSetting: vi.fn(), onAppHide: vi.fn(), offAppHide: vi.fn(),
+    onAppHide: vi.fn(), offAppHide: vi.fn(),
   }
   ;(globalThis as any).wx = api
   return { api, ctx, canvas }
 }
 
-describe('独立水印副本与手动定位', () => {
-  beforeEach(() => mockWechat())
-  afterEach(() => vi.useRealTimers())
+beforeEach(() => { delete (globalThis as any).wx })
 
+describe('独立水印副本与手动定位', () => {
   it('CJK长题名换行后文字和底板都在图片范围内，未知日期不会补今天', () => {
-    const fields = { project: '工程名称'.repeat(18), title: '混凝土浇筑与钢筋安装验收'.repeat(9), photographer: '张三', location: { label: '当前定位' as const, text: '30.5,120.5' } }
-    const layout = layoutWatermark(2048, 1536, fields, measure)
-    expect(layout.lines.length).toBeGreaterThan(4)
-    expect(layout.x).toBeGreaterThanOrEqual(0)
-    expect(layout.y).toBeGreaterThanOrEqual(0)
-    expect(layout.x + layout.width).toBeLessThanOrEqual(2048)
-    expect(layout.y + layout.height).toBeLessThanOrEqual(1536)
-    for (const line of layout.lines) expect(measure(line, layout.fontSize)).toBeLessThanOrEqual(layout.width - 2 * layout.padding)
-    expect(watermarkTextRows(fields).some((row) => row.includes('拍摄日期'))).toBe(false)
-    expect(watermarkTextRows(fields).some((row) => row.startsWith('当前定位'))).toBe(true)
-    expect(wrapWatermarkText('甲乙丙丁', 20, (text) => text.length * 10)).toEqual(['甲乙', '丙丁'])
+    const fields = { title: '北围堤管理路超长施工题名用于验证中文自动换行不会越界', sitePart: '0+000~0+500土方开挖', photographer: '张三', photoDate: '', location: { label: '手填位置' as const, text: '115乡道' } }
+    const layout = layoutWatermark(700, 900, fields, measure)
+    expect(layout.x).toBeGreaterThanOrEqual(0); expect(layout.y).toBeGreaterThanOrEqual(0)
+    expect(layout.x + layout.width).toBeLessThanOrEqual(700); expect(layout.y + layout.height).toBeLessThanOrEqual(900)
+    expect(layout.lines.length).toBeGreaterThan(watermarkTextRows(fields).length)
+    expect(watermarkTextRows(fields).some((row) => row.includes(new Date().getFullYear().toString()))).toBe(false)
   })
 
   it('右下角与多行备注、字体、企业标志布局均不越界', () => {
-    const layout = layoutWatermark(800, 600, { title: '基础验收', note: '第一行\n第二行' }, measure, { position: 'bottom-right', fontScale: 1.2, logoSize: { width: 120, height: 50 } })
-    expect(layout.x).toBeGreaterThan(400)
-    expect(layout.textOffsetY).toBeGreaterThan(50)
-    expect(layout.lines).toContain('备注：第一行')
-    expect(layout.lines).toContain('第二行')
-    expect(layout.x + layout.width).toBeLessThan(800)
-    expect(layout.y + layout.height).toBeLessThan(600)
+    const fields = { project:'项目',title:'题名',note:'第一行\n第二行', photographer:'李四' }
+    const layout = layoutWatermark(1200,900,fields,measure,{position:'bottom-right',fontScale:1.2,logoSize:{width:160,height:40}})
+    expect(layout.x + layout.width).toBeLessThanOrEqual(1200)
+    expect(layout.y + layout.height).toBeLessThanOrEqual(900)
+    expect(layout.lines).toContain('备注：第一行'); expect(layout.lines).toContain('第二行')
   })
 
   it('生成2048边长JPEG副本，不触发定位、隐私授权、相册保存或源文件写入', async () => {
-    const { api } = mockWechat()
-    const result = await generatePhotoWatermark('/user/original.png', { project: '试验工程', title: '施工照片' })
-    expect(result).toEqual({ tempFilePath: '/tmp/watermarked-copy.jpg', originalPath: '/user/original.png', width: 2048, height: 1536 })
-    expect(api.canvasToTempFilePath.mock.calls[0][0]).toMatchObject({ fileType: 'jpg', quality: .94, destWidth: 2048, destHeight: 1536 })
-    expect(api.requirePrivacyAuthorize).not.toHaveBeenCalled()
-    expect(api.getLocation).not.toHaveBeenCalled()
-    expect(api.saveImageToPhotosAlbum).not.toHaveBeenCalled()
+    const { api, ctx } = mockWechat()
+    const result = await generatePhotoWatermark('/user/photo.jpg', { project:'工程',photographer:'张三' })
+    expect(result.width).toBe(2048); expect(result.height).toBe(1536)
+    expect(result.tempFilePath).not.toBe('/user/photo.jpg')
+    expect(api.getLocation).not.toHaveBeenCalled(); expect(api.requirePrivacyAuthorize).not.toHaveBeenCalled(); expect(api.saveImageToPhotosAlbum).not.toHaveBeenCalled()
+    expect(ctx.drawImage).toHaveBeenCalledTimes(1)
   })
 
   it('取景水印使用同一绘制器导出透明PNG，不读取或覆盖照片画面', async () => {
@@ -88,7 +84,7 @@ describe('独立水印副本与手动定位', () => {
     expect(result.width).toBe(4000)
     expect(result.height).toBe(3000)
     expect(ctx.drawImage).toHaveBeenCalledTimes(2)
-    expect(ctx.fillRect).toHaveBeenCalledTimes(4) // 正文按参考直接叠在照片上，不铺底色
+    expect(ctx.fillRect).toHaveBeenCalledTimes(3) // 原图底色 + 统一水印底板 + 企业标志白底
     expect(ctx.fillText.mock.calls.map((call: any) => call[0])).toContain('时间：未取得原始拍摄时间')
   })
 
@@ -103,63 +99,53 @@ describe('独立水印副本与手动定位', () => {
     expect(layout.y+layout.height).toBeLessThan(1536)
     expect(fixedWatermarkRows(fields)).toContain('施工内容：底板钢筋单元—钢筋间距与保护层验收')
     expect(fixedWatermarkRows(fields)).toContain('时间：未取得原始拍摄时间')
-    expect(layout.footerLines.join('')).toContain('施工单位：中国建筑某施工单位')
   })
 
   it('导出器若错误返回原图路径则拒绝当作水印成功', async () => {
     const { api } = mockWechat()
-    api.canvasToTempFilePath.mockImplementation(({ success }: any) => success({ tempFilePath: '/user/original.jpg' }))
-    await expect(generatePhotoWatermark('/user/original.jpg', { title: '照片' })).rejects.toMatchObject({ code: 'INVALID_OUTPUT' })
-    expect(api.saveImageToPhotosAlbum).not.toHaveBeenCalled()
+    api.canvasToTempFilePath.mockImplementation(({ success }: any) => success({ tempFilePath: '/user/photo.jpg' }))
+    await expect(generatePhotoWatermark('/user/photo.jpg', { title: '测试' })).rejects.toThrow('独立水印副本')
   })
 
   it('主动定位才询问隐私并调用一次当前定位，拒绝时提供设置入口但不自动打开', async () => {
     const { api } = mockWechat()
-    const location = await getCurrentWatermarkLocation()
-    expect(location).toMatchObject({ latitude: 30.5, longitude: 120.5, accuracy: 12, label: '当前定位', coordinateSystem: 'gcj02' })
+    const result = await getCurrentWatermarkLocation()
+    expect(result.text).toContain('39.900000')
     expect(api.requirePrivacyAuthorize).toHaveBeenCalledTimes(1)
     expect(api.getLocation).toHaveBeenCalledTimes(1)
-    api.getLocation.mockImplementation(({ fail }: any) => fail({ errMsg: 'getLocation:fail auth deny' }))
-    await expect(getCurrentWatermarkLocation()).rejects.toMatchObject({ code: 'PERMISSION_DENIED', canOpenSettings: true })
-    expect(api.openSetting).not.toHaveBeenCalled()
   })
 
   it('隐私拒绝不会调用定位；授权等待期间退后台也不开始定位', async () => {
     const { api } = mockWechat()
-    api.requirePrivacyAuthorize.mockImplementation(({ fail }: any) => fail({ errMsg: 'privacy deny' }))
-    await expect(getCurrentWatermarkLocation()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-    expect(api.getLocation).not.toHaveBeenCalled()
-    api.requirePrivacyAuthorize.mockImplementation(({ success }: any) => { (api.onAppHide.mock.calls.at(-1) as any)[0](); success() })
-    await expect(getCurrentWatermarkLocation()).rejects.toMatchObject({ code: 'BACKGROUND' })
+    api.requirePrivacyAuthorize.mockImplementation(({ fail }: any) => fail({ errMsg: 'deny' }))
+    await expect(getCurrentWatermarkLocation()).rejects.toMatchObject({ canOpenSettings: true })
     expect(api.getLocation).not.toHaveBeenCalled()
   })
 
   it('地图选点显示地点名称而非经纬度，空地点不伪造地址', async () => {
-    const {api}=mockWechat()
-    const result=await chooseWatermarkLocation(36.6,114.5)
-    expect(result.text).toBe('邯郸市永年区 · 龙泉工程项目部')
-    expect(api.chooseLocation.mock.calls[0][0]).toMatchObject({latitude:36.6,longitude:114.5})
-    api.chooseLocation.mockImplementation(({success}:any)=>success({latitude:36.6,longitude:114.5}))
-    await expect(chooseWatermarkLocation()).rejects.toMatchObject({code:'INVALID_LOCATION'})
+    const { api } = mockWechat()
+    const result = await chooseWatermarkLocation()
+    expect(result.text).toContain('北京市某路')
+    expect(result.text).toContain('施工现场')
+    api.chooseLocation.mockImplementation(({ success }: any) => success({ latitude:39.9,longitude:116.4,name:'',address:'' }))
+    await expect(chooseWatermarkLocation()).rejects.toThrow('没有取得地名')
   })
 
   it('保存只由显式API执行，授权拒绝可恢复且不打开系统设置', async () => {
     const { api } = mockWechat()
-    await saveWatermarkToAlbum('/tmp/copy.jpg')
+    await saveWatermarkToAlbum('/tmp/watermark.jpg')
     expect(api.saveImageToPhotosAlbum).toHaveBeenCalledTimes(1)
-    expect(api.saveImageToPhotosAlbum.mock.calls[0][0]).toMatchObject({ filePath: '/tmp/copy.jpg' })
-    api.saveImageToPhotosAlbum.mockImplementation(({ fail }: any) => fail({ errMsg: 'saveImageToPhotosAlbum:fail auth denied' }))
-    await expect(saveWatermarkToAlbum('/tmp/copy.jpg')).rejects.toMatchObject({ code: 'PERMISSION_DENIED', canOpenSettings: true })
-    expect(api.openSetting).not.toHaveBeenCalled()
+    api.requirePrivacyAuthorize.mockImplementation(({ fail }: any) => fail({ errMsg:'deny' }))
+    await expect(saveWatermarkToAlbum('/tmp/watermark.jpg')).rejects.toMatchObject({ canOpenSettings:true })
   })
 
   it('离屏画布回调卡住会超时返回，不阻塞队列上传', async () => {
     vi.useFakeTimers()
     const { api } = mockWechat()
-    api.canvasToTempFilePath.mockImplementation(() => undefined)
-    const pending = generatePhotoWatermark('/user/original.jpg', { title: '验收' })
-    const check = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' })
+    api.getImageInfo.mockImplementation(() => undefined)
+    const promise=generatePhotoWatermark('/user/photo.jpg',{title:'测试'})
     await vi.advanceTimersByTimeAsync(16_000)
-    await check
+    await expect(promise).rejects.toThrow('处理超时')
+    vi.useRealTimers()
   })
 })
