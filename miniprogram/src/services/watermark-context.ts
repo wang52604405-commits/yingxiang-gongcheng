@@ -42,6 +42,17 @@ export function watermarkContextMatches(context: WatermarkContext, owner: string
   return Boolean(owner && projectId && context.owner === owner && context.projectId === projectId && context.sourcePath)
 }
 
+function normalizedPhotoDate(photoDate?: string, capturedAt?: string): string {
+  const direct = String(photoDate || '').trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct
+  const source = String(capturedAt || '').trim()
+  const date = new Date(source)
+  if (!Number.isFinite(date.getTime())) return ''
+  const two = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`
+}
+
 export function watermarkUploadDraft(context: WatermarkContext, fields: { title: string; photographer: string; photoDate: string; sitePart: string; capturedAt?: string }, projectName: string, captureId: string): UploadDraft {
-  return { project_id: context.projectId, project_name: projectName, scope: context.scope || 'engineering', category: context.scope === 'other' ? undefined : context.category || 'construction', mode: 'auto', auto_delivery: true, captured_at: fields.capturedAt || context.capturedAt, capture_source: context.sourceKind === 'camera' ? 'camera' : 'album', title: fields.title.trim(), photographer: fields.photographer.trim(), photo_date: fields.photoDate, site_part: fields.sitePart.trim(), capture_item_id: captureId }
+  const capturedAt = fields.capturedAt || context.capturedAt || ''
+  return { project_id: context.projectId, project_name: projectName, scope: context.scope || 'engineering', category: context.scope === 'other' ? undefined : context.category || 'construction', mode: 'auto', auto_delivery: true, captured_at: capturedAt, capture_source: context.sourceKind === 'camera' ? 'camera' : 'album', title: fields.title.trim(), photographer: fields.photographer.trim(), photo_date: normalizedPhotoDate(fields.photoDate, capturedAt), site_part: fields.sitePart.trim(), capture_item_id: captureId }
 }
