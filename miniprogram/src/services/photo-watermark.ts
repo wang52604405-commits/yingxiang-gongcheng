@@ -139,9 +139,8 @@ const ORIENTATIONS: Record<string, number> = { up: 1, 'up-mirrored': 2, down: 3,
 
 function capturedTimeLabel(value?: string): string {
   if (!value?.trim()) return '未取得原始拍摄时间'
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return '未取得原始拍摄时间'
+  if (!Number.isFinite(date.getTime())) return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value} 00:00:00` : '未取得原始拍摄时间'
   const two = (number: number) => String(number).padStart(2, '0')
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`
 }
@@ -156,7 +155,7 @@ export function fixedWatermarkRows(fields: PhotoWatermarkFields): string[] {
     `施工内容：${construction || '未填写'}`,
     `时间：${capturedTimeLabel(fields.capturedAt || fields.photoDate)}`,
     `拍摄者：${fields.photographer?.trim() || '未填写'}`,
-    `位置：${location ? `${fields.location?.label === '当前定位' ? '当前位置 · ' : ''}${location}` : '未添加位置'}`,
+    `位置：${location || '未添加位置'}`,
   ]
 }
 
@@ -165,42 +164,35 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
   const margin = Math.max(6, Math.round(Math.min(width, height) * .02))
   const panelWidth = Math.min(width - margin * 2, Math.max(160, Math.round(width * (width >= height ? .36 : .44))))
   const targetArea = width * height / 8
-  const maxArea = width * height * .145
+  const maxArea = width * height * .16
   const preferredMinFont = Math.max(10, Math.round(Math.min(width, height) / 62))
   let fontSize = Math.max(10, Math.min(54, Math.round(Math.min(width, height) / 38)))
   while (true) {
     const padding = Math.max(5, Math.round(fontSize * .38))
-    const gap = Math.max(3, Math.round(fontSize * .16))
+    const gap = Math.max(2, Math.round(fontSize * .1))
     const lineHeight = Math.ceil(fontSize * 1.32)
     const logoBoxWidth = logoSize || fields.companyName ? Math.round(fontSize * 4.8) : 0
     const brandFontSize = fontSize
     const brandLines = fields.companyName ? [fields.companyName] : []
     const brandLineHeight = Math.ceil(brandFontSize * 1.25)
+    const brandHeight = brandLines.length * brandLineHeight
     const headerFontSize = fontSize
     const headerLineHeight = Math.ceil(headerFontSize * 1.3)
-    const headerWidth = panelWidth - logoBoxWidth - padding * 2
-    const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', Math.min(headerWidth, headerFontSize * 13), (text) => measureAtSize(text, headerFontSize))
-    if (headerLines.length > 1) {
-      const last = Array.from(headerLines[headerLines.length - 1])
-      const previous = Array.from(headerLines[headerLines.length - 2])
-      if (last.length < 3 && previous.length > 3) {
-        const moved = previous.splice(previous.length - (3 - last.length))
-        headerLines[headerLines.length - 2] = previous.join('')
-        headerLines[headerLines.length - 1] = [...moved, ...last].join('')
-      }
-    }
-    const headerHeight = Math.max(logoBoxWidth, headerLines.length * headerLineHeight + padding * 2)
-    const logoScale = logoSize ? Math.min((logoBoxWidth - padding * 2) / logoSize.width, (headerHeight - padding * 3 - brandLineHeight * brandLines.length) / logoSize.height) : 0
+    const headerWidth = Math.max(fontSize * 5, panelWidth - logoBoxWidth - padding * 2)
+    const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', headerWidth, (text) => measureAtSize(text, headerFontSize))
+    const logoPreviewHeight = logoSize && logoBoxWidth > padding * 2 ? Math.round(logoSize.height * ((logoBoxWidth - padding * 2) / logoSize.width)) : 0
+    const headerTextHeight = headerLines.length * headerLineHeight + padding * 2
+    const headerLogoHeight = logoBoxWidth ? logoPreviewHeight + brandHeight + padding * 3 : 0
+    const headerHeight = Math.max(headerTextHeight, headerLogoHeight, lineHeight + padding * 2)
+    const logoScale = logoSize ? Math.max(0, Math.min((logoBoxWidth - padding * 2) / logoSize.width, Math.max(1, headerHeight - padding * 3 - brandHeight) / logoSize.height)) : 0
     const logo = logoSize ? { width: Math.max(1, Math.round(logoSize.width * logoScale)), height: Math.max(1, Math.round(logoSize.height * logoScale)) } : undefined
-    const brandHeight = brandLines.length * brandLineHeight
     const bodyLines = fixedWatermarkRows(fields).flatMap((row) => wrapWatermarkText(row, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize)))
     const bodyHeight = bodyLines.length * lineHeight + padding * 2
     const footerLines = wrapWatermarkText(`施工单位：${fields.contractor?.trim() || '未填写'}`, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize))
     const footerHeight = footerLines.length * lineHeight + padding * 2
     const panelHeight = headerHeight + bodyHeight + footerHeight + gap * 2
     const area = panelWidth * panelHeight
-    if (panelHeight <= height - margin * 2 && area <= maxArea
-      && (area <= targetArea * 1.05 || fontSize <= preferredMinFont)) {
+    if (panelHeight <= height - margin * 2 && area <= maxArea && (area <= targetArea * 1.12 || fontSize <= preferredMinFont)) {
       return { x: margin, y: height - margin - panelHeight, width: panelWidth, height: panelHeight, areaRatio: area / (width * height), fontSize, padding, gap, lineHeight, logo, logoBoxWidth, brandFontSize, brandLineHeight, brandLines, brandHeight, headerFontSize, headerLineHeight, headerLines, headerHeight, bodyLines, bodyHeight, footerLines, footerHeight }
     }
     if (fontSize <= 10) throw new WatermarkError('水印内容过多，请缩短施工内容或施工单位名称', 'TEXT_TOO_LONG')
@@ -224,10 +216,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
   try {
     const image = canvas.createImage()
     if (!options.overlaySize) await callback<void>((success, fail) => { image.onload = () => success(); image.onerror = fail; image.src = info.path || sourcePath })
-    // Some decoders already apply the quarter-turn; use decoded bounds to avoid a second turn.
-    if (orientation >= 5 && sourceWidth !== sourceHeight && Number(image.width) === sourceHeight && Number(image.height) === sourceWidth) {
-      sourceWidth = Number(image.width); sourceHeight = Number(image.height); orientation = 1
-    }
+    if (orientation >= 5 && sourceWidth !== sourceHeight && Number(image.width) === sourceHeight && Number(image.height) === sourceWidth) { sourceWidth = Number(image.width); sourceHeight = Number(image.height); orientation = 1 }
     const maxEdge = options.maxEdge === 4096 ? 4096 : 2048
     const ratio = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight))
     const drawWidth = Math.max(1, Math.round(sourceWidth * ratio))
@@ -249,26 +238,20 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     canvas.width = width; canvas.height = height
     const ctx = canvas.getContext('2d')
     if (!options.overlaySize) {
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
-    ctx.save()
-    ctx.transform(...watermarkOrientationTransform(orientation, drawWidth, drawHeight))
-    ctx.drawImage(image, 0, 0, drawWidth, drawHeight)
-    ctx.restore()
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height)
+      ctx.save(); ctx.transform(...watermarkOrientationTransform(orientation, drawWidth, drawHeight)); ctx.drawImage(image, 0, 0, drawWidth, drawHeight); ctx.restore()
     }
     const layout = layoutFixedWatermark(width, height, fields, (text, size) => { ctx.font = `${size}px sans-serif`; return ctx.measureText(text).width }, logoSize)
-    // Fixed template: 80% transparent means alpha 0.2, never opacity 0.8.
     const bodyY = layout.y + layout.headerHeight + layout.gap
     const footerY = bodyY + layout.bodyHeight + layout.gap
-    ctx.fillStyle = 'rgba(120, 190, 240, 0.2)'
-    ctx.fillRect(layout.x, layout.y, layout.width, layout.headerHeight)
-    // Reference: body text sits directly on the photo; only header/footer are tinted.
-    ctx.fillRect(layout.x, footerY, layout.width, layout.footerHeight)
+    ctx.fillStyle = 'rgba(5, 24, 28, 0.62)'
+    ctx.fillRect(layout.x, layout.y, layout.width, layout.height)
+    ctx.strokeStyle = 'rgba(255,255,255,.32)'; ctx.lineWidth = Math.max(1, layout.fontSize * .035)
+    ctx.strokeRect?.(layout.x, layout.y, layout.width, layout.height)
+    ctx.beginPath?.(); ctx.moveTo?.(layout.x, bodyY - layout.gap / 2); ctx.lineTo?.(layout.x + layout.width, bodyY - layout.gap / 2); ctx.stroke?.()
+    ctx.beginPath?.(); ctx.moveTo?.(layout.x, footerY - layout.gap / 2); ctx.lineTo?.(layout.x + layout.width, footerY - layout.gap / 2); ctx.stroke?.()
     if (layout.logoBoxWidth) {
-      ctx.fillStyle = '#ffffff'
-      if (ctx.beginPath && ctx.quadraticCurveTo && ctx.fill) {
-        const x = layout.x, y = layout.y, w = layout.logoBoxWidth, h = layout.headerHeight, r = Math.min(18, w * .12)
-        ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath(); ctx.fill()
-      } else ctx.fillRect(layout.x, layout.y, layout.logoBoxWidth, layout.headerHeight)
+      ctx.fillStyle = 'rgba(255,255,255,.94)'; ctx.fillRect(layout.x, layout.y, layout.logoBoxWidth, layout.headerHeight)
     }
     if (logo && layout.logo) {
       ctx.drawImage(logo, logoCrop!.x, logoCrop!.y, logoCrop!.width, logoCrop!.height,
@@ -278,9 +261,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)
     ctx.font = `${layout.fontSize}px sans-serif`; ctx.textBaseline = 'top'; ctx.lineJoin = 'round'
     const drawLines = (lines: string[], x: number, y: number, lineHeight = layout.lineHeight) => lines.forEach((line, index) => {
-      const top = y + lineHeight * index
-      ctx.strokeText?.(line, x, top)
-      ctx.fillText(line, x, top)
+      const top = y + lineHeight * index; ctx.strokeText?.(line, x, top); ctx.fillText(line, x, top)
     })
     ctx.font = `${layout.brandFontSize}px sans-serif`
     ctx.textAlign = 'center'; ctx.fillStyle = '#141414'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1
@@ -297,7 +278,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
   } finally { canvas.width = 1; canvas.height = 1 }
 }
 
-/** Native map picker returns a human-readable place; never substitute raw coordinates. */
+/** Native map picker returns a human-readable place; kept for manual-photo compatibility. */
 export async function chooseWatermarkLocation(latitude?: number, longitude?: number) {
   return authorizedAction('location', async (api) => {
     if (!api.chooseLocation) throw new WatermarkError('当前微信版本不支持地图选点，请手填地点', 'UNSUPPORTED')
