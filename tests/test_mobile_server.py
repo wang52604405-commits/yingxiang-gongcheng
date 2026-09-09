@@ -70,6 +70,10 @@ class MobileServerContractTest(unittest.TestCase):
         config.ADMIN_PASSWORD = ""
         server_app._rate_hits.clear()
 
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        cls.old_signer = server_app.signer
+        server_app.signer = server_app.LicenseSigner(Path(cls.temp.name) / "test-only-key")
+        server_app.signer._key = Ed25519PrivateKey.generate()
         cls.db = db
         cls.app = server_app.create_app()
         cls.app.config["TESTING"] = True
@@ -97,6 +101,9 @@ class MobileServerContractTest(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
+        conn = cls.db.connect()
+        conn.executemany("INSERT INTO licenses(account_id,license_type,valid_days,active) VALUES (?,'lifetime',0,1)", [(account_a,), (account_b,)])
+        conn.commit(); conn.close()
         cls.desktop_token_a = cls._activate(cls.token_a, "MACHINE-A")
         cls.desktop_token_a_alt = cls._activate(cls.token_a, "MACHINE-A-ALT")
         cls.desktop_token_b = cls._activate(cls.token_b, "MACHINE-B")
@@ -116,6 +123,8 @@ class MobileServerContractTest(unittest.TestCase):
                 setattr(config, name, value)
         except ImportError:
             pass
+        from server import app as server_app
+        server_app.signer = cls.old_signer
         cls.temp.cleanup()
         for name, value in cls.old_env.items():
             if value is None:
@@ -171,6 +180,7 @@ class MobileServerContractTest(unittest.TestCase):
         requirements=None,
         legacy_photo_uuids=None,
         processes=None,
+        deletion_password_hash=None,
     ):
         # 大多数测试传账号登录令牌以表示租户；新桌面契约
         # 实际上传必须换成与请求机器一致的 desktop_sync_token。
@@ -230,6 +240,8 @@ class MobileServerContractTest(unittest.TestCase):
                 }
             ],
         }
+        if deletion_password_hash is not None:
+            payload["deletion_password_hash"] = deletion_password_hash
         if requirements is not None:
             payload["requirements"] = requirements
             payload["requirement_summary"] = {
@@ -981,6 +993,10 @@ class MobileServerContractTest(unittest.TestCase):
         password = "RuleCapture2026"
         machine_id = "MACHINE-RULE"
         self._register(username, password)
+        conn = self.db.connect()
+        conn.execute("INSERT INTO licenses(account_id,license_type,valid_days,active) SELECT id, 'lifetime', 0, 1 FROM accounts WHERE username = ?", (username,))
+        conn.commit()
+        conn.close()
         desktop_account_token = self._login(username, password)
         desktop_sync_token = self._activate(desktop_account_token, machine_id)
         requirement = {
@@ -4665,6 +4681,68 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertIn("手机原图仅短期中转到绑定电脑", cloud_template)
         self.assertIn("电脑确认归档后服务器删除原图", cloud_template)
         self.assertNotIn("平台只同步缩略图，不上传工程原图", cloud_template)
+
+    def test_mobile_edit_password_delete_and_change_feed(self):
+        from werkzeug.security import generate_password_hash
+        project_id="photo-actions-"+uuid.uuid4().hex[:8]
+        response=self._snapshot(self.desktop_token_a,"编辑测试",project_id=project_id)
+        conn=self.db.connect();owner=conn.execute("SELECT id FROM accounts WHERE username='tenant_a'").fetchone()["id"];conn.close()
+        ref=f"{owner}:{project_id}"
+        photo_uuid=str(uuid.uuid4())
+        self.assertEqual(self._backfill(self.desktop_token_a,photo_uuid,project_id).status_code,201)
+        url=f"/api/mobile/v1/photos/{photo_uuid}"
+        changed=self.client.patch(url,json={"project_id":ref,"title":"手机修改题名","photo_date":"2026-09-10"},headers=self._headers(self.token_a))
+        self.assertEqual(changed.status_code,200,changed.get_json())
+        self.assertEqual(changed.get_json()["photo"]["title"],"手机修改题名")
+        blocked=self.client.post(url+"/delete",json={"project_id":ref,"password":"safe123"},headers=self._headers(self.token_a))
+        self.assertEqual(blocked.get_json()["code"],"delete_password_not_synced")
+        secret=generate_password_hash("safe123")
+        self._snapshot(self.desktop_token_a,"编辑测试",project_id=project_id,revision=8,deletion_password_hash=secret)
+        visible=self.client.get("/api/mobile/v1/projects",headers=self._headers(self.token_a)).get_json()
+        self.assertNotIn(secret,json.dumps(visible))
+        self.assertEqual(self.client.post(url+"/delete",json={"project_id":ref,"password":"wrong"},headers=self._headers(self.token_a)).status_code,403)
+        self.assertEqual(self.client.get(url,headers=self._headers(self.token_a)).status_code,200)
+        self.assertEqual(self.client.patch(url,json={"project_id":ref,"title":"forbidden"},headers=self._headers(self.token_b)).status_code,404)
+        deleted=self.client.post(url+"/delete",json={"project_id":ref,"password":"safe123"},headers=self._headers(self.token_a))
+        self.assertEqual(deleted.status_code,200,deleted.get_json())
+        self.assertEqual(self.client.get(url,headers=self._headers(self.token_a)).status_code,404)
+        self.assertTrue(self.client.post(url+"/delete",json={"project_id":ref,"password":"safe123"},headers=self._headers(self.token_a)).get_json()["idempotent"])
+        feed=self.client.get("/api/desktop/v1/photo-changes",query_string={"project_id":project_id,"desktop_machine_id":"MACHINE-A"},headers=self._headers(self.desktop_token_a)).get_json()
+        self.assertEqual([e["action"] for e in feed["changes"]],["edit","delete"])
+        self.assertNotIn("safe123",json.dumps(feed))
+
+    def test_paid_project_inheritance_never_unlocks_other_projects(self):
+        name="free-"+uuid.uuid4().hex[:8];self._register(name,"FreeMember2026")
+        token=self._login(name,"FreeMember2026")
+        machine="FREE-"+uuid.uuid4().hex[:8];desktop=self._activate(token,machine)
+        own_project="free-project-"+uuid.uuid4().hex[:8]
+        self._snapshot(desktop,"免费工程",project_id=own_project,desktop_machine_id=machine)
+        conn=self.db.connect()
+        actor=conn.execute("SELECT id FROM accounts WHERE username=?",(name,)).fetchone()["id"]
+        owner=conn.execute("SELECT id FROM accounts WHERE username='tenant_a'").fetchone()["id"]
+        conn.close()
+        own_ref=f"{actor}:{own_project}"
+        projects=self.client.get("/api/mobile/v1/projects",headers=self._headers(token)).get_json()["projects"]
+        self.assertFalse(next(p for p in projects if p["id"]==own_ref)["can_capture"])
+        self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{own_ref}/tree",headers=self._headers(token)).status_code,200)
+        payload={"client_batch_id":str(uuid.uuid4()),"project_id":own_ref,"scope":"engineering","category":"construction","mode":"auto"}
+        denied=self.client.post("/api/mobile/v1/batches",json=payload,headers=self._headers(token))
+        self.assertEqual(denied.get_json()["code"],"membership_required")
+        first="paid-one-"+uuid.uuid4().hex[:8];second="paid-two-"+uuid.uuid4().hex[:8]
+        self._snapshot(self.desktop_token_a,"付费项目一",project_id=first)
+        self._snapshot(self.desktop_token_a,"付费项目二",project_id=second)
+        conn=self.db.connect();conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,status,invited_by_account_id,joined_at,updated_at) VALUES (?,?,?,'capturer','active',?,'2026-09-10','2026-09-10')",(owner,first,actor,owner));conn.commit();conn.close()
+        inherited={**payload,"client_batch_id":str(uuid.uuid4()),"project_id":f"{owner}:{first}"}
+        allowed=self.client.post("/api/mobile/v1/batches",json=inherited,headers=self._headers(token))
+        self.assertEqual(allowed.status_code,201,allowed.get_json())
+        other=self.client.post("/api/mobile/v1/batches",json={**inherited,"client_batch_id":str(uuid.uuid4()),"project_id":f"{owner}:{second}"},headers=self._headers(token))
+        self.assertEqual(other.status_code,404,other.get_json())
+        conn=self.db.connect();conn.execute("UPDATE licenses SET active=0 WHERE account_id=?",(owner,));conn.commit();conn.close()
+        try:
+            denied=self.client.post("/api/mobile/v1/batches",json={**inherited,"client_batch_id":str(uuid.uuid4())},headers=self._headers(token))
+            self.assertEqual(denied.get_json()["code"],"membership_required")
+        finally:
+            conn=self.db.connect();conn.execute("UPDATE licenses SET active=1 WHERE account_id=?",(owner,));conn.commit();conn.close()
 
 
 if __name__ == "__main__":

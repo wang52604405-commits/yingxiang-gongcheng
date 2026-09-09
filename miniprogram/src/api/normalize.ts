@@ -29,6 +29,7 @@ export function normalizeProject(raw: any): ProjectSummary {
     local_project_id: String(raw.local_project_id || raw.source_project_id || ''),
     access_role: normalizeProjectRole(raw.access_role || membership.role),
     member_count: Math.max(0, Number(raw.member_count ?? membership.member_count ?? 0)),
+    upload_allowed: optionalBoolean(raw.upload_allowed),
     can_capture: optionalBoolean(raw.can_capture, membership.can_capture, permissions.can_capture),
     can_manage_members: optionalBoolean(raw.can_manage_members, membership.can_manage_members, permissions.can_manage_members),
     revision: Number(raw.revision || 0),

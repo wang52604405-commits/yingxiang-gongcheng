@@ -664,6 +664,9 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
         local.preview_retry_attempts = undefined
         local.preview_next_retry_at = undefined
         await markDesktopImported(local)
+        local.status = 'local_deleted'
+        local.local_deleted_at = local.local_deleted_at || now()
+        persist(owner)
         continue
       }
       local.match_candidates = remote.match_candidates || local.match_candidates
@@ -1118,7 +1121,7 @@ function retryTarget(photo: LocalPhoto): PhotoStatus {
 function canManuallyRetry(photoUuid: string): boolean {
   const photo = state.photos.find((item) => item.photo_uuid === photoUuid)
   if (!photo || photo.status !== 'failed' || !isCurrentOwner(photo.owner_account_id)) return false
-  if (photo.retryable !== false) return true
+  if (photo.retryable !== false || photo.failure_code === 'membership_required') return true
   const batch = state.batches.find((item) => item.client_batch_id === photo.client_batch_id)
   return Boolean(batch && hasPermanentArchiveInfoFailure(batch)
     && photo.failure_code === batch.archive_info_sync_failure_code
@@ -1230,7 +1233,7 @@ async function retry(photoUuid: string): Promise<void> {
 }
 
 async function retryAll(): Promise<void> {
-  for (const photo of state.photos.filter((item) => item.status === 'failed' && item.retryable !== false)) await retry(photo.photo_uuid)
+  for (const photo of state.photos.filter((item) => item.status === 'failed' && canManuallyRetry(item.photo_uuid))) await retry(photo.photo_uuid)
 }
 
 async function deleteFailed(photoUuid: string): Promise<void> {
@@ -1306,6 +1309,22 @@ export const pendingCount = computed(() => state.photos.filter((photo) => !['des
 export const failedCount = computed(() => state.photos.filter((photo) => photo.status === 'failed').length)
 export const queueUsagePercent = computed(() => Math.min(100, Math.round((queueBytes.value / MAX_QUEUE_BYTES) * 100)))
 
+function applyCloudPhotoInfo(photoUuid: string, info: { title: string; photo_date: string; assignment?: Assignment }): void {
+  const photo = state.photos.find(item => item.photo_uuid === photoUuid && isCurrentOwner(item.owner_account_id))
+  if (!photo || photo.deleted_at) return
+  photo.title = info.title; photo.photo_date = info.photo_date
+  photo.draft.title = info.title; photo.draft.photo_date = info.photo_date
+  if (info.assignment) photo.draft.assignment = { ...info.assignment }
+  persist(photo.owner_account_id)
+}
+
+function markCloudPhotoDeleted(photoUuid: string): void {
+  const photo = state.photos.find(item => item.photo_uuid === photoUuid && isCurrentOwner(item.owner_account_id))
+  if (!photo) return
+  photo.status = 'local_deleted'; photo.deleted_at = now(); photo.local_deleted_at = now()
+  persist(photo.owner_account_id)
+}
+
 export const queueRuntime = {
   state,
   setOwner,
@@ -1319,6 +1338,8 @@ export const queueRuntime = {
   retry,
   retryAll,
   deleteFailed,
+  markCloudPhotoDeleted,
+  applyCloudPhotoInfo,
   recoverAuthFailures,
   startForegroundPolling,
   stopForegroundPolling,

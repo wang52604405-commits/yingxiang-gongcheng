@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { beginWatermarkDivision, consumeWatermarkDivision, watermarkDivisionFields } from '@/services/watermark-division'
 import { computed, reactive, ref, watch } from 'vue'
 import { onLoad, onReady, onShow, onUnload } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -8,14 +9,18 @@ import { consumeWatermarkContext, watermarkContextMatches, watermarkUploadDraft,
 import { generatePhotoWatermark, getCurrentWatermarkLocation, saveWatermarkToAlbum } from '@/services/photo-watermark'
 import { COMPANY_LOGOS } from '@/services/company-logos'
 import { queueRuntime } from '@/services/queue-runtime'
-import { capturePermissionMessage } from '@/services/project-membership'
+import { canCaptureProject, capturePermissionMessage } from '@/services/project-membership'
 import { mobileApi } from '@/api/mobile'
 import type { ProjectSummary } from '@/types/domain'
 
 const context = ref<WatermarkContext | null>(null)
 const activeProject = ref(selectionStorage.getProject())
-const form = reactive({ project: '', title: '', photographer: '', photoDate: '', sitePart: '', locationText: '', unitProjectName: '', partName: '', unitName: '', constructionContent: '', capturedAt: '', contractor: '' })
+const form = reactive({ project: '', title: '', photographer: '', photoDate: '', sitePart: '', locationText: '', unitProjectName: '', partName: '', unitName: '', unitCode: '', constructionContent: '', capturedAt: '', contractor: '' })
 const locationLabel = ref<'当前定位' | '手填位置'>('手填位置')
+const manualLocation = ref(false)
+const manualDate = ref('')
+const manualTime = ref('')
+const manualPhoto = computed(() => context.value?.sourceKind !== 'camera')
 const logoIndex = ref(0)
 const logoNames = ['不加企业标志', ...COMPANY_LOGOS.map((item) => item.name)]
 const largeExport = ref(false)
@@ -31,6 +36,7 @@ const preview = ref<{ tempFilePath: string; width: number; height: number } | nu
 const dirty = ref(true)
 let alive = true
 let choosingHierarchy = false
+const divisionKeyword = ref('')
 const photographerVerified = computed(() => activeProject.value.photographer_verified === true && Boolean(activeProject.value.photographer_name))
 const timeText = computed(() => {
   if (!form.capturedAt) return form.photoDate || '未取得原始拍摄时间'
@@ -39,7 +45,7 @@ const timeText = computed(() => {
   return value.toLocaleString('zh-CN', { hour12: false })
 })
 function preferenceKey() { return context.value ? `engineering-image:watermark-template:v1:${context.value.owner}:${context.value.projectId}` : '' }
-function chooseHierarchy() { if (!busy.value && sameContext()) { choosingHierarchy = true; uni.navigateTo({ url: '/pages/destination/select?scope=engineering&return=capture' }) } }
+function chooseHierarchy() { if (!busy.value && sameContext()) { beginWatermarkDivision(selectionStorage.getOwner(), String(activeProject.value.id)); choosingHierarchy = true; uni.navigateTo({ url: '/pages/destination/select?scope=engineering&return=watermark&keyword=' + encodeURIComponent(divisionKeyword.value.trim()) }) } }
 async function refreshIdentity() {
   if (!context.value) return
   try {
@@ -71,6 +77,7 @@ function showError(reason: unknown) {
 async function renderLatest() {
   const source = requireContext()
   if (!photographerVerified.value) throw new Error('拍摄者姓名尚未认证，请联系项目负责人审核')
+  if (manualPhoto.value && (!manualDate.value || !manualTime.value || !form.locationText.trim())) throw new Error('请手动填写这张照片的时间和地点')
   const result = await generatePhotoWatermark(source.sourcePath, {
     companyName: COMPANY_LOGOS[logoIndex.value - 1]?.name || '', project: form.project, unitProjectName: form.unitProjectName, partName: form.partName, unitName: form.unitName,
     constructionContent: form.constructionContent, capturedAt: form.capturedAt || form.photoDate,
@@ -124,7 +131,7 @@ async function uploadAuto() {
     requireContext()
     captureId = `watermark:${output.tempFilePath}`
     const title = [form.unitName, form.constructionContent.trim()].filter(Boolean).join('—')
-    const sitePart = [form.unitProjectName, form.partName, form.unitName, form.constructionContent.trim()].filter(Boolean).join(' / ')
+    const sitePart = [form.unitCode, form.unitProjectName, form.partName, form.unitName, form.constructionContent.trim()].filter(Boolean).join(' / ')
     const draft = watermarkUploadDraft(source, { ...form, title, sitePart }, project.name, captureId)
     const batch = await queueRuntime.enqueue([output.tempFilePath], draft)
     uploadedBatchId.value = batch.client_batch_id
@@ -147,7 +154,8 @@ async function getLocation() {
     requireContext()
     form.locationText = location.text
     locationLabel.value = '当前定位'
-  } catch (reason) { if (alive) showError(reason) }
+    manualLocation.value = false
+  } catch (reason) { if (alive) { manualLocation.value = true; showError(reason) } }
   finally { locating.value = false }
 }
 function clearLocation() { form.locationText = ''; locationLabel.value = '手填位置' }
@@ -161,25 +169,25 @@ onLoad(() => {
   Object.assign(form, { project: activeProject.value.name, constructionContent: value.title === value.unitName ? '' : value.title,
     photographer: activeProject.value.photographer_name || '', photoDate: value.photoDate, capturedAt: value.capturedAt || '',
     unitProjectName: value.unitProjectName || '', partName: value.partName || '', unitName: value.unitName || '' })
+  if (value.sourceKind !== 'camera') { form.photoDate = ''; form.capturedAt = ''; manualLocation.value = true }
   const pref = uni.getStorageSync(preferenceKey()) || {}
   logoIndex.value = Math.max(0, COMPANY_LOGOS.findIndex(item => item.id === pref.logoId) + 1)
   form.contractor = String(pref.contractor || '').slice(0, 100)
 
 })
-onReady(async () => { await refreshIdentity(); await updatePreview() })
+onReady(async () => { await refreshIdentity(); if (context.value?.sourceKind === 'camera' && sameContext() && photographerVerified.value && queueRuntime.state.foreground) await getLocation(); if (!manualPhoto.value) await updatePreview() })
 onShow(() => {
   activeProject.value = selectionStorage.getProject()
   if (choosingHierarchy && context.value && sameContext()) {
     choosingHierarchy = false
-    const assignment = selectionStorage.getDestination()?.assignment
-    form.unitProjectName = assignment?.unit_project_name || ''
-    form.partName = assignment?.part_name || ''
-    form.unitName = assignment?.unit_name || ''
+    const selected = consumeWatermarkDivision(selectionStorage.getOwner(), String(activeProject.value.id))
+    if (selected) Object.assign(form, watermarkDivisionFields(selected.assignment))
   }
   if (context.value && !sameContext()) { context.value = null; preview.value = null; form.locationText = ''; error.value = '账号或工程已切换，请返回重新选择照片' }
 })
 onUnload(() => { alive = false; form.locationText = '' })
 watch([form, locationLabel, logoIndex, largeExport], () => { dirty.value = true; uploadedBatchId.value = '' }, { deep: true })
+watch([manualDate, manualTime], () => { if (manualPhoto.value) { form.photoDate = manualDate.value; form.capturedAt = manualDate.value && manualTime.value ? manualDate.value + 'T' + manualTime.value + ':00' : '' } })
 watch([logoIndex, () => form.contractor], () => { if (context.value && sameContext()) uni.setStorageSync(preferenceKey(), { logoId: COMPANY_LOGOS[logoIndex.value - 1]?.id || '', contractor: form.contractor }) })
 </script>
 
@@ -194,20 +202,23 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
       <text class="archive-target">归档项目：{{ activeProject.name }}</text>
       <view class="edit-card card">
         <text class="section-title">固定工程水印</text>
-        <text class="copy-note">左下角 · 浅蓝色块80%透明 · 紧凑水印 · 约占画面1/10</text>
+        <text class="copy-note">左下角 · 浅蓝色块80%透明 · 紧凑水印 · 约占画面1/8</text>
         <text class="field-label">企业标志</text><picker :range="logoNames" :value="logoIndex" :disabled="busy" @change="logoIndex = Number($event.detail.value)"><view class="input date-input">{{ logoNames[logoIndex] }}</view></picker>
         <text class="field-label">项目名称</text><view class="readonly-value">{{ form.project }}</view>
-        <view class="field-heading"><text class="field-label">项目划分</text><button class="text-button pressable" :disabled="busy" @tap="chooseHierarchy">选择工程部位</button></view>
+        <text class="field-label">搜索项目划分</text><view class="division-search"><input v-model="divisionKeyword" class="input" maxlength="80" placeholder="如：底板、单元编码，可用空格组合关键词" confirm-type="search" :disabled="busy" @confirm="chooseHierarchy" /><button class="text-button pressable" :disabled="busy" @tap="chooseHierarchy">搜索选择</button></view>
         <view class="hierarchy-row"><text>单位工程</text><text>{{ form.unitProjectName || '未选择' }}</text></view>
         <view class="hierarchy-row"><text>施工区域</text><text>{{ form.partName || '未选择分部工程' }}</text></view>
-        <view class="hierarchy-row"><text>单元工程</text><text>{{ form.unitName || '未选择，可由后台识别' }}</text></view>
-        <text class="field-label">具体施工内容</text><input v-model="form.constructionContent" class="input" maxlength="60" placeholder="填写在单元工程名称后，如钢筋绑扎检查" :disabled="busy" />
-        <text class="field-label">时间（自动）</text><view class="readonly-value">{{ timeText }}</view>
+        <view class="hierarchy-row"><text>施工内容前缀</text><text>{{ form.unitName || '未选择，可由后台识别' }}</text></view>
+        <text class="field-label">具体施工内容</text><input v-model="form.constructionContent" class="input" maxlength="60" placeholder="仅填写后面的内容，如钢筋绑扎检查" :disabled="busy" />
+        <text class="field-label">{{ manualPhoto ? '时间（相册照片需手填）' : '时间（自动）' }}</text>
+        <view v-if="manualPhoto" class="manual-datetime"><picker mode="date" :value="manualDate" :disabled="busy" @change="manualDate = $event.detail.value"><view class="input date-input">{{ manualDate || '选择拍摄日期' }}</view></picker><picker mode="time" :value="manualTime" :disabled="busy" @change="manualTime = $event.detail.value"><view class="input date-input">{{ manualTime || '选择拍摄时间' }}</view></picker></view>
+        <view v-else class="readonly-value">{{ timeText }}</view>
         <text class="field-label">拍摄者</text><view class="readonly-value">{{ photographerVerified ? form.photographer + ' · 已认证' : '待项目负责人认证' }}</view>
-        <view class="field-heading"><text class="field-label">位置</text><button v-if="form.locationText" class="text-button pressable" :disabled="busy" @tap="clearLocation">清除</button></view>
-        <input v-model="form.locationText" class="input" maxlength="120" placeholder="定位或手填地址" :disabled="busy" @input="locationLabel = '手填位置'" />
-        <view class="location-actions"><text v-if="form.locationText" class="location-source">{{ locationLabel }}</text><button class="text-button pressable" :disabled="busy" @tap="getLocation">{{ locating ? '正在获取…' : '获取当前位置' }}</button></view>
-        <text v-if="locationLabel === '当前定位' && form.locationText" class="copy-note">当前位置是此刻手机的位置，不代表旧照片的拍摄地点。</text>
+        <text class="field-label">{{ manualPhoto ? '地点（相册照片需手填）' : '位置（优先定位）' }}</text>
+        <view v-if="form.locationText && !manualLocation" class="readonly-value">{{ form.locationText }}</view>
+        <view v-if="!manualPhoto" class="location-actions"><button class="secondary-button pressable location-primary" :disabled="busy" @tap="getLocation">{{ locating ? '正在定位…' : form.locationText ? '重新定位' : '获取当前位置' }}</button><button class="text-button pressable" :disabled="busy" @tap="manualLocation = !manualLocation">{{ manualLocation ? '收起手填' : '手填备用' }}</button></view>
+        <input v-if="manualLocation" v-model="form.locationText" class="input" maxlength="120" :placeholder="manualPhoto ? '填写拍摄当时的实际地点' : '定位不可用时，填写现场地址'" :disabled="busy" @input="locationLabel = '手填位置'" />
+        <text v-if="locationLabel === '当前定位' && form.locationText && context.sourceKind !== 'camera'" class="copy-note">这是此刻手机的位置，请确认适用于这张旧照片。</text>
         <text class="field-label">施工单位名称（底部色块）</text><input v-model="form.contractor" class="input" maxlength="100" placeholder="手填施工单位全称" :disabled="busy" />
         <view class="export-row"><text>高清导出</text><switch :checked="largeExport" :disabled="busy || previewOnly" @change="changeExportQuality" /></view>
       </view>
@@ -215,7 +226,8 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
     <view v-if="error" class="error-card" role="alert"><text>{{ error }}</text><button v-if="showSettings" class="text-button pressable" @tap="openSettings">打开权限设置</button></view>
     <template v-if="context">
       <text class="classify-note">上传后自动归类到施工单元；识别不到的照片送电脑端待分类，供人工筛选。</text>
-      <button class="primary-button pressable save-button" :disabled="busy || Boolean(uploadedBatchId)" @tap="uploadAuto">{{ uploading ? '正在准备上传…' : uploadedBatchId ? '已加入上传归类队列' : previewOnly ? '上传水印预览并归类' : '上传并自动归类' }}</button>
+      <text v-if="!canCaptureProject(activeProject)" class="copy-note">当前可制作水印并保存到手机，本项目未开通上传权限。</text>
+      <button v-if="canCaptureProject(activeProject)" class="primary-button pressable save-button" :disabled="busy || Boolean(uploadedBatchId)" @tap="uploadAuto">{{ uploading ? '正在准备上传…' : uploadedBatchId ? '已加入上传归类队列' : previewOnly ? '上传水印预览并归类' : '上传并自动归类' }}</button>
       <button class="secondary-button pressable album-button" :disabled="busy" @tap="savePhoto">{{ saveLabel }}</button>
       <button v-if="uploadedBatchId" class="text-button queue-link pressable" @tap="openQueue">查看同步记录</button>
     </template>
@@ -223,6 +235,8 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
 </template>
 
 <style scoped>
+.manual-datetime { display:grid; grid-template-columns:1fr 1fr; gap:12rpx; }
+.division-search { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12rpx; }
 .readonly-value { color:var(--text); font-size:26rpx; line-height:1.5; padding:14rpx 0; }.hierarchy-row { display:grid; grid-template-columns:130rpx 1fr; gap:12rpx; padding:15rpx 0; border-bottom:1rpx solid var(--line); font-size:24rpx; line-height:1.5; }.hierarchy-row text:first-child { color:var(--muted); }
 .watermark-page { padding-bottom:calc(48rpx + var(--safe-bottom)); }
 .watermark-preview { position:relative; display:grid; place-items:center; width:100%; height:500rpx; padding:0; overflow:hidden; border-radius:24rpx; background:#071215; }
@@ -234,7 +248,7 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
 .edit-card { margin-top:24rpx; padding:24rpx; }.section-title { font-size:28rpx; font-weight:650; color:var(--text); }
 .input { box-sizing:border-box; min-height:48px; }.date-input { display:flex; align-items:center; }
 .text-button { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 10rpx; color:var(--primary-strong); background:transparent; font-size:24rpx; line-height:1.4; }
-.location-actions { justify-content:flex-end; }.location-source { margin-right:auto; font-size:22rpx; color:var(--muted); }
+.location-actions { justify-content:flex-start; margin:10rpx 0; }.location-primary { flex:1; min-height:44px; font-size:25rpx; }.location-source { margin-right:auto; font-size:22rpx; color:var(--muted); }
 .advanced-toggle { width:100%; display:flex; justify-content:space-between; align-items:center; min-height:44px; padding:0; background:transparent; color:var(--text); font-size:27rpx; }.advanced-toggle text:last-child { color:var(--primary-strong); font-size:24rpx; }
 .option-row { display:flex; flex-wrap:wrap; gap:12rpx; }.option-chip { display:inline-flex; align-items:center; min-height:44px; padding:0 22rpx; background:var(--surface-2); border:1rpx solid var(--line); color:var(--muted); font-size:24rpx; border-radius:16rpx; }.option-chip.active { background:var(--primary-soft); color:var(--primary-strong); border-color:var(--primary-strong); }
 .export-row { margin-top:24rpx; }.error-card { margin-top:24rpx; padding:20rpx; border-radius:18rpx; color:var(--danger); background:var(--surface-2); font-size:24rpx; line-height:1.5; }.save-button { margin-top:28rpx; }

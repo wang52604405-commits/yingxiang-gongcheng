@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
+import { photoActions } from '@/services/photo-actions'
+import type { LocalPhoto } from '@/types/domain'
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
@@ -11,7 +14,7 @@ import { formatBytes } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
 const activeFilter = ref('all')
-const projectPhotos = computed(() => queueRuntime.state.photos.filter((photo) => photo.status !== 'local_deleted' && String(photo.draft.project_id) === String(project.value.id)))
+const projectPhotos = computed(() => queueRuntime.state.photos.filter((photo) => photo.status !== 'local_deleted' && !photo.deleted_at && String(photo.draft.project_id) === String(project.value.id)))
 const filters = [
   { key: 'all', label: '全部' }, { key: 'pending', label: '待上传' },
   { key: 'saved', label: '已上传' }, { key: 'completed', label: '已完成' }, { key: 'attention', label: '需处理' },
@@ -40,26 +43,22 @@ function openConfirm(clientBatchId: string) {
   uni.navigateTo({ url: `/pages/upload/confirm?batch=${clientBatchId}` })
 }
 
-function requestDelete(photo: (typeof queueRuntime.state.photos)[number]) {
-  if (deletingPhotoId.value) return
-  uni.showModal({
-    title: '删除失败照片？',
-    content: '会删除手机本机的原图、传输图和预览图，无法恢复；服务器已经保存的照片不会删除。',
-    confirmText: '删除',
-    confirmColor: '#ff6b66',
-    success: async ({ confirm }) => {
-      if (!confirm) return
-      deletingPhotoId.value = photo.photo_uuid
-      try {
-        await queueRuntime.deleteFailed(photo.photo_uuid)
-        uni.showToast({ title: '已从本机删除', icon: 'success' })
-      } catch (error) {
-        uni.showModal({ title: '删除失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false })
-      } finally {
-        deletingPhotoId.value = ''
-      }
-    },
-  })
+const deleteTarget = ref<LocalPhoto | null>(null)
+const deleteError = ref('')
+function requestDelete(photo: LocalPhoto) { if (!deletingPhotoId.value) { deleteTarget.value = photo; deleteError.value = '' } }
+async function confirmDelete(password: string) {
+  const photo = deleteTarget.value
+  if (!photo || deletingPhotoId.value) return
+  const owner = selectionStorage.getOwner()
+  deletingPhotoId.value = photo.photo_uuid
+  try {
+    await photoActions.verifyPassword(photo.draft.project_id,password)
+    if (owner !== selectionStorage.getOwner() || String(project.value.id) !== photo.draft.project_id) return
+    await queueRuntime.deleteFailed(photo.photo_uuid)
+    deleteTarget.value = null
+    uni.showToast({title:'已从本机删除',icon:'success'})
+  } catch(error) { deleteError.value = error instanceof Error ? error.message : '删除失败' }
+  finally { deletingPhotoId.value = '' }
 }
 
 function storageLabel(photo: (typeof queueRuntime.state.photos)[number]) {
@@ -131,6 +130,7 @@ onShow(() => {
     <!-- #ifdef H5 -->
     <H5TabBar :selected="3" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->
+    <DeletePasswordDialog :visible="Boolean(deleteTarget)" :busy="Boolean(deletingPhotoId)" :error="deleteError" message="验证项目删除密码后，删除本机失败照片；服务器已保存的照片不受影响。" @close="deleteTarget = null" @confirm="confirmDelete" />
   </view>
 </template>
 

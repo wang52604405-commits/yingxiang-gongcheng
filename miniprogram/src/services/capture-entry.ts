@@ -25,7 +25,7 @@ export async function chooseCaptureSource(): Promise<CaptureSource | null> {
 export async function launchCapture(options: CaptureLaunchOptions = {}): Promise<boolean> {
   const project = selectionStorage.getProject()
   const denied = capturePermissionMessage(project)
-  if (denied) {
+  if (denied && !project?.id) {
     uni.showModal({ title: denied.title, content: denied.content, showCancel: false, success: () => {
       if (!project?.id) uni.navigateTo({ url: '/pages/project/select' })
     } })

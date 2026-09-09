@@ -33,6 +33,7 @@ export interface ProjectSummary {
   local_project_id?: string
   access_role?: ProjectAccessRole
   member_count?: number
+  upload_allowed?: boolean
   can_capture?: boolean
   can_manage_members?: boolean
   revision?: number

@@ -33,6 +33,13 @@ describe('共享工程角色与选择状态', () => {
     expect(capturePermissionMessage(project({ access_role: 'viewer', can_capture: false }))?.title).toBe('当前为只读成员')
   })
 
+  it('主账号付费权限只跟随所选项目，免费项目不继承其他工程权限', () => {
+    expect(canCaptureProject(project({ upload_allowed: false, can_capture: true }))).toBe(false)
+    expect(canCaptureProject(project({ upload_allowed: true, access_role: 'capturer', can_capture: true }))).toBe(true)
+    expect(canCaptureProject(project({ upload_allowed: true, access_role: 'viewer', can_capture: false }))).toBe(false)
+    expect(canManageProjectMembers(project({ upload_allowed: false, access_role: 'owner' }))).toBe(false)
+  })
+
   it('角色显示简洁且成员数有安全默认值', () => {
     expect(projectRoleLabel('owner')).toBe('负责人')
     expect(projectMemberSummary(project({ access_role: 'capturer', member_count: 5 }))).toBe('5人 · 采集员')
@@ -68,15 +75,15 @@ describe('采集权限入口覆盖', () => {
     expect(nativeTab).toContain('project.can_capture')
     expect(nativeTab).toContain("role!=='viewer'")
     const upload = source('src/pages/upload/index.vue')
-    expect(upload).toContain('if (!ensureCapturePermission()) return')
+    expect(upload).toContain('if (!ensureCapturePermission(true)) return')
     expect(upload).toContain("query?.autopick === '1' && !sourceInitialized.value && ensureCapturePermission()")
-    expect(upload.indexOf('if (!ensureCapturePermission()) return')).toBeLessThan(upload.indexOf('queueRuntime.enqueue'))
+    expect(upload.indexOf('if (!ensureCapturePermission(true)) return')).toBeLessThan(upload.indexOf('queueRuntime.enqueue'))
   })
 
   it('产品版本与页面显示保持一致', () => {
     const pkg = JSON.parse(source('package.json'))
     const manifest = JSON.parse(source('src/manifest.json'))
-    expect(pkg.version).toBe('1.6.0')
+    expect(pkg.version).toBe('1.6.1')
     expect(manifest.versionName).toBe(pkg.version)
     expect(source('src/pages/profile/index.vue')).toContain(`工程影像 V${pkg.version}`)
   })

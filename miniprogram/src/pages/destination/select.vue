@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { matchesDivisionKeywords, resolveWatermarkDivision, saveWatermarkDivision } from '@/services/watermark-division'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -25,15 +26,15 @@ const leafNodes = computed(() => allNodes.value.filter((node) => scope.value ===
   ? node.type === 'unit' : node.type === 'other' && !node.children?.length))
 const searchResults = computed(() => {
   const query = keyword.value.trim().toLowerCase()
-  return leafNodes.value.filter((node) => `${node.name} ${node.code} ${node.pathLabel}`.toLowerCase().includes(query))
+  return leafNodes.value.filter((node) => matchesDivisionKeywords(node, query))
 })
 const browseNodes = computed(() => (trail.value.length ? trail.value[trail.value.length - 1].children || [] : roots.value)
   .filter((node) => node.active !== false && (node.type === 'unit' || node.type === 'other' || flattenDestinations([node]).some((item) => item.type === 'unit'))))
 const recent = computed(() => validHistory(history.value.recent))
 const favorites = computed(() => validHistory(history.value.favorites))
-const hasProcessSheet = computed(() => scope.value === 'engineering' && selectedNode.value?.processes?.length && returnTarget.value !== 'library')
+const hasProcessSheet = computed(() => scope.value === 'engineering' && selectedNode.value?.processes?.length && !['library', 'watermark'].includes(returnTarget.value))
 function validHistory(items: DestinationSelection[]) {
-  return items.filter((item) => item.scope === scope.value).map((item) => reconcileDestination(item, allNodes.value)).filter((item): item is DestinationSelection => Boolean(item))
+  return items.filter((item) => item.scope === scope.value).map((item) => returnTarget.value === 'watermark' ? resolveWatermarkDivision(item, allNodes.value) : reconcileDestination(item, allNodes.value)).filter((item): item is DestinationSelection => Boolean(item))
 }
 function refreshHistory() { history.value = getDestinationHistory(owner.value, targetProjectId.value) }
 function isFavorite(value: DestinationSelection) { return favorites.value.some((item) => destinationKey(item) === destinationKey(value)) }
@@ -48,7 +49,7 @@ async function loadTree() {
     const activeProject = selectionStorage.getProject()
     const projectId = returnTarget.value === 'confirm' ? targetProjectId.value : String(activeProject.id || '')
     if (!projectId) throw new Error('请先选择或加入工程')
-    const response = await loadDestinationTree(projectId, scope.value)
+    const response = await loadDestinationTree(projectId, scope.value, returnTarget.value === 'watermark')
     targetProjectId.value = projectId
     targetProjectName.value = String(response.project?.name || activeProject.name || '')
     roots.value = response.nodes || []
@@ -70,12 +71,13 @@ function browse(node: ProjectNode) {
 }
 function chooseNode(node: SelectableDestination) {
   selectedNode.value = node
-  if (returnTarget.value === 'library' || scope.value === 'other' || !node.processes?.length) saveSelection()
+  if (['library', 'watermark'].includes(returnTarget.value) || scope.value === 'other' || !node.processes?.length) saveSelection()
 }
 function finish(value: DestinationSelection) {
   if (owner.value !== selectionStorage.getOwner()) return
   if (returnTarget.value !== 'confirm' && String(selectionStorage.getProject().id || '') !== targetProjectId.value) return
-  if (returnTarget.value === 'library') selectionStorage.setLibraryFilter(value)
+  if (returnTarget.value === 'watermark') saveWatermarkDivision(owner.value, targetProjectId.value, value)
+  else if (returnTarget.value === 'library') selectionStorage.setLibraryFilter(value)
   else if (returnTarget.value === 'confirm') {
     if (!targetProjectId.value) return
     selectionStorage.setConfirmDestination({ ...value, project_id: targetProjectId.value, project_name: targetProjectName.value })
@@ -85,7 +87,7 @@ function finish(value: DestinationSelection) {
   uni.navigateBack()
 }
 function reuse(value: DestinationSelection) {
-  const valid = reconcileDestination(value, allNodes.value)
+  const valid = returnTarget.value === 'watermark' ? resolveWatermarkDivision(value, allNodes.value) : reconcileDestination(value, allNodes.value)
   if (!valid) return
   // The library filters a whole unit, never a single process.
   if (returnTarget.value === 'library') delete valid.assignment.process_name
@@ -100,6 +102,7 @@ onLoad((query) => {
   scope.value = query?.scope === 'other' ? 'other' : 'engineering'
   returnTarget.value = String(query?.return || 'capture')
   targetProjectId.value = returnTarget.value === 'confirm' ? String(query?.project_id || '') : ''
+  keyword.value = String(query?.keyword || '')
   owner.value = selectionStorage.getOwner()
   void loadTree()
 })
@@ -108,7 +111,7 @@ onLoad((query) => {
 <template>
   <view class="page-shell no-tabs destination-page" :class="{ 'has-process-sheet': hasProcessSheet }">
     <PageHeader :title="returnTarget === 'library' && scope === 'engineering' ? '选择单元' : scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
-    <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="搜索部位名称或编码" placeholder-class="input-placeholder" /><button v-if="keyword" class="clear-search pressable" @tap="keyword = ''">清除</button></view>
+    <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="搜索名称、编码或多个关键词" placeholder-class="input-placeholder" /><button v-if="keyword" class="clear-search pressable" @tap="keyword = ''">清除</button></view>
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="loadError" class="empty-state"><text class="empty-title">工程层级读取失败</text><text class="empty-copy">{{ loadError }}</text><button class="retry-button pressable" @tap="loadTree">重新加载</button></view>
     <template v-else>

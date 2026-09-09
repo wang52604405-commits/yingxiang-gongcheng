@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
-from flask import Blueprint, jsonify, request, send_file, url_for
+from flask import has_request_context, Blueprint, jsonify, request, send_file, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -305,6 +305,9 @@ def _project_payload(row) -> dict:
     project_ref = _project_ref(owner_account_id, local_project_id)
     access_role = str(item.get("access_role") or "owner")
     permissions = _project_permissions(access_role)
+    if item.get("upload_allowed") is False:
+        permissions["can_capture"] = False
+        permissions["can_manage_members"] = False
     member_count = int(item.get("member_count") or 1)
     return {
         "id": project_ref,
@@ -321,6 +324,7 @@ def _project_payload(row) -> dict:
         "updated_at": item["updated_at"],
         "metadata": _json(item.get("metadata_json"), {}),
         "access_role": access_role,
+        "upload_allowed": item.get("upload_allowed", True),
         "photographer_name": str(item.get("photographer_name") or ""),
         "photographer_verified": bool(item.get("photographer_verified")),
         "member_count": member_count,
@@ -1173,9 +1177,15 @@ def register_mobile_api(
         approved = conn.execute("SELECT display_name FROM project_join_requests WHERE applicant_account_id = ? AND project_owner_account_id = ? AND project_id = ? AND status = 'approved' ORDER BY decided_at DESC, id DESC LIMIT 1", (member_id, owner_id, local_project_id)).fetchone()
         return {"photographer_name": _safe_text(approved["display_name"], 100) if approved else account_name, "photographer_verified": bool(approved)}
 
+    def project_upload_entitlement(conn, owner_id):
+        # Membership is inherited only after project_for checks membership in this exact project.
+        from .app import _has_active_membership
+        return bool(_has_active_membership(conn, int(owner_id)))
+
     def viewer_project_payload(conn, project, viewer_id):
         row = dict(project)
         row.update(project_photographer(conn, viewer_id, int(row.get("project_owner_account_id") or row["account_id"]), row["project_id"]))
+        row["upload_allowed"] = project_upload_entitlement(conn, int(row.get("project_owner_account_id") or row["account_id"]))
         return _project_payload(row)
 
     def project_for(conn, account_id, project_reference, allowed_roles=None):
@@ -1203,6 +1213,9 @@ def register_mobile_api(
             raise ApiProblem("project_permission_denied", "当前项目角色无此权限", 403)
         project["project_owner_account_id"] = int(project["account_id"])
         project.update(project_photographer(conn, account_id, project["project_owner_account_id"], local_project_id))
+        project["upload_allowed"] = project_upload_entitlement(conn, project["project_owner_account_id"])
+        if allowed_roles and set(allowed_roles).issubset(set(CAPTURE_ROLES)) and not project["upload_allowed"] and has_request_context() and request.path.startswith("/api/mobile/"):
+            raise ApiProblem("membership_required", "本项目主账号未开通有效会员；可查看照片及本地拍照加水印", 403)
         return project
 
     def project_for_desktop(conn, current, local_project_id, desktop_machine_id):
@@ -5511,6 +5524,11 @@ def register_mobile_api(
                     "该工程已绑定另一台归档电脑，请先在原电脑解除绑定",
                     409,
                 )
+            deletion_hash = str(data.get("deletion_password_hash") or "")
+            if deletion_hash:
+                if not re.fullmatch(r"(?:scrypt:32768:8:1|pbkdf2:sha256:(?:[1-9][0-9]{0,5}|1000000))\$[A-Za-z0-9]{1,64}\$[a-f0-9]{64,128}", deletion_hash):
+                    raise ApiProblem("invalid_delete_password_hash", "项目删除密码格式不支持，请在电脑端重新设置")
+                conn.execute("INSERT INTO project_photo_security VALUES (?, ?, ?, ?) ON CONFLICT(project_owner_account_id,project_id) DO UPDATE SET delete_password_hash=excluded.delete_password_hash,updated_at=excluded.updated_at", (current["id"],project_id,deletion_hash,now()))
             timestamp = now()
             metadata = (
                 _json(existing["metadata_json"], {})
@@ -5520,7 +5538,7 @@ def register_mobile_api(
             metadata.update({
                 key: value
                 for key, value in project.items()
-                if key not in {"id", "project_id", "project_code", "project_name", "name"}
+                if key not in {"id", "project_id", "project_code", "project_name", "name", "delete_password", "delete_password_hash", "deletion_password_hash", "password"}
             })
             metadata["unit_count"] = sum(
                 1 for node in nodes if node["node_type"] == "unit"
@@ -6338,6 +6356,91 @@ def register_mobile_api(
                 "photo": hydrated_photo_payload(row, current["id"]),
             }
         ), (200 if idempotent else 201)
+
+    delete_password_failures = {}
+    delete_password_guard = threading.Lock()
+
+    def verify_photo_delete_password(conn, current, project, password):
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        key = (int(project["account_id"]), project["project_id"], int(current["id"]))
+        moment = time.monotonic()
+        with delete_password_guard:
+            failures = [t for t in delete_password_failures.get(key, []) if t > moment - 300]
+            delete_password_failures[key] = failures
+            if len(failures) >= 5:
+                raise ApiProblem("delete_password_locked", "密码错误过多，请5分钟后再试", 429, True)
+        security = conn.execute("SELECT delete_password_hash FROM project_photo_security WHERE project_owner_account_id=? AND project_id=?", key[:2]).fetchone()
+        if not security:
+            raise ApiProblem("delete_password_not_synced", "请先在电脑端设置项目删除密码，并更新电脑端同步", 409)
+        if not password or not check_password_hash(security["delete_password_hash"], str(password)):
+            with delete_password_guard:
+                delete_password_failures.setdefault(key, []).append(moment)
+            raise ApiProblem("delete_password_invalid", "删除密码错误", 403)
+        with delete_password_guard:
+            delete_password_failures.pop(key, None)
+
+    def mobile_edit_target(conn, current, data, photo_uuid, include_deleted=False):
+        project = project_for(conn, current["id"], data.get("project_id"), CAPTURE_ROLES)
+        photo = conn.execute("SELECT * FROM cloud_photos WHERE project_owner_account_id=? AND project_id=? AND photo_uuid=?", (project["account_id"],project["project_id"],_uuid(photo_uuid,"photo_uuid"))).fetchone()
+        if not photo or (photo["deleted_at"] and not include_deleted):
+            raise ApiProblem("photo_not_found", "照片不存在或已删除", 404)
+        if project["access_role"] not in {"owner","admin"} and int(photo["account_id"]) != int(current["id"]):
+            raise ApiProblem("photo_edit_forbidden", "仅可修改或删除自己上传的照片", 403)
+        return project, photo
+
+    @blueprint.post("/api/mobile/v1/projects/<project_id>/verify-delete-password")
+    def mobile_verify_delete_password(project_id):
+        current = user(); data = json_body(); conn = db.connect()
+        try:
+            project = project_for(conn,current["id"],project_id,PROJECT_ROLES)
+            verify_photo_delete_password(conn,current,project,data.get("password"))
+            return jsonify({"ok": True})
+        finally: conn.close()
+
+    @blueprint.patch("/api/mobile/v1/photos/<photo_uuid>")
+    def mobile_edit_photo(photo_uuid):
+        current = user(); data = json_body(); conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project,photo = mobile_edit_target(conn,current,data,photo_uuid)
+            if not set(data).issubset({"project_id","title","photo_date","assignment"}):
+                raise ApiProblem("unsupported_photo_fields", "只支持修改题名、日期和工程部位")
+            assignment = _json(photo["assignment_json"],{})
+            if "assignment" in data:
+                assignment = _validate_assignment(conn,project["account_id"],project["project_id"],photo["scope"],data["assignment"],require_process=False)
+            payload = {"title": _safe_text(data.get("title",photo["title"]),200), "photo_date": _photo_date(data.get("photo_date",photo["photo_date"])), "scope":photo["scope"], "category":photo["category"], "assignment":assignment}
+            conn.execute("UPDATE cloud_photos SET title=?,photo_date=?,assignment_json=?,updated_at=? WHERE id=?", (payload["title"],payload["photo_date"],_dumps(assignment),now(),photo["id"]))
+            conn.execute("INSERT INTO mobile_photo_changes(project_owner_account_id,project_id,photo_uuid,action,payload_json,actor_account_id,created_at) VALUES (?,?,?,'edit',?,?,?)",(project["account_id"],project["project_id"],photo_uuid,_dumps(payload),current["id"],now()))
+            conn.commit()
+            updated=conn.execute("SELECT * FROM cloud_photos WHERE id=?",(photo["id"],)).fetchone()
+            return jsonify({"ok":True,"photo":hydrated_photo_payload(updated,current["id"]),"desktop_sync_pending":True})
+        finally: conn.close()
+
+    @blueprint.post("/api/mobile/v1/photos/<photo_uuid>/delete")
+    def mobile_delete_photo(photo_uuid):
+        current = user(); data = json_body(); conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project,photo = mobile_edit_target(conn,current,data,photo_uuid,True)
+            verify_photo_delete_password(conn,current,project,data.get("password"))
+            if not photo["deleted_at"]:
+                conn.execute("UPDATE cloud_photos SET deleted_at=?,deleted_by_account_id=?,updated_at=? WHERE id=?",(now(),current["id"],now(),photo["id"]))
+                conn.execute("INSERT INTO mobile_photo_changes(project_owner_account_id,project_id,photo_uuid,action,payload_json,actor_account_id,created_at) VALUES (?,?,?,'delete','{}',?,?)",(project["account_id"],project["project_id"],photo_uuid,current["id"],now()))
+            conn.commit()
+            return jsonify({"ok":True,"idempotent":bool(photo["deleted_at"]),"desktop_sync_pending":True})
+        finally: conn.close()
+
+    @blueprint.get("/api/desktop/v1/photo-changes")
+    def desktop_photo_changes():
+        current=user(); machine=require_desktop_client(current,request.args.get("desktop_machine_id")); conn=db.connect()
+        try:
+            project=project_for_desktop(conn,current,_project_id(request.args.get("project_id")),machine)
+            cursor=_integer(request.args.get("cursor"),0,0,10**15)
+            rows=conn.execute("SELECT * FROM mobile_photo_changes WHERE project_owner_account_id=? AND project_id=? AND id>? ORDER BY id LIMIT 100",(current["id"],project["project_id"],cursor)).fetchall()
+            events=[{"id":r["id"],"photo_uuid":r["photo_uuid"],"action":r["action"],"payload":_json(r["payload_json"],{})} for r in rows]
+            return jsonify({"ok":True,"changes":events,"next_cursor":rows[-1]["id"] if rows else cursor})
+        finally:conn.close()
 
     # 单进程重启后，历史 queued/running 任务不会永久卡在 analyzing。
     recover_stale_analysis_jobs(force=True)

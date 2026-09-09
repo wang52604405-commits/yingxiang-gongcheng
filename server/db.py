@@ -126,6 +126,18 @@ ON client_error_logs(fingerprint, created_at DESC);
 # 移动端 V1 采用纯增量表。表名与旧 cloud_projects/cloud_thumbs 分开，避免
 # 改写既有云预览数据；所有业务唯一键都包含 account_id，保证租户隔离。
 MOBILE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS project_photo_security (
+    project_owner_account_id INTEGER NOT NULL, project_id TEXT NOT NULL,
+    delete_password_hash TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_owner_account_id, project_id)
+);
+CREATE TABLE IF NOT EXISTS mobile_photo_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_owner_account_id INTEGER NOT NULL,
+    project_id TEXT NOT NULL, photo_uuid TEXT NOT NULL, action TEXT NOT NULL,
+    payload_json TEXT NOT NULL, actor_account_id INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mobile_photo_changes_project ON mobile_photo_changes(project_owner_account_id,project_id,id);
+
 CREATE TABLE IF NOT EXISTS wechat_bindings (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id    INTEGER NOT NULL,

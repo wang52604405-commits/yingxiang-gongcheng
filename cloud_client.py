@@ -32,7 +32,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260909-2.91"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260910-2.92"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -1332,3 +1332,7 @@ def desktop_backfill_photo(file_path, metadata: dict) -> dict:
             "retryable": True,
         }
 
+
+
+def desktop_photo_changes(project_id, cursor, desktop_machine_id):
+    return _cloud_api_json("/api/desktop/v1/photo-changes", query={"project_id":project_id,"cursor":cursor,"desktop_machine_id":desktop_machine_id})

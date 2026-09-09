@@ -42,3 +42,9 @@ describe('watermark editor handoff', () => {
   })
 
 })
+
+it('相册手填时间覆盖旧时间而不改原图信息', () => {
+  const draft = watermarkUploadDraft({ ...input, owner: 'A', projectId: 'P', capturedAt: '2026-09-01T12:00:00' }, { title: '', photographer: '张三', photoDate: '2026-09-08', sitePart: '', capturedAt: '2026-09-08T15:30:00' }, '工程', 'test')
+  expect(draft.captured_at).toBe('2026-09-08T15:30:00')
+  expect(draft.capture_source).toBe('album')
+})

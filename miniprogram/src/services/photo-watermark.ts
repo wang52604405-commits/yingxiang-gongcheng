@@ -98,6 +98,15 @@ export function wrapWatermarkText(text: string, width: number, measure: (text: s
     current += character
   }
   if (current) lines.push(current)
+  if (lines.length > 1) {
+    const last = Array.from(lines[lines.length - 1])
+    const previous = Array.from(lines[lines.length - 2])
+    if (last.length < 3 && previous.length > 3) {
+      const moved = previous.splice(previous.length - (3 - last.length))
+      lines[lines.length - 2] = previous.join('')
+      lines[lines.length - 1] = [...moved, ...last].join('')
+    }
+  }
   return lines
 }
 
@@ -155,19 +164,19 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
   if (width < 160 || height < 120) throw new WatermarkError('照片尺寸过小，无法清楚添加水印', 'IMAGE_TOO_SMALL')
   const margin = Math.max(6, Math.round(Math.min(width, height) * .02))
   const panelWidth = Math.min(width - margin * 2, Math.max(160, Math.round(width * (width >= height ? .36 : .44))))
-  const targetArea = width * height / 10
-  const maxArea = width * height * .13
-  const preferredMinFont = Math.max(10, Math.round(Math.min(width, height) / 70))
+  const targetArea = width * height / 8
+  const maxArea = width * height * .145
+  const preferredMinFont = Math.max(10, Math.round(Math.min(width, height) / 62))
   let fontSize = Math.max(10, Math.min(54, Math.round(Math.min(width, height) / 38)))
   while (true) {
     const padding = Math.max(5, Math.round(fontSize * .38))
     const gap = Math.max(3, Math.round(fontSize * .16))
-    const lineHeight = Math.ceil(fontSize * 1.35)
-    const logoBoxWidth = logoSize || fields.companyName ? Math.round(panelWidth * .24) : 0
-    const brandFontSize = Math.max(10, Math.min(Math.round(fontSize * 1.2), Math.floor((logoBoxWidth - padding * 2) / Math.max(1, Array.from(fields.companyName || '').length))))
+    const lineHeight = Math.ceil(fontSize * 1.32)
+    const logoBoxWidth = logoSize || fields.companyName ? Math.round(fontSize * 4.8) : 0
+    const brandFontSize = fontSize
     const brandLines = fields.companyName ? [fields.companyName] : []
     const brandLineHeight = Math.ceil(brandFontSize * 1.25)
-    const headerFontSize = Math.round(fontSize * 1.75)
+    const headerFontSize = fontSize
     const headerLineHeight = Math.ceil(headerFontSize * 1.3)
     const headerWidth = panelWidth - logoBoxWidth - padding * 2
     const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', Math.min(headerWidth, headerFontSize * 13), (text) => measureAtSize(text, headerFontSize))
@@ -250,7 +259,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     const footerY = bodyY + layout.bodyHeight + layout.gap
     ctx.fillStyle = 'rgba(120, 190, 240, 0.2)'
     ctx.fillRect(layout.x, layout.y, layout.width, layout.headerHeight)
-    ctx.fillRect(layout.x, bodyY, layout.width, layout.bodyHeight)
+    // Reference: body text sits directly on the photo; only header/footer are tinted.
     ctx.fillRect(layout.x, footerY, layout.width, layout.footerHeight)
     if (layout.logoBoxWidth) {
       ctx.fillStyle = '#ffffff'
@@ -271,7 +280,7 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
       ctx.strokeText?.(line, x, top)
       ctx.fillText(line, x, top)
     })
-    ctx.font = `bold ${layout.brandFontSize}px sans-serif`
+    ctx.font = `${layout.brandFontSize}px sans-serif`
     ctx.textAlign = 'center'; ctx.fillStyle = '#141414'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1
     drawLines(layout.brandLines, layout.x + layout.logoBoxWidth / 2, layout.y + layout.headerHeight - layout.padding - layout.brandHeight, layout.brandLineHeight)
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)

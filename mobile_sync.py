@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional, Tuple
 
 import professional_templates
+import mobile_photo_changes
 
 
 MAX_PREVIEW_BYTES = 102400
@@ -286,6 +287,8 @@ def build_project_snapshot(
             project_payload.get("project_type", ""),
         ),
     }
+    if project.get("delete_password_hash"):
+        body["deletion_password_hash"] = str(project["delete_password_hash"])
     content_hash = hashlib.sha256(
         json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -1976,6 +1979,10 @@ class DesktopMobileSync:
                         "error": "账号在同步过程中发生变化，本轮已中止",
                         "retryable": True,
                     }
+                    return self.last_result
+                changes = mobile_photo_changes.sync_changes(self)
+                if not changes.get("ok"):
+                    self.last_result = {"ok":False,"stage":"photo_changes",**changes}
                     return self.last_result
                 inbox = self._sync_inbox()
                 if not inbox.get("ok"):

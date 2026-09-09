@@ -542,7 +542,7 @@ describe('原图优先落盘与账号隔离队列', () => {
     await queueRuntime.resume('app-show')
 
     expect(queueRuntime.state.photos[0]).toMatchObject({
-      status: 'desktop_imported',
+      status: 'local_deleted',
       deleted_at: '2026-08-28T12:30:00Z',
       original_path: '',
       original_removed: true,

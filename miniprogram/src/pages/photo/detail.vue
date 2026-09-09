@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { setWatermarkContext } from '@/services/watermark-context'
-import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import DeletePasswordDialog from '@/components/DeletePasswordDialog.vue'
+import { photoActions } from '@/services/photo-actions'
+import { consumePhotoEditDestination } from '@/services/destination-history'
+import { canCaptureProject } from '@/services/project-membership'
+import { computed, reactive, ref } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
 import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { buildPhotoDetailRows, resolvePhotoHierarchy, type PhotoHierarchy } from '@/services/photo-detail'
-import type { CloudPhoto, LocalPhoto, ProjectSummary } from '@/types/domain'
+import type { Assignment, CloudPhoto, LocalPhoto, ProjectSummary } from '@/types/domain'
 import { sessionState } from '@/services/auth'
 import { bootstrapState } from '@/stores/bootstrap'
 import { selectionStorage } from '@/stores/selection'
@@ -21,13 +25,48 @@ const projectName = ref('')
 const hierarchy = ref<PhotoHierarchy>({})
 const imageUrl = computed(() => local.value?.preview_path || cloud.value?.image_url || cloud.value?.thumb_url || '')
 const localActor = computed(() => sessionState.account?.display_name || sessionState.account?.username || '')
-const detailRows = computed(() => buildPhotoDetailRows({
-  local: local.value,
-  cloud: cloud.value,
-  projectName: projectName.value,
-  hierarchy: hierarchy.value,
-  localActor: localActor.value,
-}))
+const editing = ref(false)
+const changing = ref(false)
+const editError = ref('')
+const deleteVisible = ref(false)
+const deleteError = ref('')
+const editForm = reactive({ title: '', photo_date: '', assignment: undefined as Assignment | undefined })
+let choosingAssignment = false
+const canEdit = computed(() => {
+  const project = selectionStorage.getProject() as ProjectSummary
+  if (!cloud.value || !canCaptureProject(project)) return false
+  return ['owner','admin'].includes(project.access_role || 'owner') || String(cloud.value.uploaded_by_account_id || '') === String(sessionState.account?.id || '')
+})
+const detailRows = computed(() => buildPhotoDetailRows({ local: cloud.value ? null : local.value, cloud: cloud.value, projectName: projectName.value, hierarchy: hierarchy.value, localActor: localActor.value }).map(row => row.key === 'captured_at' && cloud.value?.photo_date ? { ...row, label: '拍摄日期', value: cloud.value.photo_date } : row))
+function stillCurrent() { return detailOwner.value === selectionStorage.getOwner() && detailProject.value === String(selectionStorage.getProject().id) }
+function startEditing() { if (!canEdit.value) return; editForm.title = cloud.value!.title; editForm.photo_date = cloud.value!.photo_date; editForm.assignment = undefined; editError.value = ''; editing.value = true }
+function chooseAssignment() { if (changing.value || !stillCurrent()) return; consumePhotoEditDestination(detailOwner.value,detailProject.value); choosingAssignment = true; uni.navigateTo({url:`/pages/destination/select?scope=${cloud.value?.scope || 'engineering'}&return=photo-edit`}) }
+async function saveInfo() {
+  if (!stillCurrent() || !canEdit.value || changing.value) return
+  changing.value = true; editError.value = ''
+  try {
+    const result = await photoActions.edit(photoId.value,detailProject.value,{...editForm})
+    if (!stillCurrent()) return
+    cloud.value = result; editing.value = false
+    queueRuntime.applyCloudPhotoInfo(photoId.value,{title:result.title,photo_date:result.photo_date,assignment:editForm.assignment})
+    if (local.value) { local.value.title = result.title; local.value.photo_date = result.photo_date }
+    await loadProjectDetails()
+    uni.showToast({ title: '已保存，电脑端将同步', icon:'success' })
+  } catch (error) { editError.value = error instanceof Error ? error.message : '保存失败' }
+  finally { changing.value = false }
+}
+async function confirmDelete(password: string) {
+  if (!stillCurrent() || !canEdit.value || changing.value) return
+  changing.value = true; deleteError.value = ''
+  try {
+    await photoActions.delete(photoId.value,detailProject.value,password)
+    if (!stillCurrent()) return
+    queueRuntime.markCloudPhotoDeleted(photoId.value)
+    deleteVisible.value = false; uni.showToast({title:'照片已删除',icon:'success'}); uni.navigateBack()
+  } catch(error) { deleteError.value = error instanceof Error ? error.message : '删除失败' }
+  finally { changing.value = false }
+}
+
 
 function photoProjectId(): string {
   return local.value?.draft.project_id || cloud.value?.project_id || ''
@@ -60,13 +99,13 @@ async function loadProjectDetails() {
 
 async function load() {
   queueRuntime.hydrate()
-  local.value = queueRuntime.state.photos.find((photo) => photo.photo_uuid === photoId.value) || null
-  if (!local.value) {
+  local.value = queueRuntime.state.photos.find((photo) => photo.photo_uuid === photoId.value && !photo.deleted_at) || null
+  if (!local.value || !['local_ready', 'uploading'].includes(local.value.status)) {
     try {
       const response = await mobileApi.photo(photoId.value)
       cloud.value = response.photo
     } catch (error) {
-      uni.showModal({ title: '影像读取失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false })
+      if (!local.value) uni.showModal({ title: '影像读取失败', content: error instanceof Error ? error.message : '请稍后重试', showCancel: false })
     }
   }
   if (local.value || cloud.value) await loadProjectDetails()
@@ -91,6 +130,7 @@ function openWatermark() {
   } catch (reason) { uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' }) }
 }
 
+onShow(() => { if (choosingAssignment) { choosingAssignment = false; if (stillCurrent()) { const picked = consumePhotoEditDestination(detailOwner.value, detailProject.value); if (picked && picked.scope === cloud.value?.scope) editForm.assignment = picked.assignment } } })
 onLoad((query) => {
   detailOwner.value = selectionStorage.getOwner()
   detailProject.value = String(selectionStorage.getProject().id || '')
@@ -109,6 +149,8 @@ onLoad((query) => {
         <view v-else class="preview-placeholder">暂无预览</view>
       </button>
       <button v-if="imageUrl || local?.original_path" class="watermark-button secondary-button pressable" @tap="openWatermark">{{ local?.original_path ? '保存水印照片' : '保存水印预览' }}</button>
+      <view v-if="canEdit" class="photo-actions"><button class="secondary-button pressable" @tap="startEditing">编辑照片信息</button><button class="text-delete pressable" @tap="deleteError = ''; deleteVisible = true">删除照片</button></view>
+      <view v-if="editing" class="detail-card edit-panel card"><text class="field-label">题名</text><input v-model="editForm.title" class="input" maxlength="200" :disabled="changing" /><text class="field-label">拍摄日期</text><picker mode="date" :value="editForm.photo_date" :disabled="changing" @change="editForm.photo_date = $event.detail.value"><view class="input">{{ editForm.photo_date || '选择日期' }}</view></picker><button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button><text v-if="editError" class="edit-error">{{ editError }}</text><view class="photo-actions"><button :disabled="changing" @tap="editing = false">取消</button><button class="primary-button" :disabled="changing" @tap="saveInfo">{{ changing ? '保存中…' : '保存信息' }}</button></view></view>
       <view class="detail-card card">
         <view v-for="row in detailRows" :key="row.key" class="detail-row">
           <text>{{ row.label }}</text>
@@ -116,10 +158,12 @@ onLoad((query) => {
         </view>
       </view>
     </template>
+    <DeletePasswordDialog :visible="deleteVisible" :busy="changing" :error="deleteError" @close="deleteVisible = false" @confirm="confirmDelete" />
   </view>
 </template>
 
 <style scoped>
+.photo-actions{display:flex;gap:18rpx;align-items:center;margin-top:20rpx}.photo-actions button{flex:1;min-height:44px;font-size:25rpx}.text-delete{color:#ff9999;background:transparent}.edit-panel{padding:24rpx!important}.edit-panel .input{min-height:48px}.edit-panel>button{margin-top:20rpx;font-size:25rpx}.edit-error{display:block;color:#ff9999;margin-top:12rpx}
 .detail-page { padding-bottom: calc(48rpx + var(--safe-bottom)); }
 .photo-preview { display: grid; place-items: center; width: 100%; height: 510rpx; overflow: hidden; border-radius: 28rpx; background: #071215; }
 .photo-preview image { width: 100%; height: 100%; }

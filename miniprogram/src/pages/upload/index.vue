@@ -242,7 +242,8 @@ function savePreset() {
   })
 }
 
-function ensureCapturePermission(): boolean {
+function ensureCapturePermission(upload = false): boolean {
+  if (!upload && project.value.id && sessionState.account) return true
   const denied = capturePermissionMessage(project.value)
   if (!denied) {
     permissionWarningShown.value = false
@@ -312,7 +313,7 @@ async function reselectMedia() {
 async function submitCapture() {
   if (submitting.value || choosing.value) return
   project.value = selectionStorage.getProject()
-  if (!ensureCapturePermission()) return
+  if (!ensureCapturePermission(true)) return
   if (!project.value.id) {
     uni.showModal({ title: '还没有工程', content: '请先选择或加入工程。', showCancel: false })
     return
@@ -479,7 +480,8 @@ onUnload(persistDraft)
     </view>
 
     <view v-if="queueRuntime.queueBytes.value > 0" class="queue-status"><view class="queue-copy"><text>本机待上传</text><text>{{ formatBytes(queueRuntime.queueBytes.value) }} / 160MB</text></view><view class="usage-track"><view class="usage-fill" :style="{ transform: `scaleX(${queueRuntime.queueUsagePercent.value / 100})` }" /></view></view>
-    <button class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button>
+    <text v-if="!canCaptureProject(project)" class="saving-note">当前仅可查看和制作本地水印，勾选照片后点“编辑水印”。</text>
+    <button v-if="canCaptureProject(project)" class="primary-button pressable submit-button" :disabled="!canSubmit" @tap="submitCapture">{{ submitLabel }}</button>
     <view v-if="editing" class="editor-mask" @tap="editing = false"><view class="editor-sheet card" @tap.stop>
       <view class="media-head"><text class="media-title">修改选中的 {{ selected.length }} 张</text><button class="text-button pressable" @tap="editing = false">取消</button></view>
       <text class="field-label">题名</text><input v-model="editor.title" class="metadata-input" maxlength="120" placeholder="留空保持原值" />

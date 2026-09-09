@@ -42,6 +42,6 @@ export function watermarkContextMatches(context: WatermarkContext, owner: string
   return Boolean(owner && projectId && context.owner === owner && context.projectId === projectId && context.sourcePath)
 }
 
-export function watermarkUploadDraft(context: WatermarkContext, fields: { title: string; photographer: string; photoDate: string; sitePart: string }, projectName: string, captureId: string): UploadDraft {
-  return { project_id: context.projectId, project_name: projectName, scope: context.scope || 'engineering', category: context.scope === 'other' ? undefined : context.category || 'construction', mode: 'auto', auto_delivery: true, captured_at: context.capturedAt, capture_source: context.sourceKind === 'camera' ? 'camera' : 'album', title: fields.title.trim(), photographer: fields.photographer.trim(), photo_date: fields.photoDate, site_part: fields.sitePart.trim(), capture_item_id: captureId }
+export function watermarkUploadDraft(context: WatermarkContext, fields: { title: string; photographer: string; photoDate: string; sitePart: string; capturedAt?: string }, projectName: string, captureId: string): UploadDraft {
+  return { project_id: context.projectId, project_name: projectName, scope: context.scope || 'engineering', category: context.scope === 'other' ? undefined : context.category || 'construction', mode: 'auto', auto_delivery: true, captured_at: fields.capturedAt || context.capturedAt, capture_source: context.sourceKind === 'camera' ? 'camera' : 'album', title: fields.title.trim(), photographer: fields.photographer.trim(), photo_date: fields.photoDate, site_part: fields.sitePart.trim(), capture_item_id: captureId }
 }
