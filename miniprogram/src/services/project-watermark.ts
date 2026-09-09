@@ -1,25 +1,48 @@
-import { apiRequest } from '@/api/client'
-import { API_MODE } from '@/config/env'
-import { selectionStorage } from '@/stores/selection'
-export interface ProjectWatermarkSettings { logo_id: string; contractor: string }
-export interface ProjectWatermarkResponse { settings: ProjectWatermarkSettings; can_manage: boolean }
-const pending = new Map<string,Promise<ProjectWatermarkResponse>>()
-const key = (project: string) => `engineering-image:project-watermark:v1:${selectionStorage.getOwner()}:${project}`
-export function cachedProjectWatermark(project: string): ProjectWatermarkResponse {
-  return uni.getStorageSync(key(project)) || {settings:{logo_id:'',contractor:''},can_manage:false}
+import { mobileApi } from '@/api/mobile'
+
+export interface ProjectWatermarkSettings {
+  logo_id: string
+  contractor: string
+  location_text: string
 }
-export async function readProjectWatermark(project: string): Promise<ProjectWatermarkResponse> {
-  const storageKey=key(project)
-  const existing=pending.get(storageKey);if(existing) return existing
-  const task=(async () => {
-    const value = API_MODE === 'mock' ? {...cachedProjectWatermark(project),can_manage:selectionStorage.getProject().can_manage_members !== false} : await apiRequest<ProjectWatermarkResponse>('GET',`/projects/${encodeURIComponent(project)}/watermark-settings`)
-    uni.setStorageSync(storageKey,value);return value
-  })()
-  pending.set(storageKey,task)
-  try {return await task} finally {if(pending.get(storageKey)===task)pending.delete(storageKey)}
+export interface ProjectWatermarkResponse {
+  settings: ProjectWatermarkSettings
+  can_manage: boolean
 }
-export async function saveProjectWatermark(project: string, settings: ProjectWatermarkSettings): Promise<ProjectWatermarkResponse> {
-  const storageKey=key(project)
-  const value = API_MODE === 'mock' ? {settings,can_manage:true} : await apiRequest<ProjectWatermarkResponse>('PATCH',`/projects/${encodeURIComponent(project)}/watermark-settings`,settings)
-  uni.setStorageSync(storageKey,value);return value
+
+const cache = new Map<string, ProjectWatermarkResponse>()
+const defaults = (): ProjectWatermarkResponse => ({
+  settings: { logo_id: '', contractor: '', location_text: '' },
+  can_manage: false,
+})
+
+function normalize(value?: Partial<ProjectWatermarkResponse> | null): ProjectWatermarkResponse {
+  return {
+    settings: {
+      logo_id: String(value?.settings?.logo_id || ''),
+      contractor: String(value?.settings?.contractor || ''),
+      location_text: String(value?.settings?.location_text || ''),
+    },
+    can_manage: Boolean(value?.can_manage),
+  }
+}
+
+export function cachedProjectWatermark(projectId: string): ProjectWatermarkResponse {
+  return cache.get(String(projectId || '')) || defaults()
+}
+
+export async function readProjectWatermark(projectId: string): Promise<ProjectWatermarkResponse> {
+  const id = String(projectId || '')
+  if (!id) return defaults()
+  const response = normalize(await mobileApi.get<ProjectWatermarkResponse>(`/projects/${encodeURIComponent(id)}/watermark-settings`))
+  cache.set(id, response)
+  return response
+}
+
+export async function saveProjectWatermark(projectId: string, settings: ProjectWatermarkSettings): Promise<ProjectWatermarkResponse> {
+  const id = String(projectId || '')
+  if (!id) throw new Error('请先选择工程')
+  const response = normalize(await mobileApi.patch<ProjectWatermarkResponse>(`/projects/${encodeURIComponent(id)}/watermark-settings`, settings))
+  cache.set(id, response)
+  return response
 }
