@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { usePageTheme, themeState, themeLabel, setThemeMode, locateTheme } from '@/services/theme'
+import { usePageTheme, themeState, themeLabel, setThemeMode } from '@/services/theme'
 const themeStyle = usePageTheme()
 import { pendingJoinRequest } from '@/services/project-join-request'
 import { computed, ref } from 'vue'
@@ -21,12 +21,10 @@ const displayName = computed(() => authenticated.value ? (sessionState.account?.
 const initial = computed(() => authenticated.value ? displayName.value.slice(0, 1) : '—')
 const uniApi = uni
 
-async function chooseAppearance() {
-  uni.showActionSheet({ itemList: ['自动 · 按日出日落', '白天 · 浅色', '夜间 · 深色'], success: async ({tapIndex}) => {
+function chooseAppearance() {
+  uni.showActionSheet({ itemList: ['自动 · 跟随系统', '浅色', '深色'], success: ({tapIndex}) => {
     const mode = (['auto','light','dark'] as const)[tapIndex]
-    if (!mode) return
-    setThemeMode(mode)
-    if (mode === 'auto') { try { await locateTheme() } catch { uni.showModal({ title: '未取得位置', content: '暂时跟随系统外观。允许定位后，即可按当地日出日落自动切换。', showCancel: false }) } }
+    if (mode) setThemeMode(mode)
   } })
 }
 
@@ -76,7 +74,7 @@ onShow(() => {
     <view v-if="!queueRuntime.state.online" class="notice offline-notice"><text class="notice-dot" /><text>离线，原图保存在本机</text></view>
 
     <view class="settings card">
-      <button class="setting-row pressable" :disabled="themeState.locating" @tap="chooseAppearance"><view class="setting-icon"><UiIcon name="home" :size="18" /></view><text class="setting-title">界面皮肤</text><text class="setting-value">{{ themeState.locating ? '正在定位…' : themeLabel }}</text></button>
+      <button class="setting-row pressable" @tap="chooseAppearance"><view class="setting-icon"><UiIcon name="home" :size="18" /></view><text class="setting-title">界面皮肤</text><text class="setting-value">{{ themeLabel }}</text></button>
       <button v-if="authenticated && pendingRequestId" class="setting-row pressable" @tap="uniApi.navigateTo({ url: '/pages/project/request-status?id=' + encodeURIComponent(pendingRequestId) })">
         <view class="setting-icon"><UiIcon name="user" :size="18" /></view><text class="setting-title">我的加入申请</text><text class="setting-value">查看进度</text>
       </button>

@@ -1,5 +1,5 @@
 <view class="tabbar {{theme}}" role="tablist" aria-label="主导航">
-  <button wx:for="{{tabs}}" wx:key="label" class="tab-button {{selected === index ? 'active' : ''}} {{item.primary ? 'primary' : ''}}" data-index="{{index}}" data-path="{{item.path}}" data-action="{{item.action}}" bindtap="activate" hover-class="pressed" hover-stay-time="120">
+  <button wx:for="{{tabs}}" wx:key="label" class="tab-button {{selected === index ? 'active' : ''}} {{item.primary ? 'primary' : ''}}" data-index="{{index}}" data-path="{{item.path}}" data-action="{{item.action}}" bindtap="activate" hover-class="none">
     <view class="icon-wrap"><view class="line-icon icon-{{item.icon}}"><view class="part part-a"></view><view class="part part-b"></view><view class="part part-c"></view></view><text wx:if="{{index === 3 && badge}}" class="badge">{{badge}}</text></view><text class="tab-label">{{item.label}}</text>
   </button>
 </view>

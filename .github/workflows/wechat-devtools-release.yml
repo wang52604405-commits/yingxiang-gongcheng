@@ -79,9 +79,15 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="$(mktemp -d)"
-          git fetch --depth=1 origin codex/wechat-mp-release
-          git worktree add --force -B codex/wechat-mp-release "${release_dir}" FETCH_HEAD
-          git -C "${release_dir}" rm -r --ignore-unmatch .
+          if git ls-remote --exit-code --heads origin codex/wechat-mp-release >/dev/null 2>&1; then
+            git fetch --depth=1 origin codex/wechat-mp-release
+            git worktree add --force -B codex/wechat-mp-release "${release_dir}" FETCH_HEAD
+            git -C "${release_dir}" rm -r --ignore-unmatch .
+          else
+            git worktree add --detach "${release_dir}" HEAD
+            git -C "${release_dir}" checkout --orphan codex/wechat-mp-release
+            git -C "${release_dir}" rm -r --ignore-unmatch .
+          fi
           cp -a miniprogram/dist/build/mp-weixin/. "${release_dir}/"
           printf 'source_commit=%s\nsource_ref=%s\n' "${SOURCE_COMMIT}" "${SOURCE_REF}" > "${release_dir}/SOURCE_COMMIT.txt"
           git -C "${release_dir}" config user.name "github-actions[bot]"
@@ -89,3 +95,41 @@ jobs:
           git -C "${release_dir}" add --all
           git -C "${release_dir}" commit -m "build: 微信开发者工具包 ${SOURCE_COMMIT:0:7}"
           git -C "${release_dir}" push origin HEAD:codex/wechat-mp-release
+
+  upload-wechat-development:
+    name: 上传微信小程序开发版本
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 20
+    steps:
+      - name: 拉取发布工具
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+          path: source
+
+      - name: 拉取刚编译的微信包
+        uses: actions/checkout@v7
+        with:
+          ref: codex/wechat-mp-release
+          path: release
+
+      - name: 通过微信开发者工具上传开发版本
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          $releasePath = Join-Path $env:GITHUB_WORKSPACE 'release'
+          $sourcePath = Join-Path $env:GITHUB_WORKSPACE 'source'
+          $repository = (& git -C $releasePath remote get-url origin).Trim()
+          if (-not $repository) { throw '无法读取微信发布包 Git 远端地址' }
+          $version = "1.6.4.$env:GITHUB_RUN_NUMBER"
+          $description = '统一界面色系；修复切页与相机闪烁；微信地图选点；简化水印和手机上传'
+          & (Join-Path $sourcePath 'miniprogram\scripts\sync-wechat-devtools.ps1') `
+            -ProjectPath $releasePath `
+            -Repository $repository `
+            -Branch 'codex/wechat-mp-release' `
+            -Upload `
+            -Version $version `
+            -Description $description
+          if ($LASTEXITCODE -ne 0) { throw "微信开发版本上传失败: exit code $LASTEXITCODE" }
