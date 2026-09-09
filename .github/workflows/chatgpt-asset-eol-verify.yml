@@ -1,0 +1,46 @@
+name: ChatGPT Asset EOL Verify
+
+on:
+  push:
+    branches:
+      - chatgpt/fix-asset-eol-20260909
+    paths:
+      - .gitattributes
+      - .github/workflows/chatgpt-asset-eol-verify.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify checkout attributes
+        shell: pwsh
+        run: |
+          git check-attr -a -- assets/app-A20260909-2.90.js assets/app-A20260909-2.90.css
+          $jsAttr = git check-attr text -- assets/app-A20260909-2.90.js
+          $cssAttr = git check-attr text -- assets/app-A20260909-2.90.css
+          if ($jsAttr -notmatch 'text: unset') { throw "JS_TEXT_ATTRIBUTE_NOT_UNSET: $jsAttr" }
+          if ($cssAttr -notmatch 'text: unset') { throw "CSS_TEXT_ATTRIBUTE_NOT_UNSET: $cssAttr" }
+
+      - name: Verify gzip payload equals checked-out source byte-for-byte
+        shell: pwsh
+        run: |
+          @'
+          import gzip
+          from pathlib import Path
+
+          for name in ("app-A20260909-2.90.js", "app-A20260909-2.90.css"):
+              source = Path("assets") / name
+              packed = Path("assets") / f"{name}.gz"
+              raw = source.read_bytes()
+              inflated = gzip.decompress(packed.read_bytes())
+              if raw != inflated:
+                  raise SystemExit(f"BYTE_MISMATCH {name}: source={len(raw)} gzip={len(inflated)}")
+              if b"\r\n" in raw:
+                  raise SystemExit(f"CRLF_PRESENT {name}")
+              print(f"BYTE_MATCH {name} bytes={len(raw)}")
+          '@ | python -
