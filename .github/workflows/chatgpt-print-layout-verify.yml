@@ -1,0 +1,57 @@
+name: ChatGPT Print Layout Verify
+
+on:
+  push:
+    branches:
+      - chatgpt/print-grid-autofill-20260909
+    paths:
+      - tools/chatgpt_print_patch_20260909.py
+      - .github/workflows/chatgpt-print-layout-verify.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 20
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - name: 检出功能分支
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 应用受控打印补丁
+        shell: powershell
+        run: python tools/chatgpt_print_patch_20260909.py
+
+      - name: 打印专项回归
+        shell: powershell
+        run: python -m unittest discover -s tests -p "test_z_print_layout_modes.py" -v
+
+      - name: 全量回归
+        shell: powershell
+        run: python -m unittest discover -s tests -v
+
+      - name: 发布完整性校验
+        shell: powershell
+        run: python verify_release.py
+
+      - name: 提交已验证正式改动
+        shell: powershell
+        run: |
+          git config user.name "wang52604405-commits"
+          git config user.email "wang52604405@gmail.com"
+          git rm -f --ignore-unmatch tools/chatgpt_print_patch_20260909.py .github/workflows/chatgpt-print-layout-verify.yml
+          git add -A
+          if (git diff --cached --quiet) {
+            Write-Host "NO_CHANGES_TO_COMMIT"
+            exit 0
+          }
+          git commit -m "feat: simplify A4 print layouts and separate labels"
+          git push origin HEAD:chatgpt/print-grid-autofill-20260909
