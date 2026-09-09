@@ -8,6 +8,8 @@
     "pages/profile/index",
     "pages/project/select",
     "pages/project/members",
+    "pages/project/applications",
+    "pages/project/request-status",
     "pages/project/invite",
     "pages/project/join",
     "pages/destination/select",
@@ -39,7 +41,7 @@
       },
       {
         "pagePath": "pages/queue/index",
-        "text": "待上传"
+        "text": "同步记录"
       },
       {
         "pagePath": "pages/profile/index",
