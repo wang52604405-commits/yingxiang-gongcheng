@@ -133,6 +133,10 @@ class FakeManager:
                     "uploaded_by_account_id": str(meta.get("uploaded_by_account_id") or ""),
                     "project_owner_account_id": str(meta.get("project_owner_account_id") or ""),
                     "capture_source": str(meta.get("capture_source") or ""),
+                    "mobile_unclassified": bool(meta.get("mobile_unclassified")),
+                    "manual_review_required": bool(meta.get("manual_review_required")),
+                    "review_reason": str(meta.get("review_reason") or ""),
+                    "site_part": str(meta.get("site_part") or ""),
                     "orientation": orientation,
                     "process_name": process_name,
                     "mobile_compressed_200k": bool(meta.get("mobile_compressed_200k")),
@@ -314,6 +318,73 @@ class DesktopMobileSyncTest(unittest.TestCase):
             processes=processes,
             division_type="process" if processes else "unit",
         )
+
+    def staging_provider(self, identity):
+        code = "MOBILE-WAIT-test"
+        if code not in self.manager.projects:
+            self.manager.add_project(code, "待分类影像", source_fields={"_other_image": True, "_mobile_unclassified": True, "_mobile_unclassified_owner": identity["owner_account_id"], "_mobile_unclassified_project_ref": identity["project_ref"]})
+        return code
+
+    def staging_item(self, raw):
+        return {"photo_uuid": str(uuid.uuid4()), "project_id": "default", "scope": "engineering", "category": "construction", "unit_code": "", "process_name": "", "manual_review_required": True, "review_reason": "识别结果不唯一", "site_part": "闸室底板", "title": "模板验收", "photo_date": "2026-09-09", "photographer": "张三", "original_download_url": "/download/original", "original_sha256": hashlib.sha256(raw).hexdigest(), "original_size_bytes": len(raw), "original_mime_type": "image/jpeg", "target_machine_id": "MACHINE-A", "cursor": "1"}
+
+    def test_unclassified_original_is_durable_idempotent_and_acknowledged_after_verification(self):
+        raw = jpeg_bytes()
+        item = self.staging_item(raw)
+        cloud = FakeCloud(raw=raw, items=[item])
+        service = self.service(cloud, unclassified_project_provider=self.staging_provider)
+        first = service._sync_inbox()
+        self.assertTrue(first["ok"], first)
+        stored = self.manager.get_project("MOBILE-WAIT-test")["photos"][0]
+        self.assertEqual((self.manager._photos_dir("MOBILE-WAIT-test") / stored["filename"]).read_bytes(), raw)
+        self.assertTrue(stored["manual_review_required"])
+        self.assertEqual(stored["review_reason"], "识别结果不唯一")
+        self.assertEqual(stored["site_part"], "闸室底板")
+        self.assertEqual(cloud.acks[0][:3], (item["photo_uuid"], "MOBILE-WAIT-test", stored["id"]))
+        self.assertTrue(service._sync_inbox()["ok"])
+        self.assertEqual(len(self.manager.get_project("MOBILE-WAIT-test")["photos"]), 1)
+
+    def test_invalid_local_unit_stages_instead_of_guessing_and_wrong_project_still_rejected(self):
+        raw = jpeg_bytes()
+        item = {**self.staging_item(raw), "manual_review_required": False, "review_reason": "", "unit_code": "retired-unit"}
+        service = self.service(FakeCloud(raw=raw, items=[item]), unclassified_project_provider=self.staging_provider)
+        self.assertTrue(service._sync_inbox()["ok"])
+        self.assertIn("单元工程", self.manager.get_project("MOBILE-WAIT-test")["photos"][0]["review_reason"])
+        wrong = {**self.staging_item(raw), "project_id": "another-project"}
+        other_cloud = FakeCloud(raw=raw, items=[wrong])
+        failure = self.service(other_cloud, unclassified_project_provider=self.staging_provider)._sync_inbox()
+        self.assertFalse(failure["ok"])
+        self.assertEqual(other_cloud.acks, [])
+
+    def test_staging_metadata_failure_never_acks_or_deletes_remote_original(self):
+        raw = jpeg_bytes()
+        item = self.staging_item(raw)
+        cloud = FakeCloud(raw=raw, items=[item])
+        service = self.service(cloud, unclassified_project_provider=self.staging_provider)
+        self.staging_provider(mobile_sync._engineering_project_identity(self.project))
+        with patch.object(self.manager, "_write_metadata", side_effect=OSError("disk full")):
+            result = service._sync_inbox()
+        self.assertFalse(result["ok"])
+        self.assertEqual(cloud.acks, [])
+        self.assertEqual(cloud.raw, raw)
+
+    def test_classification_flag_survives_offline_and_is_cleared_only_after_cloud_confirmation(self):
+        permanent = str(uuid.uuid4())
+        raw = jpeg_bytes()
+        photo = {"id": "SY001", "photo_uuid": permanent, "filename": "original.jpg", "category": "construction", "mobile_original_received": True, "mobile_classification_pending": True, "project_owner_account_id": "fake-account", "sha256": hashlib.sha256(raw).hexdigest()}
+        self.add_unit(photos=[photo])
+        (self.manager._photos_dir("YNLQ-001-01-001") / "original.jpg").write_bytes(raw)
+        cloud = FakeCloud()
+        calls = []
+        cloud.desktop_classify_photo = lambda photo_uuid, metadata: calls.append((photo_uuid, metadata)) or {"ok": False, "error": "offline"}
+        service = self.service(cloud)
+        self.assertFalse(service._sync_classification_pending()["ok"])
+        self.assertTrue(self.manager.get_project("YNLQ-001-01-001")["photos"][0]["mobile_classification_pending"])
+        cloud.desktop_classify_photo = lambda photo_uuid, metadata: calls.append((photo_uuid, metadata)) or {"ok": True}
+        self.assertTrue(service._sync_classification_pending()["ok"])
+        self.assertFalse(self.manager.get_project("YNLQ-001-01-001")["photos"][0]["mobile_classification_pending"])
+        self.assertEqual(calls[-1][1]["unit_code"], "YNLQ-001-01-001")
+        self.assertEqual((self.manager._photos_dir("YNLQ-001-01-001") / "original.jpg").read_bytes(), raw)
 
     def test_lazy_uuid_migration_is_stable_backed_up_and_does_not_touch_photo(self):
         raw = jpeg_bytes()
@@ -1032,6 +1103,127 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertEqual(cloud.backfills[0][0], small)
         self.assertLessEqual(len(cloud.backfills[0][0]), mobile_sync.MAX_PREVIEW_BYTES)
         self.assertEqual(cloud.backfills[0][1]["desktop_machine_id"], "MACHINE-A")
+
+    def test_backfill_skips_unchanged_files_without_rebuilding_previews_and_resumes(self):
+        photos = [{"id": f"SY{i:03}", "photo_uuid": str(uuid.uuid4()), "filename": f"construction-{i}.jpg", "category": "construction"} for i in range(4)]
+        self.add_unit(photos=photos)
+        raw = jpeg_bytes(size=(700, 500))
+        for photo in photos:
+            (self.manager._photos_dir("YNLQ-001-01-001") / photo["filename"]).write_bytes(raw)
+        cloud = FakeCloud()
+        service = self.service(cloud, backfill_limit=1)
+        state = service._read_state()
+        for photo in photos[:2]:
+            state["backfilled"][photo["photo_uuid"]] = hashlib.sha256(raw).hexdigest()
+        state["backfill_last_uuid"] = photos[1]["photo_uuid"]
+        service._write_state(state)
+        with patch.object(mobile_sync, "prepare_jpeg_view_copy", wraps=mobile_sync.prepare_jpeg_view_copy) as prepare:
+            result = service._sync_backfill()
+            self.assertEqual(result["uploaded"], 1)
+            self.assertEqual(prepare.call_count, 1)
+            self.assertEqual(cloud.backfills[0][1]["photo_uuid"], photos[2]["photo_uuid"])
+            self.assertEqual(result["inventory"]["local_photo_count"], 4)
+            self.assertEqual(result["inventory"]["pending_count"], 1)
+        for _ in range(3):
+            service._sync_backfill()
+        restarted = self.service(cloud, backfill_limit=1)
+        with patch.object(mobile_sync, "prepare_jpeg_view_copy", wraps=mobile_sync.prepare_jpeg_view_copy) as prepare:
+            final = restarted._sync_backfill()
+            self.assertEqual(prepare.call_count, 0)
+            self.assertEqual(final["inventory"]["current_verified_count"], 4)
+            self.assertEqual(final["inventory"]["pending_count"], 0)
+        self.assertEqual(len(cloud.backfills), 2)
+
+    def test_backfill_retries_corrected_metadata_without_changing_image(self):
+        photo_uuid = str(uuid.uuid4())
+        self.add_unit(photos=[{"id": "SY001", "photo_uuid": photo_uuid, "filename": "construction-1.jpg", "category": "construction", "photo_date": "bad-date"}])
+        source = self.manager._photos_dir("YNLQ-001-01-001") / "construction-1.jpg"
+        source.write_bytes(jpeg_bytes(size=(700, 500)))
+        before = source.read_bytes()
+        cloud = FakeCloud(backfill_results=[{"ok": False, "http_status": 400, "code": "invalid_photo_date", "error": "日期格式错误"}, {"ok": True}])
+        service = self.service(cloud)
+        first = service._sync_backfill()
+        self.assertEqual(first["inventory"]["permanent_error_count"], 1)
+        with patch.object(mobile_sync, "prepare_jpeg_view_copy", wraps=mobile_sync.prepare_jpeg_view_copy) as prepare:
+            service._sync_backfill()
+            self.assertEqual(prepare.call_count, 0)
+        data = self.manager.get_project("YNLQ-001-01-001")
+        data["photos"][0]["photo_date"] = "2024-01-02"
+        self.manager._write_metadata("YNLQ-001-01-001", data)
+        fixed = service._sync_backfill()
+        self.assertEqual(fixed["uploaded"], 1)
+        self.assertEqual(len(cloud.backfills), 2)
+        self.assertEqual(cloud.backfills[-1][1]["photo_date"], "2024-01-02")
+        self.assertEqual(source.read_bytes(), before)
+        self.assertEqual(fixed["inventory"]["permanent_error_count"], 0)
+
+    def test_backfill_inventory_distinguishes_missing_mobile_and_pending_photos(self):
+        photos = [
+            {"id": "SY001", "photo_uuid": str(uuid.uuid4()), "filename": "construction-1.jpg", "category": "construction"},
+            {"id": "JL001", "photo_uuid": str(uuid.uuid4()), "filename": "supervision-missing.jpg", "category": "supervision"},
+            {"id": "JL002", "photo_uuid": str(uuid.uuid4()), "filename": "mobile.jpg", "category": "supervision", "mobile_original_received": True},
+        ]
+        self.add_unit(photos=photos)
+        (self.manager._photos_dir("YNLQ-001-01-001") / photos[0]["filename"]).write_bytes(jpeg_bytes())
+        result = self.service(FakeCloud())._sync_backfill()
+        info = result["inventory"]
+        self.assertEqual(info["local_photo_count"], 3)
+        self.assertEqual(info["categories"], {"construction": 1, "supervision": 2})
+        self.assertEqual(info["candidate_count"], 1)
+        self.assertEqual(info["mobile_origin_count"], 1)
+        self.assertEqual(info["missing_file_count"], 1)
+        self.assertEqual(info["server_confirmed_count"], 1)
+
+    def test_backfill_missing_unit_does_not_starve_later_photos_and_snapshot_change_retries(self):
+        photos = [{"id": f"SY{i}", "photo_uuid": str(uuid.uuid4()), "filename": f"construction-{i}.jpg", "category": "construction"} for i in range(2)]
+        self.add_unit(photos=photos)
+        for photo in photos:
+            (self.manager._photos_dir("YNLQ-001-01-001") / photo["filename"]).write_bytes(jpeg_bytes())
+        cloud = FakeCloud(backfill_results=[{"ok": False, "http_status": 404, "code": "unit_not_found", "error": "单元停用"}, {"ok": True}, {"ok": True}])
+        service = self.service(cloud)
+        result = service._sync_backfill()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["uploaded"], 1)
+        self.assertEqual(len(cloud.backfills), 2)
+        self.assertEqual(result["inventory"]["permanent_error_count"], 1)
+        state = service._read_state()
+        state["snapshot_revision"] = "updated-tree-2"
+        service._write_state(state)
+        retried = service._sync_backfill()
+        self.assertEqual(retried["uploaded"], 1)
+        self.assertEqual(len(cloud.backfills), 3)
+        self.assertEqual(retried["inventory"]["permanent_error_count"], 0)
+        blocked_cloud = FakeCloud(backfill_results=[{"ok": False, "http_status": 404, "code": "project_not_found", "error": "工程权限撤销"}])
+        state["backfilled"] = {}
+        state["backfill_fingerprints"] = {}
+        service._write_state(state)
+        service.cloud = blocked_cloud
+        blocked = service._sync_backfill()
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(len(blocked_cloud.backfills), 1)
+
+    def test_backfill_scheduler_shortens_only_full_batches_with_progress_and_backlog(self):
+        service = self.service(FakeCloud(), backfill_limit=10)
+        progress = {"ok": True, "backfill": {"ok": True, "inventory": {"pending_count": 100, "cycle_attempted": 10, "cycle_uploaded": 10, "cycle_verified": 0}}}
+        idle = {"ok": True, "backfill": {"ok": True, "inventory": {"pending_count": 0, "cycle_attempted": 3, "cycle_uploaded": 3}}}
+        error = {"ok": False, "stage": "backfill", "retryable": True}
+        paused = {"ok": True, "backfill": {"ok": True, "paused": True, "inventory": progress["backfill"]["inventory"]}}
+        permanent_only = {"ok": True, "backfill": {"ok": True, "inventory": {"pending_count": 100, "cycle_attempted": 10, "cycle_uploaded": 0}}}
+        partial = {"ok": True, "backfill": {"ok": True, "inventory": {"pending_count": 100, "cycle_attempted": 1, "cycle_uploaded": 1}}}
+        legacy_verified = {"ok": True, "backfill": {"ok": True, "inventory": {"pending_count": 100, "cycle_attempted": 0, "cycle_uploaded": 0, "cycle_verified": 10}}}
+        class FakeEvent:
+            def __init__(self):
+                self.delays = []
+            def wait(self, delay):
+                self.delays.append(delay)
+                return len(self.delays) == 7
+        event = FakeEvent()
+        service._stop_event = event
+        with patch.object(service, "run_once", side_effect=[progress, idle, error, paused, permanent_only, partial, legacy_verified]) as run:
+            service._run_forever()
+        self.assertEqual(event.delays, [2.0, 30.0, 30.0, 30.0, 30.0, 30.0, 2.0])
+        self.assertEqual(run.call_count, 7, "终止事件后不得再启动一轮")
+        self.assertEqual(service.backfill_limit, 10)
 
     def test_backfill_permanent_photo_error_is_recorded_and_next_photo_continues(self):
         first_uuid = str(uuid.uuid4())

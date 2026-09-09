@@ -87,6 +87,10 @@
       }
     },
     {
+      "path": "pages/photo/watermark",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
       "path": "pages/photo/detail",
       "style": {
         "navigationStyle": "custom"

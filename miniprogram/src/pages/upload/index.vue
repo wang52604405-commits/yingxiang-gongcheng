@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { setWatermarkContext } from '@/services/watermark-context'
 import { consumePhotoEditDestination, flattenDestinations, reconcileDestination, destinationLabel as fullDestinationLabel } from '@/services/destination-history'
 import { captureDraftStorage, captureOverrides, localDate, type CaptureItem } from '@/services/capture-draft'
 import { loadDestinationTree } from '@/services/destination-tree'
@@ -168,6 +169,18 @@ function removeSelected() {
     if (!draftWarning.value) await Promise.allSettled(removed.map(item => discardCaptureOriginal(item.path, scopeOwner.value, scopeProject.value)))
   } })
 }
+function openWatermark() {
+  if (choosing.value || submitting.value) return
+  if (selected.value.length !== 1) { uni.showToast({ title: '请只勾选一张照片再保存水印', icon: 'none' }); return }
+  const item = items.value[selected.value[0]]
+  if (!item || scopeOwner.value !== selectionStorage.getOwner() || scopeProject.value !== String(selectionStorage.getProject().id)) return
+  const values = captureOverrides(item, batchTitle.value, photographer.value)
+  const assignment = values.assignment || archiveDraft.value.assignment
+  try {
+    setWatermarkContext(scopeOwner.value, scopeProject.value, { sourcePath: item.path, sourceQuality: 'original', sourceKind: item.source, capturedAt: item.capturedAt || '', unitProjectName: assignment?.unit_project_name || '', partName: assignment?.part_name || '', unitName: assignment?.unit_name || '', scope: scope.value, category: category.value, sitePart: [assignment?.unit_project_name, assignment?.part_name, assignment?.unit_name, assignment?.process_name, assignment?.other_node_name].filter(Boolean).join(' / '), project: project.value.name, title: values.title || assignment?.process_name || assignment?.unit_name || assignment?.other_node_name || '', photographer: values.photographer || '', photoDate: values.photo_date || '' })
+    uni.navigateTo({ url: '/pages/photo/watermark' })
+  } catch (reason) { uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' }) }
+}
 function previewPhoto(index: number) { uni.previewImage({ current: items.value[index].path, urls: pickedPaths.value }) }
 function useMyName() { photographer.value = sessionState.account?.display_name || sessionState.account?.username || '' }
 
@@ -246,10 +259,10 @@ function ensureCapturePermission(): boolean {
 }
 function chooseDestination() { uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=capture` }) }
 
-async function readOriginalDate(path: string): Promise<string> {
+async function readOriginalCapturedAt(path: string): Promise<string> {
   try {
     const metadata = await Promise.race([readFilePrefix(path, 128 * 1024).then(parseJpegExif), new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))])
-    return metadata?.capturedAt ? localDate(new Date(metadata.capturedAt)) : ''
+    return metadata?.capturedAt || ''
   } catch { return '' }
 }
 async function pickMedia(nextSource: CaptureSource = source.value) {
@@ -266,7 +279,8 @@ async function pickMedia(nextSource: CaptureSource = source.value) {
     const paths = await choosePhotoPaths(nextSource)
     if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) return
     pendingPaths.value = paths
-    const dates = paths.map(path => nextSource === 'camera' ? Promise.resolve(localDate()) : readOriginalDate(path))
+    const captureReturnedAt = new Date().toISOString()
+    const dates = paths.map(async path => (await readOriginalCapturedAt(path)) || (nextSource === 'camera' ? captureReturnedAt : ''))
     for (const [pathIndex, path] of paths.entries()) {
       if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) break
       if (items.value.some(item => item.sourcePath === path || item.path === path)) { uni.showToast({ title: '已跳过本批重复照片', icon: 'none' }); continue }
@@ -274,13 +288,13 @@ async function pickMedia(nextSource: CaptureSource = source.value) {
       const size = await getSourceFileSize(path)
       if (size > 50 * 1024 * 1024) throw new Error('单张照片不能超过 50MB')
       if (queueRuntime.queueBytes.value + items.value.reduce((sum, item) => sum + item.size, 0) + size > 160 * 1024 * 1024) throw new Error('照片总量超过 160MB，请先上传当前照片')
-      const [saved, date] = await Promise.all([
+      const [saved, capturedAt] = await Promise.all([
         persistCaptureOriginal(path, owner, projectId),
         dates[pathIndex],
       ])
       if (owner !== selectionStorage.getOwner() || projectId !== String(selectionStorage.getProject().id)) break
       if (nextSource === 'camera' && !photographer.value) useMyName()
-      items.value.push({ path: saved.originalPath, sourcePath: path, size: saved.originalSize, date, source: nextSource, overrides: {} })
+      items.value.push({ path: saved.originalPath, sourcePath: path, size: saved.originalSize, date: capturedAt ? localDate(new Date(capturedAt)) : '', capturedAt, source: nextSource, overrides: {} })
       pendingPaths.value = pendingPaths.value.filter(value => value !== path)
       persistDraft()
     }
@@ -417,7 +431,7 @@ onUnload(persistDraft)
       </view>
       <text v-if="choosing" class="saving-note">正在保存照片，完成后可继续添加</text><view class="add-actions"><button class="secondary-button pressable" :disabled="choosing || submitting" @tap="pickMedia('camera')">{{ items.length ? '继续拍照' : '拍照' }}</button><button class="secondary-button pressable" :disabled="choosing || submitting" @tap="pickMedia('album')">{{ items.length ? '继续添加' : '选照片' }}</button></view>
       <view v-if="items.length" class="selection-tools"><text>{{ selectedLabel }}</text><button class="text-button pressable" @tap="selected = selected.length === items.length ? [] : items.map((_, i) => i)">{{ selected.length === items.length ? '取消全选' : '全选' }}</button></view>
-      <view v-if="selected.length" class="selection-actions"><button class="secondary-button pressable" @tap="editSelected">修改 {{ selected.length }} 张</button><button class="text-button pressable" @tap="removeSelected">移除</button></view>
+      <view v-if="selected.length" class="selection-actions"><button class="secondary-button pressable" @tap="editSelected">修改 {{ selected.length }} 张</button><button class="text-button pressable" @tap="openWatermark">编辑水印</button><button class="text-button pressable" @tap="removeSelected">移除</button></view>
     </view>
 
     <view class="capture-settings card">
@@ -490,7 +504,7 @@ onUnload(persistDraft)
 .title-scroll :deep(::-webkit-scrollbar) { display:none; width:0; height:0; }
 .title-scroll { margin-top:12rpx; white-space:nowrap; }.title-chips { display:inline-flex; gap:12rpx; }.small-chip { flex:none; min-height:40px; padding:10rpx 20rpx; border-radius:12rpx; background:var(--surface-2); color:var(--muted); font-size:23rpx; line-height:1.5; display:flex; align-items:center; }
 .photo-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12rpx; margin-top:18rpx; }.photo-tile { position:relative; min-width:0; border:2px solid transparent; border-radius:16rpx; overflow:hidden; background:var(--surface-2); }.photo-tile.selected { border-color:var(--primary-strong); }.photo-tile image { width:100%; height:172rpx; display:block; }.select-photo { position:absolute; top:4rpx; right:4rpx; min-width:44px; min-height:44px; padding:0; background:rgba(0,0,0,.55); color:white; line-height:44px; font-size:24rpx; border-radius:50%; }.selected .select-photo { background:var(--primary-strong); color:var(--surface); }.photo-date { display:block; text-align:center; font-size:20rpx; padding:10rpx 0; color:var(--muted); }.photo-custom { position:absolute; bottom:48rpx; left:0; background:rgba(0,0,0,.6); color:white; padding:4rpx 8rpx; font-size:19rpx; }.warning { color:var(--warning); }
-.add-actions { display:grid; grid-template-columns:1fr 1fr; gap:14rpx; margin-top:22rpx; }.add-actions button,.selection-actions button { font-size:25rpx; min-height:44px; }.selection-tools { font-size:22rpx; color:var(--muted); margin-top:12rpx; }.selection-actions { display:flex; gap:20rpx; align-items:center; }
+.add-actions { display:grid; grid-template-columns:1fr 1fr; gap:14rpx; margin-top:22rpx; }.add-actions button,.selection-actions button { font-size:25rpx; min-height:44px; }.selection-tools { font-size:22rpx; color:var(--muted); margin-top:12rpx; }.selection-actions { display:flex; flex-wrap:wrap; gap:20rpx; align-items:center; }
 .editor-mask { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.55); display:flex; align-items:flex-end; }.editor-sheet { width:100%; max-height:85vh; overflow-y:auto; padding:28rpx 28rpx calc(30rpx + env(safe-area-inset-bottom)); border-radius:28rpx 28rpx 0 0; }.editor-actions { margin-top:24rpx; }.editor-actions .primary-button { flex:1; min-height:48px; font-size:26rpx; }.picker-date { display:flex; align-items:center; }
 
 .capture-page { padding-bottom: calc(54rpx + var(--safe-bottom)); }

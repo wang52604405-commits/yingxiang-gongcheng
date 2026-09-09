@@ -25,6 +25,23 @@ function engineeringDraft(): UploadDraft {
 }
 
 describe('上传前完整归档信息', () => {
+  it('自动识别允许未选单元或其它目录，工程与类别仍然必填', () => {
+    const auto: UploadDraft = { ...engineeringDraft(), mode: 'auto', assignment: undefined, site_part: '闸室段模板' }
+    expect(isArchiveInfoComplete(auto)).toBe(true)
+    expect(isArchiveInfoComplete({ ...auto, scope: 'other', category: undefined })).toBe(true)
+    expect(archiveInfoIssues({ ...auto, category: undefined }).map((issue) => issue.field)).toContain('category')
+    expect(archiveInfoIssues({ ...auto, project_name: '' }).map((issue) => issue.field)).toContain('project')
+    expect(isArchiveInfoComplete({ ...auto, mode: 'direct' })).toBe(false)
+  })
+
+  it('自动模式不能绕过损坏的显式归档层级、来源或类别', () => {
+    const auto: UploadDraft = { ...engineeringDraft(), mode: 'auto', assignment: { unit_code: 'DY-001' } }
+    expect(isArchiveInfoComplete(auto)).toBe(false)
+    expect(isArchiveInfoComplete({ ...auto, assignment: undefined, assignment_explicit: true })).toBe(false)
+    expect(isArchiveInfoComplete({ ...auto, assignment: undefined, capture_source: 'unknown' as any })).toBe(false)
+    expect(isArchiveInfoComplete({ ...auto, assignment: undefined, category: 'invalid' as any })).toBe(false)
+    expect(isArchiveInfoComplete({ ...auto, assignment: undefined, scope: 'invalid' as any })).toBe(false)
+  })
   it('工程、类别、单位、分部、单元和必需工序齐全才允许提交', () => {
     const draft = engineeringDraft()
     expect(isArchiveInfoComplete(draft)).toBe(true)

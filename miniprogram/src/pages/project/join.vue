@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onUnload } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
 import { mobileApi } from '@/api/mobile'
 import { sessionState } from '@/services/auth'
-import { normalizeInviteCode, consumePendingInvite, peekPendingInvite, rememberPendingInvite } from '@/services/pending-invite'
+import { normalizeInviteCode, consumePendingInvite, peekPendingInvite, rememberPendingInvite, inviteCodeForJoinPage, clearDiscardedInviteEntry, invalidatePendingInvite, isInvalidInviteError } from '@/services/pending-invite'
 import { PROJECT_ROLE_LABELS } from '@/services/project-membership'
 import { applyBootstrap, loadBootstrap } from '@/stores/bootstrap'
 import { rememberJoinRequest, validateJoinApplicant } from '@/services/project-join-request'
@@ -34,6 +34,7 @@ async function loadPreview(expectedCode = code.value) {
   } catch (reason) {
     if (version === previewVersion) {
       preview.value = null
+      if (isInvalidInviteError(reason)) invalidatePendingInvite(normalized)
       error.value = reason instanceof Error ? reason.message : '邀请码不可用'
     }
   } finally {
@@ -90,15 +91,26 @@ async function joinProject() {
     if (peekPendingInvite() === joiningCode) consumePendingInvite()
     uni.reLaunch({ url: '/pages/home/index' })
   } catch (reason) {
+    if (isInvalidInviteError(reason)) invalidatePendingInvite(joiningCode)
     error.value = reason instanceof Error ? reason.message : '加入项目失败'
   } finally { joining.value = false }
 }
 
+function backHome() {
+  if (code.value && peekPendingInvite() === code.value) consumePendingInvite()
+  uni.reLaunch({ url: '/pages/home/index' })
+}
+
 onLoad((query) => {
-  const pending = peekPendingInvite()
-  code.value = normalizeInviteCode(query?.code || query?.invite || pending)
-  if (code.value.length === 10) rememberPendingInvite(code.value)
+  code.value = inviteCodeForJoinPage(query)
+  if (!code.value && (query?.code || query?.invite) && sessionState.stage === 'authenticated') { clearDiscardedInviteEntry(); uni.reLaunch({ url: '/pages/home/index' }) }
 })
+onUnload(() => {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewVersion += 1
+  if (sessionState.stage === 'authenticated' && !joining.value && code.value && peekPendingInvite() === code.value) consumePendingInvite()
+})
+
 </script>
 
 <template>
@@ -118,6 +130,7 @@ onLoad((query) => {
     </view>
     <view v-if="error" class="error-panel" role="alert">{{ error }}</view>
     <button class="primary-button pressable join-button" :disabled="!canJoin" @tap="joinProject">{{ joinLabel }}</button>
+    <button class="return-home pressable" @tap="backHome">返回工作台</button>
   </view>
 </template>
 
@@ -134,4 +147,5 @@ onLoad((query) => {
 .error-panel { margin-top: 22rpx; padding: 18rpx 20rpx; border: 1rpx solid rgba(255, 107, 102, 0.28); border-radius: 18rpx; color: #ffb1b1; background: rgba(255, 107, 102, 0.1); font-size: 23rpx; line-height: 1.5; }
 .join-button { margin-top: 28rpx; }
 .apply-note { display:block; margin-top:20rpx; color:var(--muted); font-size:24rpx; line-height:1.5; }
+.return-home { display:flex; align-items:center; justify-content:center; min-height:44px; margin-top:20rpx; color:var(--muted); background:transparent; font-size:25rpx; }
 </style>

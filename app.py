@@ -2247,6 +2247,11 @@ class AlbumManager:
                 "uploaded_by_account_id": str(meta.get("uploaded_by_account_id") or "").strip(),
                 "project_owner_account_id": str(meta.get("project_owner_account_id") or "").strip(),
                 "capture_source": str(meta.get("capture_source") or "desktop").strip(),
+                "mobile_unclassified": bool(meta.get("mobile_unclassified")),
+                "manual_review_required": bool(meta.get("manual_review_required")),
+                "review_reason": str(meta.get("review_reason") or "").strip(),
+                "site_part": str(meta.get("site_part") or "").strip(),
+                "mobile_source_scope": str(meta.get("mobile_source_scope") or "").strip(),
                 "orientation": orientation,
                 "orientation_label": PHOTO_ORIENTATION_LABELS[orientation],
                 "rotation": 0,
@@ -2533,6 +2538,12 @@ class AlbumManager:
                     moved["filename"] = temp_name
                     moved["photo_uuid"] = photo_uuid
                     moved["process_name"] = target_process_name
+                    if (source.get("source_fields") or {}).get("_mobile_unclassified") and not (target.get("source_fields") or {}).get(OTHER_IMAGE_MARKER):
+                        moved["mobile_review_reason"] = str(moved.get("review_reason") or "")
+                        moved["mobile_unclassified"] = False
+                        moved["manual_review_required"] = False
+                        moved["review_reason"] = ""
+                        moved["mobile_classification_pending"] = bool(moved.get("mobile_original_received"))
                     moved["process_code"] = self._process_code(target, target_process_name) if target_process_name else ""
                     if stage_backup and stage_backup.is_file():
                         self._originals_dir(target_code).mkdir(parents=True, exist_ok=True)
@@ -5381,7 +5392,7 @@ def other_images_tree():
     }
 
 
-def create_other_image_node(payload):
+def create_other_image_node(payload, internal_source_fields=None):
     raw_code = str(payload.get("code") or "").strip()
     if not raw_code:
         raise ValueError("请输入其它影像编号")
@@ -5417,6 +5428,7 @@ def create_other_image_node(payload):
             "工程其它影像": "是",
             "上级编号": parent_code,
             "自定义编号": code,
+            **dict(internal_source_fields or {}),
         },
     )
     # 与其它工程同名时，PhotoManager 会生成独立内部编号；目录树必须记录
@@ -5430,6 +5442,125 @@ def create_other_image_node(payload):
     target_list.append(node)
     write_other_images(data)
     return node
+
+
+_unclassified_lock = threading.RLock()
+
+
+def ensure_unclassified_project(identity):
+    """Create/reuse one durable staging album for exactly this cloud owner and engineering project."""
+    with _unclassified_lock:
+        current = mobile_sync._engineering_project_identity(current_engineering_project())
+        if not current.get("owner_account_id") or current != identity:
+            raise ValueError("账号或工程已切换，无法创建待分类目录")
+        if current_project_cloud_ownership().get("state") != "matched":
+            raise ValueError("请登录工程所属云账号")
+        code = "MOBILE-WAIT-" + hashlib.sha256(current["project_ref"].encode("utf-8")).hexdigest()[:16]
+        markers = {"_mobile_unclassified": True, "_mobile_unclassified_owner": current["owner_account_id"], "_mobile_unclassified_project_ref": current["project_ref"]}
+        if manager._metadata_path(code).exists():
+            data = manager.get_project(code)
+            fields = data.get("source_fields") or {}
+            if not fields.get(OTHER_IMAGE_MARKER) or any(fields.get(key) != value for key, value in markers.items()):
+                raise ValueError("待分类目录编号已被占用，未改动现有资料")
+            # Recover a tree-write interruption without recreating the original album.
+            tree = read_other_images()
+            if not find_other_node(tree.get("nodes", []), code):
+                tree.setdefault("nodes", []).append({"code": code, "name": "待分类影像", "children": []})
+                write_other_images(tree)
+            return code
+        node = create_other_image_node({"code": code, "name": "待分类影像"}, internal_source_fields=markers)
+        return str(node["code"])
+
+
+def unclassified_albums():
+    ownership = current_project_cloud_ownership()
+    if ownership.get("state") != "matched":
+        raise ValueError("请登录当前工程所属账号后查看待分类影像")
+    result = []
+    for summary in manager.list_projects(include_other=True):
+        data = manager.get_project(summary["project_code"])
+        fields = data.get("source_fields") or {}
+        if fields.get("_mobile_unclassified") and fields.get("_mobile_unclassified_owner") == ownership["owner_id"] and fields.get("_mobile_unclassified_project_ref") == ownership["project_ref"]:
+            result.append(data)
+    return result
+
+
+@app.route("/unclassified")
+def unclassified_page():
+    if not current_user():
+        return redirect("/")
+    return render_template("unclassified.html")
+
+
+@app.route("/api/unclassified")
+def api_unclassified():
+    _user, error = login_required_json()
+    if error:
+        return error
+    try:
+        albums = unclassified_albums()
+        photos = [manager._photo_item(album, photo) for album in albums for photo in album.get("photos", [])]
+        units = []
+        for summary in manager.list_projects():
+            data = manager.get_project(summary["project_code"])
+            if (data.get("source_fields") or {}).get(OTHER_IMAGE_MARKER):
+                continue
+            hierarchy = manager.project_hierarchy(data)
+            units.append({"code": data["project_code"], "name": data.get("project_name", ""), "path": " / ".join(str(hierarchy.get(key) or "") for key in ("unit_project_name", "part_name", "unit_name") if hierarchy.get(key)), "processes": data.get("processes") or []})
+        current = current_engineering_project()
+        return jsonify({"ok": True, "project_id": current.get("id") or DEFAULT_ENGINEERING_PROJECT_ID, "project_name": current.get("project_name", ""), "photos": photos, "count": len(photos), "units": units})
+    except ValueError as exc:
+        return json_error(str(exc), 403)
+
+
+@app.route("/api/unclassified/classify", methods=["POST"])
+def api_classify_unclassified():
+    _user, error = login_required_json()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    try:
+        with _unclassified_lock:
+            _desktop_team_project_context()
+            if str(payload.get("project_id") or "") != str(active_engineering_project_id()):
+                raise ValueError("当前工程已切换，请刷新后重新选择")
+            target = str(payload.get("target_project_code") or "").strip()
+            if not target or manager._safe_code(target) != target or not manager._metadata_path(target).is_file():
+                raise ValueError("目标单元不存在")
+            target_data = manager.get_project(target)
+            if (target_data.get("source_fields") or {}).get(OTHER_IMAGE_MARKER):
+                raise ValueError("请选择工程划分中的单元")
+            process = str(payload.get("target_process_name") or "").strip()
+            if process and process not in (target_data.get("processes") or []):
+                raise ValueError("目标工序不存在")
+            photo_uuids = payload.get("photo_uuids")
+            if not isinstance(photo_uuids, list) or not 1 <= len(photo_uuids) <= 100 or any(not mobile_sync._canonical_uuid(value) for value in photo_uuids):
+                raise ValueError("请选择 1 至 100 张待分类照片")
+            requested = list(dict.fromkeys(str(value) for value in photo_uuids))
+            moved = []
+            for permanent in requested:
+                found = None
+                for album in unclassified_albums():
+                    for photo in album.get("photos", []):
+                        if str(photo.get("photo_uuid")) == permanent:
+                            found = (album["project_code"], photo["id"])
+                            break
+                    if found:
+                        break
+                if not found:
+                    # Retrying a partially completed batch is safe: UUIDs already in
+                    # the chosen unit are reported without moving or copying again.
+                    existing = next((photo for photo in manager.get_project(target).get("photos", []) if str(photo.get("photo_uuid")) == permanent), None)
+                    if existing:
+                        moved.append(manager._photo_item(manager.get_project(target), existing))
+                        continue
+                    raise ValueError("所选照片已变化，请刷新列表后重试")
+                moved.append(manager.move_photo(found[0], found[1], target, target_process_name=process))
+            return jsonify({"ok": True, "photos": moved, "count": len(moved), "cloud_sync_pending": True})
+    except (ValueError, FileNotFoundError) as exc:
+        return json_error(str(exc), 400)
+    except Exception as exc:
+        return json_error(str(exc), 500)
 
 
 @app.route("/")
@@ -6361,6 +6492,7 @@ def desktop_mobile_sync_service():
                 cache_dir=DATA_DIR / "mobile_sync_cache",
                 interval_seconds=30,
                 machine_id_reader=licensing.machine_id,
+                unclassified_project_provider=ensure_unclassified_project,
             )
         return _desktop_mobile_sync_service
 

@@ -311,6 +311,8 @@ class MobileServerContractTest(unittest.TestCase):
         capture_source=None,
         photographer=None,
         transfer_profile=None,
+        site_part=None,
+        auto_delivery=None,
     ):
         fields = {
             "file": (io.BytesIO(content), filename),
@@ -327,6 +329,10 @@ class MobileServerContractTest(unittest.TestCase):
                 filename if original_filename is None else original_filename
             ),
         }
+        if site_part is not None:
+            fields["site_part"] = site_part
+        if auto_delivery is not None:
+            fields["auto_delivery"] = "true" if auto_delivery else "false"
         if photographer is not None:
             fields["photographer"] = photographer
         if capture_source is not None:
@@ -3402,6 +3408,177 @@ class MobileServerContractTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_entire_project_gallery_pages_beyond_600_across_all_categories(self):
+        project_id = "gallery-all-" + uuid.uuid4().hex[:8]
+        snapshot = self._snapshot(self.desktop_token_a, "完整图库分页", project_id=project_id, desktop_machine_id="MACHINE-A", revision=1).get_json()
+        reference = snapshot["project_ref"]
+        batch_id = self._create_batch(self.token_a, project_id=reference)
+        seed_uuid = str(uuid.uuid4())
+        self.assertEqual(self._upload(self.token_a, batch_id, seed_uuid, self._jpeg((9, 83, 105))).status_code, 201)
+        conn = self.db.connect()
+        try:
+            seed = dict(conn.execute("SELECT * FROM cloud_photos WHERE photo_uuid = ?", (seed_uuid,)).fetchone())
+            seed.pop("id")
+            columns = list(seed)
+            sql = "INSERT INTO cloud_photos (" + ",".join(columns) + ") VALUES (" + ",".join("?" for _ in columns) + ")"
+            for index in range(624):
+                item = {**seed, "storage_key": "gallery-test/" + uuid.uuid4().hex + ".jpg", "photo_uuid": str(uuid.uuid4()), "scope": "other" if index % 3 == 2 else "engineering", "category": "" if index % 3 == 2 else ("supervision" if index % 3 == 1 else "construction"), "source": "desktop", "status": "desktop_imported"}
+                conn.execute(sql, tuple(item[column] for column in columns))
+            conn.commit()
+        finally:
+            conn.close()
+        seen = []
+        cursor = ""
+        pages = 0
+        while True:
+            response = self.client.get(f"/api/mobile/v1/photos?project_id={reference}&limit=100&cursor={cursor}", headers=self._headers(self.token_a))
+            self.assertEqual(response.status_code, 200, response.get_json())
+            data = response.get_json()
+            self.assertEqual(data["total"], 625)
+            seen.extend(item["photo_uuid"] for item in data["photos"])
+            pages += 1
+            cursor = data["next_cursor"]
+            if not cursor:
+                break
+            self.assertLess(pages, 8)
+        self.assertEqual(pages, 7)
+        self.assertEqual(len(seen), 625)
+        self.assertEqual(len(set(seen)), 625)
+        construction = self.client.get(f"/api/mobile/v1/photos?project_id={reference}&scope=engineering&category=construction", headers=self._headers(self.token_a)).get_json()
+        self.assertEqual(construction["total"], 209)
+        denied = self.client.get(f"/api/mobile/v1/photos?project_id={reference}", headers=self._headers(self.token_b))
+        self.assertEqual(denied.status_code, 404)
+
+    def test_auto_delivery_high_match_and_unknown_are_delivered_with_originals(self):
+        for kind in ("high", "ambiguous", "ocr_error"):
+            batch_id = self._create_batch(self.token_a, mode="auto")
+            photo_uuid = str(uuid.uuid4())
+            upload = self._upload(self.token_a, batch_id, photo_uuid, self._jpeg((9, 50, 110)), auto_delivery=True, site_part="左岸连接堤")
+            self.assertEqual(upload.status_code, 201, upload.get_json())
+            if kind == "ambiguous":
+                match_patch = patch("server.mobile_recognition.match_photo", return_value={"unit_code": "YNLQ-001-01-001", "confidence": "high", "ambiguous": True, "score": 980, "candidates": []})
+            else:
+                from contextlib import nullcontext
+                match_patch = nullcontext()
+            with patch("server.mobile_recognition.recognize_watermark", side_effect=RuntimeError("OCR不可用") if kind == "ocr_error" else None, return_value={}), match_patch:
+                _, response = self._analyze_and_wait(self.token_a, batch_id)
+            batch = response.get_json()["batch"]
+            self.assertEqual(batch["status"], "desktop_pending", batch)
+            photo = batch["photos"][0]
+            self.assertEqual(photo["manual_review_required"], kind != "high")
+            self.assertEqual(photo["site_part"], "左岸连接堤")
+            if kind == "high":
+                self.assertEqual(photo["assignment"]["unit_code"], "YNLQ-001-01-001")
+                self.assertEqual(photo["assignment"]["process_name"], "")
+            else:
+                self.assertEqual(photo["assignment"], {})
+                self.assertTrue(photo["review_reason"])
+            inbox = self.client.get("/api/desktop/v1/inbox?desktop_machine_id=MACHINE-A&limit=100", headers=self._headers(self.desktop_token_a)).get_json()["items"]
+            delivered = next(item for item in inbox if item["photo_uuid"] == photo_uuid)
+            self.assertTrue(delivered["original_available"])
+            self.assertEqual(delivered["manual_review_required"], kind != "high")
+            downloaded = self.client.get(delivered["original_download_url"], headers=self._headers(self.desktop_token_a))
+            self.assertEqual(downloaded.status_code, 200)
+            downloaded.close()
+
+    def test_auto_delivery_stale_worker_falls_back_and_revocation_never_grants(self):
+        batch_id = self._create_batch(self.token_a, mode="auto")
+        photo_uuid = str(uuid.uuid4())
+        self._upload(self.token_a, batch_id, photo_uuid, self._jpeg(), auto_delivery=True)
+        conn = self.db.connect()
+        try:
+            account = conn.execute("SELECT account_id FROM mobile_batches WHERE id = ?", (batch_id,)).fetchone()["account_id"]
+            conn.execute("UPDATE cloud_photos SET status = 'analyzing' WHERE batch_id = ?", (batch_id,))
+            conn.execute("UPDATE mobile_batches SET status = 'analyzing' WHERE id = ?", (batch_id,))
+            conn.execute("INSERT INTO mobile_jobs(account_id,batch_id,job_type,status,created_at,updated_at) VALUES (?,?,'analyze','running','2000-01-01','2000-01-01')", (account,batch_id))
+            conn.commit()
+        finally:
+            conn.close()
+        recovered = self.client.get(f"/api/mobile/v1/batches/{batch_id}", headers=self._headers(self.token_a)).get_json()["batch"]
+        self.assertEqual(recovered["status"], "desktop_pending")
+        self.assertTrue(recovered["photos"][0]["manual_review_required"])
+        self.assertEqual(recovered["photos"][0]["assignment"], {})
+        # A removed uploader is not allowed to start classification on retained bytes.
+        snapshot, invite = self._wechat_join_invite()
+        pending = self._wechat_join(invite, uuid.uuid4().hex).get_json()
+        self.client.post(f"/api/mobile/v1/project-join-requests/{pending['join_request']['id']}/approve", json={}, headers=self._headers(self.token_a))
+        member_batch = self._create_batch(pending["token"], mode="auto", project_id=snapshot["project_ref"])
+        member_uuid = str(uuid.uuid4())
+        self._upload(pending["token"], member_batch, member_uuid, self._jpeg(), auto_delivery=True)
+        self.client.delete(f"/api/mobile/v1/projects/{snapshot['project_ref']}/members/{pending['account']['id']}", headers=self._headers(self.token_a))
+        denied = self.client.post(f"/api/mobile/v1/batches/{member_batch}/analyze", headers=self._headers(pending["token"]))
+        self.assertEqual(denied.status_code, 404)
+        conn = self.db.connect()
+        try:
+            row = conn.execute("SELECT * FROM cloud_photos WHERE photo_uuid = ?", (member_uuid,)).fetchone()
+            self.assertEqual(row["status"], "server_saved")
+            self.assertTrue(row["original_storage_key"])
+            self.assertNotEqual(row["original_cleanup_status"], "deleted")
+        finally:
+            conn.close()
+
+    def test_desktop_classify_pending_pool_photo_is_owner_machine_bound_and_idempotent(self):
+        batch_id = self._create_batch(self.token_a, mode="auto")
+        photo_uuid = str(uuid.uuid4())
+        self._upload(self.token_a, batch_id, photo_uuid, self._jpeg(), auto_delivery=True)
+        with patch("server.mobile_recognition.recognize_watermark", side_effect=RuntimeError("OCR不可用")):
+            self._analyze_and_wait(self.token_a, batch_id)
+        payload = {"project_id": "default", "desktop_machine_id": "MACHINE-A", "unit_code": "YNLQ-001-01-001", "process_name": "", "category": "construction", "local_project_code": "YNLQ-001-01-001", "local_photo_id": "SY001"}
+        endpoint = f"/api/desktop/v1/photos/{photo_uuid}/classify"
+        self.assertEqual(self.client.post(endpoint, json=payload, headers=self._headers(self.desktop_token_a)).status_code, 409)
+        ack = self.client.post(f"/api/desktop/v1/photos/{photo_uuid}/ack", json={"desktop_machine_id": "MACHINE-A", "local_project_code": "__unclassified__", "local_photo_id": "WAIT001"}, headers=self._headers(self.desktop_token_a))
+        self.assertEqual(ack.status_code, 200, ack.get_json())
+        self.assertEqual(self.client.post(endpoint, json=payload, headers=self._headers(self.token_a)).status_code, 403)
+        self.assertEqual(self.client.post(endpoint, json={**payload, "desktop_machine_id": "MACHINE-B"}, headers=self._headers(self.desktop_token_b)).status_code, 404)
+        first = self.client.post(endpoint, json=payload, headers=self._headers(self.desktop_token_a))
+        self.assertEqual(first.status_code, 200, first.get_json())
+        self.assertFalse(first.get_json()["photo"]["manual_review_required"])
+        self.assertEqual(first.get_json()["photo"]["unit_code"], "YNLQ-001-01-001")
+        self.assertEqual(first.get_json()["photo"]["status"], "desktop_imported")
+        again = self.client.post(endpoint, json=payload, headers=self._headers(self.desktop_token_a))
+        self.assertTrue(again.get_json()["idempotent"])
+
+    def test_watermark_photographer_uses_approved_applicant_name_per_project(self):
+        snapshot, invite = self._wechat_join_invite()
+        joined = self.client.post("/api/mobile/v1/project-invites/join", json={"code": invite, "display_name": "审核的张工", "phone": "13800138000"}, headers=self._headers(self.token_b)).get_json()
+        rid = joined["join_request"]["id"]
+        approved = self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_a))
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        ref = snapshot["project_ref"]
+        projects = self.client.get("/api/mobile/v1/projects", headers=self._headers(self.token_b)).get_json()["projects"]
+        member_project = next(p for p in projects if p["id"] == ref)
+        self.assertEqual(member_project["photographer_name"], "审核的张工")
+        self.assertTrue(member_project["photographer_verified"])
+        bootstrap = self.client.get("/api/mobile/v1/bootstrap", headers=self._headers(self.token_b)).get_json()
+        self.assertEqual(next(p for p in bootstrap["projects"] if p["id"] == ref)["photographer_name"], "审核的张工")
+        tree = self.client.get(f"/api/mobile/v1/projects/{ref}/tree", headers=self._headers(self.token_b)).get_json()
+        self.assertEqual(tree["project"]["photographer_name"], "审核的张工")
+        owner_tree = self.client.get(f"/api/mobile/v1/projects/{ref}/tree", headers=self._headers(self.token_a)).get_json()
+        self.assertEqual(owner_tree["project"]["photographer_name"], "tenant_a")
+        batch = self._create_batch(self.token_b, mode="auto", project_id=ref)
+        photo = self._upload(self.token_b, batch, str(uuid.uuid4()), self._jpeg(), capture_source="camera", auto_delivery=True, photographer="伪造的邀请人姓名").get_json()["photo"]
+        self.assertEqual(photo["photographer"], "审核的张工")
+        self.assertEqual(photo["photographer_account_id"], joined["join_request"]["applicant_account_id"])
+        self.assertTrue(photo["match"]["photographer_verified"])
+        self.assertEqual(photo["uploaded_by"], "tenant_b")
+        owner_batch = self._create_batch(self.token_a, mode="auto", project_id=ref)
+        owner_photo = self._upload(self.token_a, owner_batch, str(uuid.uuid4()), self._jpeg(), capture_source="camera", auto_delivery=True, photographer="不是本人").get_json()["photo"]
+        self.assertEqual(owner_photo["photographer"], "tenant_a")
+
+    def test_legacy_member_photographer_fallback_is_not_marked_approved(self):
+        snapshot, _ = self._wechat_join_invite()
+        ref = snapshot["project_ref"]
+        conn = self.db.connect()
+        try:
+            member = conn.execute("SELECT id FROM accounts WHERE username = 'tenant_b'").fetchone()["id"]
+            conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,joined_at,updated_at) VALUES(?,?,?,'capturer','2020-01-01','2020-01-01')", (snapshot["owner_account_id"], ref.split(":",1)[1], member))
+            conn.commit()
+        finally:
+            conn.close()
+        project = self.client.get(f"/api/mobile/v1/projects/{ref}/tree", headers=self._headers(self.token_b)).get_json()["project"]
+        self.assertEqual(project["photographer_name"], "tenant_b")
+        self.assertFalse(project["photographer_verified"])
+
     def test_mobile_album_photographer_does_not_replace_authenticated_uploader(self):
         batch_id = self._create_batch(self.token_a)
         uploaded = self._upload(
@@ -3428,6 +3605,7 @@ class MobileServerContractTest(unittest.TestCase):
             "chunk_size_bytes": size, "total_chunks": len(parts),
             "capture_source": "album", "photographer": "李四", "uploaded_by": "伪造姓名",
             "title": "老照片验收", "photo_date": "2024-01-02",
+            "site_part": "左岸连接堤", "auto_delivery": True,
         }
         with patch.object(config, "MOBILE_CHUNK_BYTES", size):
             init = self.client.post(f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/init", json=payload, headers=self._headers(self.token_a))
@@ -3437,10 +3615,12 @@ class MobileServerContractTest(unittest.TestCase):
         final = self.client.post(f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/{photo_uuid}/finalize", json={"sha256": payload["sha256"], "original_size_bytes": len(original), "total_chunks": len(parts)}, headers=self._headers(self.token_a))
         self.assertEqual(final.status_code, 201, final.get_json())
         photo = final.get_json()["photo"]
-        self.assertEqual(photo["photographer"], "李四")
+        self.assertEqual(photo["photographer"], "tenant_a")
         self.assertEqual(photo["uploaded_by"], "tenant_a")
         self.assertEqual(photo["title"], "老照片验收")
         self.assertEqual(photo["photo_date"], "2024-01-02")
+        self.assertEqual(photo["site_part"], "左岸连接堤")
+        self.assertTrue(photo["match"]["auto_delivery"])
 
     def test_mobile_upload_records_authenticated_account_as_photographer(self):
         batch_id = self._create_batch(self.token_a)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { setWatermarkContext } from '@/services/watermark-context'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageHeader from '@/components/PageHeader.vue'
@@ -10,6 +11,8 @@ import { sessionState } from '@/services/auth'
 import { bootstrapState } from '@/stores/bootstrap'
 import { selectionStorage } from '@/stores/selection'
 
+const detailOwner = ref('')
+const detailProject = ref('')
 const photoId = ref('')
 const local = ref<LocalPhoto | null>(null)
 const cloud = ref<CloudPhoto | null>(null)
@@ -74,7 +77,23 @@ function preview() {
   if (imageUrl.value) uni.previewImage({ current: imageUrl.value, urls: [imageUrl.value] })
 }
 
+function openWatermark() {
+  const owner = selectionStorage.getOwner()
+  const currentProjectId = String(selectionStorage.getProject().id || '')
+  if (!owner || !currentProjectId || String(sessionState.account?.id || '') !== owner) return
+  if (owner !== detailOwner.value || currentProjectId !== detailProject.value) { uni.showToast({ title: '账号或工程已切换，请重新打开照片', icon: 'none' }); return }
+  if (local.value && String(local.value.owner_account_id) !== owner) { uni.showToast({ title: '账号已切换，请重新打开照片', icon: 'none' }); return }
+  const sourcePath = local.value?.original_path || imageUrl.value
+  if (!sourcePath) { uni.showToast({ title: '照片暂时无法读取', icon: 'none' }); return }
+  try {
+    setWatermarkContext(owner, currentProjectId, { sourcePath, sourceQuality: local.value?.original_path ? 'original' : 'preview', sourceKind: 'detail', capturedAt: local.value?.client_captured_at || cloud.value?.captured_at || '', unitProjectName: local.value?.draft.assignment?.unit_project_name || cloud.value?.unit_project_name || '', partName: local.value?.draft.assignment?.part_name || cloud.value?.part_name || '', unitName: local.value?.draft.assignment?.unit_name || cloud.value?.unit_name || '', scope: local.value?.draft.scope || cloud.value?.scope || 'engineering', category: local.value?.draft.category || cloud.value?.category, sitePart: [local.value?.draft.assignment?.unit_name || cloud.value?.unit_name, local.value?.draft.assignment?.process_name || cloud.value?.process_name].filter(Boolean).join(' / '), project: projectName.value, title: local.value?.title || cloud.value?.title || '', photographer: cloud.value?.photographer || local.value?.draft.photographer || '', photoDate: local.value?.photo_date || cloud.value?.photo_date || '' })
+    uni.navigateTo({ url: '/pages/photo/watermark' })
+  } catch (reason) { uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' }) }
+}
+
 onLoad((query) => {
+  detailOwner.value = selectionStorage.getOwner()
+  detailProject.value = String(selectionStorage.getProject().id || '')
   photoId.value = String(query?.id || '')
   void load()
 })
@@ -89,6 +108,7 @@ onLoad((query) => {
         <image v-if="imageUrl" :src="imageUrl" mode="aspectFit" />
         <view v-else class="preview-placeholder">暂无预览</view>
       </button>
+      <button v-if="imageUrl || local?.original_path" class="watermark-button secondary-button pressable" @tap="openWatermark">{{ local?.original_path ? '保存水印照片' : '保存水印预览' }}</button>
       <view class="detail-card card">
         <view v-for="row in detailRows" :key="row.key" class="detail-row">
           <text>{{ row.label }}</text>
@@ -110,4 +130,5 @@ onLoad((query) => {
 .detail-row > text:first-child { color: var(--muted); font-size: 24rpx; }
 .detail-row > text:last-child { color: var(--text); font-size: 27rpx; text-align: right; word-break: break-all; }
 .detail-row .status-value { color: var(--primary-strong); }
+.watermark-button { margin-top:24rpx; min-height:44px; font-size:27rpx; }
 </style>

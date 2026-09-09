@@ -1060,6 +1060,59 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(queueRuntime.state.batches[0].analyzed).toBe(true)
   })
 
+  it('新自动批次不要求先选单元，传施工部位并直接跟随电脑待分类状态', async () => {
+    const photo = localPhoto('32', 'auto-watermark')
+    photo.status = 'local_ready'
+    photo.remote_batch_id = undefined
+    photo.draft = { ...draft, mode: 'auto', auto_delivery: true, site_part: '闸室段模板', assignment: undefined }
+    const batch = { ...localBatch(photo), draft: photo.draft, remote_batch_id: undefined, committed: false }
+    const storage = new Map<string, any>([['engineering-image:queue:v2:account:32', { owner_account_id: '32', photos: [photo], batches: [batch] }]])
+    installPlatform(storage, true)
+    mocks.createBatch.mockResolvedValue({ batch_id: '18' })
+    mocks.uploadPhoto.mockResolvedValue({ ok: true })
+    mocks.analyzeBatch.mockResolvedValue({ ok: true, job: { job_id: 'auto-18', status: 'queued' } })
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('manual')
+    expect(mocks.createBatch).toHaveBeenCalledWith(expect.objectContaining({ mode: 'auto', assignment: undefined }))
+    expect(mocks.uploadPhoto.mock.calls[0][2]).toMatchObject({ site_part: '闸室段模板', auto_delivery: true })
+    expect(queueRuntime.state.photos[0].status).toBe('analyzing')
+    mocks.batch.mockResolvedValue({ ok: true, batch_id: '18', status: 'desktop_pending', photos: [{ photo_uuid: photo.photo_uuid, status: 'desktop_pending', review_reason: '未找到可靠单元，请在电脑端分类' }] })
+    await queueRuntime.resume('manual')
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'desktop_pending', review_reason: '未找到可靠单元，请在电脑端分类' })
+    expect(queueRuntime.state.batches[0]).toMatchObject({ analyzed: true, committed: true })
+    expect(mocks.assignBatch).not.toHaveBeenCalled()
+    expect(mocks.commitBatch).not.toHaveBeenCalled()
+  })
+
+  it('新入队自动照片保存自动交付标记，旧队列与直接归档不被补写标记', async () => {
+    const storage = new Map<string, any>()
+    installPlatform(storage, false)
+    mocks.stageOriginal.mockResolvedValue({ originalPath: '/user/new.jpg', originalSize: 8_000_000, originalFilename: 'new.jpg' })
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.enqueue(['/tmp/new.jpg'], { ...draft, mode: 'auto', assignment: undefined })
+    expect(queueRuntime.state.photos[0].draft.auto_delivery).toBe(true)
+    await queueRuntime.enqueue(['/tmp/direct.jpg'], draft)
+    expect(queueRuntime.state.photos.find((item) => item.draft.mode === 'direct')?.draft.auto_delivery).toBeUndefined()
+  })
+
+  it('自动批次内单张损坏的显式层级不会借批次空归属绕过检查', async () => {
+    const photo = localPhoto('32', 'auto-malformed')
+    photo.status = 'local_ready'
+    photo.remote_batch_id = undefined
+    photo.draft = { ...draft, mode: 'auto', assignment: { unit_code: 'missing-parents' } }
+    const batch = { ...localBatch(photo), draft: { ...photo.draft, assignment: undefined }, remote_batch_id: undefined, committed: false }
+    const storage = new Map<string, any>([['engineering-image:queue:v2:account:32', { owner_account_id: '32', photos: [photo], batches: [batch] }]])
+    installPlatform(storage, true)
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('manual')
+    expect(mocks.createBatch).not.toHaveBeenCalled()
+    expect(mocks.uploadPhoto).not.toHaveBeenCalled()
+    expect(queueRuntime.state.photos[0]).toMatchObject({ status: 'failed', failure_code: 'ARCHIVE_INFO_REQUIRED' })
+  })
+
   it('遗留的 1MiB 归档图不再优先于本机原图', async () => {
     const photo = localPhoto('32', 'one-mib-photo')
     photo.status = 'local_ready'

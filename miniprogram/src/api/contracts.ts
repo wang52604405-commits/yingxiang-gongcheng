@@ -13,6 +13,8 @@ export interface CreateBatchPayload {
 }
 
 export interface PhotoUploadMetadata {
+  auto_delivery?: boolean
+  site_part?: string
   photo_uuid: string
   client_captured_at: string
   orientation: number
@@ -48,6 +50,8 @@ export interface ChunkUploadState {
 
 export function buildChunkUploadInit(metadata: PhotoUploadMetadata, chunkSizeBytes: number): ChunkUploadInitPayload {
   return {
+    ...(metadata.auto_delivery !== undefined ? { auto_delivery: metadata.auto_delivery } : {}),
+    ...(metadata.site_part !== undefined ? { site_part: metadata.site_part } : {}),
     photo_uuid: metadata.photo_uuid,
     sha256: metadata.sha256,
     original_size_bytes: metadata.original_size_bytes,
@@ -83,6 +87,8 @@ export function normalizeBatchPayload(payload: CreateBatchPayload): CreateBatchP
 
 export function buildPhotoUploadForm(metadata: PhotoUploadMetadata): Record<string, string> {
   return {
+    ...(metadata.auto_delivery !== undefined ? { auto_delivery: String(metadata.auto_delivery) } : {}),
+    ...(metadata.site_part !== undefined ? { site_part: metadata.site_part } : {}),
     photo_uuid: metadata.photo_uuid,
     client_captured_at: metadata.client_captured_at,
     orientation: String(metadata.orientation),

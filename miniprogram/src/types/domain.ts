@@ -24,6 +24,8 @@ export interface Account {
 }
 
 export interface ProjectSummary {
+  photographer_name?: string
+  photographer_verified?: boolean
   id: string
   code: string
   name: string
@@ -116,6 +118,9 @@ export interface Assignment {
 }
 
 export interface UploadDraft {
+  captured_at?: string
+  auto_delivery?: boolean
+  site_part?: string
   assignment_explicit?: boolean
   capture_item_id?: string
   title?: string
@@ -133,6 +138,7 @@ export interface UploadDraft {
 }
 
 export interface LocalPhoto {
+  review_reason?: string
   owner_account_id: string
   photo_uuid: string
   client_batch_id: string

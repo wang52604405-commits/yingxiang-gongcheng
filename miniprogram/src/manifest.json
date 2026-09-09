@@ -2,8 +2,8 @@
   "name": "工程影像",
   "appid": "__UNI__ENGINEERING_IMAGE_V1",
   "description": "水利、房建、市政、电力工程现场影像采集、同步与归档",
-  "versionName": "1.5.1",
-  "versionCode": "151",
+  "versionName": "1.6.0",
+  "versionCode": "160",
   "transformPx": false,
   "mp-weixin": {
     "appid": "",
@@ -16,9 +16,18 @@
       "__usePrivacyCheck__": true
     },
     "usingComponents": true,
+    "requiredPrivateInfos": [
+      "getLocation"
+    ],
     "permission": {
       "scope.camera": {
         "desc": "用于拍摄现场工程影像"
+      },
+      "scope.userLocation": {
+        "desc": "仅在您点击获取当前位置时，用于给本地水印照片添加当前手机位置"
+      },
+      "scope.writePhotosAlbum": {
+        "desc": "仅在您点击保存水印照片时，将生成的照片副本保存到手机相册"
       }
     }
   }

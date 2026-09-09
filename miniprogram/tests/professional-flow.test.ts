@@ -42,7 +42,7 @@ describe('专业采集与全量图库闭环', () => {
   it('图库携带其它目录筛选并消费 next_cursor，不再只显示首 60 张', () => {
     const library = source('src/pages/library/index.vue')
     expect(library).toContain('other_node_code:')
-    expect(library).toContain('cursor: reset ? undefined : nextCursor.value')
+    expect(source('src/services/photo-library.ts')).toContain('const cursor = reset ? undefined : state.nextCursor')
     expect(library).toContain('onReachBottom')
     expect(library).toContain('继续加载更多')
   })

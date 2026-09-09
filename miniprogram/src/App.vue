@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
+import { onAppHide, onLaunch, onAppShow } from '@dcloudio/uni-app'
 import { BUILD_CHANNEL } from '@/config/env'
 import { createSessionLifecycle } from '@/services/session-lifecycle'
 import { ensureSession, sessionState } from '@/services/auth'
@@ -10,19 +10,17 @@ import { rememberLaunchInvite } from '@/services/pending-invite'
 const sessionLifecycle = createSessionLifecycle({ ensure: ensureSession, session: sessionState, queue: queueRuntime, selection: selectionStorage })
 
 onLaunch((options) => {
-  rememberLaunchInvite(options)
+  rememberLaunchInvite(options, 'launch')
   console.info(BUILD_CHANNEL)
   void sessionLifecycle.activate()
 })
 
-onShow(() => {
-  const wxApi = (globalThis as { wx?: { getEnterOptionsSync?: () => unknown } }).wx
-  const enterOptions = (uni as any).getEnterOptionsSync?.() || wxApi?.getEnterOptionsSync?.()
-  rememberLaunchInvite(enterOptions)
+onAppShow((options) => {
+  rememberLaunchInvite(options, 'show')
   void sessionLifecycle.activate()
 })
 
-onHide(() => {
+onAppHide(() => {
   sessionLifecycle.hide()
 })
 </script>

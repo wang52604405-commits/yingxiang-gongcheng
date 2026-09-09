@@ -70,7 +70,7 @@ trap rollback ERR
 echo "[1/7] 安装系统依赖并准备目录"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    python3-venv nginx sqlite3 rsync openssl curl
+    python3-venv nginx sqlite3 rsync openssl curl libgl1
 install -d -o root -g root -m 755 "$APP_DIR" "$APP_DIR/releases"
 install -d -o root -g root -m 700 "$APP_DIR/backups" "$BACKUP_DIR"
 install -d -o www-data -g www-data -m 750 "$DATA_DIR"

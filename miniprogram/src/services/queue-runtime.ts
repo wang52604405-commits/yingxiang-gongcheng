@@ -390,6 +390,8 @@ function defaultTitle(draft: UploadDraft): string {
 
 function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPath: string; originalSize: number; originalFilename: string }, photoUuid = createUuid()): LocalPhoto {
   const createdAt = now()
+  const sourceCapturedAt = String(batch.draft.captured_at || '').trim()
+  const validCapturedAt = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(sourceCapturedAt) && Number.isFinite(Date.parse(sourceCapturedAt)) ? sourceCapturedAt : ''
   return {
     owner_account_id: owner,
     photo_uuid: photoUuid,
@@ -413,7 +415,7 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
     width: 0,
     height: 0,
     orientation: 1,
-    client_captured_at: batch.draft.photo_date ? batch.draft.photo_date : (batch.draft.capture_source === 'camera' ? createdAt : ''),
+    client_captured_at: validCapturedAt || (batch.draft.photo_date ? batch.draft.photo_date : (batch.draft.capture_source === 'camera' ? createdAt : '')),
     title: defaultTitle(batch.draft),
     photo_date: batch.draft.photo_date || (batch.draft.capture_source === 'camera' ? [new Date().getFullYear(), String(new Date().getMonth() + 1).padStart(2, '0'), String(new Date().getDate()).padStart(2, '0')].join('-') : ''),
     draft: JSON.parse(JSON.stringify(batch.draft)),
@@ -546,6 +548,8 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       persist(owner)
     }
     const metadata = {
+      ...(photo.draft.mode === 'auto' && photo.draft.auto_delivery === true ? { auto_delivery: true } : {}),
+      site_part: photo.draft.site_part,
       photo_uuid: photo.photo_uuid,
       client_captured_at: photo.client_captured_at,
       orientation: photo.orientation,
@@ -663,6 +667,7 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
         continue
       }
       local.match_candidates = remote.match_candidates || local.match_candidates
+      local.review_reason = remote.review_reason || undefined
       if (remote.title && !local.draft.title) local.title = remote.title
       if (remote.photo_date && !local.draft.photo_date) local.photo_date = remote.photo_date
       if (!hasPermanentArchiveInfoFailure(batch)) await applyRemoteStatus(local, remote.status)
@@ -727,6 +732,11 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
   const uploadable = ready.filter((photo) => hasValidUploadSource(photo))
   if (uploadable.length && !isArchiveInfoComplete(batch.draft)) {
     uploadable.forEach((photo) => markArchiveInfoRequired(photo, batch.draft))
+    return
+  }
+  const invalidDrafts = uploadable.filter((photo) => !isArchiveInfoComplete(photo.draft))
+  if (invalidDrafts.length) {
+    invalidDrafts.forEach((photo) => markArchiveInfoRequired(photo, photo.draft))
     return
   }
   if (!batch.remote_batch_id && !uploadable.length) return
@@ -980,6 +990,9 @@ function clearOwner(): void {
 async function enqueue(sourcePaths: string[], draft: UploadDraft, overrides: Partial<UploadDraft>[] = []): Promise<LocalBatch> {
   if (!sourcePaths.length) throw new Error('没有选择照片')
   if (overrides.length && overrides.length !== sourcePaths.length) throw new Error('照片信息与数量不一致，请重新选择')
+  // Only newly enqueued auto photos opt into server-to-desktop delivery. Existing
+  // restored queues keep their historical review workflow until explicitly replaced.
+  draft = { ...draft, auto_delivery: draft.mode === 'auto' ? true : undefined }
   hydrate()
   const owner = state.ownerAccountId
   const generation = ownerGeneration
@@ -1008,6 +1021,7 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft, overrides: Par
       const photoUuid = createUuid()
       const filename = sourcePaths[index].replace(/\\/g, '/').split('/').pop() || 'photo'
       const photoDraft = { ...draft, ...overrides[index] }
+      photoDraft.auto_delivery = photoDraft.mode === 'auto' ? true : undefined
       const photo = recoveryPhoto(owner, { ...batch, draft: photoDraft }, { originalPath: '', originalSize: sourceSize, originalFilename: filename }, photoUuid)
       batch.photo_uuids.push(photoUuid)
       let original: { originalPath: string; originalSize: number; originalFilename: string }

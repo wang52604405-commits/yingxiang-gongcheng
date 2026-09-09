@@ -199,11 +199,18 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
   if (path.endsWith('/tree') && !path.endsWith('/other-tree') && method === 'GET') return { ok: true, project: rawProject(projects[0]), tree: engineeringTree, units: [] } as T
   if (path.endsWith('/other-tree') && method === 'GET') return { ok: true, project: rawProject(projects[0]), tree: otherTree, units: [] } as T
   if (path.startsWith('/photos?') && method === 'GET') {
-    const query = decodeURIComponent(path.split('?')[1] || '')
-    const scope = query.includes('scope=other') ? 'other' : 'engineering'
-    const category = query.includes('category=supervision') ? 'supervision' : 'construction'
-    const photos = samplePhotos.filter((photo) => photo.scope === scope && (scope === 'other' || photo.category === category))
-    return { ok: true, photos, total: photos.length, next_cursor: null } as T
+    const query = new URLSearchParams(path.split('?')[1] || '')
+    const scope = query.get('scope')
+    const category = query.get('category')
+    const unitCode = query.get('unit_code')
+    const otherCode = query.get('other_node_code')
+    const photos = samplePhotos.filter((photo) => (!scope || photo.scope === scope)
+      && (!category || photo.category === category)
+      && (!unitCode || photo.unit_code === unitCode)
+      && (!otherCode || photo.other_node_code === otherCode))
+    const offset = Math.max(0, Number(query.get('cursor') || 0))
+    const limit = Math.max(1, Math.min(100, Number(query.get('limit') || 60)))
+    return { ok: true, photos: photos.slice(offset, offset + limit), total: photos.length, next_cursor: offset + limit < photos.length ? String(offset + limit) : null } as T
   }
   if (path.startsWith('/photos/') && method === 'GET') {
     return { ok: true, photo: samplePhotos.find((photo) => photo.photo_uuid === path.split('/').pop()) || samplePhotos[0] } as T

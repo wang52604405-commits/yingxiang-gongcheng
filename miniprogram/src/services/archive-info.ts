@@ -1,7 +1,7 @@
 import type { Assignment, ProjectSummary, UploadDraft } from '@/types/domain'
 
 export interface ArchiveInfoIssue {
-  field: 'project' | 'category' | 'unit_project' | 'part' | 'unit' | 'process' | 'other_destination'
+  field: 'project' | 'category' | 'scope' | 'mode' | 'capture_source' | 'unit_project' | 'part' | 'unit' | 'process' | 'other_destination'
   label: string
 }
 
@@ -26,13 +26,19 @@ export function resolveDraftProject(projects: ProjectSummary[], projectId: strin
 export function archiveInfoIssues(draft: UploadDraft): ArchiveInfoIssue[] {
   const issues: ArchiveInfoIssue[] = []
   if (!present(draft.project_id) || !present(draft.project_name)) issues.push({ field: 'project', label: '工程' })
+  if (!['engineering', 'other'].includes(draft.scope)) issues.push({ field: 'scope', label: '影像类型' })
+  if (!['direct', 'auto'].includes(draft.mode)) issues.push({ field: 'mode', label: '归档方式' })
+  if (draft.capture_source !== undefined && !['camera', 'album'].includes(draft.capture_source)) issues.push({ field: 'capture_source', label: '照片来源' })
+  const needsAssignment = draft.mode !== 'auto' || draft.assignment_explicit === true
+    || Boolean(draft.assignment && Object.values(draft.assignment).some((value) => value !== undefined && value !== '' && value !== false))
   if (draft.scope === 'other') {
-    if (!present(draft.assignment?.other_node_code) || !present(draft.assignment?.other_node_name)) {
+    if (needsAssignment && (!present(draft.assignment?.other_node_code) || !present(draft.assignment?.other_node_name))) {
       issues.push({ field: 'other_destination', label: '其它影像目录' })
     }
     return issues
   }
-  if (!draft.category) issues.push({ field: 'category', label: '照片类别' })
+  if (!['construction', 'supervision'].includes(String(draft.category || ''))) issues.push({ field: 'category', label: '照片类别' })
+  if (!needsAssignment) return issues
   const assignment = draft.assignment
   if (!present(assignment?.unit_project_code) || !present(assignment?.unit_project_name)) {
     issues.push({ field: 'unit_project', label: '单位工程' })

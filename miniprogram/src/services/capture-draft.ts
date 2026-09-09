@@ -5,6 +5,7 @@ export interface CaptureItem {
   sourcePath: string
   size: number
   date: string
+  capturedAt?: string
   source: 'camera' | 'album'
   overrides: Partial<UploadDraft>
 }
@@ -34,5 +35,5 @@ export function localDate(value = new Date()): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
 }
 export function captureOverrides(item: CaptureItem, title: string, photographer: string): Partial<UploadDraft> {
-  return { capture_item_id: item.path, title: title.trim(), photographer: photographer.trim(), photo_date: item.date, capture_source: item.source, ...item.overrides, assignment_explicit: Boolean(item.overrides.assignment) }
+  return { captured_at: item.capturedAt, capture_item_id: item.path, title: title.trim(), photographer: photographer.trim(), photo_date: item.date, capture_source: item.source, ...item.overrides, assignment_explicit: Boolean(item.overrides.assignment) }
 }

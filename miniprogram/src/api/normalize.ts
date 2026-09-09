@@ -23,6 +23,8 @@ export function normalizeProject(raw: any): ProjectSummary {
   const permissions = membership.permissions && typeof membership.permissions === 'object' ? membership.permissions : {}
   return {
     id, code, name,
+    photographer_name: String(raw.photographer_name || ''),
+    photographer_verified: raw.photographer_verified === true,
     owner_account_id: String(raw.owner_account_id || membership.owner_account_id || ''),
     local_project_id: String(raw.local_project_id || raw.source_project_id || ''),
     access_role: normalizeProjectRole(raw.access_role || membership.role),
@@ -117,6 +119,7 @@ export function normalizeTreeNode(raw: any): ProjectNode {
 }
 
 export interface NormalizedBatchPhoto {
+  review_reason?: string
   photo_uuid: string
   status: string
   deleted_at?: string
@@ -140,6 +143,7 @@ export function normalizeBatch(raw: any): NormalizedBatch {
     client_batch_id: raw.client_batch_id ? String(raw.client_batch_id) : undefined,
     status: String(raw.status || ''),
     photos: Array.isArray(raw.photos) ? raw.photos.map((photo: any) => ({
+      review_reason: photo.review_reason ? String(photo.review_reason) : undefined,
       photo_uuid: String(photo.photo_uuid || ''),
       status: String(photo.status || ''),
       deleted_at: photo.deleted_at ? String(photo.deleted_at) : undefined,

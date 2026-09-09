@@ -4,6 +4,8 @@ import type { BootstrapResponse, ProjectSummary } from '@/types/domain'
 import { selectionStorage } from './selection'
 
 const BOOTSTRAP_KEY = 'engineering-image:bootstrap:v1'
+let viewGeneration = 0
+let requestVersion = 0
 const keyFor = (accountId: string | number) => `${BOOTSTRAP_KEY}:account:${String(accountId)}`
 
 export const bootstrapState = reactive<{
@@ -42,18 +44,25 @@ export function hydrateBootstrap(accountId: string | number): BootstrapResponse 
   return cached || null
 }
 
-export async function loadBootstrap(accountId: string | number, preferredProjectId = ''): Promise<BootstrapResponse> {
+export async function loadBootstrap(accountId: string | number, preferredProjectId = '', canApply: () => boolean = () => true): Promise<BootstrapResponse> {
+  const generation = viewGeneration
+  const request = ++requestVersion
   bootstrapState.loading = true
   try {
     const response = await mobileApi.bootstrap()
+    if (generation !== viewGeneration || !canApply()) throw new Error('登录状态已改变，已忽略旧响应')
+    if (String(response.account?.id || '') !== String(accountId)) throw new Error('登录账号已改变，请重新验证')
     applyBootstrap(accountId, response, preferredProjectId)
     return response
   } finally {
-    bootstrapState.loading = false
+    if (request === requestVersion) bootstrapState.loading = false
   }
 }
 
 export function clearBootstrapView(): void {
+  viewGeneration += 1
+  requestVersion += 1
+  bootstrapState.loading = false
   bootstrapState.ready = false
   bootstrapState.projects = []
   bootstrapState.currentProject = null

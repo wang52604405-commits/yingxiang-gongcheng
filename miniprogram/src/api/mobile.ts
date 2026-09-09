@@ -122,7 +122,7 @@ export const mobileApi = {
     const raw = await apiRequest<any>('GET', `/projects/${encodeURIComponent(projectId)}/other-tree`)
     return { ok: true as const, project: normalizeProject(raw.project), nodes: Array.isArray(raw.tree) ? raw.tree.map(normalizeTreeNode) : [], units: Array.isArray(raw.units) ? raw.units : [] }
   },
-  photos: (query: { project_id: string; scope: string; category?: string; unit_code?: string; other_node_code?: string; cursor?: string; limit?: number }) => {
+  photos: (query: { project_id: string; scope?: string; category?: string; unit_code?: string; other_node_code?: string; cursor?: string; limit?: number }) => {
     const params = Object.entries(query).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&')
     return apiRequest<any>('GET', `/photos?${params}`).then((raw) => ({ ok: true as const, photos: Array.isArray(raw.photos) ? raw.photos.map(normalizeCloudPhoto) : [], next_cursor: String(raw.next_cursor || ''), total: Number(raw.total || 0) }))
   },

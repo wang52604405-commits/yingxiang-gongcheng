@@ -1,0 +1,46 @@
+/** Official website assets. Provenance: docs/company-logo-sources.md. */
+export interface CompanyLogo {
+  id: string
+  name: string
+  path: string
+  sourceUrl: string
+}
+
+export const COMPANY_LOGOS: CompanyLogo[] = [
+  {
+    "id": "crec",
+    "name": "中国中铁",
+    "path": "/static/company-logos/crec.png",
+    "sourceUrl": "https://www.crec.cn/uiFramework/commonResource/image/2021053021542376908.png"
+  },
+  {
+    "id": "crcc",
+    "name": "中国铁建",
+    "path": "/static/company-logos/crcc.png",
+    "sourceUrl": "https://www.crcc.cn/cms_files/filemanager/49/picture/20263/B69EA7594F818C8BE30542F7E56F999E.png"
+  },
+  {
+    "id": "cscec",
+    "name": "中国建筑",
+    "path": "/static/company-logos/cscec.png",
+    "sourceUrl": "https://www.cscec.com.cn/images/P020201228373005410587.png"
+  },
+  {
+    "id": "powerchina",
+    "name": "中国电建",
+    "path": "/static/company-logos/powerchina.png",
+    "sourceUrl": "https://www.powerchina.cn/cms_files/filemanager/640784126/picture/20265/6F513FB873986087665367E5C76959AD.png"
+  },
+  {
+    "id": "ceec",
+    "name": "中国能建",
+    "path": "/static/company-logos/ceec.png",
+    "sourceUrl": "https://www.ceec.net.cn/picture/0/2109020906053888588.png"
+  },
+  {
+    "id": "cccc",
+    "name": "中国交建",
+    "path": "/static/company-logos/cccc.png",
+    "sourceUrl": "https://en.ccccltd.cn/images/ZJJTlogo.svg"
+  }
+]

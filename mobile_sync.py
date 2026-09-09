@@ -676,6 +676,7 @@ class DesktopMobileSync:
         inbox_limit: int = DEFAULT_INBOX_LIMIT,
         backfill_limit: int = DEFAULT_BACKFILL_LIMIT,
         machine_id_reader: Optional[Callable[[], str]] = None,
+        unclassified_project_provider: Optional[Callable[[dict], str]] = None,
     ):
         self.manager = manager
         self.cloud = cloud
@@ -687,6 +688,7 @@ class DesktopMobileSync:
         self.inbox_limit = max(1, min(100, int(inbox_limit or DEFAULT_INBOX_LIMIT)))
         self.backfill_limit = max(1, int(backfill_limit or DEFAULT_BACKFILL_LIMIT))
         self.machine_id_reader = machine_id_reader or (lambda: "")
+        self.unclassified_project_provider = unclassified_project_provider
         self._state_lock = threading.Lock()
         self._cycle_lock = threading.Lock()
         self._start_lock = threading.Lock()
@@ -772,6 +774,8 @@ class DesktopMobileSync:
             state["backfilled"] = {}
         if not isinstance(state.get("backfill_errors"), dict):
             state["backfill_errors"] = {}
+        if not isinstance(state.get("backfill_fingerprints"), dict):
+            state["backfill_fingerprints"] = {}
         if not isinstance(state.get("ack_pending"), dict):
             state["ack_pending"] = {}
         if not isinstance(state.get("cleanup_pending"), dict):
@@ -906,6 +910,7 @@ class DesktopMobileSync:
             "snapshot_revision": str(state.get("snapshot_revision") or ""),
             "inbox_cursor": str(state.get("inbox_cursor") or ""),
             "backfilled_count": len(state.get("backfilled") or {}),
+            "backfill_inventory": dict(state.get("backfill_inventory") or {}),
             "ack_pending_count": len(state.get("ack_pending") or {}),
             "cleanup_pending_count": len(state.get("cleanup_pending") or {}),
             "delete_pending_count": len(state.get("delete_pending") or {}),
@@ -1241,6 +1246,8 @@ class DesktopMobileSync:
         ownership = self._project_ownership_status()
         if not ownership.get("ok"):
             raise ValueError(ownership.get("error") or "本地工程云账号归属不一致")
+        import_identity = self._state_identity()
+        import_generation = self._cloud_generation()
         photo_uuid = _canonical_uuid(item.get("photo_uuid"))
         if not photo_uuid:
             raise ValueError("手机影像 UUID 无效")
@@ -1325,6 +1332,9 @@ class DesktopMobileSync:
             max_bytes=original_max_bytes,
         )
 
+        if self._state_identity() != import_identity or self._cloud_generation() != import_generation or _engineering_project_identity(self.engineering_project_reader() or {}) != identity:
+            raise ValueError("账号或工程已切换，已停止导入并保留服务器原图")
+
         if existing:
             repair = getattr(self.manager, "repair_mobile_original", None)
             if not callable(repair):
@@ -1358,7 +1368,26 @@ class DesktopMobileSync:
                 "original_mime_type": verified["mime_type"],
             }
 
-        project_code, category, process_name = self._resolve_inbox_target(item)
+        staged = bool(item.get("manual_review_required"))
+        review_reason = str(item.get("review_reason") or "").strip()
+        try:
+            if staged:
+                raise ValueError(review_reason or "未能确定施工单元，需要人工分类")
+            project_code, category, process_name = self._resolve_inbox_target(item)
+        except ValueError as exc:
+            if not callable(self.unclassified_project_provider) or item.get("scope") not in {"engineering", "other"}:
+                raise
+            if item.get("scope") == "engineering" and item.get("category") not in {"construction", "supervision"}:
+                raise
+            project_code = str(self.unclassified_project_provider(identity) or "")
+            project_data = self.manager.get_project(project_code)
+            fields = project_data.get("source_fields") or {}
+            if not fields.get("_mobile_unclassified") or fields.get("_mobile_unclassified_project_ref") != identity["project_ref"] or fields.get("_mobile_unclassified_owner") != identity["owner_account_id"]:
+                raise ValueError("待分类目录账号或工程不一致，已保留服务器原图")
+            category = str(item.get("category") or "construction")
+            process_name = ""
+            staged = True
+            review_reason = review_reason or str(exc)
 
         from werkzeug.datastructures import FileStorage
 
@@ -1394,6 +1423,11 @@ class DesktopMobileSync:
                     or ""
                 ).strip(),
                 "capture_source": str(item.get("capture_source") or "mobile").strip(),
+                "mobile_unclassified": staged,
+                "manual_review_required": staged,
+                "review_reason": review_reason if staged else "",
+                "site_part": str(item.get("site_part") or "").strip(),
+                "mobile_source_scope": str(item.get("scope") or ""),
             }
         }
         raw_orientation = str(item.get("orientation") or "").strip().lower()
@@ -1657,7 +1691,7 @@ class DesktopMobileSync:
             "cleanup_pending": len((self._read_state().get("cleanup_pending") or {})),
         }
 
-    def _iter_backfill_candidates(self) -> Iterable[dict]:
+    def _iter_backfill_candidates(self, inventory=None) -> Iterable[dict]:
         ownership = self._project_ownership_status()
         if not ownership.get("ok"):
             return
@@ -1674,12 +1708,24 @@ class DesktopMobileSync:
             is_other = bool(fields.get("_other_image"))
             hierarchy = self.manager.project_hierarchy(data)
             for photo in data.get("photos", []):
+                if inventory is not None:
+                    inventory["local_photo_count"] += 1
+                    category = "other" if is_other else str(photo.get("category") or "construction")
+                    inventory["categories"][category] = inventory["categories"].get(category, 0) + 1
                 photo_uuid = _canonical_uuid(photo.get("photo_uuid"))
-                if not photo_uuid or photo.get("mobile_compressed_200k") or photo.get("mobile_original_received"):
+                if not photo_uuid:
+                    if inventory is not None:
+                        inventory["invalid_uuid_count"] += 1
+                    continue
+                if photo.get("mobile_compressed_200k") or photo.get("mobile_original_received"):
+                    if inventory is not None:
+                        inventory["mobile_origin_count"] += 1
                     continue
                 filename = Path(str(photo.get("filename") or "")).name
                 source = self.manager._photos_dir(code) / filename
-                if not filename or not source.exists():
+                if not filename or not source.is_file():
+                    if inventory is not None:
+                        inventory["missing_file_count"] += 1
                     continue
                 target = {
                     "project_id": project_identity["local_project_id"],
@@ -1700,82 +1746,198 @@ class DesktopMobileSync:
                     "target": target,
                 }
 
+    @staticmethod
+    def _backfill_source_fingerprint(candidate) -> str:
+        source = candidate["source"]
+        stat = source.stat()
+        photo = candidate["photo"]
+        # Lightweight change detection, not a replacement for upload SHA verification.
+        value = {
+            "path": str(source.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+            "target": candidate["target"],
+            "metadata": {key: photo.get(key, "") for key in ("title", "photo_date", "photographer", "uploaded_by", "upload_time")},
+            "version": 1,
+        }
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
     def _sync_backfill(self) -> dict:
         ownership = self._project_ownership_status()
         if not ownership.get("ok"):
             return {**ownership, "uploaded": 0}
         state = self._read_state()
+        identity = self._state_identity()
+        generation = self._cloud_generation()
+        project_ref = ownership.get("project_ref")
+        def still_current():
+            return self._state_identity() == identity and self._cloud_generation() == generation and self._project_ownership_status().get("project_ref") == project_ref
         if state.get("backfill_paused"):
-            return {"ok": True, "paused": True, "uploaded": 0}
+            return {"ok": True, "paused": True, "uploaded": 0, "inventory": state.get("backfill_inventory", {})}
+        inventory = {"local_photo_count": 0, "categories": {}, "mobile_origin_count": 0, "missing_file_count": 0, "invalid_uuid_count": 0}
+        candidates = list(self._iter_backfill_candidates(inventory))
+        fingerprints = {}
+        for candidate in candidates:
+            try:
+                fingerprints[candidate["photo_uuid"]] = self._backfill_source_fingerprint(candidate)
+            except OSError:
+                fingerprints[candidate["photo_uuid"]] = ""
         uploaded = 0
-        for candidate in self._iter_backfill_candidates():
-            if uploaded >= self.backfill_limit:
+        attempted = 0
+        verified = 0
+        def finish(result):
+            if not still_current():
+                return {"ok": False, "code": "account_changed_during_sync", "error": "账号或工程已切换，本轮已停止", "retryable": True, "uploaded": uploaded}
+            current = self._read_state()
+            known = current.get("backfilled", {})
+            errors = current.get("backfill_errors", {})
+            checks = current.get("backfill_fingerprints", {})
+            keys = set(fingerprints)
+            permanent = {key for key in keys if isinstance(errors.get(key), dict) and errors[key].get("permanent") and fingerprints[key] and errors[key].get("source_fingerprint") == fingerprints[key] and (errors[key].get("code") == "local_preview_invalid" or errors[key].get("validation_revision") == current.get("snapshot_revision", ""))}
+            inventory.update({
+                "project_ref": project_ref, "candidate_count": len(candidates),
+                "server_confirmed_count": sum(key in known for key in keys),
+                "current_verified_count": sum(bool(key in known and fingerprints[key] and checks.get(key) == fingerprints[key]) for key in keys),
+                "pending_count": sum(key not in known and key not in permanent for key in keys),
+                "permanent_error_count": len(permanent), "error_count": sum(key in errors for key in keys),
+                "checked_at": datetime.now().isoformat(timespec="seconds"),
+                "cycle_attempted": attempted, "cycle_uploaded": uploaded, "cycle_verified": verified,
+            })
+            current["backfill_inventory"] = inventory
+            self._write_state(current)
+            return {**result, "uploaded": uploaded, "inventory": inventory}
+        cursor = str(state.get("backfill_scan_cursor") or state.get("backfill_last_uuid") or "")
+        position = next((index + 1 for index, item in enumerate(candidates) if item["photo_uuid"] == cursor), 0)
+        candidates = candidates[position:] + candidates[:position]
+        for candidate in candidates:
+            if not still_current():
+                return finish({"ok": False})
+            if attempted + verified >= self.backfill_limit:
                 break
             photo_uuid = candidate["photo_uuid"]
             photo = candidate["photo"]
+            fingerprint = fingerprints[photo_uuid]
+            if fingerprint and state["backfilled"].get(photo_uuid) and state["backfill_fingerprints"].get(photo_uuid) == fingerprint:
+                continue
+            previous_error = state["backfill_errors"].get(photo_uuid)
+            if fingerprint and isinstance(previous_error, dict) and previous_error.get("permanent") and previous_error.get("source_fingerprint") == fingerprint and (previous_error.get("code") == "local_preview_invalid" or previous_error.get("validation_revision") == state.get("snapshot_revision", "")):
+                continue
+            state = self._read_state()
+            if state.get("backfill_paused") or self._stop_event.is_set():
+                return finish({"ok": True, "paused": bool(state.get("backfill_paused")), "stopped": self._stop_event.is_set()})
             try:
                 preview = prepare_jpeg_view_copy(candidate["source"], self.cache_dir)
             except Exception as exc:
-                # 损坏的某张照片不应阻断所有其它照片。
-                state = self._read_state()
-                state.setdefault("backfill_errors", {})[photo_uuid] = str(exc)[:300]
+                attempted += 1
+                state["backfill_errors"][photo_uuid] = {"permanent": True, "source_fingerprint": fingerprint, "error": str(exc)[:300], "code": "local_preview_invalid", "updated_at": datetime.now().isoformat(timespec="seconds")}
+                state["backfill_scan_cursor"] = photo_uuid
                 self._write_state(state)
                 continue
+            if not still_current():
+                return finish({"ok": False})
             state = self._read_state()
-            if state.setdefault("backfilled", {}).get(photo_uuid) == preview["sha256"]:
-                continue
-            previous_error = state.setdefault("backfill_errors", {}).get(photo_uuid)
-            if (
-                isinstance(previous_error, dict)
-                and previous_error.get("permanent")
-                and previous_error.get("preview_sha256") == preview["sha256"]
-            ):
+            if state["backfilled"].get(photo_uuid) == preview["sha256"]:
+                state["backfill_fingerprints"][photo_uuid] = fingerprint
+                state["backfill_scan_cursor"] = photo_uuid
+                self._write_state(state)
+                verified += 1
                 continue
             metadata = {
-                "photo_uuid": photo_uuid,
-                **candidate["target"],
-                "desktop_machine_id": self._desktop_machine_id(),
-                "title": str(photo.get("title") or ""),
-                "photo_date": str(photo.get("photo_date") or ""),
-                "photographer": str(photo.get("photographer") or ""),
-                "uploaded_by": str(photo.get("uploaded_by") or ""),
-                "photographer_account_id": str(photo.get("photographer_account_id") or ""),
-                "uploaded_by_account_id": str(photo.get("uploaded_by_account_id") or ""),
-                "client_captured_at": _iso_local_time(str(photo.get("upload_time") or "")),
-                "orientation": preview.get("exif_orientation", 1),
-                "width": preview["width"],
-                "height": preview["height"],
-                "sha256": preview["sha256"],
+                "photo_uuid": photo_uuid, **candidate["target"], "desktop_machine_id": self._desktop_machine_id(),
+                "title": str(photo.get("title") or ""), "photo_date": str(photo.get("photo_date") or ""),
+                "photographer": str(photo.get("photographer") or ""), "uploaded_by": str(photo.get("uploaded_by") or ""),
+                "photographer_account_id": str(photo.get("photographer_account_id") or ""), "uploaded_by_account_id": str(photo.get("uploaded_by_account_id") or ""),
+                "client_captured_at": _iso_local_time(str(photo.get("upload_time") or "")), "orientation": preview.get("exif_orientation", 1),
+                "width": preview["width"], "height": preview["height"], "sha256": preview["sha256"],
             }
+            attempted += 1
             result = self.cloud.desktop_backfill_photo(preview["path"], metadata)
+            if not still_current():
+                return finish({"ok": False})
+            state = self._read_state()
             if not result.get("ok"):
                 try:
                     http_status = int(result.get("http_status") or 0)
                 except (TypeError, ValueError):
                     http_status = 0
-                # 单张图片或元数据的永久校验错误只隔离该照片。认证、
-                # 网络、限流和服务器错误仍中止本轮，留待下一周期重试。
-                if http_status in {400, 409, 413, 415, 422} and not result.get("network_error"):
-                    state = self._read_state()
-                    state.setdefault("backfill_errors", {})[photo_uuid] = {
-                        "permanent": True,
-                        "preview_sha256": preview["sha256"],
-                        "http_status": http_status,
-                        "code": str(result.get("code") or "")[:80],
-                        "error": str(result.get("error") or "云端预览校验失败")[:300],
-                        "updated_at": datetime.now().isoformat(timespec="seconds"),
+                photo_validation_error = http_status in {400, 409, 413, 415, 422} or (http_status == 404 and result.get("code") in {"unit_not_found", "other_node_not_found"})
+                if photo_validation_error and not result.get("network_error"):
+                    state["backfill_errors"][photo_uuid] = {
+                        "permanent": True, "source_fingerprint": fingerprint, "validation_revision": state.get("snapshot_revision", ""), "preview_sha256": preview["sha256"], "http_status": http_status,
+                        "code": str(result.get("code") or "")[:80], "error": str(result.get("error") or "云端预览校验失败")[:300], "updated_at": datetime.now().isoformat(timespec="seconds"),
                     }
+                    state["backfill_scan_cursor"] = photo_uuid
                     self._write_state(state)
                     continue
-                return {**result, "uploaded": uploaded}
-            state = self._read_state()
-            state.setdefault("backfilled", {})[photo_uuid] = preview["sha256"]
+                return finish(result)
+            state["backfilled"][photo_uuid] = preview["sha256"]
+            state["backfill_fingerprints"][photo_uuid] = fingerprint
+            state["backfill_scan_cursor"] = photo_uuid
             state["backfill_last_uuid"] = photo_uuid
             state["backfill_updated_at"] = datetime.now().isoformat(timespec="seconds")
-            state.setdefault("backfill_errors", {}).pop(photo_uuid, None)
+            state["backfill_errors"].pop(photo_uuid, None)
             self._write_state(state)
             uploaded += 1
-        return {"ok": True, "uploaded": uploaded}
+        return finish({"ok": True})
+
+    def _sync_classification_pending(self) -> dict:
+        ownership = self._project_ownership_status()
+        if not ownership.get("ok"):
+            return {**ownership, "synced": 0}
+        identity = self._state_identity()
+        generation = self._cloud_generation()
+        project_identity = _engineering_project_identity(self.engineering_project_reader() or {})
+        synced = failed = 0
+        for project in self.manager.list_projects(include_other=True):
+            code = str(project.get("project_code") or "")
+            data = self.manager.get_project(code)
+            if (data.get("source_fields") or {}).get("_other_image"):
+                continue
+            for photo in data.get("photos", []):
+                if not photo.get("mobile_classification_pending"):
+                    continue
+                if self._state_identity() != identity or self._cloud_generation() != generation or _engineering_project_identity(self.engineering_project_reader() or {}) != project_identity:
+                    return {"ok": False, "error": "账号已切换", "synced": synced, "failed": failed}
+                if str(photo.get("project_owner_account_id") or "") != project_identity["owner_account_id"]:
+                    failed += 1
+                    continue
+                permanent = _canonical_uuid(photo.get("photo_uuid"))
+                send = getattr(self.cloud, "desktop_classify_photo", None)
+                if not permanent or not callable(send):
+                    failed += 1
+                    continue
+                hierarchy = self.manager.project_hierarchy(data)
+                try:
+                    # Never confirm a classification whose only durable original is absent.
+                    filename = Path(str(photo.get("filename") or "")).name
+                    original = self.manager._photos_dir(code) / filename
+                    if not filename or not original.is_file():
+                        raise ValueError("待归类原图不存在，已暂停同步")
+                    expected = str(photo.get("sha256") or "")
+                    if expected and hashlib.sha256(original.read_bytes()).hexdigest() != expected:
+                        raise ValueError("待归类原图校验失败，已暂停同步")
+                    result = send(permanent, {
+                        "project_id": project_identity["local_project_id"],
+                        "desktop_machine_id": self._desktop_machine_id(),
+                        "unit_code": hierarchy.get("unit_code") or data.get("display_project_code") or code,
+                        "process_name": str(photo.get("process_name") or ""),
+                        "category": str(photo.get("category") or "construction"),
+                        "local_project_code": code, "local_photo_id": str(photo.get("id") or ""),
+                    })
+                    if not result.get("ok"):
+                        failed += 1
+                        continue
+                    if self._state_identity() != identity or self._cloud_generation() != generation or _engineering_project_identity(self.engineering_project_reader() or {}) != project_identity:
+                        return {"ok": False, "error": "账号已切换", "synced": synced, "failed": failed}
+                    with self.manager._project_write_lock(code):
+                        latest = self.manager.get_project(code)
+                        for current in latest.get("photos", []):
+                            if current.get("photo_uuid") == permanent and current.get("process_name", "") == photo.get("process_name", ""):
+                                current["mobile_classification_pending"] = False
+                                current["mobile_classified_at"] = datetime.now().isoformat(timespec="seconds")
+                        self.manager._write_metadata(code, latest)
+                    synced += 1
+                except Exception:
+                    failed += 1
+        return {"ok": failed == 0, "synced": synced, "failed": failed}
 
     def run_once(self) -> dict:
         if not self._cycle_lock.acquire(blocking=False):
@@ -1831,6 +1993,7 @@ class DesktopMobileSync:
                         "retryable": True,
                     }
                     return self.last_result
+                classifications = self._sync_classification_pending()
                 backfill = self._sync_backfill()
                 if not backfill.get("ok"):
                     self.last_result = {"ok": False, "stage": "backfill", **backfill}
@@ -1841,6 +2004,7 @@ class DesktopMobileSync:
                     "snapshot": snapshot,
                     "inbox": inbox,
                     "backfill": backfill,
+                    "classifications": classifications,
                 }
                 return self.last_result
             except Exception as exc:
@@ -1851,10 +2015,24 @@ class DesktopMobileSync:
         finally:
             self._cycle_lock.release()
 
+    def _next_sync_delay(self, result: dict) -> float:
+        """有进展且仍有积压时短等候；空闲、暂停、故障沿用正常周期。"""
+        backfill = result.get("backfill") or {}
+        inventory = backfill.get("inventory") or {}
+        if (
+            result.get("ok") and backfill.get("ok")
+            and not backfill.get("paused") and not backfill.get("stopped")
+            and int(inventory.get("pending_count") or 0) > 0
+            and int(inventory.get("cycle_attempted") or 0) + int(inventory.get("cycle_verified") or 0) >= self.backfill_limit
+            and int(inventory.get("cycle_uploaded") or 0) + int(inventory.get("cycle_verified") or 0) > 0
+        ):
+            return min(2.0, float(self.interval_seconds))
+        return float(self.interval_seconds)
+
     def _run_forever(self) -> None:
-        self.run_once()  # 启动后立即同步，不等第一个 30 秒。
-        while not self._stop_event.wait(self.interval_seconds):
-            self.run_once()
+        result = self.run_once()  # 启动后立即同步，不等第一个 30 秒。
+        while not self._stop_event.wait(self._next_sync_delay(result)):
+            result = self.run_once()
 
     def start(self):
         with self._start_lock:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, toRefs } from 'vue'
 import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
 import H5TabBar from '@/components/H5TabBar.vue'
@@ -8,89 +8,83 @@ import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
-import type { CloudPhoto, PhotoCategory, Scope } from '@/types/domain'
+import { createPhotoLibrary } from '@/services/photo-library'
+import type { PhotoCategory, Scope } from '@/types/domain'
 import { shortDate } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
-const scope = ref<Scope>('engineering')
-const category = ref<PhotoCategory>('construction')
-const photos = ref<CloudPhoto[]>([])
-const loading = ref(false)
-const loadingMore = ref(false)
-const nextCursor = ref('')
-const totalCount = ref(0)
+const scope = ref<Scope | 'all'>('all')
+const category = ref<PhotoCategory | 'all'>('all')
 const selectedDestination = ref(selectionStorage.getLibraryFilter())
+const activeDestination = computed(() => selectedDestination.value?.scope === scope.value
+  && selectedDestination.value?.project_id === project.value.id ? selectedDestination.value : null)
 const uniApi = uni
-let requestVersion = 0
+let choosingDestination = false
+let lastContext = ''
+const library = createPhotoLibrary(() => ({
+  owner: selectionStorage.getOwner(),
+  query: {
+    project_id: selectionStorage.getProject().id,
+    scope: scope.value === 'all' ? undefined : scope.value,
+    category: scope.value === 'engineering' && category.value !== 'all' ? category.value : undefined,
+    unit_code: scope.value === 'engineering' ? activeDestination.value?.assignment.unit_code : undefined,
+    other_node_code: scope.value === 'other' ? activeDestination.value?.assignment.other_node_code : undefined,
+  },
+}), mobileApi.photos)
+const { photos, loading, loadingMore, nextCursor, totalCount, error } = toRefs(library.state)
+const listTitle = computed(() => activeDestination.value ? '筛选结果'
+  : scope.value === 'all' ? '全部照片'
+  : scope.value === 'other' ? '其它照片'
+  : category.value === 'construction' ? '施工照片' : category.value === 'supervision' ? '监理照片' : '工程照片')
 
 async function loadPhotos(reset = true) {
-  if (!project.value.id) {
-    photos.value = []
-    totalCount.value = 0
-    nextCursor.value = ''
-    loading.value = false
-    loadingMore.value = false
-    uni.stopPullDownRefresh()
-    return
-  }
-  if (!reset && (loadingMore.value || !nextCursor.value)) return
-  const version = reset ? ++requestVersion : requestVersion
-  if (reset) loading.value = true
-  else loadingMore.value = true
-  try {
-    const response = await mobileApi.photos({
-      project_id: project.value.id,
-      scope: scope.value,
-      category: scope.value === 'engineering' ? category.value : undefined,
-      unit_code: scope.value === 'engineering' ? selectedDestination.value?.assignment.unit_code : undefined,
-      other_node_code: scope.value === 'other' ? selectedDestination.value?.assignment.other_node_code : undefined,
-      cursor: reset ? undefined : nextCursor.value,
-      limit: 60,
-    })
-    if (version !== requestVersion) return
-    const incoming: CloudPhoto[] = response.photos || []
-    if (reset) photos.value = incoming
-    else {
-      const existing = new Set(photos.value.map((photo) => photo.photo_uuid))
-      photos.value = [...photos.value, ...incoming.filter((photo) => !existing.has(photo.photo_uuid))]
-    }
-    nextCursor.value = response.next_cursor || ''
-    totalCount.value = response.total
-  } catch (error) {
-    if (version === requestVersion) uni.showToast({ title: error instanceof Error ? error.message : '影像加载失败', icon: 'none' })
-  } finally {
-    if (version === requestVersion) {
-      loading.value = false
-      loadingMore.value = false
-      uni.stopPullDownRefresh()
-    }
-  }
+  await library.load(reset)
+  uni.stopPullDownRefresh()
 }
 
-function changeScope(next: Scope) {
+function changeScope(next: Scope | 'all') {
+  if (scope.value === next) return
   scope.value = next
+  category.value = 'all'
+  selectionStorage.clearLibraryFilter()
+  selectedDestination.value = null
   void loadPhotos()
 }
 
-function changeCategory(next: PhotoCategory) {
+function changeCategory(next: PhotoCategory | 'all') {
+  if (category.value === next) return
   category.value = next
   void loadPhotos()
 }
 
 function chooseDestination() {
+  if (scope.value === 'all') return
+  choosingDestination = true
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=library` })
 }
 
 function clearDestination() {
   selectionStorage.clearLibraryFilter()
   selectedDestination.value = null
+  scope.value = 'all'
+  category.value = 'all'
   void loadPhotos()
 }
 
 onShow(() => {
   syncTabBar(1)
   project.value = selectionStorage.getProject()
+  const context = `${selectionStorage.getOwner()}:${project.value.id}`
+  if (context !== lastContext) {
+    scope.value = 'all'
+    category.value = 'all'
+    selectionStorage.clearLibraryFilter()
+    choosingDestination = false
+    lastContext = context
+  }
   selectedDestination.value = selectionStorage.getLibraryFilter()
+  if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) scope.value = selectedDestination.value.scope
+  choosingDestination = false
   void loadPhotos()
 })
 onPullDownRefresh(() => loadPhotos(true))
@@ -104,23 +98,25 @@ onReachBottom(() => { void loadPhotos(false) })
 
     <view class="library-controls card">
       <view class="segment library-segment">
+        <button class="segment-button pressable" :class="{ active: scope === 'all' }" @tap="changeScope('all')">全部照片</button>
         <button class="segment-button pressable" :class="{ active: scope === 'engineering' }" @tap="changeScope('engineering')">工程影像</button>
         <button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button>
       </view>
-      <view class="path-row">
+      <view v-if="scope !== 'all'" class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ selectedDestination?.scope === scope ? selectedDestination.assignment.unit_name || selectedDestination.assignment.other_node_name : scope === 'engineering' ? '选择单元' : '选择目录' }}</text></view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? activeDestination.assignment.unit_name || activeDestination.assignment.other_node_name : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
-      <button v-if="selectedDestination?.scope === scope" class="clear-filter pressable" @tap="clearDestination">查看全部</button>
+      <button v-if="activeDestination" class="clear-filter pressable" @tap="clearDestination">查看全部</button>
       </view>
       <view v-if="scope === 'engineering'" class="segment category-segment">
+        <button class="segment-button pressable" :class="{ active: category === 'all' }" @tap="changeCategory('all')">全部</button>
         <button class="segment-button pressable" :class="{ active: category === 'construction' }" @tap="changeCategory('construction')">施工影像</button>
         <button class="segment-button pressable" :class="{ active: category === 'supervision' }" @tap="changeCategory('supervision')">监理影像</button>
       </view>
     </view>
 
-    <view class="section-head unit-head"><text class="section-title">{{ scope === 'engineering' ? '工程照片' : '其它照片' }}</text><text class="count-copy">{{ totalCount }} 张</text></view>
+    <view class="section-head unit-head"><text class="section-title">{{ listTitle }}</text><text class="count-copy">{{ loading ? '读取中…' : error && !photos.length ? '读取失败' : `云端 ${totalCount} 张` }}</text></view>
 
     <view v-if="loading && !photos.length" class="loading-inline"><view class="loading-spinner" /><text>加载中…</text></view>
     <view v-else-if="photos.length" class="gallery">
@@ -133,8 +129,10 @@ onReachBottom(() => { void loadPhotos(false) })
         </view>
       </button>
     </view>
-    <button v-if="photos.length && nextCursor" class="load-more pressable" :disabled="loadingMore" @tap="loadPhotos(false)">{{ loadingMore ? '正在加载…' : '继续加载更多' }}</button>
-    <view v-if="!loading && !photos.length" class="empty-state">
+    <text v-if="photos.length" class="loaded-count">已显示 {{ photos.length }} / {{ totalCount }} 张</text>
+    <view v-if="error" class="library-error"><text>{{ error }}</text><button class="secondary-button pressable" @tap="loadPhotos(!nextCursor)">重试</button></view>
+    <button v-if="photos.length && nextCursor" class="load-more pressable" :disabled="loading || loadingMore" @tap="loadPhotos(false)">{{ loadingMore ? '正在加载…' : '继续加载更多' }}</button>
+    <view v-if="!loading && !error && !photos.length" class="empty-state">
       <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
       <text class="empty-title">这里还没有影像</text>
     </view>
@@ -146,7 +144,7 @@ onReachBottom(() => { void loadPhotos(false) })
 
 <style scoped>
 .library-controls { margin-top: var(--space-lg); padding: 12rpx; }
-.library-segment { margin: 0; }
+.library-segment { margin: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .path-row { display: flex; align-items: center; gap: 8rpx; margin: 8rpx 0; }
 .path-card { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 0 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
 .clear-filter { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 40px; padding: 0 14rpx; color: var(--primary-strong); font-size: 22rpx; }
@@ -154,7 +152,9 @@ onReachBottom(() => { void loadPhotos(false) })
 .path-title { display: block; overflow: hidden; color: var(--text); font-size: 26rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .path-arrow { display: grid; flex: 0 0 auto; place-items: center; width: 36rpx; height: 52rpx; color: var(--muted); }
 .count-copy { display: block; margin-top: 6rpx; color: var(--muted); font-size: 22rpx; }
-.category-segment { margin: 0; }
+.loaded-count { display: block; margin-top: 22rpx; color: var(--muted); text-align: center; font-size: 22rpx; }
+.library-error { display: grid; gap: 16rpx; justify-items: center; padding: 22rpx; color: var(--muted); font-size: 24rpx; }
+.category-segment { margin: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12rpx; }
 .photo-tile { position: relative; display: block; width: 100%; min-width: 0; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 18rpx; background: var(--surface); }
 .tile-image, .tile-placeholder { width: 100%; height: 100%; }

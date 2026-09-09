@@ -264,13 +264,13 @@ describe('账号登录、微信绑定与 token 过期', () => {
     expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/project/request-status?id=req-1' })
   })
 
-  it('邀请过期错误保留输入和邀请码，重试重新获取微信 code', async () => {
+  it('邀请过期错误保留页面错误但清除自动跳转，主动重试重新获取微信 code', async () => {
     mocks.wechatJoin.mockRejectedValue(new Error('邀请码已过期，请联系邀请人'))
     const { joinProjectWithWechat, sessionState } = await import('@/services/auth')
     const { peekPendingInvite } = await import('@/services/pending-invite')
     await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow('邀请码已过期')
     expect(sessionState.error).toContain('邀请码已过期')
-    expect(peekPendingInvite()).toBe('TEAM123456')
+    expect(peekPendingInvite()).toBe('')
     expect(mocks.tokenSet).not.toHaveBeenCalled()
     await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow()
     expect(login).toHaveBeenCalledTimes(2)
@@ -302,6 +302,114 @@ describe('账号登录、微信绑定与 token 过期', () => {
     const { joinProjectWithWechat } = await import('@/services/auth')
     await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow('申请响应不完整')
     expect(mocks.tokenSet).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { account: 'owner', scene: 1001, request: '', rejected: false, hasProject: true },
+    { account: 'approved-member', scene: 1089, request: '', rejected: false, hasProject: true },
+    { account: 'pending-applicant', scene: 1001, request: 'pending-request', rejected: false, hasProject: false },
+    { account: 'rejected-applicant', scene: 1007, request: 'rejected-request', rejected: true, hasProject: false },
+  ])('$account 正常重开或失效旧分享恢复时回工作台，保持原有审批和权限', async ({ account, scene, request, rejected, hasProject }) => {
+    mocks.token = 'valid-token'
+    storage.set('engineering-image:account:v1', { id: account, username: account })
+    pages = [{ route: 'pages/project/join' }]
+    mocks.loadBootstrap.mockResolvedValue({ ok: true, account: { id: account, username: account }, projects: hasProject ? [{ id: 'owned:project' }] : [] })
+    const { rememberPendingInvite, rememberLaunchInvite, invalidatePendingInvite, peekPendingInvite } = await import('@/services/pending-invite')
+    const { rememberJoinRequest, pendingJoinRequest } = await import('@/services/project-join-request')
+    rememberPendingInvite('LPRVSFTCST')
+    if (request) rememberJoinRequest(account, request)
+    if (rejected) invalidatePendingInvite('LPRVSFTCST')
+    rememberLaunchInvite({ scene, path: 'pages/project/join', query: { code: 'LPRVSFTCST' } }, 'launch')
+    const { ensureSession } = await import('@/services/auth')
+    await ensureSession()
+    await vi.runAllTimersAsync()
+    expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/home/index' })
+    expect(peekPendingInvite()).toBe('')
+    expect(pendingJoinRequest(account)).toBe(request)
+    expect(mocks.wechatJoin).not.toHaveBeenCalled()
+    expect(mocks.accountLogin).not.toHaveBeenCalled()
+  })
+
+  it('已登录主账号点击一条新的分享，仍打开本次邀请码而不是丢弃有效邀请', async () => {
+    mocks.token = 'valid-token'
+    storage.set('engineering-image:account:v1', { id: 'owner', username: 'owner' })
+    pages = [{ route: 'pages/home/index' }]
+    mocks.loadBootstrap.mockResolvedValue({ ok: true, account: { id: 'owner', username: 'owner' } })
+    const { rememberLaunchInvite } = await import('@/services/pending-invite')
+    rememberLaunchInvite({ scene: 1008, path: 'pages/project/join', query: { code: 'TEAM654321' } }, 'show')
+    const { ensureSession } = await import('@/services/auth')
+    await ensureSession()
+    await vi.runAllTimersAsync()
+    expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/project/join?code=TEAM654321' })
+    expect(mocks.wechatJoin).not.toHaveBeenCalled()
+  })
+
+  it('申请人主动查看审核页后切前台，不会被旧的分享参数劫持，也不会自动取得项目权限', async () => {
+    mocks.token = 'valid-token'
+    storage.set('engineering-image:account:v1', { id: 'applicant', username: 'applicant' })
+    pages = [{ route: 'pages/project/request-status' }]
+    mocks.loadBootstrap.mockResolvedValue({ ok: true, account: { id: 'applicant', username: 'applicant' }, projects: [] })
+    const { rememberLaunchInvite, rememberPendingInvite, consumePendingInvite } = await import('@/services/pending-invite')
+    rememberPendingInvite('LPRVSFTCST')
+    consumePendingInvite()
+    rememberLaunchInvite({ scene: 1007, path: 'pages/project/join', query: { code: 'LPRVSFTCST' } }, 'show')
+    const { ensureSession } = await import('@/services/auth')
+    await ensureSession()
+    await vi.runAllTimersAsync()
+    expect(reLaunch).not.toHaveBeenCalled()
+    expect(mocks.wechatJoin).not.toHaveBeenCalled()
+  })
+
+  it('正在旧加入页时点击新的分享，切换到新邀请而不是保留旧页面', async () => {
+    mocks.token = 'valid-token'
+    storage.set('engineering-image:account:v1', { id: 'owner', username: 'owner' })
+    pages = [{ route: 'pages/project/join', options: { code: 'LPRVSFTCST' } }]
+    mocks.loadBootstrap.mockResolvedValue({ ok: true, account: { id: 'owner', username: 'owner' } })
+    const { rememberLaunchInvite } = await import('@/services/pending-invite')
+    rememberLaunchInvite({ scene: 1007, path: 'pages/project/join', query: { code: 'TEAM654321' } }, 'show')
+    const { ensureSession } = await import('@/services/auth')
+    await ensureSession()
+    await vi.runAllTimersAsync()
+    expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/project/join?code=TEAM654321' })
+  })
+
+  it('会话恢复请求晚于退出返回，不能恢复旧账号或自动跳首页', async () => {
+    mocks.token = 'token-A'
+    storage.set('engineering-image:account:v1', { id: 'A', username: 'A' })
+    let finish!: (value: any) => void
+    let canApply!: () => boolean
+    mocks.loadBootstrap.mockImplementation((_account, _project, guard) => { canApply = guard; return new Promise((resolve) => { finish = resolve }) })
+    const { ensureSession, signOut, sessionState } = await import('@/services/auth')
+    const pending = ensureSession()
+    signOut()
+    expect(canApply()).toBe(false)
+    finish({ ok: true, account: { id: 'A', username: 'A' } })
+    await expect(pending).resolves.toBe(false)
+    await vi.runAllTimersAsync()
+    expect(sessionState.account).toBeNull()
+    expect(sessionState.stage).toBe('account_login')
+    expect(reLaunch).not.toHaveBeenCalledWith({ url: '/pages/home/index' })
+    expect(mocks.queueSetOwner).not.toHaveBeenCalled()
+  })
+
+  it.each(['quick', 'bind', 'account'])('%s 登录请求晚于退出返回，不能写入 token 或重新进入绑定', async (action) => {
+    let finish!: (value: any) => void
+    const deferred = () => new Promise((resolve) => { finish = resolve })
+    mocks.wechatLogin.mockImplementation(deferred)
+    mocks.wechatBindConfirm.mockImplementation(deferred)
+    mocks.accountLogin.mockImplementation(deferred)
+    const { quickWechatLogin, confirmWechatBinding, loginWithAccount, signOut, sessionState } = await import('@/services/auth')
+    sessionState.bindingIntent = 'intent-A'
+    sessionState.pendingAccount = { id: 'A', username: 'A' }
+    const pending = action === 'quick' ? quickWechatLogin() : action === 'bind' ? confirmWechatBinding() : loginWithAccount('A', 'password')
+    await Promise.resolve()
+    signOut()
+    finish({ ok: true, token: 'stale-token', account: { id: 'A', username: 'A' }, binding_intent: 'stale-intent', bootstrap: { account: { id: 'A' }, projects: [] } })
+    await expect(pending).rejects.toThrow('登录操作已取消')
+    expect(mocks.tokenSet).not.toHaveBeenCalled()
+    expect(sessionState.account).toBeNull()
+    expect(sessionState.pendingAccount).toBeNull()
+    expect(sessionState.stage).toBe('account_login')
   })
 
 })

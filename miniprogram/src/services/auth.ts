@@ -1,4 +1,4 @@
-import { clearJoinRequest, pendingJoinRequest, rememberJoinRequest, validateJoinApplicant } from './project-join-request'
+import { clearJoinRequest, rememberJoinRequest, validateJoinApplicant } from './project-join-request'
 import { reactive } from 'vue'
 import { API_MODE, WECHAT_APP_ID } from '@/config/env'
 import { mobileApi, type AuthResponse } from '@/api/mobile'
@@ -8,7 +8,7 @@ import { applyBootstrap, clearBootstrapView, hydrateBootstrap, loadBootstrap } f
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
 import { registerAuthExpiredHandler } from './auth-expiry-coordinator'
-import { consumePendingInvite, peekPendingInvite, normalizeInviteCode, rememberPendingInvite } from './pending-invite'
+import { consumePendingInvite, peekPendingInvite, normalizeInviteCode, rememberPendingInvite, isDiscardedInviteEntry, clearDiscardedInviteEntry, invalidatePendingInvite, isInvalidInviteError, takeLaunchInviteNavigation } from './pending-invite'
 
 const ACCOUNT_KEY = 'engineering-image:account:v1'
 const AUTH_ROUTE = 'pages/auth/bind'
@@ -44,22 +44,29 @@ function currentRoute(): string {
 
 function moveToLogin(): void {
   if (currentRoute() === AUTH_ROUTE) return
+  const attempt = authAttempt
   setTimeout(() => {
+    if (attempt !== authAttempt || sessionState.stage === 'authenticated') return
     if (currentRoute() !== AUTH_ROUTE) uni.reLaunch({ url: `/${AUTH_ROUTE}` })
   }, 0)
 }
 
-function moveToHome(): void {
+function moveToHome(requestToOpen = ''): void {
+  const accountId = sessionState.account?.id
+  const token = tokenStorage.get()
   setTimeout(() => {
+    if (sessionState.stage !== 'authenticated' || sessionState.account?.id !== accountId || tokenStorage.get() !== token) return
     const route = currentRoute()
     const inviteCode = peekPendingInvite()
-    if (inviteCode && route !== JOIN_PROJECT_ROUTE) {
+    const freshInvite = takeLaunchInviteNavigation()
+    if (inviteCode && (route !== JOIN_PROJECT_ROUTE || freshInvite === inviteCode)) {
       uni.reLaunch({ url: `/${JOIN_PROJECT_ROUTE}?code=${encodeURIComponent(inviteCode)}` })
       return
     }
-    const requestId = sessionState.account ? pendingJoinRequest(sessionState.account.id) : ''
+    if (route === JOIN_PROJECT_ROUTE && !inviteCode && isDiscardedInviteEntry()) { clearDiscardedInviteEntry(); uni.reLaunch({ url: HOME_URL }); return }
+    const requestId = requestToOpen
     if (requestId && (!route || route === AUTH_ROUTE)) { uni.reLaunch({ url: `/pages/project/request-status?id=${encodeURIComponent(requestId)}` }); return }
-    if (!route || route === AUTH_ROUTE) uni.reLaunch({ url: HOME_URL })
+    if (!route || route === AUTH_ROUTE) { clearDiscardedInviteEntry(); uni.reLaunch({ url: HOME_URL }) }
   }, 0)
 }
 
@@ -101,7 +108,8 @@ function showAccountLogin(message = ''): void {
   moveToLogin()
 }
 
-async function acceptAuthenticatedResponse(response: AuthResponse, joinedInvite = ''): Promise<void> {
+async function acceptAuthenticatedResponse(response: AuthResponse, joinedInvite = '', canAccept: () => boolean = () => true): Promise<void> {
+  if (!canAccept()) throw new Error('登录操作已取消，请重试')
   if (!response.token || !response.account || !response.bootstrap) {
     throw new Error('服务器登录响应不完整，请稍后重试')
   }
@@ -125,7 +133,7 @@ async function acceptAuthenticatedResponse(response: AuthResponse, joinedInvite 
   queueRuntime.setOwner(response.account.id)
   queueRuntime.recoverAuthFailures()
   void queueRuntime.resume('manual')
-  moveToHome()
+  moveToHome(joinedInvite && response.join_request && response.join_request.status !== 'approved' ? response.join_request.id : '')
 }
 
 export function clearAuthError(): void {
@@ -154,13 +162,18 @@ export async function ensureSession(): Promise<boolean> {
     return false
   }
 
+  const accountId = sessionState.account.id
+  const attempt = authAttempt
+  const stillCurrent = () => authAttempt === attempt && tokenStorage.get() === token && sessionState.account?.id === accountId
   sessionState.stage = 'checking'
-  hydrateBootstrap(sessionState.account.id)
+  hydrateBootstrap(accountId)
   try {
-    const bootstrap = await loadBootstrap(sessionState.account.id)
+    const bootstrap = await loadBootstrap(accountId, '', stillCurrent)
+    if (!stillCurrent()) return false
     sessionState.account = bootstrap.account
     uni.setStorageSync(ACCOUNT_KEY, bootstrap.account)
   } catch (error) {
+    if (!stillCurrent()) return false
     const unauthorized = error instanceof ApiError
       && (error.statusCode === 401 || ['unauthorized', 'token_expired'].includes(error.code))
     if (unauthorized) {
@@ -183,11 +196,13 @@ export async function ensureSession(): Promise<boolean> {
 }
 
 export async function loginWithAccount(username: string, password: string): Promise<void> {
-  authAttempt += 1
+  const attempt = ++authAttempt
   sessionState.error = ''
   try {
     const code = await getLoginCode()
+    if (attempt !== authAttempt) throw new Error('登录操作已取消，请重试')
     const response = await mobileApi.accountLogin(username, password, code, WECHAT_APP_ID)
+    if (attempt !== authAttempt) throw new Error('登录操作已取消，请重试')
     if (!response.account || !response.binding_intent) throw new Error('账号验证响应不完整，请重新登录')
     // 第一步只保留短时绑定意图，不写 token、账号或 bootstrap。
     sessionState.pendingAccount = response.account
@@ -195,34 +210,41 @@ export async function loginWithAccount(username: string, password: string): Prom
     sessionState.stage = 'bind_wechat'
     sessionState.ready = true
   } catch (error) {
-    sessionState.error = messageOf(error, '账号登录失败')
+    if (attempt === authAttempt) sessionState.error = messageOf(error, '账号登录失败')
     throw error
   }
 }
 
 export async function confirmWechatBinding(): Promise<void> {
+  const attempt = ++authAttempt
+  const intent = sessionState.bindingIntent
+  const stillCurrent = () => attempt === authAttempt && sessionState.bindingIntent === intent
   sessionState.error = ''
   try {
-    if (!sessionState.bindingIntent) throw new Error('绑定凭证已失效，请重新登录账号')
-    const response = await mobileApi.wechatBindConfirm(sessionState.bindingIntent)
-    await acceptAuthenticatedResponse(response)
+    if (!intent) throw new Error('绑定凭证已失效，请重新登录账号')
+    const response = await mobileApi.wechatBindConfirm(intent)
+    await acceptAuthenticatedResponse(response, '', stillCurrent)
   } catch (error) {
-    sessionState.error = messageOf(error, '微信绑定失败')
+    if (attempt === authAttempt) sessionState.error = messageOf(error, '微信绑定失败')
     throw error
   }
 }
 
 export async function quickWechatLogin(): Promise<void> {
-  authAttempt += 1
+  const attempt = ++authAttempt
+  const stillCurrent = () => attempt === authAttempt
   sessionState.error = ''
   try {
-    const response = await mobileApi.wechatLogin(await getLoginCode(), WECHAT_APP_ID)
+    const code = await getLoginCode()
+    if (!stillCurrent()) throw new Error('登录操作已取消，请重试')
+    const response = await mobileApi.wechatLogin(code, WECHAT_APP_ID)
+    if (!stillCurrent()) throw new Error('登录操作已取消，请重试')
     if (response.binding_required || !response.token) {
       throw new Error('当前微信尚未绑定账号，请使用项目邀请码加入，或登录已有账号')
     }
-    await acceptAuthenticatedResponse(response)
+    await acceptAuthenticatedResponse(response, '', stillCurrent)
   } catch (error) {
-    sessionState.error = messageOf(error, '微信快捷登录失败')
+    if (attempt === authAttempt) sessionState.error = messageOf(error, '微信快捷登录失败')
     throw error
   }
 }
@@ -246,9 +268,12 @@ export async function joinProjectWithWechat(inviteCode: string, displayName: str
     if (!stillCurrent()) throw new Error('加入操作已取消，请重新确认邀请码')
     if (!response.join_request && !(response.already_member && response.project?.id)) throw new Error('申请响应不完整，请重试')
     if (response.join_request && response.account && response.join_request.applicant_account_id !== String(response.account.id)) throw new Error('申请账号不匹配，请重新登录')
-    await acceptAuthenticatedResponse(response, invite)
+    await acceptAuthenticatedResponse(response, invite, stillCurrent)
   } catch (error) {
-    if (attempt === authAttempt) sessionState.error = messageOf(error, '加入项目失败，请稍后重试')
+    if (attempt === authAttempt) {
+      if (isInvalidInviteError(error)) invalidatePendingInvite(invite)
+      sessionState.error = messageOf(error, '加入项目失败，请稍后重试')
+    }
     throw error
   }
 }
@@ -266,5 +291,6 @@ export function signOut(): void {
 }
 
 registerAuthExpiredHandler(async () => {
+  authAttempt += 1
   showAccountLogin('登录已过期，请重新登录')
 })

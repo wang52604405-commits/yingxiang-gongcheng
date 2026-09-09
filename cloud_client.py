@@ -32,7 +32,7 @@ DEFAULT_SERVER_URL = "https://api.shuiliyingxiang.cn"  # 已备案的正式 HTTP
 LEGACY_SERVER_HOSTS = {"47.95.221.66"}
 LOCAL_SERVER_HOSTS = {"127.0.0.1", "localhost", "::1"}
 OFFLINE_GRACE_SECONDS = 7 * 24 * 3600
-APP_VERSION = "A20260909-2.90"  # 与桌面启动器版本一致，用于检查更新
+APP_VERSION = "A20260909-2.91"  # 与桌面启动器版本一致，用于检查更新
 
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
@@ -1126,6 +1126,12 @@ def desktop_ack_photo(
             "desktop_machine_id": str(desktop_machine_id or ""),
         },
     )
+
+
+def desktop_classify_photo(photo_uuid: str, metadata: dict) -> dict:
+    """Synchronize an explicit local unit assignment without re-uploading or replacing the original."""
+    quoted = urllib.parse.quote(str(photo_uuid or ""), safe="")
+    return _cloud_api_json(f"/api/desktop/v1/photos/{quoted}/classify", method="POST", payload=dict(metadata or {}))
 
 
 def desktop_delete_photo(

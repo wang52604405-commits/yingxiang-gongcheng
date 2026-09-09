@@ -321,6 +321,8 @@ def _project_payload(row) -> dict:
         "updated_at": item["updated_at"],
         "metadata": _json(item.get("metadata_json"), {}),
         "access_role": access_role,
+        "photographer_name": str(item.get("photographer_name") or ""),
+        "photographer_verified": bool(item.get("photographer_verified")),
         "member_count": member_count,
         **permissions,
         "membership": {
@@ -465,6 +467,9 @@ def _photo_payload(row, download_url="", *, conn=None) -> dict:
         "preview_height": preview_height,
         "status": item["status"],
         "match": match,
+        "site_part": match.get("site_part", ""),
+        "manual_review_required": bool(match.get("manual_review_required")),
+        "review_reason": str(match.get("review_reason") or ""),
         "match_candidates": match.get("candidates", []),
         "error": {
             "code": item["error_code"],
@@ -1158,6 +1163,21 @@ def register_mobile_api(
             raise ApiProblem("project_not_found", "工程不存在或无权访问", 404)
         return dict(row)
 
+    def project_photographer(conn, member_id, owner_id, local_project_id):
+        member = conn.execute("SELECT a.display_name, a.username FROM accounts a JOIN project_members pm ON pm.member_account_id = a.id WHERE a.id = ? AND a.status = 'active' AND pm.project_owner_account_id = ? AND pm.project_id = ? AND pm.status = 'active'", (member_id, owner_id, local_project_id)).fetchone()
+        if not member:
+            return {"photographer_name": "", "photographer_verified": False}
+        account_name = _safe_text(member["display_name"] or member["username"], 100)
+        if int(member_id) == int(owner_id):
+            return {"photographer_name": account_name, "photographer_verified": True}
+        approved = conn.execute("SELECT display_name FROM project_join_requests WHERE applicant_account_id = ? AND project_owner_account_id = ? AND project_id = ? AND status = 'approved' ORDER BY decided_at DESC, id DESC LIMIT 1", (member_id, owner_id, local_project_id)).fetchone()
+        return {"photographer_name": _safe_text(approved["display_name"], 100) if approved else account_name, "photographer_verified": bool(approved)}
+
+    def viewer_project_payload(conn, project, viewer_id):
+        row = dict(project)
+        row.update(project_photographer(conn, viewer_id, int(row.get("project_owner_account_id") or row["account_id"]), row["project_id"]))
+        return _project_payload(row)
+
     def project_for(conn, account_id, project_reference, allowed_roles=None):
         owner_account_id, local_project_id, _legacy = _parse_project_ref(
             project_reference, account_id
@@ -1182,6 +1202,7 @@ def register_mobile_api(
         if allowed_roles and project["access_role"] not in set(allowed_roles):
             raise ApiProblem("project_permission_denied", "当前项目角色无此权限", 403)
         project["project_owner_account_id"] = int(project["account_id"])
+        project.update(project_photographer(conn, account_id, project["project_owner_account_id"], local_project_id))
         return project
 
     def project_for_desktop(conn, current, local_project_id, desktop_machine_id):
@@ -1543,9 +1564,12 @@ def register_mobile_api(
         title, photo_date, client_captured_at, orientation, source, batch_id,
         file_storage, claimed_sha, claimed_size="", target_machine_id="",
         original_filename="", photographer="", uploaded_by="", upload_max_bytes=None,
+        site_part="", auto_delivery=False,
         project_owner_account_id=0, capture_source="", transfer_profile=""
     ):
         is_mobile_original = source == "mobile"
+        fixed_photographer = is_mobile_original and str(auto_delivery).lower() in {"true", "1"}
+        photographer_verified = False
         normalized_transfer_profile = (
             _transfer_profile(transfer_profile) if is_mobile_original else ""
         )
@@ -1698,6 +1722,9 @@ def register_mobile_api(
                         _project_ref(owner_account_id, project_id),
                         CAPTURE_ROLES,
                     )
+                    if fixed_photographer:
+                        resolved_photographer = project["photographer_name"]
+                        photographer_verified = project["photographer_verified"]
                     target = _machine_id(
                         target_machine_id or project["desktop_machine_id"]
                     )
@@ -1888,9 +1915,10 @@ def register_mobile_api(
                         "photographer": resolved_photographer,
                         "photographer_account_id": (
                             int(current_user["id"])
-                            if is_mobile_original
-                            and normalized_capture_source == "camera"
-                            and resolved_photographer == actor_name
+                            if is_mobile_original and (fixed_photographer or (
+                                normalized_capture_source == "camera"
+                                and resolved_photographer == actor_name
+                            ))
                             else 0
                         ),
                         "uploaded_by": resolved_uploaded_by,
@@ -1920,6 +1948,7 @@ def register_mobile_api(
                         "target_machine_id": target,
                         "original_cleanup_status": cleanup_status,
                         "status": status,
+                        "match_json": _dumps({"site_part": _safe_text(site_part, 200), "auto_delivery": str(auto_delivery).lower() in {"true", "1"}, "photographer_verified": photographer_verified}),
                         "created_at": timestamp,
                         "updated_at": timestamp,
                         "desktop_imported_at": timestamp if source == "desktop" else "",
@@ -1936,7 +1965,7 @@ def register_mobile_api(
                         "original_size_bytes, original_mime_type, original_storage_key, "
                         "preview_sha256, preview_size_bytes, preview_width, preview_height, "
                         "preview_quality, preview_storage_key, target_machine_id, "
-                        "original_cleanup_status, status, created_at, updated_at, "
+                        "original_cleanup_status, status, match_json, created_at, updated_at, "
                         "desktop_imported_at) VALUES (:account_id, :batch_id, :photo_uuid, "
                         ":project_owner_account_id, :project_id, :source, :scope, :category, "
                         ":assignment_json, "
@@ -1948,7 +1977,7 @@ def register_mobile_api(
                         ":original_sha256, :original_size_bytes, :original_mime_type, "
                         ":original_storage_key, :preview_sha256, :preview_size_bytes, "
                         ":preview_width, :preview_height, :preview_quality, :preview_storage_key, "
-                        ":target_machine_id, :original_cleanup_status, :status, :created_at, "
+                        ":target_machine_id, :original_cleanup_status, :status, :match_json, :created_at, "
                         ":updated_at, :desktop_imported_at)",
                         values,
                     )
@@ -2027,6 +2056,8 @@ def register_mobile_api(
 
         metadata = dict(_json(value, {}))
         metadata["photographer"] = _safe_text(metadata.get("photographer"), 100)
+        metadata["site_part"] = _safe_text(metadata.get("site_part"), 200)
+        metadata["auto_delivery"] = str(metadata.get("auto_delivery", False)).lower() in {"true", "1"}
         metadata["transfer_profile"] = _transfer_profile(
             metadata.pop("transfer_profile", ""),
             metadata.pop("compression_profile", ""),
@@ -2286,7 +2317,7 @@ def register_mobile_api(
             "ORDER BY photos.id DESC LIMIT 10",
             (current_user["id"],),
         ).fetchall()
-        project_items = [_project_payload(row) for row in projects]
+        project_items = [viewer_project_payload(conn, row, current_user["id"]) for row in projects]
         hierarchy = {
             f"{row['scope']}_{row['node_type']}": int(row["total"])
             for row in hierarchy_rows
@@ -2619,7 +2650,7 @@ def register_mobile_api(
                 "AND p.active = 1 ORDER BY p.project_name, p.project_id",
                 (current["id"],),
             ).fetchall()
-            return jsonify({"ok": True, "projects": [_project_payload(row) for row in rows]})
+            return jsonify({"ok": True, "projects": [viewer_project_payload(conn, row, current["id"]) for row in rows]})
         finally:
             conn.close()
 
@@ -3676,6 +3707,8 @@ def register_mobile_api(
             assignment=assignment,
             title=request.form.get("title", ""),
             photographer=request.form.get("photographer", ""),
+            site_part=request.form.get("site_part", ""),
+            auto_delivery=request.form.get("auto_delivery", ""),
             photo_date=request.form.get("photo_date", ""),
             client_captured_at=request.form.get("client_captured_at", ""),
             orientation=request.form.get("orientation", 1),
@@ -3749,6 +3782,8 @@ def register_mobile_api(
             "height": _strict_integer(
                 data.get("height", 0), "height", 0, config.MOBILE_MAX_ORIGINAL_EDGE
             ),
+            "site_part": _safe_text(data.get("site_part"), 200),
+            "auto_delivery": str(data.get("auto_delivery", False)).lower() in {"true", "1"},
             "photographer": _safe_text(data.get("photographer"), 100),
             "title": _safe_text(data.get("title"), 200),
             "photo_date": _photo_date(data.get("photo_date", "")),
@@ -4504,6 +4539,8 @@ def register_mobile_api(
                         scope=batch["scope"],
                         category=batch["category"],
                         assignment=_json(batch["assignment_json"], {}),
+                        site_part=metadata.get("site_part", ""),
+                        auto_delivery=metadata.get("auto_delivery", False),
                         photographer=metadata.get("photographer", ""),
                         title=metadata.get("title", ""),
                         photo_date=metadata.get("photo_date", ""),
@@ -4661,6 +4698,37 @@ def register_mobile_api(
             "updated_at": item["updated_at"],
         }
 
+    def auto_delivery_batch(conn, batch) -> bool:
+        if not batch or batch["mode"] != "auto":
+            return False
+        rows = conn.execute("SELECT match_json FROM cloud_photos WHERE account_id = ? AND batch_id = ?", (batch["account_id"], batch["id"])).fetchall()
+        return bool(rows) and all(_json(row["match_json"], {}).get("auto_delivery") is True for row in rows)
+
+    def require_analysis_delivery_access(conn, batch):
+        actor = conn.execute("SELECT status FROM accounts WHERE id = ?", (batch["account_id"],)).fetchone()
+        if not actor or actor["status"] != "active":
+            raise ApiProblem("account_disabled", "账号已停用", 403)
+        owner = int(batch["project_owner_account_id"] or batch["account_id"])
+        project = project_for(conn, batch["account_id"], _project_ref(owner, batch["project_id"]), CAPTURE_ROLES)
+        target = _require_active_machine(conn, owner, batch["target_machine_id"])
+        if target != project["desktop_machine_id"]:
+            raise ApiProblem("batch_target_conflict", "工程归档电脑已变更", 409)
+
+    def fallback_analysis_photos(conn, account_id, batch_id, code, message):
+        batch = conn.execute("SELECT * FROM mobile_batches WHERE id = ? AND account_id = ?", (batch_id, account_id)).fetchone()
+        deliver = auto_delivery_batch(conn, batch)
+        if deliver:
+            try:
+                require_analysis_delivery_access(conn, batch)
+            except ApiProblem:
+                deliver = False
+        timestamp = now()
+        status = "desktop_pending" if deliver else "needs_review"
+        if deliver:
+            conn.execute("UPDATE cloud_photos SET assignment_json = '{}', match_json = json_set(match_json, '$.manual_review_required', json('true'), '$.review_reason', ?) WHERE account_id = ? AND batch_id = ? AND status = 'analyzing'", (message, account_id, batch_id))
+        conn.execute("UPDATE cloud_photos SET status = ?, error_code = ?, error_message = ?, updated_at = ? WHERE account_id = ? AND batch_id = ? AND status = 'analyzing'", (status, code, message, timestamp, account_id, batch_id))
+        conn.execute("UPDATE mobile_batches SET status = ?, error_code = ?, error_message = ?, updated_at = ? WHERE account_id = ? AND id = ? AND status = 'analyzing'", (status, code, message, timestamp, account_id, batch_id))
+
     def recover_stale_analysis_jobs(*, force: bool = False) -> None:
         cutoff = _future_timestamp(now(), -config.MOBILE_ANALYSIS_STALE_SECONDS)
         conn = db.connect()
@@ -4706,20 +4774,7 @@ def register_mobile_api(
                     "WHERE id = ? AND status IN ('queued', 'running')",
                     (timestamp, job["id"]),
                 )
-                conn.execute(
-                    "UPDATE cloud_photos SET status = 'needs_review', "
-                    "error_code = 'analysis_interrupted', "
-                    "error_message = '自动识别中断，请手动确认', updated_at = ? "
-                    "WHERE account_id = ? AND batch_id = ? AND status = 'analyzing'",
-                    (timestamp, job["account_id"], job["batch_id"]),
-                )
-                conn.execute(
-                    "UPDATE mobile_batches SET status = 'needs_review', "
-                    "error_code = 'analysis_interrupted', "
-                    "error_message = '自动识别中断，请手动确认', updated_at = ? "
-                    "WHERE account_id = ? AND id = ? AND status = 'analyzing'",
-                    (timestamp, job["account_id"], job["batch_id"]),
-                )
+                fallback_analysis_photos(conn, job["account_id"], job["batch_id"], "analysis_interrupted", "自动识别中断，已转待分类")
             conn.commit()
         finally:
             conn.close()
@@ -4755,20 +4810,7 @@ def register_mobile_api(
         try:
             conn.execute("BEGIN IMMEDIATE")
             timestamp = now()
-            conn.execute(
-                "UPDATE cloud_photos SET status = 'needs_review', "
-                "error_code = 'analysis_failed', "
-                "error_message = '自动识别失败，请手动选择归属', updated_at = ? "
-                "WHERE account_id = ? AND batch_id = ? AND status = 'analyzing'",
-                (timestamp, account_id, batch_id),
-            )
-            conn.execute(
-                "UPDATE mobile_batches SET status = 'needs_review', "
-                "error_code = 'analysis_failed', "
-                "error_message = '自动识别失败，请手动选择归属', updated_at = ? "
-                "WHERE account_id = ? AND id = ? AND status = 'analyzing'",
-                (timestamp, account_id, batch_id),
-            )
+            fallback_analysis_photos(conn, account_id, batch_id, "analysis_failed", "自动识别失败，已转待分类")
             conn.execute(
                 "UPDATE mobile_jobs SET status = 'failed', "
                 "error_code = 'analysis_failed', error_text = ?, updated_at = ? "
@@ -4835,6 +4877,7 @@ def register_mobile_api(
                     _project_ref(project_owner_account_id, batch["project_id"]),
                     CAPTURE_ROLES,
                 )
+                delivery = auto_delivery_batch(conn, batch)
                 unit_rows = conn.execute(
                     "SELECT * FROM cloud_units WHERE account_id = ? AND project_id = ? "
                     "AND scope = 'engineering' AND active = 1 ORDER BY sort_order, id",
@@ -4871,6 +4914,9 @@ def register_mobile_api(
                         fields = mobile_recognition.recognize_watermark(
                             image_bytes, strict=True
                         )
+                        stored_match = _json(photo["match_json"], {})
+                        if stored_match.get("site_part"):
+                            fields["construction_area"] = stored_match["site_part"]
                         if batch["scope"] == "engineering":
                             matched = mobile_recognition.match_photo(
                                 filename=photo["original_filename"],
@@ -4894,7 +4940,7 @@ def register_mobile_api(
                             }
                         confidence = matched["confidence"]
                         confidence_counts[confidence] += 1
-                        assignment = _json(photo["assignment_json"], {})
+                        assignment = {} if delivery else _json(photo["assignment_json"], {})
                         if (
                             batch["scope"] == "engineering"
                             and confidence == "high"
@@ -4914,9 +4960,10 @@ def register_mobile_api(
                                 "photo_date": photo["photo_date"]
                                 or fields.get("photo_date", ""),
                                 "match": {
-                                    **matched,
+                                    **stored_match, **matched,
                                     "ocr": fields,
-                                    "manual_review_required": True,
+                                    "manual_review_required": not (delivery and bool(assignment)),
+                                    "review_reason": "" if delivery and assignment else "识别结果不明确，请人工选择归档单元",
                                 },
                                 "error_code": "",
                                 "error_message": "",
@@ -4928,10 +4975,11 @@ def register_mobile_api(
                         results.append(
                             {
                                 "id": photo["id"],
-                                "assignment": _json(photo["assignment_json"], {}),
+                                "assignment": {} if delivery else _json(photo["assignment_json"], {}),
                                 "title": photo["title"],
                                 "photo_date": photo["photo_date"],
                                 "match": {
+                                    **_json(photo["match_json"], {}),
                                     "confidence": "low",
                                     "confidence_label": "低",
                                     "ambiguous": False,
@@ -4941,6 +4989,7 @@ def register_mobile_api(
                                     "candidates": [],
                                     "ocr": {},
                                     "manual_review_required": True,
+                                    "review_reason": "自动识别失败，请人工选择归档单元",
                                 },
                                 "error_code": "analysis_failed",
                                 "error_message": "自动识别失败，请手动选择归属",
@@ -4977,14 +5026,24 @@ def register_mobile_api(
                     )
                     conn.commit()
                     return
+                if delivery:
+                    require_analysis_delivery_access(conn, batch)
                 timestamp = now()
                 for result_item in results:
+                    if delivery and result_item["assignment"]:
+                        try:
+                            result_item["assignment"] = _validate_assignment(conn, project_owner_account_id, batch["project_id"], batch["scope"], result_item["assignment"], require_process=False)
+                        except ApiProblem:
+                            result_item["assignment"] = {}
+                            result_item["match"]["manual_review_required"] = True
+                            result_item["match"]["review_reason"] = "识别单元已变更或停用，请人工选择归档单元"
                     conn.execute(
-                        "UPDATE cloud_photos SET status = 'needs_review', "
+                        "UPDATE cloud_photos SET status = ?, "
                         "assignment_json = ?, title = ?, photo_date = ?, match_json = ?, "
                         "error_code = ?, error_message = ?, updated_at = ? "
                         "WHERE id = ? AND account_id = ? AND status = 'analyzing'",
                         (
+                            "desktop_pending" if delivery else "needs_review",
                             _dumps(result_item["assignment"]),
                             _safe_text(result_item["title"], 200),
                             _photo_date(result_item["photo_date"]),
@@ -4998,10 +5057,11 @@ def register_mobile_api(
                     )
                 result = {
                     "photo_count": len(photos),
-                    "matched_count": confidence_counts["high"],
+                    "matched_count": sum(bool(item["assignment"]) and not item["match"].get("manual_review_required", True) for item in results) if delivery else confidence_counts["high"],
                     "confidence": confidence_counts,
                     "failed_count": failed_count,
-                    "manual_review_required": True,
+                    "manual_review_required": any(item["match"].get("manual_review_required", True) for item in results),
+                    "auto_delivery": delivery,
                     "ocr_available": True,
                 }
                 conn.execute(
@@ -5019,10 +5079,11 @@ def register_mobile_api(
                     ),
                 )
                 conn.execute(
-                    "UPDATE mobile_batches SET status = 'needs_review', error_code = ?, "
+                    "UPDATE mobile_batches SET status = ?, error_code = ?, "
                     "error_message = ?, updated_at = ? WHERE id = ? AND account_id = ? "
                     "AND status = 'analyzing'",
                     (
+                        "desktop_pending" if delivery else "needs_review",
                         "analysis_partial_failure" if failed_count else "",
                         "部分照片识别失败，请手动确认" if failed_count else "",
                         timestamp,
@@ -5058,20 +5119,7 @@ def register_mobile_api(
             if batch["status"] == "analyzing":
                 if not latest_job or latest_job["status"] not in {"queued", "running"}:
                     timestamp = now()
-                    conn.execute(
-                        "UPDATE cloud_photos SET status = 'needs_review', "
-                        "error_code = 'analysis_interrupted', "
-                        "error_message = '识别任务状态丢失，请手动确认', updated_at = ? "
-                        "WHERE account_id = ? AND batch_id = ? AND status = 'analyzing'",
-                        (timestamp, current["id"], batch_id),
-                    )
-                    conn.execute(
-                        "UPDATE mobile_batches SET status = 'needs_review', "
-                        "error_code = 'analysis_interrupted', "
-                        "error_message = '识别任务状态丢失，请手动确认', updated_at = ? "
-                        "WHERE id = ? AND account_id = ? AND status = 'analyzing'",
-                        (timestamp, batch_id, current["id"]),
-                    )
+                    fallback_analysis_photos(conn, current["id"], batch_id, "analysis_interrupted", "识别任务中断，已转待分类")
                     conn.commit()
                     repaired = batch_for(conn, current["id"], batch_id)
                     return jsonify(
@@ -6191,6 +6239,41 @@ def register_mobile_api(
                 "cleanup_pending": cleanup_status == "cleanup_pending",
             }
         )
+
+    @blueprint.post("/api/desktop/v1/photos/<photo_uuid>/classify")
+    def desktop_classify_photo(photo_uuid):
+        current = user()
+        data = json_body()
+        machine = require_desktop_client(current, data.get("desktop_machine_id"))
+        photo_uuid = _uuid(photo_uuid, "photo_uuid")
+        local_project_id = _safe_text(data.get("project_id"), 160)
+        local_project_code = _safe_text(data.get("local_project_code"), 160)
+        local_photo_id = _safe_text(data.get("local_photo_id"), 160)
+        category = _safe_text(data.get("category"), 20)
+        if not local_project_code or not local_photo_id:
+            raise ApiProblem("local_photo_required", "缺少电脑照片定位信息")
+        if category not in CATEGORIES:
+            raise ApiProblem("invalid_category", "照片类别无效")
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = project_for_desktop(conn, current, local_project_id, machine)
+            row = conn.execute("SELECT * FROM cloud_photos WHERE project_owner_account_id = ? AND project_id = ? AND photo_uuid = ? AND target_machine_id = ? AND source = 'mobile' AND deleted_at = ''", (current["id"], project["project_id"], photo_uuid, machine)).fetchone()
+            if not row:
+                raise ApiProblem("photo_not_found", "照片不存在或不属于当前归档电脑", 404)
+            if row["status"] != "desktop_imported":
+                raise ApiProblem("photo_not_imported", "请先将照片完整保存到电脑", 409)
+            assignment = _validate_assignment(conn, current["id"], project["project_id"], "engineering", {"unit_code": data.get("unit_code"), "process_name": data.get("process_name", "")}, require_process=False)
+            match = _json(row["match_json"], {})
+            idempotent = row["scope"] == "engineering" and row["category"] == category and _json(row["assignment_json"], {}) == assignment and not match.get("manual_review_required") and row["local_project_code"] == local_project_code and row["local_photo_id"] == local_photo_id
+            if not idempotent:
+                match.update({"manual_review_required": False, "review_reason": "", "classified_by": "desktop"})
+                conn.execute("UPDATE cloud_photos SET scope = 'engineering', category = ?, assignment_json = ?, match_json = ?, local_project_code = ?, local_photo_id = ?, error_code = '', error_message = '', updated_at = ? WHERE id = ?", (category, _dumps(assignment), _dumps(match), local_project_code, local_photo_id, now(), row["id"]))
+                conn.commit()
+                row = conn.execute("SELECT * FROM cloud_photos WHERE id = ?", (row["id"],)).fetchone()
+            return jsonify({"ok": True, "idempotent": idempotent, "photo": _photo_payload(row, "", conn=conn)})
+        finally:
+            conn.close()
 
     @blueprint.post("/api/desktop/v1/backfill-photo")
     def desktop_backfill_photo():

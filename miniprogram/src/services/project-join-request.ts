@@ -14,7 +14,7 @@ export interface ProjectJoinRequest {
 }
 export function normalizeJoinRequest(raw: any): ProjectJoinRequest | undefined {
   if (!raw?.id || !['pending', 'approved', 'rejected', 'expired', 'revoked'].includes(raw.status)) return undefined
-  return { id: String(raw.id), status: raw.status, project_id: String(raw.project_id || ''), project_name: String(raw.project_name || ''), display_name: String(raw.display_name || ''), phone: String(raw.phone || ''), applicant_account_id: String(raw.applicant_account_id || ''), approver_account_id: String(raw.approver_account_id || ''), created_at: String(raw.created_at || ''), role: String(raw.role || ''), can_review: Boolean(raw.can_review), reason: String(raw.reason || raw.rejection_reason || '') }
+  return { id: String(raw.id), status: raw.status, project_id: String(raw.project_id || ''), project_name: String(raw.project_name || ''), display_name: String(raw.display_name || ''), phone: String(raw.phone || ''), applicant_account_id: String(raw.applicant_account_id || ''), approver_account_id: String(raw.approver_account_id || ''), created_at: String(raw.created_at || ''), role: String(raw.role || ''), can_review: Boolean(raw.can_review), reason: String(raw.decision_reason || raw.reason || raw.rejection_reason || '') }
 }
 export function validateJoinApplicant(name: string, phone: string): string {
   if (!name.trim() || name.trim().length > 60) return '请填写真实姓名，最多 60 个字'

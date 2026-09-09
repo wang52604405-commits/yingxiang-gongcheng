@@ -89,6 +89,11 @@ describe('移动端 API v1 契约', () => {
       transfer_profile: 'jpeg_1m',
     })
     expect(buildChunkUploadInit(metadata, 4 * 1024 * 1024)).not.toHaveProperty('original_mime_type')
+    expect(buildPhotoUploadForm({ ...metadata, site_part: '闸室段模板' }).site_part).toBe('闸室段模板')
+    expect(buildChunkUploadInit({ ...metadata, site_part: '闸室段模板' }, 4 * 1024 * 1024).site_part).toBe('闸室段模板')
+    expect(buildPhotoUploadForm({ ...metadata, auto_delivery: true }).auto_delivery).toBe('true')
+    expect(buildChunkUploadInit({ ...metadata, auto_delivery: true }, 4 * 1024 * 1024).auto_delivery).toBe(true)
+    expect(buildPhotoUploadForm(metadata)).not.toHaveProperty('auto_delivery')
   })
 
   it('按服务器真实的 batch 嵌套结构读取批次与 score/reasons 候选', () => {
