@@ -23,6 +23,11 @@ from PIL import Image
 
 
 class MobileServerContractTest(unittest.TestCase):
+    def setUp(self):
+        # Independent contract scenarios must not share the per-IP HTTP rate window.
+        from server import app as server_app
+        server_app._rate_hits.clear()
+
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(prefix="album-mobile-server-")
@@ -4758,6 +4763,111 @@ class MobileServerContractTest(unittest.TestCase):
             conn = self.db.connect()
             conn.execute("UPDATE licenses SET active=1 WHERE account_id=?", (owner,)); conn.commit(); conn.close()
 
+    def _free_upload_owner(self):
+        name = "quota-" + uuid.uuid4().hex[:10]
+        self._register(name, "QuotaOwner2026")
+        token = self._login(name, "QuotaOwner2026")
+        machine = "QUOTA-" + uuid.uuid4().hex[:10]
+        desktop = self._activate(token, machine)
+        project = "quota-project-" + uuid.uuid4().hex[:8]
+        self._snapshot(desktop, "免费拍摄工程", project_id=project, desktop_machine_id=machine)
+        conn = self.db.connect()
+        owner = conn.execute("SELECT id FROM accounts WHERE username=?", (name,)).fetchone()[0]
+        conn.close()
+        return token, desktop, machine, project, owner
+
+    def test_free_mobile_quota_owner_pool_delete_idempotency_and_desktop_exemption(self):
+        from server.mobile_api import mobile_upload_quota
+        token, desktop, machine, project, owner = self._free_upload_owner()
+        second = project + "-second"
+        self._snapshot(desktop, "同主账号另一工程", project_id=second, desktop_machine_id=machine)
+        conn = self.db.connect()
+        member = conn.execute("SELECT id FROM accounts WHERE username='tenant_b'").fetchone()[0]
+        conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,status,joined_at,updated_at) VALUES(?,?,?,'capturer','active','2026-09-10','2026-09-10')", (owner, second, member))
+        conn.commit(); conn.close()
+        with patch("server.app._product_config", return_value={"mini_program": {"free_upload_limit": 2}}):
+            backfilled = self._backfill(desktop, str(uuid.uuid4()), project, desktop_machine_id=machine)
+            self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
+            batches = [self._create_batch(token, project_id=f"{owner}:{project}"), self._create_batch(self.token_b, project_id=f"{owner}:{second}")]
+            content = self._jpeg((37, 80, 128)); photo_uuid = str(uuid.uuid4())
+            first = self._upload(token, batches[0], photo_uuid, content)
+            self.assertEqual(first.status_code, 201, first.get_json())
+            second_upload = self._upload(self.token_b, batches[1], str(uuid.uuid4()), content)
+            self.assertEqual(second_upload.status_code, 201, second_upload.get_json())
+            retry = self._upload(token, batches[0], photo_uuid, content)
+            self.assertEqual(retry.status_code, 200, retry.get_json())
+            denied = self._upload(token, batches[0], str(uuid.uuid4()), content)
+            self.assertEqual(denied.get_json()["code"], "membership_required")
+            conn = self.db.connect()
+            conn.execute("UPDATE cloud_photos SET deleted_at='2026-09-10T00:00:00Z' WHERE project_owner_account_id=? AND photo_uuid=?", (owner, photo_uuid))
+            # Simulate deployment over historical records that predate the usage ledger.
+            conn.execute("DELETE FROM mobile_upload_usage WHERE project_owner_account_id=?", (owner,))
+            conn.commit(); conn.close()
+            self.db.init_db()
+            conn = self.db.connect()
+            quota = mobile_upload_quota(conn, owner)
+            self.assertEqual(quota["used"], 2)
+            self.assertEqual(quota["remaining"], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM mobile_upload_usage WHERE project_owner_account_id=?", (owner,)).fetchone()[0], 2)
+            conn.close()
+            listing = self.client.get("/api/mobile/v1/projects", headers=self._headers(token)).get_json()["projects"]
+            self.assertTrue(all(p["can_capture"] and not p["can_manage_members"] for p in listing))
+            self.assertTrue(all(p["upload_quota"]["used"] == 2 for p in listing))
+            conn = self.db.connect()
+            conn.execute("INSERT INTO licenses(account_id,license_type,valid_days,active) VALUES(?,'lifetime',0,1)", (owner,)); conn.commit(); conn.close()
+            unlimited = self._upload(token, batches[0], str(uuid.uuid4()), content)
+            self.assertEqual(unlimited.status_code, 201, unlimited.get_json())
+
+    def test_free_mobile_quota_final_transaction_stops_parallel_uploads(self):
+        from server import mobile_api
+        token, _desktop, _machine, project, owner = self._free_upload_owner()
+        batch = self._create_batch(token, project_id=f"{owner}:{project}")
+        barrier = threading.Barrier(2)
+        original = mobile_api._require_mobile_upload_quota
+        def synchronized_precheck(conn, *args, **kwargs):
+            result = original(conn, *args, **kwargs)
+            if not conn.in_transaction:
+                barrier.wait(timeout=10)
+            return result
+        with patch("server.app._product_config", return_value={"mini_program": {"free_upload_limit": 1}}), patch.object(mobile_api, "_require_mobile_upload_quota", side_effect=synchronized_precheck):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                responses = list(pool.map(lambda _: self._upload(token, batch, str(uuid.uuid4()), self._jpeg()), range(2)))
+            self.assertEqual(sorted(r.status_code for r in responses), [201, 403])
+            conn = self.db.connect()
+            self.assertEqual(mobile_api.mobile_upload_quota(conn, owner)["used"], 1)
+            conn.close()
+
+    def test_free_mobile_quota_chunk_reservation_commit_and_retry(self):
+        from server import config
+        from server.mobile_api import mobile_upload_quota
+        token, _desktop, _machine, project, owner = self._free_upload_owner()
+        batch = self._create_batch(token, project_id=f"{owner}:{project}")
+        photo_uuid = str(uuid.uuid4()); content = self._jpeg()
+        product = {"mini_program": {"free_upload_limit": 1}}
+        with patch("server.app._product_config", return_value=product), patch.object(config, "MOBILE_CHUNK_BYTES", len(content)):
+            initialized = self._chunk_init(token, batch, photo_uuid, content, chunk_size=len(content))
+            self.assertEqual(initialized.status_code, 201, initialized.get_json())
+            retry = self._chunk_init(token, batch, photo_uuid, content, chunk_size=len(content))
+            self.assertEqual(retry.status_code, 200, retry.get_json())
+            conn = self.db.connect()
+            self.assertEqual(mobile_upload_quota(conn, owner)["reserved"], 1); conn.close()
+            denied = self._upload(token, batch, str(uuid.uuid4()), content)
+            self.assertEqual(denied.get_json()["code"], "membership_required")
+            uploaded = self._put_chunk(token, batch, photo_uuid, 0, content)
+            self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+            finalize = f"/api/mobile/v1/batches/{batch}/chunked-uploads/{photo_uuid}/finalize"
+            payload = {"sha256": hashlib.sha256(content).hexdigest(), "original_size_bytes": len(content), "total_chunks": 1}
+            product["mini_program"]["free_upload_limit"] = 0
+            blocked = self.client.post(finalize, json=payload, headers=self._headers(token))
+            self.assertEqual(blocked.get_json()["code"], "membership_required")
+            product["mini_program"]["free_upload_limit"] = 1
+            finished = self.client.post(finalize, json=payload, headers=self._headers(token))
+            self.assertEqual(finished.status_code, 201, finished.get_json())
+            repeated = self.client.post(finalize, json=payload, headers=self._headers(token))
+            self.assertEqual(repeated.status_code, 200, repeated.get_json())
+            conn = self.db.connect(); quota = mobile_upload_quota(conn, owner); conn.close()
+            self.assertEqual((quota["used"], quota["reserved"], quota["remaining"]), (1, 0, 0))
+
     def test_paid_project_inheritance_never_unlocks_other_projects(self):
         name="free-"+uuid.uuid4().hex[:8];self._register(name,"FreeMember2026")
         token=self._login(name,"FreeMember2026")
@@ -4770,11 +4880,14 @@ class MobileServerContractTest(unittest.TestCase):
         conn.close()
         own_ref=f"{actor}:{own_project}"
         projects=self.client.get("/api/mobile/v1/projects",headers=self._headers(token)).get_json()["projects"]
-        self.assertFalse(next(p for p in projects if p["id"]==own_ref)["can_capture"])
+        own_payload = next(p for p in projects if p["id"]==own_ref)
+        self.assertTrue(own_payload["can_capture"])
+        self.assertFalse(own_payload["can_manage_members"])
+        self.assertEqual(own_payload["upload_quota"]["remaining"], 100)
         self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{own_ref}/tree",headers=self._headers(token)).status_code,200)
         payload={"client_batch_id":str(uuid.uuid4()),"project_id":own_ref,"scope":"engineering","category":"construction","mode":"auto"}
         denied=self.client.post("/api/mobile/v1/batches",json=payload,headers=self._headers(token))
-        self.assertEqual(denied.get_json()["code"],"membership_required")
+        self.assertEqual(denied.status_code, 201, denied.get_json())
         first="paid-one-"+uuid.uuid4().hex[:8];second="paid-two-"+uuid.uuid4().hex[:8]
         self._snapshot(self.desktop_token_a,"付费项目一",project_id=first)
         self._snapshot(self.desktop_token_a,"付费项目二",project_id=second)
@@ -4787,7 +4900,7 @@ class MobileServerContractTest(unittest.TestCase):
         conn=self.db.connect();conn.execute("UPDATE licenses SET active=0 WHERE account_id=?",(owner,));conn.commit();conn.close()
         try:
             denied=self.client.post("/api/mobile/v1/batches",json={**inherited,"client_batch_id":str(uuid.uuid4())},headers=self._headers(token))
-            self.assertEqual(denied.get_json()["code"],"membership_required")
+            self.assertEqual(denied.status_code, 201, denied.get_json())
         finally:
             conn=self.db.connect();conn.execute("UPDATE licenses SET active=1 WHERE account_id=?",(owner,));conn.commit();conn.close()
 

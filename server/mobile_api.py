@@ -61,6 +61,42 @@ _CHUNK_SESSION_LOCKS_GUARD = threading.Lock()
 ANALYSIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mobile-ocr")
 
 
+def mobile_upload_quota(conn, owner_id, *, exclude_uuid="", timestamp=None):
+    """Owner-wide lifetime usage plus active chunk reservations, never desktop backfill."""
+    from .app import _has_active_membership, _product_config
+    owner_id = int(owner_id)
+    raw_limit = _product_config(conn).get("mini_program", {}).get("free_upload_limit", 100)
+    try:
+        limit = max(0, int(raw_limit))
+    except (TypeError, ValueError):
+        limit = 100
+    used = int(conn.execute(
+        "SELECT COUNT(*) FROM (SELECT photo_uuid FROM mobile_upload_usage WHERE project_owner_account_id=? "
+        "UNION SELECT photo_uuid FROM cloud_photos WHERE project_owner_account_id=? AND source='mobile')",
+        (owner_id, owner_id),
+    ).fetchone()[0])
+    reserved = int(conn.execute(
+        "SELECT COUNT(DISTINCT s.photo_uuid) FROM mobile_upload_sessions s "
+        "WHERE s.project_owner_account_id=? AND s.status IN ('active','finalizing') "
+        "AND s.expires_at>? AND s.photo_uuid<>? "
+        "AND NOT EXISTS(SELECT 1 FROM mobile_upload_usage u WHERE u.project_owner_account_id=s.project_owner_account_id AND u.photo_uuid=s.photo_uuid) "
+        "AND NOT EXISTS(SELECT 1 FROM cloud_photos p WHERE p.project_owner_account_id=s.project_owner_account_id AND p.photo_uuid=s.photo_uuid AND p.source='mobile')",
+        (owner_id, timestamp or _utc_now(), exclude_uuid),
+    ).fetchone()[0])
+    unlimited = bool(_has_active_membership(conn, owner_id))
+    return {"limit": limit, "used": used, "reserved": reserved,
+            "remaining": None if unlimited else max(0, limit-used-reserved), "unlimited": unlimited}
+
+
+def _require_mobile_upload_quota(conn, owner_id, photo_uuid, timestamp=None):
+    quota = mobile_upload_quota(conn, owner_id, exclude_uuid=photo_uuid, timestamp=timestamp)
+    if not quota["unlimited"] and quota["used"] + quota["reserved"] >= quota["limit"]:
+        # Existing mobile releases allow manual retry after membership changes for this code.
+        raise ApiProblem("membership_required",
+                         f"主账号免费上传额度共{quota['limit']}张，已上传{quota['used']}张，正在上传{quota['reserved']}张；额度已用完，可继续本地拍照加水印，开通会员后可继续上传", 403)
+    return quota
+
+
 @contextmanager
 def _photo_upload_lock(account_id: int, photo_uuid: str):
     """单 worker 多线程下按照片 UUID 串行，避免幂等对象键相互覆盖。"""
@@ -308,6 +344,8 @@ def _project_payload(row) -> dict:
     if item.get("upload_allowed") is False:
         permissions["can_capture"] = False
         permissions["can_manage_members"] = False
+    if item.get("membership_active") is False:
+        permissions["can_manage_members"] = False
     member_count = int(item.get("member_count") or 1)
     return {
         "id": project_ref,
@@ -325,6 +363,7 @@ def _project_payload(row) -> dict:
         "metadata": _json(item.get("metadata_json"), {}),
         "access_role": access_role,
         "upload_allowed": item.get("upload_allowed", True),
+        "upload_quota": item.get("upload_quota"),
         "photographer_name": str(item.get("photographer_name") or ""),
         "photographer_verified": bool(item.get("photographer_verified")),
         "member_count": member_count,
@@ -1185,7 +1224,10 @@ def register_mobile_api(
     def viewer_project_payload(conn, project, viewer_id):
         row = dict(project)
         row.update(project_photographer(conn, viewer_id, int(row.get("project_owner_account_id") or row["account_id"]), row["project_id"]))
-        row["upload_allowed"] = project_upload_entitlement(conn, int(row.get("project_owner_account_id") or row["account_id"]))
+        owner = int(row.get("project_owner_account_id") or row["account_id"])
+        row["membership_active"] = project_upload_entitlement(conn, owner)
+        row["upload_allowed"] = True  # Keep native/local camera available even at the limit.
+        row["upload_quota"] = mobile_upload_quota(conn, owner, timestamp=now())
         return _project_payload(row)
 
     def project_for(conn, account_id, project_reference, allowed_roles=None):
@@ -1213,8 +1255,10 @@ def register_mobile_api(
             raise ApiProblem("project_permission_denied", "当前项目角色无此权限", 403)
         project["project_owner_account_id"] = int(project["account_id"])
         project.update(project_photographer(conn, account_id, project["project_owner_account_id"], local_project_id))
-        project["upload_allowed"] = project_upload_entitlement(conn, project["project_owner_account_id"])
-        if allowed_roles and set(allowed_roles).issubset(set(CAPTURE_ROLES)) and not project["upload_allowed"] and has_request_context() and request.path.startswith("/api/mobile/"):
+        project["membership_active"] = project_upload_entitlement(conn, project["project_owner_account_id"])
+        project["upload_allowed"] = True
+        free_capture_route = has_request_context() and (request.path == "/api/mobile/v1/batches" or request.path.startswith("/api/mobile/v1/batches/")) and set(allowed_roles or []) == CAPTURE_ROLES
+        if allowed_roles and set(allowed_roles).issubset(set(CAPTURE_ROLES)) and not project["membership_active"] and has_request_context() and request.path.startswith("/api/mobile/") and not free_capture_route:
             raise ApiProblem("membership_required", "本项目主账号未开通有效会员；可查看照片及本地拍照加水印", 403)
         return project
 
@@ -1729,6 +1773,8 @@ def register_mobile_api(
                     ).fetchone()
                     if existing:
                         return reject_or_return(existing)
+                    if is_mobile_original:
+                        _require_mobile_upload_quota(check_conn, owner_account_id, photo_uuid, now())
                     project = project_for(
                         check_conn,
                         current_user["id"],
@@ -1907,6 +1953,8 @@ def register_mobile_api(
                         requirement_code = str(current_batch["requirement_code"] or "")
                         requirement_name = str(current_batch["requirement_name"] or "")
 
+                    if is_mobile_original:
+                        _require_mobile_upload_quota(conn, owner_account_id, photo_uuid, now())
                     timestamp = now()
                     status = (
                         "desktop_imported" if source == "desktop" else "server_saved"
@@ -1994,6 +2042,11 @@ def register_mobile_api(
                         ":updated_at, :desktop_imported_at)",
                         values,
                     )
+                    if is_mobile_original:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO mobile_upload_usage(project_owner_account_id,photo_uuid,project_id,created_at) VALUES(?,?,?,?)",
+                            (owner_account_id, photo_uuid, project_id, timestamp),
+                        )
                     if batch_id:
                         conn.execute(
                             "UPDATE mobile_batches SET status = 'server_saved', updated_at = ?, "
@@ -2706,7 +2759,7 @@ def register_mobile_api(
                 )
                 conn.commit()
             return jsonify({"ok": True, "settings": settings,
-                            "can_manage": project["access_role"] in MANAGE_MEMBER_ROLES and bool(project["upload_allowed"])})
+                            "can_manage": project["access_role"] in MANAGE_MEMBER_ROLES and bool(project["membership_active"])})
         except Exception:
             conn.rollback()
             raise
@@ -3899,6 +3952,8 @@ def register_mobile_api(
                     "AND photo_uuid = ?",
                     (owner_account_id, photo_uuid),
                 ).fetchone()
+                if not existing_photo:
+                    _require_mobile_upload_quota(conn, owner_account_id, photo_uuid, now())
                 if existing_photo and not existing:
                     if not (
                         existing_photo["source"] == "mobile"
@@ -4105,6 +4160,7 @@ def register_mobile_api(
                             "chunk_upload_not_found", "分片上传会话不存在", 404
                         )
 
+                _require_mobile_upload_quota(conn, owner_account_id, photo_uuid, now())
                 quota_params = [current["id"]]
                 exclude = ""
                 if reset_session_id:
@@ -4271,6 +4327,7 @@ def register_mobile_api(
                 )
                 require_chunk_batch_context(batch, session)
                 _require_batch_uploadable(batch["status"])
+                _require_mobile_upload_quota(conn, int(session["project_owner_account_id"] or session["account_id"]), photo_uuid, now())
                 _require_active_machine(
                     conn,
                     int(
@@ -4391,6 +4448,7 @@ def register_mobile_api(
                             ],
                         }
                     )
+                _require_mobile_upload_quota(conn, int(session["project_owner_account_id"] or session["account_id"]), photo_uuid, now())
                 destination = chunk_store.install(
                     current["id"], session["id"], chunk_index, temporary
                 )
@@ -4534,6 +4592,7 @@ def register_mobile_api(
                 )
                 require_chunk_batch_context(batch, session)
                 _require_batch_uploadable(batch["status"])
+                _require_mobile_upload_quota(conn, int(session["project_owner_account_id"] or session["account_id"]), photo_uuid, now())
                 _require_active_machine(
                     conn,
                     int(

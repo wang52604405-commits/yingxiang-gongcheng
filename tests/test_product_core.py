@@ -138,9 +138,19 @@ class ServerProductContractTest(unittest.TestCase):
             restarted.get_json()["account"]["id"], payload["account"]["id"]
         )
 
+    def test_mini_program_quota_config_is_independent_and_preserves_zero(self):
+        from server.app import _normalized_product_config
+        product = _normalized_product_config({"mini_program": {"free_upload_limit": 0}})
+        self.assertEqual(product["mini_program"]["free_upload_limit"], 0)
+        self.assertEqual(product["free"]["photo_limit"], 300)
+        product = _normalized_product_config({"mini_program": {"free_upload_limit": 100}})
+        self.assertEqual(product["mini_program"]["free_upload_limit"], 100)
+        self.assertEqual(product["free"]["photo_limit"], 300)
+
     def test_product_config_invite_qualification_and_telemetry(self):
         product = self.client.get("/api/product-config").get_json()["product"]
         self.assertEqual(product["free"]["photo_limit"], 300)
+        self.assertEqual(product["mini_program"]["free_upload_limit"], 100)
         self.assertFalse(product["free"]["upload_expiry_enabled"])
         self.assertFalse(product["free"]["watermark_enabled"])
         self.assertEqual(product["pricing"]["price_label"], "原价")

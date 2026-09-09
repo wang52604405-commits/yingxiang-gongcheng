@@ -179,7 +179,8 @@
           <label>月度会员价格<input id="cfgMonthly" type="number" min="1" max="9999"></label>
           <label>终身会员价格<input id="cfgLifetime" type="number" min="1" max="99999"></label>
           <label>价格标签<input id="cfgPriceLabel" maxlength="40"></label>
-          <label>免费照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>
+          <label>电脑免费版照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>
+          <label>小程序免费累计上传上限<input id="cfgMiniFreeLimit" type="number" min="0" max="100000"><small>按项目主账号累计；成员共用，电脑同步照片不占用</small></label>
           <label>有效邀请门槛<input id="cfgInviteMilestone" type="number" min="1" max="1000"></label>
           <label>每次奖励天数<input id="cfgInviteDays" type="number" min="0" max="3650"></label>
           <label>云图最长边(px)<input id="cfgThumbSide" type="number" min="320" max="1600"></label>
@@ -406,6 +407,7 @@
       $("#cfgLifetime").value = pricing.lifetime_price || 399;
       $("#cfgPriceLabel").value = pricing.price_label || "原价";
       $("#cfgFreeLimit").value = free.photo_limit || 300;
+      $("#cfgMiniFreeLimit").value = product.mini_program?.free_upload_limit ?? 100;
       $("#cfgInviteMilestone").value = invite.milestone || 10;
       $("#cfgInviteDays").value = invite.reward_days || 30;
       $("#cfgThumbSide").value = cloud.thumb_max_side || 720;
@@ -423,6 +425,7 @@
           method: "POST",
           body: JSON.stringify({ product: {
             pricing: { monthly_price: Number($("#cfgMonthly").value), lifetime_price: Number($("#cfgLifetime").value), price_label: $("#cfgPriceLabel").value.trim() },
+            mini_program: { free_upload_limit: Number($("#cfgMiniFreeLimit").value) },
             free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: false },
             invite: { milestone: Number($("#cfgInviteMilestone").value), reward_days: Number($("#cfgInviteDays").value), enabled: true },
             cloud_preview: { thumb_max_side: Number($("#cfgThumbSide").value), thumb_quality: Number($("#cfgThumbQuality").value), max_thumbs_per_project: Number($("#cfgThumbCount").value), beta_free_access: $("#cfgBetaCloud").checked },

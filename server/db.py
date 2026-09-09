@@ -126,6 +126,13 @@ ON client_error_logs(fingerprint, created_at DESC);
 # 移动端 V1 采用纯增量表。表名与旧 cloud_projects/cloud_thumbs 分开，避免
 # 改写既有云预览数据；所有业务唯一键都包含 account_id，保证租户隔离。
 MOBILE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mobile_upload_usage (
+    project_owner_account_id INTEGER NOT NULL,
+    photo_uuid TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(project_owner_account_id, photo_uuid)
+);
 CREATE TABLE IF NOT EXISTS project_watermark_settings (
     project_owner_account_id INTEGER NOT NULL,
     project_id TEXT NOT NULL,
@@ -769,3 +776,13 @@ def init_db() -> None:
     finally:
         conn.close()
     migrate()
+    conn = connect()
+    try:
+        # Lifetime consumption survives photo deletion; seed historical mobile uploads.
+        conn.execute("INSERT OR IGNORE INTO mobile_upload_usage "
+                     "(project_owner_account_id,photo_uuid,project_id,created_at) "
+                     "SELECT project_owner_account_id,photo_uuid,project_id,created_at "
+                     "FROM cloud_photos WHERE source='mobile'")
+        conn.commit()
+    finally:
+        conn.close()

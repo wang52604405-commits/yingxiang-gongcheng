@@ -122,6 +122,9 @@ def _normalized_product_config(value=None) -> dict:
     pricing["monthly_price"] = max(1, min(9999, int(pricing.get("monthly_price") or 39)))
     pricing["lifetime_price"] = max(1, min(99999, int(pricing.get("lifetime_price") or 399)))
     pricing["price_label"] = str(pricing.get("price_label") or "原价")[:40]
+    mini_program = product["mini_program"]
+    raw_limit = mini_program.get("free_upload_limit", 100)
+    mini_program["free_upload_limit"] = max(0, min(100000, int(100 if raw_limit is None else raw_limit)))
     free = product["free"]
     free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
     # 免费版 300 张为完整可用额度，不叠加产品水印。
