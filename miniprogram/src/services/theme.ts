@@ -24,14 +24,13 @@ function syncTabTheme(next: 'light' | 'dark') {
     }
   } catch {}
 }
-export function refreshTheme() {
+export function refreshTheme(_date?: Date) {
   const next: 'light' | 'dark' = themeState.mode === 'auto' ? systemTheme() : themeState.mode
   if (themeState.resolved !== next) themeState.resolved = next
   syncTabTheme(next)
 }
 export function setThemeLocation(latitude: number, longitude: number) {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
-  // Watermark location must never alter page appearance while the user is navigating or opening the camera.
   themeState.latitude = Math.round(latitude * 10) / 10
   themeState.longitude = Math.round(longitude * 10) / 10
   persist()
