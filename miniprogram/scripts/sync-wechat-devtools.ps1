@@ -1,10 +1,10 @@
 param(
-  [string]$ProjectPath = 'D:\Desktop\工程影像微信发布版',
+  [string]$ProjectPath = 'D:\Desktop\wechat-miniapp-release',
   [string]$Repository = 'https://github.com/wang52604405-commits/yingxiang-gongcheng.git',
   [string]$Branch = 'codex/wechat-mp-release',
   [switch]$Upload,
-  [string]$Version = '1.2.20260828',
-  [string]$Description = '备案域名接入、桌面同步与原图中转闭环'
+  [string]$Version = '1.6.4',
+  [string]$Description = 'Engineering image miniapp update'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,14 +25,14 @@ function Find-WechatCli {
     $candidate = Get-ChildItem -LiteralPath $tencent -Filter 'cli.bat' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($candidate) { return $candidate.FullName }
   }
-  throw 'Wechat DevTools cli.bat was not found. Install WeChat DevTools first.'
+  throw 'WeChat DevTools cli.bat was not found.'
 }
 
 function Start-WechatDevTools {
   param([string]$CliPath)
   $installRoot = Split-Path -Parent $CliPath
   $candidate = Get-ChildItem -LiteralPath $installRoot -Filter '*.exe' -File | Where-Object { $_.Length -gt 100MB } | Select-Object -First 1
-  if (-not $candidate) { throw 'Wechat DevTools executable was not found.' }
+  if (-not $candidate) { throw 'WeChat DevTools executable was not found.' }
   Start-Process -FilePath $candidate.FullName -ArgumentList @($ProjectPath) | Out-Null
 }
 
@@ -52,11 +52,8 @@ function Invoke-WechatCliChecked {
   $exitCode = $LASTEXITCODE
   $text = ($lines | ForEach-Object { "$_" }) -join "`n"
   $lines | ForEach-Object { Write-Host "$_" }
-  if (
-    $exitCode -ne 0 -or
-    $text -match '(?i)\[error\]|service port disabled|服务端口已关闭|upload failed|上传失败'
-  ) {
-    throw "$ActionName failed. Confirm DevTools -> Settings -> Security Settings -> Service Port is On."
+  if ($exitCode -ne 0 -or $text -match '(?i)\[error\]|service port disabled|upload failed') {
+    throw "$ActionName failed. Confirm DevTools Settings > Security Settings > Service Port is On."
   }
   return $text
 }
@@ -73,12 +70,12 @@ $origin = (& git -C $ProjectPath remote get-url origin 2>$null)
 if (-not $origin) {
   Invoke-Git @('-C', $ProjectPath, 'remote', 'add', 'origin', $Repository)
 } elseif ($origin.TrimEnd('/') -ne $Repository.TrimEnd('/')) {
-  throw "The Git remote is not the Engineering Image repository: $origin"
+  throw "Unexpected Git remote: $origin"
 }
 
 $dirty = @(& git -C $ProjectPath status --porcelain)
 if ($dirty.Count -gt 0) {
-  throw "The release directory has uncommitted changes; sync stopped: $ProjectPath"
+  throw "Release directory has uncommitted changes: $ProjectPath"
 }
 
 Invoke-Git @('-C', $ProjectPath, 'fetch', 'origin', $Branch)
@@ -93,18 +90,18 @@ if ($localBranch.Count -eq 0) {
 $cli = Find-WechatCli
 Write-Host "Synced $Branch. Opening WeChat DevTools: $ProjectPath"
 if (-not (Test-WechatCliProfile)) {
-  Write-Host 'Starting WeChat DevTools to initialize its CLI profile.'
+  Write-Host 'Starting WeChat DevTools to initialize CLI profile.'
   Start-WechatDevTools $cli
   Start-Sleep -Seconds 5
 }
 Invoke-WechatCliChecked $cli @(
   'open', '--project', $ProjectPath, '--lang', 'zh'
-) 'Opening WeChat DevTools' | Out-Null
+) 'Open WeChat DevTools' | Out-Null
 
 if ($Upload) {
   Write-Host "Uploading WeChat development version: $Version"
   Invoke-WechatCliChecked $cli @(
     'upload', '--project', $ProjectPath,
     '--version', $Version, '--desc', $Description, '--lang', 'zh'
-  ) 'Uploading WeChat development version' | Out-Null
+  ) 'Upload WeChat development version' | Out-Null
 }
