@@ -89,7 +89,7 @@ export function buildPhotoDetailRows(input: {
     scope === 'engineering' ? { key: 'process', label: '工序', value: firstText(assignment?.process_name, cloud?.process_name) } : null,
     scope === 'other' ? { key: 'directory', label: '归档目录', value: firstText(assignment?.other_node_name, cloud?.other_node_name) } : null,
     { key: 'captured_at', label: '拍摄时间', value: formatPhotoCapturedAt(firstText(local?.client_captured_at, cloud?.captured_at, local?.photo_date, cloud?.photo_date)) },
-    { key: 'photographer', label: '拍摄者', value: firstText(cloud?.photographer, local?.draft.capture_source === 'camera' ? input.localActor : '') },
+    { key: 'photographer', label: '拍摄者', value: firstText(cloud?.photographer, local?.draft.photographer, local?.draft.capture_source === 'camera' ? input.localActor : '') },
     { key: 'uploaded_by', label: '上传者', value: firstText(cloud?.uploaded_by, local ? input.localActor : '') },
     { key: 'status', label: '上传/归档状态', value: status ? STATUS_LABELS[status] : '', accent: true },
   ]
