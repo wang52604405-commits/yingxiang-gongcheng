@@ -5,7 +5,10 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from tests.test_mobile_sync import FakeManager
+if __package__:
+    from .test_mobile_sync import FakeManager
+else:
+    from test_mobile_sync import FakeManager
 from mobile_photo_changes import apply_change
 
 class MobilePhotoChangesTest(unittest.TestCase):
