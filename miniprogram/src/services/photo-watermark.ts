@@ -1,10 +1,10 @@
 export interface WatermarkLocationText { label: '当前定位' | '拍摄位置' | '手填位置'; text: string }
 export interface PhotoWatermarkFields {
-  project?: string; projectName?: string; unitProjectName?: string; partName?: string; unitName?: string
+  project?: string; companyName?: string; projectName?: string; unitProjectName?: string; partName?: string; unitName?: string
   constructionContent?: string; capturedAt?: string; contractor?: string
   title?: string; sitePart?: string; photographer?: string; photoDate?: string; location?: WatermarkLocationText; note?: string
 }
-export interface PhotoWatermarkOptions { maxEdge?: 2048 | 4096; logoPath?: string; position?: 'bottom-left' | 'bottom-right'; fontScale?: .85 | 1 | 1.2; opacity?: .55 | .75 | .9 }
+export interface PhotoWatermarkOptions { maxEdge?: 2048 | 4096; logoPath?: string; logoCrop?: { x: number; y: number; width: number; height: number }; position?: 'bottom-left' | 'bottom-right'; fontScale?: .85 | 1 | 1.2; opacity?: .55 | .75 | .9 }
 export interface WatermarkedPhoto { tempFilePath: string; originalPath: string; width: number; height: number }
 export class WatermarkError extends Error {
   constructor(message: string, public code: string, public canOpenSettings = false) { super(message); this.name = 'WatermarkError' }
@@ -163,11 +163,14 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
     const padding = Math.max(5, Math.round(fontSize * .38))
     const gap = Math.max(3, Math.round(fontSize * .16))
     const lineHeight = Math.ceil(fontSize * 1.35)
-    const logoScale = logoSize ? Math.min(1, panelWidth * .24 / logoSize.width, fontSize * 1.55 / logoSize.height) : 0
+    const logoScale = logoSize ? Math.min(panelWidth * .24 / logoSize.width, fontSize * 2.2 / logoSize.height) : 0
     const logo = logoSize ? { width: Math.max(1, Math.round(logoSize.width * logoScale)), height: Math.max(1, Math.round(logoSize.height * logoScale)) } : undefined
-    const headerWidth = panelWidth - padding * 2 - (logo ? logo.width + padding : 0)
+    const brandFontSize = Math.round(fontSize * 1.3)
+    const brandLines = fields.companyName ? wrapWatermarkText(fields.companyName, panelWidth - padding * 2 - (logo ? logo.width + padding : 0), text => measureAtSize(text, brandFontSize)) : []
+    const brandHeight = Math.max(logo?.height || 0, brandLines.length * Math.ceil(brandFontSize * 1.25))
+    const headerWidth = panelWidth - padding * 2
     const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', headerWidth, (text) => measureAtSize(text, fontSize))
-    const headerHeight = Math.max(logo?.height || 0, headerLines.length * lineHeight) + padding * 2
+    const headerHeight = brandHeight + (brandHeight ? padding : 0) + headerLines.length * lineHeight + padding * 2
     const bodyLines = fixedWatermarkRows(fields).flatMap((row) => wrapWatermarkText(row, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize)))
     const bodyHeight = bodyLines.length * lineHeight + padding * 2
     const footerLines = wrapWatermarkText(`施工单位：${fields.contractor?.trim() || '未填写'}`, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize))
@@ -176,7 +179,7 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
     const area = panelWidth * panelHeight
     if (panelHeight <= height - margin * 2 && area <= maxArea
       && (area <= targetArea * 1.05 || fontSize <= preferredMinFont)) {
-      return { x: margin, y: height - margin - panelHeight, width: panelWidth, height: panelHeight, areaRatio: area / (width * height), fontSize, padding, gap, lineHeight, logo, headerLines, headerHeight, bodyLines, bodyHeight, footerLines, footerHeight }
+      return { x: margin, y: height - margin - panelHeight, width: panelWidth, height: panelHeight, areaRatio: area / (width * height), fontSize, padding, gap, lineHeight, logo, brandFontSize, brandLines, brandHeight, headerLines, headerHeight, bodyLines, bodyHeight, footerLines, footerHeight }
     }
     if (fontSize <= 10) throw new WatermarkError('水印内容过多，请缩短施工内容或施工单位名称', 'TEXT_TOO_LONG')
     fontSize -= 1
@@ -210,14 +213,16 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     const width = orientation >= 5 ? drawHeight : drawWidth
     const height = orientation >= 5 ? drawWidth : drawHeight
     let logo: any = null
+    let logoCrop: { x: number; y: number; width: number; height: number } | undefined
     let logoSize: { width: number; height: number } | undefined
     if (options.logoPath) {
       if (/^https?:\/\//i.test(options.logoPath)) throw new WatermarkError('请使用已提供的企业标志', 'INVALID_LOGO')
       logo = canvas.createImage()
       await callback<void>((success, fail) => { logo.onload = () => success(); logo.onerror = fail; logo.src = options.logoPath })
       if (!(Number(logo.width) > 0 && Number(logo.height) > 0)) throw new WatermarkError('企业标志读取失败', 'INVALID_LOGO')
-      const scale = Math.min(1, Math.min(width * .24, 320) / Number(logo.width), Math.min(height * .13, 120) / Number(logo.height))
-      logoSize = { width: Math.max(1, Math.round(Number(logo.width) * scale)), height: Math.max(1, Math.round(Number(logo.height) * scale)) }
+      logoCrop = options.logoCrop || { x: 0, y: 0, width: Number(logo.width), height: Number(logo.height) }
+      if (![logoCrop.x, logoCrop.y, logoCrop.width, logoCrop.height].every(Number.isFinite) || logoCrop.x < 0 || logoCrop.y < 0 || logoCrop.width <= 0 || logoCrop.height <= 0 || logoCrop.x + logoCrop.width > Number(logo.width) || logoCrop.y + logoCrop.height > Number(logo.height)) throw new WatermarkError('企业图标区域无效', 'INVALID_LOGO')
+      logoSize = { width: logoCrop.width, height: logoCrop.height }
     }
     canvas.width = width; canvas.height = height
     const ctx = canvas.getContext('2d')
@@ -230,23 +235,26 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     // Fixed template: 80% transparent means alpha 0.2, never opacity 0.8.
     const bodyY = layout.y + layout.headerHeight + layout.gap
     const footerY = bodyY + layout.bodyHeight + layout.gap
-    ctx.fillStyle = 'rgba(9, 36, 43, 0.2)'
+    ctx.fillStyle = 'rgba(120, 190, 240, 0.2)'
     ctx.fillRect(layout.x, layout.y, layout.width, layout.headerHeight)
     ctx.fillRect(layout.x, bodyY, layout.width, layout.bodyHeight)
     ctx.fillRect(layout.x, footerY, layout.width, layout.footerHeight)
     if (logo && layout.logo) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'
       ctx.fillRect(layout.x + layout.padding / 2, layout.y + layout.padding / 2, layout.logo.width + layout.padding, layout.logo.height + layout.padding)
-      ctx.drawImage(logo, layout.x + layout.padding, layout.y + layout.padding, layout.logo.width, layout.logo.height)
+      ctx.drawImage(logo, logoCrop!.x, logoCrop!.y, logoCrop!.width, logoCrop!.height, layout.x + layout.padding, layout.y + layout.padding, layout.logo.width, layout.logo.height)
     }
-    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(1, layout.fontSize * .055)
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)
     ctx.font = `${layout.fontSize}px sans-serif`; ctx.textBaseline = 'top'; ctx.lineJoin = 'round'
     const drawLines = (lines: string[], x: number, y: number) => lines.forEach((line, index) => {
       const top = y + layout.lineHeight * index
       ctx.strokeText?.(line, x, top)
       ctx.fillText(line, x, top)
     })
-    drawLines(layout.headerLines, layout.x + layout.padding + (layout.logo ? layout.logo.width + layout.padding : 0), layout.y + layout.padding)
+    ctx.font = `bold ${layout.brandFontSize}px sans-serif`
+    drawLines(layout.brandLines, layout.x + layout.padding + (layout.logo ? layout.logo.width + layout.padding : 0), layout.y + layout.padding)
+    ctx.font = `${layout.fontSize}px sans-serif`
+    drawLines(layout.headerLines, layout.x + layout.padding, layout.y + layout.padding + layout.brandHeight + (layout.brandHeight ? layout.padding : 0))
     drawLines(layout.bodyLines, layout.x + layout.padding, bodyY + layout.padding)
     drawLines(layout.footerLines, layout.x + layout.padding, footerY + layout.padding)
     const result = await callback<any>((success, fail) => api.canvasToTempFilePath({ canvas, fileType: 'jpg', quality: .94, destWidth: width, destHeight: height, success, fail }))

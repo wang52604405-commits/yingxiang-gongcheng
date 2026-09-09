@@ -72,13 +72,14 @@ async function renderLatest() {
   const source = requireContext()
   if (!photographerVerified.value) throw new Error('拍摄者姓名尚未认证，请联系项目负责人审核')
   const result = await generatePhotoWatermark(source.sourcePath, {
-    project: form.project, unitProjectName: form.unitProjectName, partName: form.partName, unitName: form.unitName,
+    companyName: COMPANY_LOGOS[logoIndex.value - 1]?.name || '', project: form.project, unitProjectName: form.unitProjectName, partName: form.partName, unitName: form.unitName,
     constructionContent: form.constructionContent, capturedAt: form.capturedAt || form.photoDate,
     photographer: form.photographer, contractor: form.contractor,
     location: form.locationText.trim() ? { label: locationLabel.value, text: form.locationText.trim() } : undefined,
   }, {
     maxEdge: largeExport.value ? 4096 : 2048,
     logoPath: logoIndex.value ? COMPANY_LOGOS[logoIndex.value - 1]?.path : undefined,
+    logoCrop: logoIndex.value ? COMPANY_LOGOS[logoIndex.value - 1]?.symbolCrop : undefined,
   })
   requireContext()
   preview.value = result
@@ -193,14 +194,14 @@ watch([logoIndex, () => form.contractor], () => { if (context.value && sameConte
       <text class="archive-target">归档项目：{{ activeProject.name }}</text>
       <view class="edit-card card">
         <text class="section-title">固定工程水印</text>
-        <text class="copy-note">左下角 · 色块80%透明 · 约占画面1/6</text>
+        <text class="copy-note">左下角 · 浅蓝色块80%透明 · 约占画面1/6</text>
         <text class="field-label">企业标志</text><picker :range="logoNames" :value="logoIndex" :disabled="busy" @change="logoIndex = Number($event.detail.value)"><view class="input date-input">{{ logoNames[logoIndex] }}</view></picker>
         <text class="field-label">项目名称</text><view class="readonly-value">{{ form.project }}</view>
         <view class="field-heading"><text class="field-label">项目划分</text><button class="text-button pressable" :disabled="busy" @tap="chooseHierarchy">选择工程部位</button></view>
         <view class="hierarchy-row"><text>单位工程</text><text>{{ form.unitProjectName || '未选择' }}</text></view>
         <view class="hierarchy-row"><text>施工区域</text><text>{{ form.partName || '未选择分部工程' }}</text></view>
         <view class="hierarchy-row"><text>单元工程</text><text>{{ form.unitName || '未选择，可由后台识别' }}</text></view>
-        <text class="field-label">具体施工内容</text><input v-model="form.constructionContent" class="input" maxlength="100" placeholder="填写在单元工程名称后，如钢筋绑扎检查" :disabled="busy" />
+        <text class="field-label">具体施工内容</text><input v-model="form.constructionContent" class="input" maxlength="60" placeholder="填写在单元工程名称后，如钢筋绑扎检查" :disabled="busy" />
         <text class="field-label">时间（自动）</text><view class="readonly-value">{{ timeText }}</view>
         <text class="field-label">拍摄者</text><view class="readonly-value">{{ photographerVerified ? form.photographer + ' · 已认证' : '待项目负责人认证' }}</view>
         <view class="field-heading"><text class="field-label">位置</text><button v-if="form.locationText" class="text-button pressable" :disabled="busy" @tap="clearLocation">清除</button></view>
