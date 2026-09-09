@@ -163,14 +163,27 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
     const padding = Math.max(5, Math.round(fontSize * .38))
     const gap = Math.max(3, Math.round(fontSize * .16))
     const lineHeight = Math.ceil(fontSize * 1.35)
-    const logoScale = logoSize ? Math.min(panelWidth * .24 / logoSize.width, fontSize * 2.2 / logoSize.height) : 0
+    const logoBoxWidth = logoSize || fields.companyName ? Math.round(panelWidth * .24) : 0
+    const brandFontSize = Math.max(10, Math.min(Math.round(fontSize * 1.2), Math.floor((logoBoxWidth - padding * 2) / Math.max(1, Array.from(fields.companyName || '').length))))
+    const brandLines = fields.companyName ? [fields.companyName] : []
+    const brandLineHeight = Math.ceil(brandFontSize * 1.25)
+    const headerFontSize = Math.round(fontSize * 1.75)
+    const headerLineHeight = Math.ceil(headerFontSize * 1.3)
+    const headerWidth = panelWidth - logoBoxWidth - padding * 2
+    const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', Math.min(headerWidth, headerFontSize * 13), (text) => measureAtSize(text, headerFontSize))
+    if (headerLines.length > 1) {
+      const last = Array.from(headerLines[headerLines.length - 1])
+      const previous = Array.from(headerLines[headerLines.length - 2])
+      if (last.length < 3 && previous.length > 3) {
+        const moved = previous.splice(previous.length - (3 - last.length))
+        headerLines[headerLines.length - 2] = previous.join('')
+        headerLines[headerLines.length - 1] = [...moved, ...last].join('')
+      }
+    }
+    const headerHeight = Math.max(logoBoxWidth, headerLines.length * headerLineHeight + padding * 2)
+    const logoScale = logoSize ? Math.min((logoBoxWidth - padding * 2) / logoSize.width, (headerHeight - padding * 3 - brandLineHeight * brandLines.length) / logoSize.height) : 0
     const logo = logoSize ? { width: Math.max(1, Math.round(logoSize.width * logoScale)), height: Math.max(1, Math.round(logoSize.height * logoScale)) } : undefined
-    const brandFontSize = Math.round(fontSize * 1.3)
-    const brandLines = fields.companyName ? wrapWatermarkText(fields.companyName, panelWidth - padding * 2 - (logo ? logo.width + padding : 0), text => measureAtSize(text, brandFontSize)) : []
-    const brandHeight = Math.max(logo?.height || 0, brandLines.length * Math.ceil(brandFontSize * 1.25))
-    const headerWidth = panelWidth - padding * 2
-    const headerLines = wrapWatermarkText(fields.projectName?.trim() || fields.project?.trim() || '未选择工程', headerWidth, (text) => measureAtSize(text, fontSize))
-    const headerHeight = brandHeight + (brandHeight ? padding : 0) + headerLines.length * lineHeight + padding * 2
+    const brandHeight = brandLines.length * brandLineHeight
     const bodyLines = fixedWatermarkRows(fields).flatMap((row) => wrapWatermarkText(row, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize)))
     const bodyHeight = bodyLines.length * lineHeight + padding * 2
     const footerLines = wrapWatermarkText(`施工单位：${fields.contractor?.trim() || '未填写'}`, panelWidth - padding * 2, (text) => measureAtSize(text, fontSize))
@@ -179,7 +192,7 @@ export function layoutFixedWatermark(width: number, height: number, fields: Phot
     const area = panelWidth * panelHeight
     if (panelHeight <= height - margin * 2 && area <= maxArea
       && (area <= targetArea * 1.05 || fontSize <= preferredMinFont)) {
-      return { x: margin, y: height - margin - panelHeight, width: panelWidth, height: panelHeight, areaRatio: area / (width * height), fontSize, padding, gap, lineHeight, logo, brandFontSize, brandLines, brandHeight, headerLines, headerHeight, bodyLines, bodyHeight, footerLines, footerHeight }
+      return { x: margin, y: height - margin - panelHeight, width: panelWidth, height: panelHeight, areaRatio: area / (width * height), fontSize, padding, gap, lineHeight, logo, logoBoxWidth, brandFontSize, brandLineHeight, brandLines, brandHeight, headerFontSize, headerLineHeight, headerLines, headerHeight, bodyLines, bodyHeight, footerLines, footerHeight }
     }
     if (fontSize <= 10) throw new WatermarkError('水印内容过多，请缩短施工内容或施工单位名称', 'TEXT_TOO_LONG')
     fontSize -= 1
@@ -239,22 +252,32 @@ export async function generatePhotoWatermark(sourcePath: string, fields: PhotoWa
     ctx.fillRect(layout.x, layout.y, layout.width, layout.headerHeight)
     ctx.fillRect(layout.x, bodyY, layout.width, layout.bodyHeight)
     ctx.fillRect(layout.x, footerY, layout.width, layout.footerHeight)
+    if (layout.logoBoxWidth) {
+      ctx.fillStyle = '#ffffff'
+      if (ctx.beginPath && ctx.quadraticCurveTo && ctx.fill) {
+        const x = layout.x, y = layout.y, w = layout.logoBoxWidth, h = layout.headerHeight, r = Math.min(18, w * .12)
+        ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath(); ctx.fill()
+      } else ctx.fillRect(layout.x, layout.y, layout.logoBoxWidth, layout.headerHeight)
+    }
     if (logo && layout.logo) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'
-      ctx.fillRect(layout.x + layout.padding / 2, layout.y + layout.padding / 2, layout.logo.width + layout.padding, layout.logo.height + layout.padding)
-      ctx.drawImage(logo, logoCrop!.x, logoCrop!.y, logoCrop!.width, logoCrop!.height, layout.x + layout.padding, layout.y + layout.padding, layout.logo.width, layout.logo.height)
+      ctx.drawImage(logo, logoCrop!.x, logoCrop!.y, logoCrop!.width, logoCrop!.height,
+        layout.x + (layout.logoBoxWidth - layout.logo.width) / 2,
+        layout.y + Math.max(layout.padding, (layout.headerHeight - layout.brandHeight - layout.logo.height - layout.padding) / 2), layout.logo.width, layout.logo.height)
     }
     ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)
     ctx.font = `${layout.fontSize}px sans-serif`; ctx.textBaseline = 'top'; ctx.lineJoin = 'round'
-    const drawLines = (lines: string[], x: number, y: number) => lines.forEach((line, index) => {
-      const top = y + layout.lineHeight * index
+    const drawLines = (lines: string[], x: number, y: number, lineHeight = layout.lineHeight) => lines.forEach((line, index) => {
+      const top = y + lineHeight * index
       ctx.strokeText?.(line, x, top)
       ctx.fillText(line, x, top)
     })
     ctx.font = `bold ${layout.brandFontSize}px sans-serif`
-    drawLines(layout.brandLines, layout.x + layout.padding + (layout.logo ? layout.logo.width + layout.padding : 0), layout.y + layout.padding)
+    ctx.textAlign = 'center'; ctx.fillStyle = '#141414'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1
+    drawLines(layout.brandLines, layout.x + layout.logoBoxWidth / 2, layout.y + layout.headerHeight - layout.padding - layout.brandHeight, layout.brandLineHeight)
+    ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'; ctx.lineWidth = Math.max(2, layout.fontSize * .07)
+    ctx.font = `${layout.headerFontSize}px sans-serif`
+    drawLines(layout.headerLines, layout.x + layout.logoBoxWidth + layout.padding, layout.y + (layout.headerHeight - layout.headerLines.length * layout.headerLineHeight) / 2, layout.headerLineHeight)
     ctx.font = `${layout.fontSize}px sans-serif`
-    drawLines(layout.headerLines, layout.x + layout.padding, layout.y + layout.padding + layout.brandHeight + (layout.brandHeight ? layout.padding : 0))
     drawLines(layout.bodyLines, layout.x + layout.padding, bodyY + layout.padding)
     drawLines(layout.footerLines, layout.x + layout.padding, footerY + layout.padding)
     const result = await callback<any>((success, fail) => api.canvasToTempFilePath({ canvas, fileType: 'jpg', quality: .94, destWidth: width, destHeight: height, success, fail }))
