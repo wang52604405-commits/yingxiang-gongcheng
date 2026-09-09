@@ -1,8 +1,8 @@
 {
   "name": "engineering-image-miniprogram",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "private": true,
-  "description": "工程影像微信小程序 V1.4：原图分片上传、统一采集与云同步",
+  "description": "工程影像微信小程序 V1.5：批量采集、照片草稿与流畅上传",
   "scripts": {
     "dev:mp-weixin": "cross-env VITE_API_MODE=real uni -p mp-weixin",
     "dev:mp-weixin:mock": "uni -p mp-weixin --mode mock",

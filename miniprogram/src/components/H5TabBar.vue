@@ -6,7 +6,7 @@ const tabs = [
   { url: '/pages/home/index', icon: 'home', label: '工作台', visualIndex: 0 },
   { url: '/pages/library/index', icon: 'gallery', label: '影像库', visualIndex: 1 },
   { url: '', icon: 'camera', label: '采集', visualIndex: 2, action: true },
-  { url: '/pages/queue/index', icon: 'upload', label: '待上传', visualIndex: 3 },
+  { url: '/pages/queue/index', icon: 'upload', label: '同步记录', visualIndex: 3 },
   { url: '/pages/profile/index', icon: 'user', label: '我的', visualIndex: 4 },
 ] as const
 function activate(tab: typeof tabs[number]) {

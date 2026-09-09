@@ -309,6 +309,7 @@ class MobileServerContractTest(unittest.TestCase):
         original_size_bytes=None,
         original_filename=None,
         capture_source=None,
+        photographer=None,
         transfer_profile=None,
     ):
         fields = {
@@ -326,6 +327,8 @@ class MobileServerContractTest(unittest.TestCase):
                 filename if original_filename is None else original_filename
             ),
         }
+        if photographer is not None:
+            fields["photographer"] = photographer
         if capture_source is not None:
             fields["capture_source"] = capture_source
         if transfer_profile is not None:
@@ -3169,6 +3172,46 @@ class MobileServerContractTest(unittest.TestCase):
             rejected_terminal.status_code, 409, rejected_terminal.get_json()
         )
         self.assertEqual(rejected_terminal.get_json()["code"], "batch_committed")
+
+    def test_mobile_album_photographer_does_not_replace_authenticated_uploader(self):
+        batch_id = self._create_batch(self.token_a)
+        uploaded = self._upload(
+            self.token_a, batch_id, str(uuid.uuid4()), self._jpeg((48, 93, 121)),
+            capture_source="album", photographer="张三",
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        photo = uploaded.get_json()["photo"]
+        self.assertEqual(photo["photographer"], "张三")
+        self.assertEqual(photo["photographer_account_id"], 0)
+        self.assertEqual(photo["uploaded_by"], "tenant_a")
+        self.assertGreater(photo["uploaded_by_account_id"], 0)
+
+    def test_chunked_album_preserves_photographer_title_and_date(self):
+        from server import config
+        batch_id = self._create_batch(self.token_a)
+        photo_uuid = str(uuid.uuid4())
+        original = self._jpeg((20, 80, 120))
+        size = 1024
+        parts = [original[i:i + size] for i in range(0, len(original), size)]
+        payload = {
+            "photo_uuid": photo_uuid, "sha256": hashlib.sha256(original).hexdigest(),
+            "original_size_bytes": len(original), "original_filename": "old.jpg",
+            "chunk_size_bytes": size, "total_chunks": len(parts),
+            "capture_source": "album", "photographer": "李四", "uploaded_by": "伪造姓名",
+            "title": "老照片验收", "photo_date": "2024-01-02",
+        }
+        with patch.object(config, "MOBILE_CHUNK_BYTES", size):
+            init = self.client.post(f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/init", json=payload, headers=self._headers(self.token_a))
+        self.assertEqual(init.status_code, 201, init.get_json())
+        for i, part in enumerate(parts):
+            self.assertEqual(self._put_chunk(self.token_a, batch_id, photo_uuid, i, part).status_code, 201)
+        final = self.client.post(f"/api/mobile/v1/batches/{batch_id}/chunked-uploads/{photo_uuid}/finalize", json={"sha256": payload["sha256"], "original_size_bytes": len(original), "total_chunks": len(parts)}, headers=self._headers(self.token_a))
+        self.assertEqual(final.status_code, 201, final.get_json())
+        photo = final.get_json()["photo"]
+        self.assertEqual(photo["photographer"], "李四")
+        self.assertEqual(photo["uploaded_by"], "tenant_a")
+        self.assertEqual(photo["title"], "老照片验收")
+        self.assertEqual(photo["photo_date"], "2024-01-02")
 
     def test_mobile_upload_records_authenticated_account_as_photographer(self):
         batch_id = self._create_batch(self.token_a)

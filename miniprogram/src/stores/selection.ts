@@ -58,6 +58,7 @@ export const selectionStorage = {
   getLibraryFilter: (): DestinationSelection | null => uni.getStorageSync(ownerKey(LIBRARY_FILTER_KEY)) || null,
   setLibraryFilter: (value: DestinationSelection) => uni.setStorageSync(ownerKey(LIBRARY_FILTER_KEY), value),
   clearLibraryFilter: () => uni.removeStorageSync(ownerKey(LIBRARY_FILTER_KEY)),
+  clearConfirmDestination: (projectId: string) => uni.removeStorageSync(confirmDestinationKey(projectId)),
   getConfirmDestination: (projectId: string): DestinationSelection | null => {
     const value = uni.getStorageSync(confirmDestinationKey(projectId)) as DestinationSelection | null
     return value && String(value.project_id || '') === String(projectId || '') ? value : null

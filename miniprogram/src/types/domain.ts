@@ -116,6 +116,11 @@ export interface Assignment {
 }
 
 export interface UploadDraft {
+  assignment_explicit?: boolean
+  capture_item_id?: string
+  title?: string
+  photographer?: string
+  photo_date?: string
   project_id: string
   project_name?: string
   scope: Scope

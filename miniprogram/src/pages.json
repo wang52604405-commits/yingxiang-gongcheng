@@ -103,7 +103,7 @@
       },
       {
         "pagePath": "pages/queue/index",
-        "text": "待上传"
+        "text": "同步记录"
       },
       {
         "pagePath": "pages/profile/index",

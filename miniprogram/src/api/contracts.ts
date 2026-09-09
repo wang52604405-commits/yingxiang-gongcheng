@@ -22,6 +22,7 @@ export interface PhotoUploadMetadata {
   original_size_bytes: number
   original_filename: string
   original_mime_type: 'image/jpeg' | 'image/png'
+  photographer?: string
   title: string
   photo_date: string
   capture_source?: PhotoCaptureSource
@@ -55,6 +56,7 @@ export function buildChunkUploadInit(metadata: PhotoUploadMetadata, chunkSizeByt
     orientation: metadata.orientation,
     width: metadata.width,
     height: metadata.height,
+    ...(metadata.photographer !== undefined ? { photographer: metadata.photographer } : {}),
     title: metadata.title,
     photo_date: metadata.photo_date,
     ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),
@@ -90,6 +92,7 @@ export function buildPhotoUploadForm(metadata: PhotoUploadMetadata): Record<stri
     original_size_bytes: String(metadata.original_size_bytes),
     original_filename: metadata.original_filename,
     original_mime_type: metadata.original_mime_type,
+    ...(metadata.photographer !== undefined ? { photographer: metadata.photographer } : {}),
     title: metadata.title,
     photo_date: metadata.photo_date,
     ...(metadata.capture_source ? { capture_source: metadata.capture_source } : {}),

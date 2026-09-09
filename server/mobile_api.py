@@ -1568,9 +1568,8 @@ def register_mobile_api(
             else ("" if is_mobile_original else "desktop")
         )
         resolved_photographer = (
-            actor_name
-            if is_mobile_original and normalized_capture_source == "camera"
-            else ("" if is_mobile_original else _safe_text(photographer, 100))
+            _safe_text(photographer, 100)
+            or (actor_name if is_mobile_original and normalized_capture_source == "camera" else "")
         )
         resolved_uploaded_by = (
             actor_name
@@ -1891,6 +1890,7 @@ def register_mobile_api(
                             int(current_user["id"])
                             if is_mobile_original
                             and normalized_capture_source == "camera"
+                            and resolved_photographer == actor_name
                             else 0
                         ),
                         "uploaded_by": resolved_uploaded_by,
@@ -2026,6 +2026,7 @@ def register_mobile_api(
         """把升级前缺少 profile 的会话与新版显式空 profile 视为同一请求。"""
 
         metadata = dict(_json(value, {}))
+        metadata["photographer"] = _safe_text(metadata.get("photographer"), 100)
         metadata["transfer_profile"] = _transfer_profile(
             metadata.pop("transfer_profile", ""),
             metadata.pop("compression_profile", ""),
@@ -3520,6 +3521,7 @@ def register_mobile_api(
             category=batch["category"],
             assignment=assignment,
             title=request.form.get("title", ""),
+            photographer=request.form.get("photographer", ""),
             photo_date=request.form.get("photo_date", ""),
             client_captured_at=request.form.get("client_captured_at", ""),
             orientation=request.form.get("orientation", 1),
@@ -3593,6 +3595,7 @@ def register_mobile_api(
             "height": _strict_integer(
                 data.get("height", 0), "height", 0, config.MOBILE_MAX_ORIGINAL_EDGE
             ),
+            "photographer": _safe_text(data.get("photographer"), 100),
             "title": _safe_text(data.get("title"), 200),
             "photo_date": _photo_date(data.get("photo_date", "")),
             "capture_source": (
@@ -4347,6 +4350,7 @@ def register_mobile_api(
                         scope=batch["scope"],
                         category=batch["category"],
                         assignment=_json(batch["assignment_json"], {}),
+                        photographer=metadata.get("photographer", ""),
                         title=metadata.get("title", ""),
                         photo_date=metadata.get("photo_date", ""),
                         client_captured_at=metadata.get("client_captured_at", ""),

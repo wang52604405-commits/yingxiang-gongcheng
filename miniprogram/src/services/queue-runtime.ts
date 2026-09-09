@@ -382,6 +382,7 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 }
 
 function defaultTitle(draft: UploadDraft): string {
+  if (draft.title?.trim()) return draft.title.trim()
   if (draft.requirement?.photo_requirement_name) return draft.requirement.photo_requirement_name
   if (draft.scope === 'other') return draft.assignment?.other_node_name || '其它现场影像'
   return draft.assignment?.process_name || draft.assignment?.unit_name || '现场工程影像'
@@ -412,9 +413,9 @@ function recoveryPhoto(owner: string, batch: LocalBatch, original: { originalPat
     width: 0,
     height: 0,
     orientation: 1,
-    client_captured_at: createdAt,
+    client_captured_at: batch.draft.photo_date ? batch.draft.photo_date : (batch.draft.capture_source === 'camera' ? createdAt : ''),
     title: defaultTitle(batch.draft),
-    photo_date: createdAt.slice(0, 10),
+    photo_date: batch.draft.photo_date || (batch.draft.capture_source === 'camera' ? [new Date().getFullYear(), String(new Date().getMonth() + 1).padStart(2, '0'), String(new Date().getDate()).padStart(2, '0')].join('-') : ''),
     draft: JSON.parse(JSON.stringify(batch.draft)),
     status: 'failed',
     retry_from: 'local_ready',
@@ -474,6 +475,7 @@ async function recoverServerPreview(photo: LocalPhoto, generation: number): Prom
   let savedPath = ''
   try {
     const detail = await mobileApi.photo(photo.photo_uuid)
+    if (!isCurrentOwner(owner, generation) || photo.deleted_at) return
     const url = detail.photo.download_url || detail.photo.image_url || ''
     const saved = await downloadServerPreview(url)
     savedPath = saved.previewPath
@@ -555,6 +557,7 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
       original_size_bytes: size,
       original_filename: uploadOriginal ? photo.original_filename! : photo.transfer_filename!,
       original_mime_type: uploadOriginal ? originalMimeType(photo) : 'image/jpeg' as const,
+      photographer: photo.draft.photographer,
       title: photo.title,
       photo_date: photo.photo_date,
       capture_source: photo.draft.capture_source,
@@ -594,8 +597,8 @@ async function uploadOne(photo: LocalPhoto, batch: LocalBatch, generation: numbe
     if (!isCurrentOwner(owner, generation)) return
     photo.progress = 100
     photo.server_saved_at = now()
+    photo.preview_recovery_pending = !photo.preview_path
     setStatus(photo, 'server_saved')
-    await tryRecoverServerPreview(photo, generation)
     await cleanupOriginal(photo)
     await cleanupTransfer(photo)
   } catch (error) {
@@ -630,7 +633,10 @@ async function applyRemoteStatus(photo: LocalPhoto, remoteStatus: string): Promi
   const failedDuringUpload = photo.status === 'failed' && ['local_ready', 'uploading'].includes(photo.retry_from || 'local_ready') && !photo.preparation_pending
   if (targetRank > currentRank || failedDuringUpload) setStatus(photo, target, !canTransition(photo.status, target))
   if (targetRank >= 1) {
-    await tryRecoverServerPreview(photo, ownerGeneration)
+    if (!photo.preview_path && !photo.deleted_at) {
+      photo.preview_recovery_pending = true
+      persist(photo.owner_account_id)
+    }
     await cleanupOriginal(photo)
     await cleanupTransfer(photo)
   }
@@ -657,8 +663,8 @@ async function refreshRemoteBatch(batch: LocalBatch, generation: number): Promis
         continue
       }
       local.match_candidates = remote.match_candidates || local.match_candidates
-      if (remote.title) local.title = remote.title
-      if (remote.photo_date) local.photo_date = remote.photo_date
+      if (remote.title && !local.draft.title) local.title = remote.title
+      if (remote.photo_date && !local.draft.photo_date) local.photo_date = remote.photo_date
       if (!hasPermanentArchiveInfoFailure(batch)) await applyRemoteStatus(local, remote.status)
     }
     if (localPhotos.every((photo) => ['needs_review', 'desktop_pending', 'desktop_imported', 'local_deleted'].includes(photo.status))) batch.analyzed = batch.draft.mode === 'auto' || batch.analyzed
@@ -779,19 +785,24 @@ async function processBatch(batch: LocalBatch, generation: number): Promise<void
     return
   }
 
-  if (batch.draft.mode === 'direct' && !batch.committed && refreshed.some((photo) => photo.status === 'server_saved')) {
-    const serverSavedPhotos = refreshed.filter((photo) => photo.status === 'server_saved')
+  if (batch.draft.mode === 'direct' && !batch.committed && refreshed.some((photo) => ['server_saved', 'needs_review'].includes(photo.status))) {
+    const serverSavedPhotos = refreshed.filter((photo) => ['server_saved', 'needs_review'].includes(photo.status))
     if (serverSavedPhotos.some((photo) => !isAutomaticRetryDue(photo))) return
     try {
       serverSavedPhotos.forEach(beginAutomaticRetryAttempt)
       persist(owner)
+      if (refreshed.some((photo) => JSON.stringify(photo.draft.assignment) !== JSON.stringify(batch.draft.assignment))) {
+        await mobileApi.assignBatch(batch.remote_batch_id!, refreshed.filter((photo) => ['server_saved', 'needs_review'].includes(photo.status)).map((photo) => ({
+          photo_uuid: photo.photo_uuid, ...photo.draft.assignment, title: photo.title, photo_date: photo.photo_date,
+        })))
+      }
       await mobileApi.commitBatch(batch.remote_batch_id!)
       if (!isCurrentOwner(owner, generation)) return
-      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => setStatus(photo, 'desktop_pending'))
+      refreshed.filter((photo) => ['server_saved', 'needs_review'].includes(photo.status)).forEach((photo) => setStatus(photo, 'desktop_pending'))
       batch.committed = true
       persist(owner)
     } catch (error) {
-      refreshed.filter((photo) => photo.status === 'server_saved').forEach((photo) => {
+      refreshed.filter((photo) => ['server_saved', 'needs_review'].includes(photo.status)).forEach((photo) => {
         if (!scheduleAutomaticRetry(photo, error, 'server_saved')) markFailed(photo, error, 'server_saved')
       })
       if (isAuthExpired(error)) void notifyAuthExpired(owner)
@@ -832,11 +843,14 @@ async function resume(reason: 'app-show' | 'network-restored' | 'manual' = 'manu
         }
       }
     }
-    for (const photo of state.photos.filter((item) => REMOTE_STATUS_RANK[item.status])) {
+    // 所有原图先上传并提交电脑归档，预览恢复不占用原图上传并发槽。
+    // pending 已随服务器确认落盘；退出或失败后下轮可继续恢复。
+    await runWithConcurrency(state.photos.filter((item) => REMOTE_STATUS_RANK[item.status]), 2, async (photo) => {
+      if (!isCurrentOwner(owner, generation) || !state.online || !state.foreground) return
       await tryRecoverServerPreview(photo, generation)
       await cleanupOriginal(photo)
       await cleanupTransfer(photo)
-    }
+    })
   } finally {
     if (isCurrentOwner(owner, generation)) state.running = false
     void reason
@@ -963,8 +977,9 @@ function clearOwner(): void {
   state.prepareProgress = { current: 0, total: 0, message: '' }
 }
 
-async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<LocalBatch> {
+async function enqueue(sourcePaths: string[], draft: UploadDraft, overrides: Partial<UploadDraft>[] = []): Promise<LocalBatch> {
   if (!sourcePaths.length) throw new Error('没有选择照片')
+  if (overrides.length && overrides.length !== sourcePaths.length) throw new Error('照片信息与数量不一致，请重新选择')
   hydrate()
   const owner = state.ownerAccountId
   const generation = ownerGeneration
@@ -992,7 +1007,8 @@ async function enqueue(sourcePaths: string[], draft: UploadDraft): Promise<Local
       state.prepareProgress = { current: index + 1, total: sourcePaths.length, message: `正在安全保存第 ${index + 1} 张原图` }
       const photoUuid = createUuid()
       const filename = sourcePaths[index].replace(/\\/g, '/').split('/').pop() || 'photo'
-      const photo = recoveryPhoto(owner, batch, { originalPath: '', originalSize: sourceSize, originalFilename: filename }, photoUuid)
+      const photoDraft = { ...draft, ...overrides[index] }
+      const photo = recoveryPhoto(owner, { ...batch, draft: photoDraft }, { originalPath: '', originalSize: sourceSize, originalFilename: filename }, photoUuid)
       batch.photo_uuids.push(photoUuid)
       let original: { originalPath: string; originalSize: number; originalFilename: string }
       try {
@@ -1146,7 +1162,7 @@ function completeArchiveInfo(clientBatchId: string, projectName: string, assignm
     batch.analysis_job_id = undefined
   }
   batchPhotos.forEach((photo) => {
-    photo.draft = JSON.parse(JSON.stringify(batch.draft))
+    photo.draft = { ...photo.draft, project_name: batch.draft.project_name, assignment: { ...assignment } }
     if (repairedPhotos.includes(photo)) {
       photo.status = photo.failure_code === 'ARCHIVE_INFO_REQUIRED' ? 'local_ready' : retryTarget(photo)
       photo.retry_from = undefined

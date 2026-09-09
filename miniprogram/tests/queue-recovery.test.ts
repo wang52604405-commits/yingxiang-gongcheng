@@ -187,6 +187,46 @@ describe('原图优先落盘与账号隔离队列', () => {
     mocks.hashFile.mockResolvedValueOnce('d'.repeat(64)).mockResolvedValueOnce('c'.repeat(64))
   })
 
+  it('每张覆盖题名日期拍摄者在落盘前保存，相册缺日期不伪造今天', async () => {
+    const storage = new Map<string, any>()
+    installPlatform(storage, false)
+    mocks.stageOriginal.mockResolvedValue({ originalPath: '/user/old.jpg', originalSize: 8_000_000, originalFilename: 'old.jpg' })
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.enqueue(['/tmp/old.jpg', '/tmp/unknown.jpg'], { ...draft, capture_source: 'album', title: '本批题名' }, [
+      { title: '钢筋验收', photographer: '张三', photo_date: '2024-01-02', capture_item_id: '/tmp/old.jpg', assignment: { ...draft.assignment, process_name: '模板安装' } }, {},
+    ])
+    const old = queueRuntime.state.photos.find((p) => p.draft.capture_item_id === '/tmp/old.jpg')!
+    expect(old).toMatchObject({ title: '钢筋验收', photo_date: '2024-01-02', draft: { photographer: '张三', assignment: { process_name: '模板安装' } } })
+    expect(mocks.stageOriginal.mock.calls[0][2]).toMatchObject({ title: '钢筋验收', photo_date: '2024-01-02' })
+    const unknown = queueRuntime.state.photos.find((p) => p !== old)!
+    expect(unknown.photo_date).toBe('')
+    expect(unknown.client_captured_at).toBe('')
+    expect(mocks.hashFile).not.toHaveBeenCalled()
+  })
+
+  it('提交失败后恢复单张归属再提交，不覆盖手填题名日期', async () => {
+    const photo = localPhoto('32', 'individual-assignment')
+    photo.status = 'needs_review'
+    photo.title = '我的题名'
+    photo.photo_date = '2024-01-02'
+    photo.draft = { ...draft, title: photo.title, photo_date: photo.photo_date, assignment: { ...draft.assignment, process_name: '混凝土浇筑' } }
+    const batch = { ...localBatch(photo), committed: false }
+    const storage = new Map<string, any>([['engineering-image:queue:v2:account:32', { owner_account_id: '32', photos: [photo], batches: [batch] }]])
+    installPlatform(storage, true)
+    mocks.batch.mockResolvedValue({ batch_id: '18', photos: [{ photo_uuid: photo.photo_uuid, status: 'needs_review', title: '旧题名', photo_date: '2026-09-09' }] })
+    mocks.assignBatch.mockResolvedValue({ ok: true })
+    mocks.commitBatch.mockRejectedValueOnce(new Error('network timeout')).mockResolvedValueOnce({ ok: true })
+    const { queueRuntime } = await import('@/services/queue-runtime')
+    queueRuntime.setOwner('32')
+    await queueRuntime.resume('manual')
+    expect(queueRuntime.state.photos[0].auto_retry_pending).toBe(true)
+    queueRuntime.state.photos[0].next_retry_at = '2020-01-01T00:00:00Z'
+    await queueRuntime.resume('manual')
+    expect(mocks.assignBatch).toHaveBeenLastCalledWith('18', [expect.objectContaining({ process_name: '混凝土浇筑', title: '我的题名', photo_date: '2024-01-02' })])
+    expect(queueRuntime.state.batches[0].committed).toBe(true)
+  })
+
   it('批量第 N 张失败时，第一张原图已写恢复记录且仍属于先落盘批次', async () => {
     const storage = new Map<string, any>()
     installPlatform(storage, false)
@@ -867,6 +907,38 @@ describe('原图优先落盘与账号隔离队列', () => {
     expect(mocks.commitBatch).toHaveBeenCalledTimes(1)
     expect(queueRuntime.state.batches[0].archive_info_sync_failure_code).toBeUndefined()
     expect(queueRuntime.state.photos[0].status).toBe('desktop_pending')
+  })
+
+  it('4张原图各100ms且预览各1000ms时，200ms完成上传提交后才恢复预览', async () => {
+    vi.useFakeTimers()
+    try {
+      const photos = Array.from({ length: 4 }, (_, i) => ({ ...localPhoto('32', `speed-${i}`), status: 'local_ready' as const, preview_path: '', preview_size: 0, preview_sha256: '' }))
+      const batch = { ...localBatch(photos[0]), committed: false, photo_uuids: photos.map((p) => p.photo_uuid) }
+      const storage = new Map<string, any>([['engineering-image:queue:v2:account:32', { owner_account_id: '32', photos, batches: [batch] }]])
+      installPlatform(storage, true)
+      mocks.batch.mockResolvedValue({ batch_id: '18', photos: [] })
+      mocks.uploadPhoto.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 100)))
+      mocks.commitBatch.mockResolvedValue({ ok: true })
+      mocks.photo.mockResolvedValue({ photo: { download_url: 'https://api.example.test/preview' } })
+      mocks.downloadServerPreview.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ previewPath: '/user/recovered.jpg', previewSize: 100 }), 1000)))
+      mocks.hashFile.mockResolvedValue('a'.repeat(64))
+      const { queueRuntime } = await import('@/services/queue-runtime')
+      queueRuntime.setOwner('32')
+      const work = queueRuntime.resume('manual')
+      await vi.advanceTimersByTimeAsync(199)
+      expect(mocks.commitBatch).not.toHaveBeenCalled()
+      expect(mocks.downloadServerPreview).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(mocks.uploadPhoto).toHaveBeenCalledTimes(4)
+      expect(mocks.commitBatch).toHaveBeenCalledTimes(1)
+      expect(queueRuntime.state.photos.every((p) => p.status === 'desktop_pending' && p.preview_recovery_pending)).toBe(true)
+      expect(mocks.downloadServerPreview).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(2000)
+      await work
+      expect(queueRuntime.state.photos.every((p) => p.preview_path && !p.preview_recovery_pending)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('服务器预览恢复失败后按退避时间重试，同一轮询不重复请求', async () => {

@@ -13,10 +13,14 @@ class MemoryFs {
   readonly files = new Map<string, string | ArrayBuffer>()
   readonly directories = new Set<string>()
   failWrite: ((path: string) => boolean) | null = null
+  copies = 0
+  moves = 0
+  writes = 0
 
   mkdirSync(path: string) { this.directories.add(path) }
   writeFileSync(path: string, data: string | ArrayBuffer) {
     if (this.failWrite?.(path)) throw new Error('storage quota exceeded')
+    this.writes += 1
     this.files.set(path, data)
   }
   readFileSync(path: string) {
@@ -35,9 +39,18 @@ class MemoryFs {
     return { size: typeof value === 'string' ? new TextEncoder().encode(value).byteLength : value.byteLength, isFile: () => true }
   }
   copyFile({ srcPath, destPath, success, fail }: any) {
+    this.copies += 1
     const source = this.files.get(srcPath)
     if (source === undefined) { fail(new Error('source missing')); return }
     this.files.set(destPath, source instanceof ArrayBuffer ? source.slice(0) : source)
+    success({})
+  }
+  rename({ oldPath, newPath, success, fail }: any) {
+    const source = this.files.get(oldPath)
+    if (source === undefined) { fail(new Error('source missing')); return }
+    this.moves += 1
+    this.files.set(newPath, source)
+    this.files.delete(oldPath)
     success({})
   }
   unlinkSync(path: string) { this.files.delete(path) }
@@ -99,6 +112,81 @@ describe('账号分片队列与原图写前清单', () => {
       getStorageSync: vi.fn(() => undefined),
       setStorageSync: vi.fn(() => { throw new Error('localStorage quota exceeded') }),
     }
+  })
+
+  it('选图到入队只复制一次；原子移动后立即退出仍通过 WAL 恢复', async () => {
+    fs.files.set('/tmp/camera.jpg', new Uint8Array(12).buffer)
+    const { persistCaptureOriginal, discardCaptureOriginal } = await import('@/services/capture-draft-files')
+    const { queueFileStore } = await import('@/services/queue-storage')
+    const saved = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    const item = photo('A', 'adopted')
+    const staged = await queueFileStore.stageOriginal('A', batch('A', item.photo_uuid), item, saved.originalPath, 12)
+    expect(fs.copies).toBe(1)
+    expect(fs.moves).toBe(1)
+    expect(staged.originalFilename).toBe('camera.jpg')
+    expect(await discardCaptureOriginal(saved.originalPath, 'A', 'YNLQ')).toBe(false)
+    expect(fs.files.has(staged.originalPath)).toBe(true)
+    expect(queueFileStore.load('A').photos[0].original_path).toBe(staged.originalPath)
+  })
+
+  it('WAL 写入失败不会移动草稿，重新提交仍可恢复', async () => {
+    fs.files.set('/tmp/camera.jpg', new Uint8Array(12).buffer)
+    const { persistCaptureOriginal } = await import('@/services/capture-draft-files')
+    const { queueFileStore } = await import('@/services/queue-storage')
+    const saved = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    const item = photo('A', 'wal-fails')
+    fs.failWrite = (path) => path.includes('/wal/')
+    await expect(queueFileStore.stageOriginal('A', batch('A', item.photo_uuid), item, saved.originalPath, 12)).rejects.toThrow('quota')
+    expect(fs.files.has(saved.originalPath)).toBe(true)
+    expect(fs.moves).toBe(0)
+  })
+
+  it('草稿删除严格限定本人当前工程，且不触碰原始相册文件', async () => {
+    fs.files.set('/tmp/camera.jpg', new Uint8Array(12).buffer)
+    const { persistCaptureOriginal, discardCaptureOriginal } = await import('@/services/capture-draft-files')
+    const saved = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    expect(await discardCaptureOriginal(saved.originalPath, 'B', 'YNLQ')).toBe(false)
+    expect(await discardCaptureOriginal(saved.originalPath, 'A', 'another')).toBe(false)
+    expect(await discardCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')).toBe(false)
+    expect(await discardCaptureOriginal(saved.originalPath, 'A', 'YNLQ')).toBe(true)
+    expect(fs.files.has('/tmp/camera.jpg')).toBe(true)
+  })
+
+  it('页面快照前退出可列出完整草稿，忽略缺失或不完整副本并隔离账号工程', async () => {
+    fs.files.set('/tmp/camera.jpg', new Uint8Array(12).buffer)
+    const { persistCaptureOriginal, listCaptureOriginals } = await import('@/services/capture-draft-files')
+    const complete = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    const missing = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    const incomplete = await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'YNLQ')
+    await persistCaptureOriginal('/tmp/camera.jpg', 'B', 'YNLQ')
+    await persistCaptureOriginal('/tmp/camera.jpg', 'A', 'another')
+    fs.files.delete(missing.originalPath)
+    fs.files.set(incomplete.originalPath, new Uint8Array(3).buffer)
+    expect(listCaptureOriginals('A', 'YNLQ')).toEqual([complete])
+    expect(listCaptureOriginals('B', 'YNLQ')).toHaveLength(1)
+    expect(listCaptureOriginals('A', 'another')).toHaveLength(1)
+    expect(fs.files.has(`${missing.originalPath}.json`)).toBe(true)
+    expect(fs.files.has(incomplete.originalPath)).toBe(true)
+  })
+
+  it('500 张历史照片只写变化的那一张，断点失败仍可原样重试落盘', async () => {
+    const { queueFileStore } = await import('@/services/queue-storage')
+    const photos = Array.from({ length: 500 }, (_, index) => photo('A', `history-${index}`))
+    const group = batch('A', 'history-0')
+    queueFileStore.persistSnapshot('A', photos, [group])
+    expect(fs.writes).toBe(501)
+    photos[0].progress = 20
+    queueFileStore.persistSnapshot('A', photos, [group])
+    expect(fs.writes).toBe(502)
+    queueFileStore.persistSnapshot('A', photos, [group])
+    expect(fs.writes).toBe(502)
+    photos[0].uploaded_chunks = [0]
+    fs.failWrite = (path) => path.includes('/photos/history-0.')
+    expect(() => queueFileStore.persistSnapshot('A', photos, [group])).toThrow('quota')
+    fs.failWrite = null
+    queueFileStore.persistSnapshot('A', photos, [group])
+    expect(fs.writes).toBe(503)
+    expect(queueFileStore.load('A').photos.find((entry) => entry.photo_uuid === 'history-0')?.uploaded_chunks).toEqual([0])
   })
 
   it('原图复制成功后即使进程在照片分片写入前退出，重启也从 WAL 精确恢复', async () => {

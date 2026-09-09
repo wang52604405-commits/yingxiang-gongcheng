@@ -1,4 +1,5 @@
 import type { LocalBatch, LocalPhoto } from '@/types/domain'
+import { adoptCaptureOriginal, captureOriginalFilename } from './capture-draft-files'
 
 const LEGACY_QUEUE_KEY = 'engineering-image:queue:v2'
 const VAULT_DIR = 'engineering-image-queue-v3'
@@ -39,6 +40,7 @@ export interface QueueFileStore {
 }
 
 const sequenceByRecord = new Map<string, number>()
+const savedValueByRecord = new Map<string, string>()
 
 function ownerToken(owner: string): string {
   return Array.from(owner).map((character) => character.codePointAt(0)!.toString(16).padStart(6, '0')).join('') || 'empty'
@@ -114,11 +116,16 @@ function loadRecords<T extends { owner_account_id: string }>(fs: any, owner: str
 
 function writeRecord<T>(fs: any, owner: string, kind: 'photos' | 'batches', id: string, value: T): void {
   const key = recordKey(owner, kind, safeId(id))
+  const serialized = JSON.stringify(value)
+  // Only skip values successfully written in this process; changed records remain
+  // synchronous and durable, including every resumable upload checkpoint.
+  if (savedValueByRecord.get(key) === serialized) return
   const sequence = (sequenceByRecord.get(key) || 0) + 1
   const slot = sequence % 2
   const path = join(directory(owner, kind), `${id}.${slot}.json`)
   fs.writeFileSync(path, JSON.stringify({ sequence, value } satisfies RecordEnvelope<T>), 'utf8')
   sequenceByRecord.set(key, sequence)
+  savedValueByRecord.set(key, serialized)
 }
 
 function pathExistsWithSize(fs: any, path: string, expectedSize: number): boolean {
@@ -196,6 +203,10 @@ function recoverWal(fs: any, owner: string, photos: LocalPhoto[], batches: Local
 }
 
 function load(owner: string): QueueSnapshot {
+  // A reload can recover an older valid slot after corruption; do not let the
+  // previous in-memory deduplication cache suppress repairing that record.
+  const prefix = `${ownerToken(owner)}:`
+  for (const key of savedValueByRecord.keys()) if (key.startsWith(prefix)) savedValueByRecord.delete(key)
   const fs = fsManager()
   if (!fs || !userRoot()) return fallbackSnapshot(owner)
   ensureDirectories(fs, owner)
@@ -242,7 +253,7 @@ async function stageOriginal(owner: string, batch: LocalBatch, photo: LocalPhoto
   if (!fs || !userRoot()) throw new Error('当前环境无法安全保存原图')
   if (photo.owner_account_id !== owner || batch.owner_account_id !== owner) throw new Error('照片账号与当前账号不一致')
   ensureDirectories(fs, owner)
-  const filename = sourceFilename(sourcePath)
+  const filename = captureOriginalFilename(sourcePath, owner, photo.draft.project_id) || sourceFilename(sourcePath)
   const originalPath = join(directory(owner, 'originals'), `${safeId(photo.photo_uuid)}${extension(filename)}`)
   const wal: OriginalWal = {
     version: 1,
@@ -255,7 +266,8 @@ async function stageOriginal(owner: string, batch: LocalBatch, photo: LocalPhoto
   }
   // 写前清单成功后才允许复制；写入失败时用户临时原图仍未被移动。
   fs.writeFileSync(join(directory(owner, 'wal'), `${safeId(photo.photo_uuid)}.json`), JSON.stringify(wal), 'utf8')
-  await copyFile(fs, sourcePath, originalPath)
+  const adopted = await adoptCaptureOriginal(sourcePath, owner, photo.draft.project_id, originalPath, sourceSize)
+  if (!adopted) await copyFile(fs, sourcePath, originalPath)
   let actualSize = 0
   try {
     const stats = fs.statSync(originalPath)

@@ -73,7 +73,7 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
     </view>
     <view class="summary-grid">
       <view class="summary-card"><text class="summary-number">{{ todayCaptureCount }}</text><text class="summary-label">今日采集</text></view>
-      <button class="summary-card pressable" @tap="openQueue"><text class="summary-number" :class="{ warning: pendingCount > 0 }">{{ pendingCount }}</text><text class="summary-label">待上传</text></button>
+      <button class="summary-card pressable" @tap="openQueue"><text class="summary-number" :class="{ warning: pendingCount > 0 }">{{ pendingCount }}</text><text class="summary-label">待同步</text></button>
       <button class="summary-card pressable" @tap="openRequirements"><text class="summary-number">{{ requirementCount || '—' }}</text><text class="summary-label">采集清单</text></button>
     </view>
     <view class="section-head"><text class="section-title">最近影像</text><button class="section-action pressable" @tap="uniApi.switchTab({ url: '/pages/library/index' })">查看全部</button></view>

@@ -7,11 +7,13 @@ import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
 import type { Assignment } from '@/types/domain'
+import { createConfirmSelectionSession, initialConfirmAssignment } from '@/services/confirm-selection'
 import { isArchiveInfoComplete, resolveDraftProject } from '@/services/archive-info'
 
 const clientBatchId = ref('')
 const submitting = ref(false)
 const selections = reactive<Record<string, Assignment>>({})
+const manualSession = createConfirmSelectionSession()
 const batchProjectName = ref('')
 const batch = computed(() => queueRuntime.state.batches.find((item) => item.client_batch_id === clientBatchId.value))
 const photos = computed(() => queueRuntime.state.photos.filter((photo) => photo.client_batch_id === clientBatchId.value))
@@ -27,29 +29,10 @@ const readyToConfirm = computed(() => photos.value.length > 0 && photos.value.ev
 const processing = computed(() => photos.value.some((photo) => ['local_ready', 'uploading', 'server_saved', 'analyzing'].includes(photo.status)))
 
 watch(photos, (items) => {
-  const manual = selectionStorage.getConfirmDestination(batchProjectId.value)
   items.forEach((photo) => {
     if (selections[photo.photo_uuid]) return
-    const candidate = photo.match_candidates?.[0]
-    const baseline = photo.draft.assignment
-    if (candidate) {
-      selections[photo.photo_uuid] = baseline && (
-        candidate.unit_code === baseline.unit_code || candidate.other_node_code === baseline.other_node_code
-      ) ? {
-          ...baseline,
-          process_name: candidate.process_name || baseline.process_name,
-        } : {
-          unit_code: candidate.unit_code,
-          unit_name: candidate.unit_name,
-          process_name: candidate.process_name,
-          other_node_code: candidate.other_node_code,
-          other_node_name: candidate.other_node_name,
-        }
-    } else if (baseline) {
-      selections[photo.photo_uuid] = { ...baseline }
-    } else if (manual?.scope === photo.draft.scope) {
-      selections[photo.photo_uuid] = { ...manual.assignment }
-    }
+    const assignment = initialConfirmAssignment(photo.draft, photo.match_candidates?.[0])
+    if (assignment) selections[photo.photo_uuid] = assignment
   })
 }, { immediate: true, deep: true })
 
@@ -59,11 +42,12 @@ function chooseManual() {
     uni.showToast({ title: '未找到这批照片所属工程', icon: 'none' })
     return
   }
+  manualSession.begin(String(currentBatch.draft.project_id))
   uni.navigateTo({ url: `/pages/destination/select?scope=${currentBatch.draft.scope}&return=confirm&project_id=${encodeURIComponent(currentBatch.draft.project_id)}` })
 }
 
 function applyManualSelection() {
-  const manual = selectionStorage.getConfirmDestination(batchProjectId.value)
+  const manual = manualSession.consume(batchProjectId.value)
   if (!manual || manual.scope !== batch.value?.draft.scope) return
   if (manual.project_name) batchProjectName.value = String(manual.project_name)
   photos.value.forEach((photo) => { selections[photo.photo_uuid] = { ...manual.assignment } })

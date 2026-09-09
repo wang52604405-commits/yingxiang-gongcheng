@@ -103,7 +103,9 @@ export function normalizeCloudPhoto(raw: any): CloudPhoto {
 export function normalizeTreeNode(raw: any): ProjectNode {
   const children = Array.isArray(raw?.children) ? raw.children.map(normalizeTreeNode) : []
   const type = String(raw?.type || raw?.node_type || 'other') as ProjectNode['type']
-  const processes = children.filter((child: ProjectNode) => child.type === 'process').map((child: ProjectNode) => child.name)
+  const explicitProcesses = Array.isArray(raw?.processes) ? raw.processes.filter((value: unknown): value is string => typeof value === 'string') : []
+  const childProcesses = children.filter((child: ProjectNode) => child.type === 'process' && child.active !== false).map((child: ProjectNode) => child.name)
+  const processes = [...new Set<string>([...explicitProcesses, ...childProcesses].map((name: string) => name.trim()).filter(Boolean))]
   return {
     code: String(raw?.code || raw?.node_code || raw?.unit_code || ''),
     name: String(raw?.name || ''),

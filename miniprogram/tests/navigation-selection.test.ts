@@ -33,7 +33,7 @@ describe('工程与单元选择返回页面后的刷新契约', () => {
     const destination = source('src/pages/destination/select.vue')
     expect(confirm).toContain("const batchProjectId = computed(() => String(batch.value?.draft.project_id || ''))")
     expect(confirm).toContain('mobileApi.projects()')
-    expect(confirm).toContain('selectionStorage.getConfirmDestination(batchProjectId.value)')
+    expect(confirm).toContain('manualSession.consume(batchProjectId.value)')
     expect(confirm).toContain('if (manual.project_name) batchProjectName.value = String(manual.project_name)')
     expect(confirm).toContain('project_id=${encodeURIComponent(currentBatch.draft.project_id)}')
     expect(confirm).not.toContain('activeProject')

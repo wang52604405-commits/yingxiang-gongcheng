@@ -6,7 +6,7 @@ Component({
     {path:'/pages/home/index',label:'工作台',icon:'home'},
     {path:'/pages/library/index',label:'影像库',icon:'gallery'},
     {action:'capture',label:'采集',icon:'camera',primary:true},
-    {path:'/pages/queue/index',label:'待上传',icon:'upload'},
+    {path:'/pages/queue/index',label:'同步记录',icon:'upload'},
     {path:'/pages/profile/index',label:'我的',icon:'user'}
   ]},
   lifetimes:{attached(){this.refreshBadge()}},
