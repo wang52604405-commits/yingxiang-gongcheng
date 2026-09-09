@@ -50,8 +50,12 @@ jobs:
       - name: 验证测试、版本与发布密钥
         shell: powershell
         run: |
+          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
+          if ($LASTEXITCODE -ne 0) { throw "asset line-ending normalization failed: exit code $LASTEXITCODE" }
           python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
           python verify_release.py
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
       - name: 构建并部署 5088
         shell: powershell
@@ -120,8 +124,12 @@ jobs:
       - name: 部署前运行完整回归与发布校验
         shell: powershell
         run: |
+          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
+          if ($LASTEXITCODE -ne 0) { throw "asset line-ending normalization failed: exit code $LASTEXITCODE" }
           python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
           python verify_release.py
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
       - name: 判断是否需要部署服务器
         id: check

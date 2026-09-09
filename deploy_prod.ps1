@@ -36,6 +36,42 @@ function Test-IsInstalledAppProcess($process) {
     }
 }
 
+function Get-SafeProcessCommandLine($process) {
+    try {
+        $commandLine = [string]$process.CommandLine
+    } catch {
+        return ""
+    }
+    if (-not $commandLine) { return "" }
+    return [regex]::Replace(
+        $commandLine,
+        '(?i)(--?[A-Za-z0-9_-]*(?:pass|password|token|secret|key)[A-Za-z0-9_-]*)(=|\s+)(?:"[^"]*"|\S+)',
+        '$1$2***'
+    )
+}
+
+function Test-IsVerifiedLegacySourceAppProcess($process, $pythonExecutable, $expectedVersion, $listenPort) {
+    try {
+        if (-not $process -or -not $pythonExecutable -or -not $expectedVersion) { return $false }
+        $executable = [string]$process.ExecutablePath
+        if (-not $executable) { return $false }
+        $fullExecutable = [IO.Path]::GetFullPath($executable)
+        $expectedPython = [IO.Path]::GetFullPath([string]$pythonExecutable)
+        if (-not [string]::Equals($fullExecutable, $expectedPython, [StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+        $commandLine = [string]$process.CommandLine
+        if ($commandLine -notmatch '(?i)(?:^|[\s"\\/])run\.py(?:"|\s|$)') { return $false }
+        $bootstrap = Invoke-RestMethod -Uri "http://127.0.0.1:$listenPort/api/bootstrap" -Method Get -TimeoutSec 3
+        if (-not $bootstrap -or $bootstrap.ok -ne $true) { return $false }
+        if ([string]$bootstrap.app_version -ne [string]$expectedVersion) { return $false }
+        $propertyNames = @($bootstrap.PSObject.Properties.Name)
+        return (($propertyNames -contains "revision") -and ($propertyNames -contains "optimization_status"))
+    } catch {
+        return $false
+    }
+}
+
 # 找到 Python（服务账户 PATH 可能不含 python.exe）
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($python) {
@@ -52,6 +88,12 @@ if ($python) {
     if (-not $pythonPath) { throw "找不到 python.exe" }
 }
 Write-Host "[*] Python: $pythonPath"
+
+$cloudClientSource = Get-Content (Join-Path $repoRoot "cloud_client.py") -Raw -Encoding UTF8
+$versionMatch = [regex]::Match($cloudClientSource, 'APP_VERSION\s*=\s*"([^"]+)"')
+if (-not $versionMatch.Success) { throw "无法读取当前 APP_VERSION" }
+$expectedVersion = $versionMatch.Groups[1].Value
+Write-Host "[*] Expected app version: $expectedVersion"
 
 # ---------- 1. 构建依赖 ----------
 Write-Host ""
@@ -84,29 +126,56 @@ Write-Host "[4/7] 完整性校验"
 & $pythonPath "tamper_guard.py" verify "$distDir"
 if ($LASTEXITCODE -ne 0) { throw "[4/7] 校验失败（退出码 $LASTEXITCODE）" }
 
-# ---------- 5. 精确停止目标安装目录里的服务与桌面启动器 ----------
+# ---------- 5. 精确停止本项目正式进程，以及经严格验证的旧源码实例 ----------
 Write-Host ""
 Write-Host "[5/7] 停止 $port 与桌面启动器"
-# 只处理 $installDir 下的固定进程名；同名但位于其它目录的程序不受影响。
+
+# 旧版曾通过 autostart_album.ps1 使用“python run.py”占用 5088。
+# 仅当 Python 路径、run.py 命令行、以及本机 /api/bootstrap 的产品版本和结构全部匹配时才关闭；
+# 任一条件不满足都仍按外部程序处理并 fail-closed。
+$legacyListenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+foreach ($listenerPid in $legacyListenerPids) {
+    $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
+    if ($owner -and (Test-IsVerifiedLegacySourceAppProcess $owner $pythonPath $expectedVersion $port)) {
+        Write-Host "    识别并停止本项目旧源码实例 PID $listenerPid ($($owner.Name) run.py)"
+        Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+    }
+}
+Start-Sleep -Milliseconds 700
+
+# 只处理 $installDir 下的固定正式进程名；同名但位于其它目录的程序不受影响。
 $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { Test-IsInstalledAppProcess $_ })
 foreach ($proc in $procs) {
     Write-Host "    停止 PID $($proc.ProcessId) $($proc.Name)"
     Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
 }
-# 端口若仍被占用，只在路径和进程名都属于本安装目录时关闭；否则直接失败。
+Start-Sleep -Milliseconds 700
+
+# 重新读取端口。剩余监听者只能是本安装目录的正式程序，否则记录占用者并直接失败。
 $listenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
 foreach ($listenerPid in $listenerPids) {
     $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
-    if (-not $owner -or -not (Test-IsInstalledAppProcess $owner)) {
+    if (-not $owner) {
+        Write-Host "    [BLOCK] PID $listenerPid：无法读取进程信息"
         throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
     }
-}
-foreach ($listenerPid in $listenerPids) {
+    if (-not (Test-IsInstalledAppProcess $owner)) {
+        $ownerPath = [string]$owner.ExecutablePath
+        $ownerCommandLine = Get-SafeProcessCommandLine $owner
+        Write-Host "    [BLOCK] PID $listenerPid Name=$($owner.Name) ParentPID=$($owner.ParentProcessId)"
+        Write-Host "    [BLOCK] ExecutablePath=$ownerPath"
+        if ($ownerCommandLine) {
+            Write-Host "    [BLOCK] CommandLine=$ownerCommandLine"
+        }
+        throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
+    }
     Write-Host "    停止本应用监听 PID $listenerPid"
     Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
 }
+
 # 等待进程退出并释放 DLL 句柄（最多 30 秒）
 for ($i = 0; $i -lt 30; $i++) {
     $alive = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |

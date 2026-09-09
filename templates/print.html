@@ -19,13 +19,29 @@
 {% set margin_right = print_settings.get("print_margin_right_mm", 6) %}
 {% set margin_bottom = print_settings.get("print_margin_bottom_mm", 6) %}
 {% set margin_left = print_settings.get("print_margin_left_mm", 6) %}
+{% set source_margin_top = margin_top %}
+{% set source_margin_right = margin_right %}
+{% set source_margin_bottom = margin_bottom %}
+{% set source_margin_left = margin_left %}
+{% if layout == "landscape" %}
+  {% set margin_top = 25 %}
+{% else %}
+  {% set margin_left = 25 %}
+{% endif %}
 {% set show_page_title = print_settings.get("print_show_page_title", true) %}
 {% set image_fit = print_settings.get("print_image_fit", "contain") %}
 {% set paper_width = 210 if layout == "portrait" else 297 %}
 {% set paper_height = 297 if layout == "portrait" else 210 %}
+{% set source_content_width = paper_width - source_margin_left - source_margin_right %}
+{% set source_content_height = paper_height - source_margin_top - source_margin_bottom %}
 {% set content_width = paper_width - margin_left - margin_right %}
 {% set content_height = paper_height - margin_top - margin_bottom %}
 {% set title_height = 7 if show_page_title else 0 %}
+{% set source_layout_height = source_content_height - title_height %}
+{% set target_layout_height = content_height - title_height %}
+{% set scale_x = (content_width / source_content_width) if source_content_width > 0 else 1 %}
+{% set scale_y = (target_layout_height / source_layout_height) if source_layout_height > 0 else 1 %}
+{% set print_scale = [1, scale_x, scale_y]|min %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
 {% set has_books = has_project_groups and (project_groups|selectattr("level")|list|length > 0) %}
 {% set style_labels = {"one": "一张纸 1 张图", "two": "两宫格", "four": "四宫格", "default": "四宫格", "portrait2": "两宫格", "landscape2": "两宫格", "single": "一张纸 1 张图"} %}
@@ -96,10 +112,12 @@
     .meta { font-size: 12px; color: #374151; white-space: nowrap; }
     .layout-fixed {
       position: relative;
-      width: 100%;
+      width: {{ source_content_width }}mm;
+      height: {{ source_layout_height }}mm;
       overflow: hidden;
+      transform: scale({{ print_scale }});
+      transform-origin: top left;
     }
-    .layout-fixed { height: {{ content_height - title_height }}mm; }
     .photo-item {
       position: absolute;
       background: #fff;
@@ -241,7 +259,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
