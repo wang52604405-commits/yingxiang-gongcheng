@@ -36,6 +36,20 @@ function Test-IsInstalledAppProcess($process) {
     }
 }
 
+function Get-SafeProcessCommandLine($process) {
+    try {
+        $commandLine = [string]$process.CommandLine
+    } catch {
+        return ""
+    }
+    if (-not $commandLine) { return "" }
+    return [regex]::Replace(
+        $commandLine,
+        '(?i)(--?[A-Za-z0-9_-]*(?:pass|password|token|secret|key)[A-Za-z0-9_-]*)(=|\s+)(?:"[^"]*"|\S+)',
+        '$1$2***'
+    )
+}
+
 # 找到 Python（服务账户 PATH 可能不含 python.exe）
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($python) {
@@ -94,12 +108,23 @@ foreach ($proc in $procs) {
     Write-Host "    停止 PID $($proc.ProcessId) $($proc.Name)"
     Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
 }
-# 端口若仍被占用，只在路径和进程名都属于本安装目录时关闭；否则直接失败。
+# 端口若仍被占用，只在路径和进程名都属于本安装目录时关闭；否则记录占用者并直接失败。
 $listenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
 foreach ($listenerPid in $listenerPids) {
     $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
-    if (-not $owner -or -not (Test-IsInstalledAppProcess $owner)) {
+    if (-not $owner) {
+        Write-Host "    [BLOCK] PID $listenerPid：无法读取进程信息"
+        throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
+    }
+    if (-not (Test-IsInstalledAppProcess $owner)) {
+        $ownerPath = [string]$owner.ExecutablePath
+        $ownerCommandLine = Get-SafeProcessCommandLine $owner
+        Write-Host "    [BLOCK] PID $listenerPid Name=$($owner.Name) ParentPID=$($owner.ParentProcessId)"
+        Write-Host "    [BLOCK] ExecutablePath=$ownerPath"
+        if ($ownerCommandLine) {
+            Write-Host "    [BLOCK] CommandLine=$ownerCommandLine"
+        }
         throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
     }
 }
