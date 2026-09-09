@@ -50,6 +50,19 @@
       }
     },
     {
+      "path": "pages/project/applications",
+      "style": {
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/project/request-status",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/project/invite",
       "style": {
         "navigationStyle": "custom"

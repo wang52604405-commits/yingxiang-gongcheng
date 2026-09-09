@@ -3173,6 +3173,235 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertEqual(rejected_terminal.get_json()["code"], "batch_committed")
 
+    def _wechat_join_invite(self, role="capturer"):
+        project_id = "wx-join-" + uuid.uuid4().hex[:12]
+        snapshot = self._snapshot(self.desktop_token_a, "微信邀请工程", project_id=project_id, desktop_machine_id="MACHINE-A", revision=1).get_json()
+        invite = self.client.post("/api/desktop/v1/project-invites", json={"project_id": project_id, "role": role, "desktop_machine_id": "MACHINE-A"}, headers=self._headers(self.desktop_token_a))
+        self.assertEqual(invite.status_code, 201, invite.get_json())
+        return snapshot, invite.get_json()["invite"]["code"]
+
+    def _wechat_join(self, invite, identity, **extra):
+        from server.mobile_api import _exchange_wechat_code
+        with patch("server.mobile_api._exchange_wechat_code", return_value={"openid": identity, "unionid": ""}):
+            return self.client.post("/api/mobile/v1/auth/wechat-join", json={"code": "fresh-code", "app_id": "test-join-app", "invite_code": invite, "display_name": "新成员", "phone": "13800138000", **extra})
+
+    def test_wechat_join_independent_account_role_identity_and_idempotency(self):
+        snapshot, invite = self._wechat_join_invite("capturer")
+        identity = uuid.uuid4().hex
+        joined = self._wechat_join(invite, identity, role="owner", account_id=snapshot["owner_account_id"])
+        self.assertEqual(joined.status_code, 200, joined.get_json())
+        data = joined.get_json()
+        self.assertTrue(data["pending_approval"])
+        self.assertNotIn("project", data)
+        self.assertEqual(data["bootstrap"]["projects"], [])
+        denied = self.client.get(f"/api/mobile/v1/projects/{snapshot['project_ref']}/tree", headers=self._headers(data["token"]))
+        self.assertEqual(denied.status_code, 404)
+        approved = self.client.post(f"/api/mobile/v1/project-join-requests/{data['join_request']['id']}/approve", json={}, headers=self._headers(self.token_a))
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        data = self._wechat_join(invite, identity).get_json()
+        self.assertNotEqual(data["account"]["id"], snapshot["owner_account_id"])
+        self.assertEqual(data["account"]["role"], "user")
+        self.assertEqual(data["account"]["display_name"], "新成员")
+        self.assertEqual(data["project"]["access_role"], "capturer")
+        self.assertEqual(data["bootstrap"]["current_project"]["id"], snapshot["project_ref"])
+        self.assertEqual(len(data["bootstrap"]["projects"]), 1)
+        self.assertNotIn("password", data)
+        conn = self.db.connect()
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM licenses WHERE account_id = ?", (data["account"]["id"],)).fetchone()[0], 0)
+            before = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+        finally:
+            conn.close()
+        repeated = self._wechat_join(invite, identity, display_name="不应改名").get_json()
+        self.assertTrue(repeated["idempotent"])
+        self.assertFalse(repeated["account_created"])
+        self.assertEqual(repeated["account"]["id"], data["account"]["id"])
+        self.assertEqual(repeated["account"]["display_name"], "新成员")
+        bootstrap = self.client.get("/api/mobile/v1/bootstrap", headers=self._headers(data["token"]))
+        self.assertEqual(bootstrap.status_code, 200, bootstrap.get_json())
+        conn = self.db.connect()
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], before)
+            conn.execute("UPDATE project_members SET status = 'removed' WHERE member_account_id = ?", (data["account"]["id"],))
+            conn.commit()
+        finally:
+            conn.close()
+        denied = self._wechat_join(invite, identity)
+        self.assertEqual(denied.status_code, 404)
+
+    def test_wechat_join_rejects_expired_revoked_inactive_and_invalid_wechat_without_accounts(self):
+        from server.mobile_api import ApiProblem
+        conn = self.db.connect()
+        before = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+        conn.close()
+        for kind in ("expired", "revoked", "inactive"):
+            snapshot, invite = self._wechat_join_invite()
+            conn = self.db.connect()
+            try:
+                if kind == "expired":
+                    conn.execute("UPDATE project_invitations SET expires_at = '2000-01-01' WHERE invite_code_hash = ?", (hashlib.sha256(invite.encode()).hexdigest(),))
+                elif kind == "revoked":
+                    conn.execute("UPDATE project_invitations SET status = 'revoked' WHERE invite_code_hash = ?", (hashlib.sha256(invite.encode()).hexdigest(),))
+                else:
+                    conn.execute("UPDATE cloud_engineering_projects SET active = 0 WHERE account_id = ? AND project_id = ?", (snapshot["owner_account_id"], snapshot["project_ref"].split(":", 1)[1]))
+                conn.commit()
+            finally:
+                conn.close()
+            rejected = self._wechat_join(invite, uuid.uuid4().hex)
+            self.assertEqual(rejected.status_code, 404, (kind, rejected.get_json()))
+        with patch("server.mobile_api._exchange_wechat_code", side_effect=ApiProblem("wechat_code_invalid", "凭证无效", 401)):
+            bad = self.client.post("/api/mobile/v1/auth/wechat-join", json={"invite_code": invite, "display_name": "张三", "phone": "13800138000", "code": "bad", "app_id": "test"})
+        self.assertEqual(bad.status_code, 401)
+        conn = self.db.connect()
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], before)
+        finally:
+            conn.close()
+
+    def test_wechat_join_disabled_identity_and_used_invite_are_rejected(self):
+        _, invite = self._wechat_join_invite("viewer")
+        identity = uuid.uuid4().hex
+        first = self._wechat_join(invite, identity).get_json()
+        self.assertEqual(first["join_request"]["role"], "viewer")
+        self.client.post(f"/api/mobile/v1/project-join-requests/{first['join_request']['id']}/approve", json={}, headers=self._headers(self.token_a))
+        other = self._wechat_join(invite, uuid.uuid4().hex)
+        self.assertEqual(other.status_code, 404)
+        conn = self.db.connect()
+        try:
+            conn.execute("UPDATE accounts SET status = 'disabled' WHERE id = ?", (first["account"]["id"],))
+            conn.commit()
+        finally:
+            conn.close()
+        disabled = self._wechat_join(invite, identity)
+        self.assertEqual(disabled.status_code, 403)
+        self.assertEqual(disabled.get_json()["code"], "account_disabled")
+
+    def test_join_approval_privacy_competing_requests_and_rejection(self):
+        snapshot, invite = self._wechat_join_invite()
+        first = self._wechat_join(invite, uuid.uuid4().hex).get_json()
+        second = self._wechat_join(invite, uuid.uuid4().hex, display_name="第二人", phone="13900139000").get_json()
+        first_id = first["join_request"]["id"]
+        second_id = second["join_request"]["id"]
+        own = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(first["token"])).get_json()["requests"]
+        self.assertEqual([r["id"] for r in own], [first_id])
+        self.assertEqual(own[0]["phone"], "13800138000")
+        self.assertFalse(own[0]["can_review"])
+        unrelated = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(self.token_b)).get_json()["requests"]
+        self.assertNotIn(first_id, [r["id"] for r in unrelated])
+        for token in (first["token"], self.token_b):
+            self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{first_id}/approve", json={"role": "owner"}, headers=self._headers(token)).status_code, 404)
+        owners = self.client.get(f"/api/mobile/v1/project-join-requests?project_id={snapshot['project_ref']}", headers=self._headers(self.token_a)).get_json()["requests"]
+        self.assertEqual({r["id"] for r in owners}, {first_id, second_id})
+        self.assertTrue(all(r["can_review"] for r in owners))
+        result = self.client.post(f"/api/mobile/v1/project-join-requests/{first_id}/approve", json={"role": "owner"}, headers=self._headers(self.token_a))
+        self.assertEqual(result.status_code, 200, result.get_json())
+        rejected = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(second["token"])).get_json()["requests"][0]
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertIn("其他申请", rejected["decision_reason"])
+        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{second_id}/approve", json={}, headers=self._headers(self.token_a)).status_code, 409)
+        self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{snapshot['project_ref']}/tree", headers=self._headers(second["token"])).status_code, 404)
+        _, another = self._wechat_join_invite()
+        pending = self._wechat_join(another, uuid.uuid4().hex).get_json()
+        rid = pending["join_request"]["id"]
+        for _ in range(2):
+            reply = self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/reject", json={}, headers=self._headers(self.token_a))
+            self.assertEqual(reply.status_code, 200, reply.get_json())
+        self.assertEqual(self.client.get("/api/mobile/v1/bootstrap", headers=self._headers(pending["token"])).get_json()["projects"], [])
+
+    def test_join_approval_blocks_old_client_expired_requests_and_unrelated_admin(self):
+        snapshot, invite = self._wechat_join_invite()
+        old = self.client.post("/api/mobile/v1/project-invites/join", json={"code": invite}, headers=self._headers(self.token_b))
+        self.assertEqual(old.status_code, 400, old.get_json())
+        bad_phone = self._wechat_join(invite, uuid.uuid4().hex, phone="123")
+        self.assertEqual(bad_phone.status_code, 400)
+        pending = self._wechat_join(invite, uuid.uuid4().hex).get_json()
+        rid = pending["join_request"]["id"]
+        conn = self.db.connect()
+        try:
+            member = conn.execute("SELECT id FROM accounts WHERE username = 'tenant_b'").fetchone()["id"]
+            conn.execute("INSERT INTO project_members (project_owner_account_id, project_id, member_account_id, role, joined_at, updated_at) VALUES (?, ?, ?, 'admin', '2026-01-01', '2026-01-01')", (snapshot["owner_account_id"], snapshot["project_ref"].split(":", 1)[1], member))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_b)).status_code, 404)
+        hidden = self.client.get(f"/api/mobile/v1/project-join-requests?project_id={snapshot['project_ref']}", headers=self._headers(self.token_b)).get_json()["requests"]
+        self.assertEqual(hidden, [])
+        conn = self.db.connect()
+        try:
+            conn.execute("UPDATE project_invitations SET expires_at = '2000-01-01' WHERE invite_code_hash = ?", (hashlib.sha256(invite.encode()).hexdigest(),))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_a)).status_code, 409)
+        own = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(pending["token"])).get_json()["requests"][0]
+        self.assertEqual(own["status"], "expired")
+
+    def test_mobile_owner_removal_revokes_access_preserves_account_and_photos(self):
+        snapshot, invite = self._wechat_join_invite()
+        pending = self._wechat_join(invite, uuid.uuid4().hex).get_json()
+        rid = pending["join_request"]["id"]
+        approved = self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_a))
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        token = pending["token"]
+        reference = snapshot["project_ref"]
+        batch_id = self._create_batch(token, project_id=reference)
+        photo_uuid = str(uuid.uuid4())
+        upload = self._upload(token, batch_id, photo_uuid, self._jpeg((10, 50, 90)), capture_source="camera")
+        self.assertEqual(upload.status_code, 201, upload.get_json())
+        member = pending["account"]["id"]
+        removed = self.client.delete(f"/api/mobile/v1/projects/{reference}/members/{member}", headers=self._headers(self.token_a))
+        self.assertEqual(removed.status_code, 200, removed.get_json())
+        for path in (f"/api/mobile/v1/projects/{reference}/tree", f"/api/mobile/v1/photos/{photo_uuid}", f"/api/mobile/v1/photos?project_id={reference}", f"/api/mobile/v1/batches/{batch_id}"):
+            denied = self.client.get(path, headers=self._headers(token))
+            self.assertEqual(denied.status_code, 404, (path, denied.get_json()))
+        denied_upload = self._upload(token, batch_id, str(uuid.uuid4()), self._jpeg((10, 51, 90)))
+        self.assertEqual(denied_upload.status_code, 404, denied_upload.get_json())
+        status = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(token)).get_json()["requests"][0]["status"]
+        self.assertEqual(status, "revoked")
+        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_a)).status_code, 404)
+        conn = self.db.connect()
+        try:
+            self.assertEqual(conn.execute("SELECT status FROM accounts WHERE id = ?", (member,)).fetchone()["status"], "active")
+            photo = conn.execute("SELECT * FROM cloud_photos WHERE photo_uuid = ?", (photo_uuid,)).fetchone()
+            self.assertEqual(photo["deleted_at"], "")
+            self.assertEqual(photo["project_owner_account_id"], snapshot["owner_account_id"])
+        finally:
+            conn.close()
+
+    def test_invitation_sharer_can_approve_only_while_still_manager(self):
+        snapshot, _ = self._wechat_join_invite()
+        ref = snapshot["project_ref"]
+        conn = self.db.connect()
+        try:
+            sharer = conn.execute("SELECT id FROM accounts WHERE username = 'tenant_b'").fetchone()["id"]
+            conn.execute("INSERT INTO project_members (project_owner_account_id, project_id, member_account_id, role, joined_at, updated_at) VALUES (?, ?, ?, 'admin', '2026-01-01', '2026-01-01')", (snapshot["owner_account_id"], ref.split(":", 1)[1], sharer))
+            conn.commit()
+        finally:
+            conn.close()
+        for remove_creator in (False, True):
+            invitation = self.client.post(f"/api/mobile/v1/projects/{ref}/invites", json={"role": "capturer"}, headers=self._headers(self.token_b))
+            self.assertEqual(invitation.status_code, 201, invitation.get_json())
+            pending = self._wechat_join(invitation.get_json()["invite"]["code"], uuid.uuid4().hex).get_json()
+            rid = pending["join_request"]["id"]
+            self.assertEqual(pending["join_request"]["approver_account_id"], sharer)
+            if remove_creator:
+                removed = self.client.delete(f"/api/mobile/v1/projects/{ref}/members/{sharer}", headers=self._headers(self.token_a))
+                self.assertEqual(removed.status_code, 200)
+                self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_b)).status_code, 404)
+                self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_a)).status_code, 404)
+            else:
+                approved = self.client.post(f"/api/mobile/v1/project-join-requests/{rid}/approve", json={}, headers=self._headers(self.token_b))
+                self.assertEqual(approved.status_code, 200, approved.get_json())
+        self.db.init_db()
+        self.db.init_db()
+        conn = self.db.connect()
+        try:
+            self.assertIsNotNone(conn.execute("SELECT id FROM project_join_requests WHERE id = ?", (rid,)).fetchone())
+            indexes = {row["name"] for row in conn.execute("PRAGMA index_list(project_join_requests)").fetchall()}
+            self.assertTrue({"idx_join_requests_applicant", "idx_join_requests_approver", "idx_join_requests_project"}.issubset(indexes))
+        finally:
+            conn.close()
+
     def test_mobile_album_photographer_does_not_replace_authenticated_uploader(self):
         batch_id = self._create_batch(self.token_a)
         uploaded = self._upload(
@@ -3285,7 +3514,7 @@ class MobileServerContractTest(unittest.TestCase):
 
         preview = self.client.post(
             "/api/mobile/v1/project-invites/preview",
-            json={"code": code},
+            json={"code": code, "display_name": "成员乙", "phone": "13900139000"},
             headers=self._headers(self.token_b),
         )
         self.assertEqual(preview.status_code, 200, preview.get_json())
@@ -3297,15 +3526,20 @@ class MobileServerContractTest(unittest.TestCase):
 
         joined = self.client.post(
             "/api/mobile/v1/project-invites/join",
-            json={"code": code},
+            json={"code": code, "display_name": "成员乙", "phone": "13900139000"},
             headers=self._headers(self.token_b),
         )
         self.assertEqual(joined.status_code, 200, joined.get_json())
+        self.assertTrue(joined.get_json()["pending_approval"])
+        request_id = joined.get_json()["join_request"]["id"]
+        approved = self.client.post(f"/api/mobile/v1/project-join-requests/{request_id}/approve", json={}, headers=self._headers(self.token_a))
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        joined = self.client.post("/api/mobile/v1/project-invites/join", json={"code": code, "display_name": "成员乙", "phone": "13900139000"}, headers=self._headers(self.token_b))
         self.assertEqual(joined.get_json()["project"]["project_id"], project_ref)
         self.assertEqual(joined.get_json()["membership"]["role"], "capturer")
         retried_join = self.client.post(
             "/api/mobile/v1/project-invites/join",
-            json={"code": code},
+            json={"code": code, "display_name": "成员乙", "phone": "13900139000"},
             headers=self._headers(self.token_b),
         )
         self.assertEqual(retried_join.status_code, 200, retried_join.get_json())

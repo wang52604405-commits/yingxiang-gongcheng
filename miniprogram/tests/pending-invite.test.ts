@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { consumePendingInvite, normalizeInviteCode, peekPendingInvite, rememberLaunchInvite, rememberPendingInvite } from '@/services/pending-invite'
 
 describe('登录前邀请码保留', () => {
@@ -32,4 +33,16 @@ describe('登录前邀请码保留', () => {
     expect(rememberLaunchInvite({ query: { code: 'TEAM123456' } })).toBe('TEAM123456')
     expect(rememberLaunchInvite({ query: { scene: 'invite%3DTEAM654321' } })).toBe('TEAM654321')
   })
+  it('分享加入页加载不会抢先消费邀请码，未验证账号不请求项目预览', () => {
+    rememberLaunchInvite({ query: { code: 'TEAM123456' } })
+    const source = readFileSync('src/pages/project/join.vue', 'utf8')
+    const onLoadBlock = source.match(/onLoad\(\(query\) => \{[\s\S]*?\n\}\)/)?.[0] || ''
+    expect(onLoadBlock).toContain('peekPendingInvite()')
+    expect(onLoadBlock).toContain('rememberPendingInvite(code.value)')
+    expect(onLoadBlock).not.toContain('consumePendingInvite')
+    expect(peekPendingInvite()).toBe('TEAM123456')
+    const previewBlock = source.slice(source.indexOf('async function loadPreview'), source.indexOf('watch(code'))
+    expect(previewBlock.indexOf("sessionState.stage !== 'authenticated'")).toBeLessThan(previewBlock.indexOf('mobileApi.previewProjectInvite'))
+  })
+
 })

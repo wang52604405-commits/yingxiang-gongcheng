@@ -53,7 +53,7 @@ onLoad(() => {
   <view class="page-shell no-tabs invite-page">
     <PageHeader title="邀请成员" :subtitle="project.name" />
     <template v-if="!invite">
-      <text class="field-label role-label">加入后的角色</text>
+      <text class="field-label role-label">审批通过后的角色</text>
       <view class="role-list card">
         <button v-for="item in allowedRoles" :key="item" class="role-row pressable" :class="{ active: role === item }" @tap="chooseRole(item)"><text>{{ PROJECT_ROLE_LABELS[item] }}</text><text class="role-check">{{ role === item ? '✓' : '' }}</text></button>
       </view>
@@ -63,7 +63,7 @@ onLoad(() => {
       <view class="invite-card card">
         <text class="invite-project">{{ invite.project.name }}</text>
         <text class="invite-code">{{ displayCode }}</text>
-        <text class="invite-meta">{{ PROJECT_ROLE_LABELS[invite.role] }}<template v-if="invite.expires_at"> · 短期有效</template></text>
+        <text class="invite-meta">需审批 · {{ PROJECT_ROLE_LABELS[invite.role] }}<template v-if="invite.expires_at"> · 短期有效</template></text>
       </view>
       <button class="primary-button pressable share-button" open-type="share">发给微信好友</button>
       <button class="copy-button pressable" @tap="copyCode">复制邀请码</button>

@@ -88,35 +88,77 @@ const sampleRequirements: PhotoRequirement[] = [
   },
 ]
 
+let mockJoinRequest: Record<string, unknown> | null = null
 const mockAccount = { id: 'mock-account', username: '体验账号', display_name: '工程资料员', role: '资料员' }
+let mockActiveAccount = mockAccount
+const mockReviewRequests: Record<string, unknown>[] = [{ id: 'mock-review-request', status: 'pending', project_id: projects[0].id, project_name: projects[0].name, display_name: '王建国（示例）', phone: '13800000000', applicant_account_id: 'mock-review-applicant', approver_account_id: mockAccount.id, role: 'capturer', created_at: '2026-09-09T09:30:00' }]
+
+function mockVisibleProjects(): ProjectSummary[] {
+  if (mockActiveAccount.id === mockAccount.id) return projects
+  if (mockJoinRequest?.status !== 'approved') return []
+  if (!mockMembers.some((member) => member.account_id === mockActiveAccount.id)) return []
+  return projects.map((project) => ({ ...project, access_role: 'capturer', can_manage_members: false }))
+}
+
+function canReviewMock(row: Record<string, unknown>): boolean {
+  return row.applicant_account_id !== mockActiveAccount.id && row.approver_account_id === mockActiveAccount.id
+}
 
 function mockBootstrap(): BootstrapResponse {
+  const available = mockVisibleProjects()
   return {
     ok: true,
-    account: mockAccount,
+    account: mockActiveAccount,
     server_time: new Date().toISOString(),
-    current_project: rawProject(projects[0]) as any,
-    projects: projects.map(rawProject) as any,
+    current_project: (available[0] ? rawProject(available[0]) : null) as any,
+    projects: available.map(rawProject) as any,
     queue: { desktop_pending: 1 },
-    recent_uploads: samplePhotos.slice(0, 3),
+    recent_uploads: available.length ? samplePhotos.slice(0, 3) : [],
   }
 }
 
 export async function mockRequest<T>(method: string, path: string, data?: unknown): Promise<T> {
   await new Promise((resolve) => setTimeout(resolve, 80))
+  if (path === '/auth/wechat-join' && method === 'POST') {
+    const input = data as { invite_code?: string; display_name?: string; phone?: string }
+    if (!/^[A-Z0-9]{10}$/.test(input?.invite_code || '') || !input?.display_name?.trim() || !/^1[3-9]\d{9}$/.test(input?.phone || '')) throw new Error('请填写完整邀请码、姓名和手机号')
+    const account = { id: 'mock-applicant', username: '微信申请人', display_name: input.display_name.trim(), role: 'member' }
+    mockActiveAccount = account
+    mockJoinRequest = { id: 'mock-request', status: 'pending', project_id: projects[0].id, project_name: projects[0].name, display_name: account.display_name, phone: input.phone, applicant_account_id: account.id, approver_account_id: 'mock-account', role: 'capturer', can_review: false, created_at: new Date().toISOString() }
+    return { ok: true, token: 'mock-member-token', account, bootstrap: { ...mockBootstrap(), account, projects: [], current_project: null, recent_uploads: [], queue: {} }, join_request: mockJoinRequest, pending_approval: true } as T
+  }
+  if (/^\/project-join-requests(?:\?|$)/.test(path) && method === 'GET') {
+    const projectId = new URLSearchParams(path.split('?')[1] || '').get('project_id')
+    const rows = [...mockReviewRequests, ...(mockJoinRequest ? [mockJoinRequest] : [])]
+      .filter((row) => (!projectId || row.project_id === projectId) && (row.applicant_account_id === mockActiveAccount.id || canReviewMock(row)))
+      .map((row) => ({ ...row, can_review: canReviewMock(row) }))
+    return { ok: true, requests: rows } as T
+  }
+  const reviewMatch = path.match(/^\/project-join-requests\/([^/]+)\/(approve|reject)$/)
+  if (reviewMatch && method === 'POST') {
+    const row = [...mockReviewRequests, ...(mockJoinRequest ? [mockJoinRequest] : [])].find((item) => item.id === decodeURIComponent(reviewMatch[1]))
+    if (!row || !canReviewMock(row)) throw new Error('无审核权限')
+    if (row.status !== 'pending') throw new Error('该申请已处理')
+    row.status = reviewMatch[2] === 'approve' ? 'approved' : 'rejected'
+    if (row.status === 'approved' && !mockMembers.some((member) => member.account_id === row.applicant_account_id)) mockMembers.push({ account_id: String(row.applicant_account_id), username: 'wx_mock-member', display_name: String(row.display_name), role: 'capturer' })
+    projects[0].member_count = mockMembers.length
+    return { ok: true, join_request: { ...row, can_review: false } } as T
+  }
   if (path === '/auth/account-login' && method === 'POST') {
     return { ok: true, account: mockAccount, binding_intent: 'mock-binding-intent' } as T
   }
   if (path === '/auth/wechat-login' && method === 'POST') {
+    mockActiveAccount = mockAccount
     return { ok: true, token: 'mock-token', account: mockAccount, bootstrap: mockBootstrap() } as T
   }
   if (path === '/auth/wechat-bind-confirm' && method === 'POST') {
+    mockActiveAccount = mockAccount
     return { ok: true, token: 'mock-token', account: mockAccount, bootstrap: mockBootstrap() } as T
   }
   if (path === '/bootstrap' && method === 'GET') {
     return mockBootstrap() as T
   }
-  if (path === '/projects' && method === 'GET') return { ok: true, projects: projects.map(rawProject) } as T
+  if (path === '/projects' && method === 'GET') return { ok: true, projects: mockVisibleProjects().map(rawProject) } as T
   const memberListMatch = path.match(/^\/projects\/([^/]+)\/members$/)
   if (memberListMatch && method === 'GET') return { ok: true, project: rawProject(projects[0]), members: mockMembers } as T
   const createInviteMatch = path.match(/^\/projects\/([^/]+)\/invites$/)
@@ -128,7 +170,10 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
     return { ok: true, invite: { invite_id: 'mock-invite', code: String((data as any)?.code || 'TEAM123456'), role: 'capturer', expires_at: '2026-08-30T00:00:00Z', project: rawProject(projects[0]), inviter_name: '工程资料员' } } as T
   }
   if (path === '/project-invites/join' && method === 'POST') {
-    return { ok: true, project: { ...rawProject(projects[0]), access_role: 'capturer', can_manage_members: false }, membership: { role: 'capturer' }, bootstrap: mockBootstrap() } as T
+    const input = data as { code?: string; display_name?: string; phone?: string }
+    if (!input.display_name?.trim() || !/^1[3-9]\d{9}$/.test(input.phone || '')) throw new Error('请填写姓名和手机号')
+    mockJoinRequest = { id: 'mock-request', status: 'pending', project_id: projects[0].id, project_name: projects[0].name, display_name: input.display_name.trim(), phone: input.phone, applicant_account_id: mockAccount.id, approver_account_id: 'mock-owner', role: 'capturer', can_review: false, created_at: new Date().toISOString() }
+    return { ok: true, join_request: mockJoinRequest, pending_approval: true } as T
   }
   const memberMutationMatch = path.match(/^\/projects\/([^/]+)\/members\/([^/]+)$/)
   if (memberMutationMatch && method === 'PATCH') {
@@ -137,6 +182,7 @@ export async function mockRequest<T>(method: string, path: string, data?: unknow
   }
   if (memberMutationMatch && method === 'DELETE') {
     mockMembers = mockMembers.filter((member) => member.account_id !== decodeURIComponent(memberMutationMatch[2]))
+    projects[0].member_count = mockMembers.length
     return { ok: true, removed: true, members: mockMembers } as T
   }
   const requirementsMatch = path.match(/^\/projects\/([^/?]+)\/requirements(?:\?(.*))?$/)

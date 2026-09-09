@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     tokenClear: vi.fn(),
     accountLogin: vi.fn(),
     wechatLogin: vi.fn(),
+    wechatJoin: vi.fn(),
     wechatBindConfirm: vi.fn(),
     loadBootstrap: vi.fn(),
     hydrateBootstrap: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('@/api/client', () => ({
 vi.mock('@/api/mobile', () => ({ mobileApi: {
   accountLogin: mocks.accountLogin,
   wechatLogin: mocks.wechatLogin,
+  wechatJoin: mocks.wechatJoin,
   wechatBindConfirm: mocks.wechatBindConfirm,
 } }))
 vi.mock('@/stores/bootstrap', () => ({
@@ -245,4 +247,61 @@ describe('账号登录、微信绑定与 token 过期', () => {
     expect(sessionState.stage).toBe('account_login')
     expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/auth/bind' })
   })
+  it('受邀新成员提交真实姓名手机号后等待审核，不获得项目权限', async () => {
+    pages = [{ route: 'pages/auth/bind' }]
+    const project = { id: 'owner:project', name: '邀请项目' }
+    mocks.wechatJoin.mockResolvedValue({ ok: true, token: 'member-token', account: { id: 'member', username: 'wx_member', display_name: '张三' }, join_request: { id: 'req-1', status: 'pending', applicant_account_id: 'member', project_id: project.id }, pending_approval: true, bootstrap: { ok: true, projects: [] } })
+    const { joinProjectWithWechat, sessionState } = await import('@/services/auth')
+    const { peekPendingInvite } = await import('@/services/pending-invite')
+    await joinProjectWithWechat('TEAM123456', ' 张三 ', '13812345678')
+    await vi.runAllTimersAsync()
+    expect(login).toHaveBeenCalledTimes(1)
+    expect(mocks.wechatJoin).toHaveBeenCalledWith('TEAM123456', '张三', '13812345678', 'new-code', expect.any(String))
+    expect(mocks.accountLogin).not.toHaveBeenCalled()
+    expect(mocks.applyBootstrap).toHaveBeenCalledWith('member', { ok: true, projects: [] })
+    expect(peekPendingInvite()).toBe('')
+    expect(sessionState.stage).toBe('authenticated')
+    expect(reLaunch).toHaveBeenCalledWith({ url: '/pages/project/request-status?id=req-1' })
+  })
+
+  it('邀请过期错误保留输入和邀请码，重试重新获取微信 code', async () => {
+    mocks.wechatJoin.mockRejectedValue(new Error('邀请码已过期，请联系邀请人'))
+    const { joinProjectWithWechat, sessionState } = await import('@/services/auth')
+    const { peekPendingInvite } = await import('@/services/pending-invite')
+    await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow('邀请码已过期')
+    expect(sessionState.error).toContain('邀请码已过期')
+    expect(peekPendingInvite()).toBe('TEAM123456')
+    expect(mocks.tokenSet).not.toHaveBeenCalled()
+    await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow()
+    expect(login).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['cancel', 'new-invite'])('微信加入请求结束前发生 %s，不接受旧账号响应', async (change) => {
+    let finish!: (value: any) => void
+    mocks.wechatJoin.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    const { joinProjectWithWechat, cancelWechatJoin } = await import('@/services/auth')
+    const { rememberPendingInvite } = await import('@/services/pending-invite')
+    const joining = joinProjectWithWechat('TEAM123456', '张三', '13812345678')
+    await Promise.resolve()
+    if (change === 'cancel') cancelWechatJoin()
+    else rememberPendingInvite('TEAM654321')
+    finish({ ok: true, token: 'stale-token', account: { id: 'old' } })
+    await expect(joining).rejects.toThrow('加入操作已取消')
+    expect(mocks.tokenSet).not.toHaveBeenCalled()
+  })
+
+  it('手机号缺失时不获取微信凭证，也不发送入项申请', async () => {
+    const { joinProjectWithWechat } = await import('@/services/auth')
+    await expect(joinProjectWithWechat('TEAM123456', '张三', '')).rejects.toThrow('手机号')
+    expect(login).not.toHaveBeenCalled()
+    expect(mocks.wechatJoin).not.toHaveBeenCalled()
+  })
+
+  it('没有审批申请或已存在成员证明的旧直入响应不能授予会话', async () => {
+    mocks.wechatJoin.mockResolvedValue({ ok: true, token: 'unsafe-token', account: { id: 'member' }, project: { id: 'p' }, bootstrap: { ok: true, projects: [{ id: 'p' }] } })
+    const { joinProjectWithWechat } = await import('@/services/auth')
+    await expect(joinProjectWithWechat('TEAM123456', '张三', '13812345678')).rejects.toThrow('申请响应不完整')
+    expect(mocks.tokenSet).not.toHaveBeenCalled()
+  })
+
 })

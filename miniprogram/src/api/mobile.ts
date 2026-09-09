@@ -1,3 +1,4 @@
+import { normalizeJoinRequest, type ProjectJoinRequest } from '@/services/project-join-request'
 import type { Assignment, BootstrapResponse, CloudPhoto, MatchCandidate, PhotoRequirement, ProjectAccessRole, ProjectInvite, ProjectMember, ProjectNode, ProjectSummary } from '@/types/domain'
 import { apiBinaryRequest, apiRequest, apiUploadPhoto } from './client'
 import { buildChunkUploadInit, normalizeBatchPayload, type ChunkUploadState, type CreateBatchPayload, type PhotoUploadMetadata } from './contracts'
@@ -12,6 +13,10 @@ export interface AuthResponse {
   account?: { id: number | string; username: string; display_name?: string; role?: string }
   binding_required?: boolean
   bootstrap?: BootstrapResponse
+  project?: ProjectSummary
+  join_request?: ProjectJoinRequest
+  pending_approval?: boolean
+  already_member?: boolean
 }
 
 export interface AccountLoginResponse {
@@ -82,6 +87,10 @@ export const mobileApi = {
   wechatLogin: async (code: string, appId: string): Promise<AuthResponse> => {
     const raw = await apiRequest<any>('POST', '/auth/wechat-login', { code, app_id: appId }, false)
     return { ...raw, bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined }
+  },
+  wechatJoin: async (inviteCode: string, displayName: string, phone: string, code: string, appId: string): Promise<AuthResponse> => {
+    const raw = await apiRequest<any>('POST', '/auth/wechat-join', { code, app_id: appId, invite_code: inviteCode, display_name: displayName, phone }, false)
+    return { ...raw, bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined, project: raw.project ? normalizeProject(raw.project) : undefined, join_request: normalizeJoinRequest(raw.join_request) }
   },
   wechatBindConfirm: async (bindingIntent: string): Promise<AuthResponse> => {
     const raw = await apiRequest<any>('POST', '/auth/wechat-bind-confirm', { binding_intent: bindingIntent }, false)
@@ -160,15 +169,22 @@ export const mobileApi = {
     const invite = normalizeProjectInvite(raw)
     return { ok: true as const, invite, already_member: Boolean(raw.already_member || raw.already_joined || invite.already_joined) }
   },
-  joinProjectInvite: async (code: string) => {
-    const raw = await apiRequest<any>('POST', '/project-invites/join', { code })
+  joinProjectInvite: async (code: string, displayName: string, phone: string) => {
+    const raw = await apiRequest<any>('POST', '/project-invites/join', { code, display_name: displayName, phone })
     return {
       ok: true as const,
-      project: normalizeProject(raw.project),
+      project: raw.project ? normalizeProject(raw.project) : undefined,
+      join_request: normalizeJoinRequest(raw.join_request),
+      pending_approval: Boolean(raw.pending_approval),
+      already_member: Boolean(raw.already_member),
       membership: raw.membership && typeof raw.membership === 'object' ? raw.membership : undefined,
       bootstrap: raw.bootstrap ? normalizeBootstrapResponse(raw.bootstrap) : undefined,
       idempotent: Boolean(raw.idempotent || raw.already_member),
     }
+  },
+  listProjectJoinRequests: async () => {
+    const raw = await apiRequest<any>('GET', '/project-join-requests')
+    return { ok: true as const, requests: (Array.isArray(raw.requests) ? raw.requests : []).map(normalizeJoinRequest).filter((item: ProjectJoinRequest | undefined): item is ProjectJoinRequest => Boolean(item)) as ProjectJoinRequest[] }
   },
   updateProjectMember: async (projectId: string, accountId: string, role: ProjectAccessRole) => {
     const raw = await apiRequest<any>('PATCH', `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(accountId)}`, { role })

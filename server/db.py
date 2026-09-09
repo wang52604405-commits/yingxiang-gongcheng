@@ -177,6 +177,30 @@ CREATE TABLE IF NOT EXISTS project_members (
     FOREIGN KEY (member_account_id) REFERENCES accounts(id)
 );
 
+CREATE TABLE IF NOT EXISTS project_join_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invitation_id INTEGER NOT NULL,
+    project_owner_account_id INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    applicant_account_id INTEGER NOT NULL,
+    approver_account_id INTEGER NOT NULL,
+    display_name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    role TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_at TEXT NOT NULL DEFAULT '',
+    decided_by_account_id INTEGER NOT NULL DEFAULT 0,
+    decision_reason TEXT NOT NULL DEFAULT '',
+    UNIQUE(invitation_id, applicant_account_id),
+    FOREIGN KEY(invitation_id) REFERENCES project_invitations(id),
+    FOREIGN KEY(applicant_account_id) REFERENCES accounts(id)
+);
+CREATE INDEX IF NOT EXISTS idx_join_requests_applicant ON project_join_requests(applicant_account_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_join_requests_approver ON project_join_requests(approver_account_id, status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_join_requests_project ON project_join_requests(project_owner_account_id, project_id, status, id DESC);
+
 CREATE TABLE IF NOT EXISTS project_invitations (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
     project_owner_account_id INTEGER NOT NULL,

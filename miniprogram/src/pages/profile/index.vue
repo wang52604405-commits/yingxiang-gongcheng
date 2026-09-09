@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pendingJoinRequest } from '@/services/project-join-request'
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import AppHeader from '@/components/AppHeader.vue'
@@ -11,6 +12,7 @@ import { selectionStorage } from '@/stores/selection'
 import { formatBytes } from '@/utils/format'
 import { projectMemberSummary } from '@/services/project-membership'
 
+const pendingRequestId = ref('')
 const project = ref(selectionStorage.getProject())
 const authenticated = computed(() => sessionState.ready && sessionState.stage === 'authenticated' && Boolean(sessionState.account))
 const displayName = computed(() => authenticated.value ? (sessionState.account?.display_name || sessionState.account?.username || '当前账号') : '未登录')
@@ -38,6 +40,7 @@ function openMembers() {
 }
 
 onShow(() => {
+  pendingRequestId.value = sessionState.account ? pendingJoinRequest(sessionState.account.id) : ''
   syncTabBar(4)
   project.value = selectionStorage.getProject()
   queueRuntime.hydrate()
@@ -53,7 +56,7 @@ onShow(() => {
       <view class="avatar">{{ initial }}</view>
       <view class="identity-copy">
         <text class="identity-name">{{ displayName }}</text>
-        <text v-if="authenticated" class="identity-role">{{ sessionState.account?.username }} · 已绑定微信</text>
+        <text v-if="authenticated" class="identity-role">{{ sessionState.account?.username?.startsWith('wx_') ? '微信成员' : sessionState.account?.username }} · 已绑定微信</text>
         <text v-else class="identity-role">请先登录账号</text>
       </view>
     </view>
@@ -61,6 +64,9 @@ onShow(() => {
     <view v-if="!queueRuntime.state.online" class="notice offline-notice"><text class="notice-dot" /><text>离线，原图保存在本机</text></view>
 
     <view class="settings card">
+      <button v-if="authenticated && pendingRequestId" class="setting-row pressable" @tap="uniApi.navigateTo({ url: '/pages/project/request-status?id=' + encodeURIComponent(pendingRequestId) })">
+        <view class="setting-icon"><UiIcon name="user" :size="18" /></view><text class="setting-title">我的加入申请</text><text class="setting-value">查看进度</text>
+      </button>
       <button class="setting-row pressable" @tap="openMembers">
         <view class="setting-icon"><UiIcon name="user" :size="18" /></view><text class="setting-title">项目成员</text><text class="setting-value">{{ project.id ? projectMemberSummary(project) : '未选择工程' }}</text>
       </button>
@@ -73,7 +79,7 @@ onShow(() => {
     </view>
 
     <button v-if="authenticated" class="account-button pressable" @tap="confirmSignOut">切换账号</button>
-      <text class="version">工程影像 V1.5.0</text>
+      <text class="version">工程影像 V1.5.1</text>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="4" :badge="queueRuntime.pendingCount.value" />
     <!-- #endif -->

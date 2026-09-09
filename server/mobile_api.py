@@ -29,7 +29,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.datastructures import FileStorage
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import config, db, mobile_recognition
 from .mobile_chunks import ChunkFileError, ChunkFileStore
@@ -2732,101 +2732,255 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    def accept_project_invitation(conn, current, code_hash):
+        invitation = conn.execute(
+            "SELECT * FROM project_invitations WHERE invite_code_hash = ?",
+            (code_hash,),
+        ).fetchone()
+        if not invitation:
+            raise ApiProblem(
+                "project_invite_invalid", "邀请码无效、已使用或已过期", 404
+            )
+        project_record_for_owner(conn, invitation["project_owner_account_id"], invitation["project_id"])
+        existing = conn.execute(
+            "SELECT * FROM project_members WHERE project_owner_account_id = ? "
+            "AND project_id = ? AND member_account_id = ?",
+            (
+                invitation["project_owner_account_id"],
+                invitation["project_id"],
+                current["id"],
+            ),
+        ).fetchone()
+        timestamp = now()
+        already_member = bool(existing and existing["status"] == "active")
+        idempotent = bool(
+            invitation["status"] == "accepted"
+            and int(invitation["accepted_by_account_id"] or 0)
+            == int(current["id"])
+            and already_member
+        )
+        if not idempotent and (
+            invitation["status"] != "pending"
+            or invitation["expires_at"] <= timestamp
+        ):
+            raise ApiProblem(
+                "project_invite_invalid", "邀请码无效、已使用或已过期", 404
+            )
+        if not idempotent:
+            if not already_member:
+                conn.execute(
+                    "INSERT INTO project_members "
+                    "(project_owner_account_id, project_id, member_account_id, role, status, "
+                    "invited_by_account_id, joined_at, updated_at, removed_at, "
+                    "removed_by_account_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, '', 0) "
+                    "ON CONFLICT(project_owner_account_id, project_id, member_account_id) "
+                    "DO UPDATE SET role = excluded.role, status = 'active', "
+                    "invited_by_account_id = excluded.invited_by_account_id, "
+                    "joined_at = excluded.joined_at, updated_at = excluded.updated_at, "
+                    "removed_at = '', removed_by_account_id = 0",
+                    (
+                        invitation["project_owner_account_id"],
+                        invitation["project_id"],
+                        current["id"],
+                        invitation["role"],
+                        invitation["created_by_account_id"],
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+            changed = conn.execute(
+                "UPDATE project_invitations SET status = 'accepted', "
+                "accepted_by_account_id = ?, accepted_at = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (current["id"], timestamp, timestamp, invitation["id"]),
+            )
+            if changed.rowcount != 1:
+                raise ApiProblem(
+                    "project_invite_invalid", "邀请码已被使用", 409
+                )
+        project = project_for(conn, current["id"], _project_ref(invitation["project_owner_account_id"], invitation["project_id"]), PROJECT_ROLES)
+        return _project_payload(project), idempotent, already_member
+
+    def join_contact(data):
+        display_name = str(data.get("display_name") or "").strip()
+        phone = str(data.get("phone") or "").strip()
+        if not display_name or len(display_name) > 60 or any(ord(char) < 32 for char in display_name):
+            raise ApiProblem("display_name_required", "请填写真实姓名（1至60个字）")
+        if not re.fullmatch(r"1[3-9][0-9]{9}", phone):
+            raise ApiProblem("phone_invalid", "请填写11位中国大陆手机号码")
+        return display_name, phone
+
+    def request_payload(conn, row, actor_id):
+        item = dict(row)
+        invitation = conn.execute("SELECT * FROM project_invitations WHERE id = ?", (item["invitation_id"],)).fetchone()
+        project = conn.execute("SELECT project_name, active FROM cloud_engineering_projects WHERE account_id = ? AND project_id = ?", (item["project_owner_account_id"], item["project_id"])).fetchone()
+        status = item["status"]
+        if status == "pending":
+            if not invitation or invitation["status"] != "pending" or not project or not project["active"]:
+                status = "revoked"
+            elif invitation["expires_at"] <= now():
+                status = "expired"
+            else:
+                try:
+                    project_for(conn, item["approver_account_id"], _project_ref(item["project_owner_account_id"], item["project_id"]), MANAGE_MEMBER_ROLES)
+                except ApiProblem:
+                    status = "revoked"
+        elif status == "approved":
+            try:
+                project_for(conn, item["applicant_account_id"], _project_ref(item["project_owner_account_id"], item["project_id"]), PROJECT_ROLES)
+            except ApiProblem:
+                status = "revoked"
+        can_review = False
+        if int(actor_id) in {int(item["approver_account_id"]), int(item["project_owner_account_id"])} and int(actor_id) != int(item["applicant_account_id"]):
+            try:
+                project_for(conn, actor_id, _project_ref(item["project_owner_account_id"], item["project_id"]), MANAGE_MEMBER_ROLES)
+                project_for(conn, item["approver_account_id"], _project_ref(item["project_owner_account_id"], item["project_id"]), MANAGE_MEMBER_ROLES)
+                can_review = status == "pending"
+            except ApiProblem:
+                pass
+        return {
+            "id": item["id"], "status": status,
+            "project_id": _project_ref(item["project_owner_account_id"], item["project_id"]),
+            "project_name": project["project_name"] if project else "", "display_name": item["display_name"], "phone": item["phone"],
+            "role": item["role"], "applicant_account_id": item["applicant_account_id"], "approver_account_id": item["approver_account_id"],
+            "created_at": item["created_at"], "decided_at": item["decided_at"], "decision_reason": item["decision_reason"], "can_review": can_review,
+        }
+
+    def submit_join_request(conn, current, code_hash, display_name, phone):
+        invitation = conn.execute("SELECT * FROM project_invitations WHERE invite_code_hash = ?", (code_hash,)).fetchone()
+        if not invitation:
+            raise ApiProblem("project_invite_invalid", "邀请码无效、已使用或已过期", 404)
+        project_record_for_owner(conn, invitation["project_owner_account_id"], invitation["project_id"])
+        reference = _project_ref(invitation["project_owner_account_id"], invitation["project_id"])
+        existing = conn.execute("SELECT * FROM project_join_requests WHERE invitation_id = ? AND applicant_account_id = ?", (invitation["id"], current["id"])).fetchone()
+        # An approved replay cannot restore access after membership removal.
+        if existing and existing["status"] == "approved":
+            project = project_for(conn, current["id"], reference, PROJECT_ROLES)
+            return {"join_request": request_payload(conn, existing, current["id"]), "pending_approval": False, "idempotent": True, "project": _project_payload(project), "membership": _project_payload(project)["membership"], "already_member": True}
+        if invitation["status"] != "pending" or invitation["expires_at"] <= now():
+            raise ApiProblem("project_invite_invalid", "邀请码无效、已使用或已过期", 404)
+        project_for(conn, invitation["created_by_account_id"], reference, MANAGE_MEMBER_ROLES)
+        if existing:
+            return {"join_request": request_payload(conn, existing, current["id"]), "pending_approval": existing["status"] == "pending", "idempotent": True}
+        member = conn.execute("SELECT * FROM project_members WHERE project_owner_account_id = ? AND project_id = ? AND member_account_id = ? AND status = 'active'", (invitation["project_owner_account_id"], invitation["project_id"], current["id"])).fetchone()
+        if member:
+            return {"already_member": True, "pending_approval": False, "project": _project_payload(project_for(conn, current["id"], reference, PROJECT_ROLES))}
+        timestamp = now()
+        cursor = conn.execute("INSERT INTO project_join_requests (invitation_id, project_owner_account_id, project_id, applicant_account_id, approver_account_id, display_name, phone, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (invitation["id"], invitation["project_owner_account_id"], invitation["project_id"], current["id"], invitation["created_by_account_id"], display_name, phone, invitation["role"], timestamp, timestamp))
+        row = conn.execute("SELECT * FROM project_join_requests WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return {"join_request": request_payload(conn, row, current["id"]), "pending_approval": True, "idempotent": False}
+
     @blueprint.post("/api/mobile/v1/project-invites/join")
     def mobile_join_project_invite():
         current = user()
         if rate_limited_fn and rate_limited_fn():
             raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
         data = json_body()
+        display_name, phone = join_contact(data)
         code_hash = invite_code_hash(data.get("code"))
         conn = db.connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            invitation = conn.execute(
-                "SELECT * FROM project_invitations WHERE invite_code_hash = ?",
-                (code_hash,),
-            ).fetchone()
-            if not invitation:
-                raise ApiProblem(
-                    "project_invite_invalid", "邀请码无效、已使用或已过期", 404
-                )
-            existing = conn.execute(
-                "SELECT * FROM project_members WHERE project_owner_account_id = ? "
-                "AND project_id = ? AND member_account_id = ?",
-                (
-                    invitation["project_owner_account_id"],
-                    invitation["project_id"],
-                    current["id"],
-                ),
-            ).fetchone()
-            timestamp = now()
-            already_member = bool(existing and existing["status"] == "active")
-            idempotent = bool(
-                invitation["status"] == "accepted"
-                and int(invitation["accepted_by_account_id"] or 0)
-                == int(current["id"])
-                and already_member
-            )
-            if not idempotent and (
-                invitation["status"] != "pending"
-                or invitation["expires_at"] <= timestamp
-            ):
-                raise ApiProblem(
-                    "project_invite_invalid", "邀请码无效、已使用或已过期", 404
-                )
-            if not idempotent:
-                if not already_member:
-                    conn.execute(
-                        "INSERT INTO project_members "
-                        "(project_owner_account_id, project_id, member_account_id, role, status, "
-                        "invited_by_account_id, joined_at, updated_at, removed_at, "
-                        "removed_by_account_id) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, '', 0) "
-                        "ON CONFLICT(project_owner_account_id, project_id, member_account_id) "
-                        "DO UPDATE SET role = excluded.role, status = 'active', "
-                        "invited_by_account_id = excluded.invited_by_account_id, "
-                        "joined_at = excluded.joined_at, updated_at = excluded.updated_at, "
-                        "removed_at = '', removed_by_account_id = 0",
-                        (
-                            invitation["project_owner_account_id"],
-                            invitation["project_id"],
-                            current["id"],
-                            invitation["role"],
-                            invitation["created_by_account_id"],
-                            timestamp,
-                            timestamp,
-                        ),
-                    )
-                changed = conn.execute(
-                    "UPDATE project_invitations SET status = 'accepted', "
-                    "accepted_by_account_id = ?, accepted_at = ?, updated_at = ? "
-                    "WHERE id = ? AND status = 'pending'",
-                    (current["id"], timestamp, timestamp, invitation["id"]),
-                )
-                if changed.rowcount != 1:
-                    raise ApiProblem(
-                        "project_invite_invalid", "邀请码已被使用", 409
-                    )
+            result = submit_join_request(conn, current, code_hash, display_name, phone)
             conn.commit()
-            project = project_for(
-                conn,
-                current["id"],
-                _project_ref(
-                    invitation["project_owner_account_id"],
-                    invitation["project_id"],
-                ),
-                PROJECT_ROLES,
-            )
-            project_payload = _project_payload(project)
-            return jsonify(
-                {
-                    "ok": True,
-                    "project": project_payload,
-                    "membership": project_payload["membership"],
-                    "bootstrap": bootstrap_payload(conn, current),
-                    "idempotent": idempotent,
-                    "already_member": already_member,
-                }
-            )
+            return jsonify({"ok": True, **result, "bootstrap": bootstrap_payload(conn, current)})
+        finally:
+            conn.close()
+
+    @blueprint.get("/api/mobile/v1/project-join-requests")
+    def list_project_join_requests():
+        current = user()
+        conn = db.connect()
+        try:
+            reference = str(request.args.get("project_id") or "")
+            rows = conn.execute("SELECT * FROM project_join_requests WHERE applicant_account_id = ? OR approver_account_id = ? OR project_owner_account_id = ? ORDER BY id DESC", (current["id"], current["id"], current["id"])).fetchall()
+            visible = []
+            for row in rows:
+                project_ref = _project_ref(row["project_owner_account_id"], row["project_id"])
+                if reference and project_ref != reference:
+                    continue
+                if int(row["applicant_account_id"]) != int(current["id"]):
+                    try:
+                        project_for(conn, current["id"], project_ref, MANAGE_MEMBER_ROLES)
+                    except ApiProblem:
+                        continue
+                visible.append(request_payload(conn, row, current["id"]))
+            return jsonify({"ok": True, "requests": visible})
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/project-join-requests/<int:request_id>/<decision>")
+    def review_project_join_request(request_id, decision):
+        current = user()
+        if decision not in {"approve", "reject"}:
+            raise ApiProblem("invalid_decision", "审批操作无效")
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM project_join_requests WHERE id = ?", (request_id,)).fetchone()
+            if not row or int(current["id"]) not in {int(row["approver_account_id"]), int(row["project_owner_account_id"])} or int(current["id"]) == int(row["applicant_account_id"]):
+                raise ApiProblem("join_request_not_found", "申请不存在或无权审批", 404)
+            reference = _project_ref(row["project_owner_account_id"], row["project_id"])
+            project_for(conn, current["id"], reference, MANAGE_MEMBER_ROLES)
+            project_for(conn, row["approver_account_id"], reference, MANAGE_MEMBER_ROLES)
+            desired = "approved" if decision == "approve" else "rejected"
+            if row["status"] != "pending":
+                if row["status"] != desired:
+                    raise ApiProblem("join_request_closed", "申请已经处理", 409)
+                if desired == "approved":
+                    project_for(conn, row["applicant_account_id"], reference, PROJECT_ROLES)
+                return jsonify({"ok": True, "join_request": request_payload(conn, row, current["id"]), "idempotent": True})
+            invitation = conn.execute("SELECT * FROM project_invitations WHERE id = ?", (row["invitation_id"],)).fetchone()
+            if not invitation or invitation["status"] != "pending" or invitation["expires_at"] <= now():
+                raise ApiProblem("project_invite_invalid", "邀请码已失效，请重新邀请", 409)
+            applicant = conn.execute("SELECT * FROM accounts WHERE id = ? AND status = 'active'", (row["applicant_account_id"],)).fetchone()
+            if not applicant:
+                raise ApiProblem("account_disabled", "申请账号已被停用", 403)
+            timestamp = now()
+            if desired == "approved":
+                accept_project_invitation(conn, dict(applicant), invitation["invite_code_hash"])
+                # Existing invitations remain one-use. Resolve competing requests explicitly.
+                conn.execute("UPDATE project_join_requests SET status = 'rejected', decision_reason = '邀请码已用于其他申请，请联系分享者重新邀请', decided_by_account_id = ?, decided_at = ?, updated_at = ? WHERE invitation_id = ? AND id != ? AND status = 'pending'", (current["id"], timestamp, timestamp, invitation["id"], request_id))
+            conn.execute("UPDATE project_join_requests SET status = ?, decided_by_account_id = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'", (desired, current["id"], timestamp, timestamp, request_id))
+            conn.commit()
+            updated = conn.execute("SELECT * FROM project_join_requests WHERE id = ?", (request_id,)).fetchone()
+            return jsonify({"ok": True, "join_request": request_payload(conn, updated, current["id"]), "idempotent": False})
+        finally:
+            conn.close()
+
+    @blueprint.post("/api/mobile/v1/auth/wechat-join")
+    def wechat_join():
+        if rate_limited_fn and rate_limited_fn():
+            raise ApiProblem("rate_limited", "操作过于频繁，请稍后再试", 429, True)
+        data = json_body()
+        display_name, phone = join_contact(data)
+        code_hash = invite_code_hash(data.get("invite_code"))
+        app_id = _safe_text(data.get("app_id"), 128)
+        exchange = _exchange_wechat_code(data.get("code"), app_id)
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT a.* FROM wechat_bindings w JOIN accounts a ON a.id = w.account_id WHERE w.app_id = ? AND w.openid = ?", (app_id, exchange["openid"])).fetchone()
+            created = not bool(row)
+            if row:
+                account = dict(row)
+                if account["status"] != "active":
+                    raise ApiProblem("account_disabled", "账号已被停用", 403)
+            else:
+                # Validate before allocating an account; failures below roll back everything.
+                invite = conn.execute("SELECT * FROM project_invitations WHERE invite_code_hash = ?", (code_hash,)).fetchone()
+                if not invite or invite["status"] != "pending" or invite["expires_at"] <= now():
+                    raise ApiProblem("project_invite_invalid", "邀请码无效、已使用或已过期", 404)
+                project_record_for_owner(conn, invite["project_owner_account_id"], invite["project_id"])
+                cursor = conn.execute("INSERT INTO accounts (username, password_hash, display_name, role, status) VALUES (?, ?, ?, 'user', 'active')", ("wx_" + uuid.uuid4().hex, generate_password_hash(secrets.token_urlsafe(48)), display_name))
+                account = dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (cursor.lastrowid,)).fetchone())
+            binding, _ = binding_for_account(conn, account, {"app_id": app_id, **exchange})
+            result = submit_join_request(conn, account, code_hash, display_name, phone)
+            conn.commit()
+            payload = mobile_login_payload(conn, account, binding["id"], account_created=created, **result)
+            if result.get("project"):
+                payload["bootstrap"]["current_project"] = result["project"]
+            return jsonify(payload)
         finally:
             conn.close()
 

@@ -1,3 +1,4 @@
+import { clearJoinRequest, pendingJoinRequest, rememberJoinRequest, validateJoinApplicant } from './project-join-request'
 import { reactive } from 'vue'
 import { API_MODE, WECHAT_APP_ID } from '@/config/env'
 import { mobileApi, type AuthResponse } from '@/api/mobile'
@@ -7,12 +8,13 @@ import { applyBootstrap, clearBootstrapView, hydrateBootstrap, loadBootstrap } f
 import { queueRuntime } from '@/services/queue-runtime'
 import { selectionStorage } from '@/stores/selection'
 import { registerAuthExpiredHandler } from './auth-expiry-coordinator'
-import { consumePendingInvite, peekPendingInvite } from './pending-invite'
+import { consumePendingInvite, peekPendingInvite, normalizeInviteCode, rememberPendingInvite } from './pending-invite'
 
 const ACCOUNT_KEY = 'engineering-image:account:v1'
 const AUTH_ROUTE = 'pages/auth/bind'
 const HOME_URL = '/pages/home/index'
 const JOIN_PROJECT_ROUTE = 'pages/project/join'
+let authAttempt = 0
 
 export type AuthStage = 'checking' | 'account_login' | 'bind_wechat' | 'authenticated'
 
@@ -52,10 +54,11 @@ function moveToHome(): void {
     const route = currentRoute()
     const inviteCode = peekPendingInvite()
     if (inviteCode && route !== JOIN_PROJECT_ROUTE) {
-      consumePendingInvite()
       uni.reLaunch({ url: `/${JOIN_PROJECT_ROUTE}?code=${encodeURIComponent(inviteCode)}` })
       return
     }
+    const requestId = sessionState.account ? pendingJoinRequest(sessionState.account.id) : ''
+    if (requestId && (!route || route === AUTH_ROUTE)) { uni.reLaunch({ url: `/pages/project/request-status?id=${encodeURIComponent(requestId)}` }); return }
     if (!route || route === AUTH_ROUTE) uni.reLaunch({ url: HOME_URL })
   }, 0)
 }
@@ -98,14 +101,15 @@ function showAccountLogin(message = ''): void {
   moveToLogin()
 }
 
-async function acceptAuthenticatedResponse(response: AuthResponse): Promise<void> {
+async function acceptAuthenticatedResponse(response: AuthResponse, joinedInvite = ''): Promise<void> {
   if (!response.token || !response.account || !response.bootstrap) {
     throw new Error('服务器登录响应不完整，请稍后重试')
   }
   try {
     tokenStorage.set(response.token)
     uni.setStorageSync(ACCOUNT_KEY, response.account)
-    applyBootstrap(response.account.id, response.bootstrap)
+    if (joinedInvite && response.project && !response.pending_approval) applyBootstrap(response.account.id, response.bootstrap, response.project.id)
+    else applyBootstrap(response.account.id, response.bootstrap)
   } catch (error) {
     clearVerifiedSession()
     throw error
@@ -115,6 +119,9 @@ async function acceptAuthenticatedResponse(response: AuthResponse): Promise<void
   sessionState.stage = 'authenticated'
   sessionState.ready = true
   sessionState.error = ''
+  if (joinedInvite && response.join_request && response.join_request.status !== 'approved') rememberJoinRequest(response.account.id, response.join_request.id)
+  else if (joinedInvite) clearJoinRequest(response.account.id)
+  if (joinedInvite && peekPendingInvite() === joinedInvite) consumePendingInvite()
   queueRuntime.setOwner(response.account.id)
   queueRuntime.recoverAuthFailures()
   void queueRuntime.resume('manual')
@@ -176,6 +183,7 @@ export async function ensureSession(): Promise<boolean> {
 }
 
 export async function loginWithAccount(username: string, password: string): Promise<void> {
+  authAttempt += 1
   sessionState.error = ''
   try {
     const code = await getLoginCode()
@@ -205,11 +213,12 @@ export async function confirmWechatBinding(): Promise<void> {
 }
 
 export async function quickWechatLogin(): Promise<void> {
+  authAttempt += 1
   sessionState.error = ''
   try {
     const response = await mobileApi.wechatLogin(await getLoginCode(), WECHAT_APP_ID)
     if (response.binding_required || !response.token) {
-      throw new Error('当前微信尚未绑定账号，请先使用账号密码登录')
+      throw new Error('当前微信尚未绑定账号，请使用项目邀请码加入，或登录已有账号')
     }
     await acceptAuthenticatedResponse(response)
   } catch (error) {
@@ -218,13 +227,41 @@ export async function quickWechatLogin(): Promise<void> {
   }
 }
 
+export function cancelWechatJoin(): void { authAttempt += 1 }
+
+export async function joinProjectWithWechat(inviteCode: string, displayName: string, phone: string): Promise<void> {
+  const invite = normalizeInviteCode(inviteCode)
+  const name = displayName.trim()
+  const attempt = ++authAttempt
+  sessionState.error = ''
+  try {
+    if (invite.length !== 10) throw new Error('请输入完整的 10 位项目邀请码')
+    const validationError = validateJoinApplicant(name, phone)
+    if (validationError) throw new Error(validationError)
+    rememberPendingInvite(invite)
+    const code = await getLoginCode()
+    const stillCurrent = () => attempt === authAttempt && peekPendingInvite() === invite
+    if (!stillCurrent()) throw new Error('加入操作已取消，请重新确认邀请码')
+    const response = await mobileApi.wechatJoin(invite, name, phone.trim(), code, WECHAT_APP_ID)
+    if (!stillCurrent()) throw new Error('加入操作已取消，请重新确认邀请码')
+    if (!response.join_request && !(response.already_member && response.project?.id)) throw new Error('申请响应不完整，请重试')
+    if (response.join_request && response.account && response.join_request.applicant_account_id !== String(response.account.id)) throw new Error('申请账号不匹配，请重新登录')
+    await acceptAuthenticatedResponse(response, invite)
+  } catch (error) {
+    if (attempt === authAttempt) sessionState.error = messageOf(error, '加入项目失败，请稍后重试')
+    throw error
+  }
+}
+
 export function cancelWechatBinding(): void {
+  authAttempt += 1
   resetPendingBinding()
   sessionState.stage = 'account_login'
   sessionState.error = ''
 }
 
 export function signOut(): void {
+  authAttempt += 1
   showAccountLogin()
 }
 
