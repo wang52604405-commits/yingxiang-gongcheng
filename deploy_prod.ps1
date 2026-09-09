@@ -6,6 +6,7 @@
 #   - 私钥路径由环境变量 ALBUM_SIGN_KEY 注入（本机路径，绝不进仓库 / Secrets）
 #   - 先构建成功再动生产，构建失败整个流程提前退出，5088 不受影响
 #   - 数据目录 D:\工程影像资料 全程不触碰
+#   - 只停止目标安装目录中的正式进程，或经本产品接口签名确认的旧源码实例
 
 $ErrorActionPreference = "Stop"
 
@@ -48,6 +49,70 @@ function Get-SafeProcessCommandLine($process) {
         '(?i)(--?[A-Za-z0-9_-]*(?:pass|password|token|secret|key)[A-Za-z0-9_-]*)(=|\s+)(?:"[^"]*"|\S+)',
         '$1$2***'
     )
+}
+
+function Test-IsLegacySourceLauncherText($value) {
+    if (-not $value) { return $false }
+    return ([string]$value -match '(?i)(?:^|[\s"''\\/])(?:autostart_album\.ps1|start_album\.bat)(?:[\s"'']|$)')
+}
+
+function Disable-LegacySourceAutostart {
+    # 新版源码启动脚本读取此变量；同时写入当前进程和当前用户环境，防止后续新进程再次拉起源码版。
+    $env:ALBUM_ENABLE_SOURCE_AUTOSTART = "0"
+    try {
+        [Environment]::SetEnvironmentVariable("ALBUM_ENABLE_SOURCE_AUTOSTART", "0", "User")
+        Write-Host "    已关闭旧源码自启动环境开关"
+    } catch {
+        Write-Host "    [WARN] 无法写入旧源码自启动环境开关：$($_.Exception.Message)"
+    }
+
+    # 只删除明确指向两个历史启动器文件的 Run 注册表值；正式安装版工程影像管理平台.exe 启动项不受影响。
+    foreach ($runPath in @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+    )) {
+        try {
+            $item = Get-ItemProperty -Path $runPath -ErrorAction SilentlyContinue
+            if (-not $item) { continue }
+            foreach ($property in @($item.PSObject.Properties)) {
+                if ($property.Name -like 'PS*') { continue }
+                $value = [string]$property.Value
+                if (Test-IsLegacySourceLauncherText $value) {
+                    Remove-ItemProperty -Path $runPath -Name $property.Name -Force -ErrorAction Stop
+                    Write-Host "    已移除旧源码 Run 启动项：$($property.Name)"
+                }
+            }
+        } catch {
+            Write-Host "    [WARN] 检查 Run 启动项失败：$runPath $($_.Exception.Message)"
+        }
+    }
+
+    # 只停止并禁用 Action 明确引用两个历史启动器文件的计划任务。
+    try {
+        $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue)
+        foreach ($task in $tasks) {
+            $actionText = (@($task.Actions) | ForEach-Object {
+                ([string]$_.Execute) + ' ' + ([string]$_.Arguments) + ' ' + ([string]$_.WorkingDirectory)
+            }) -join ' '
+            if (Test-IsLegacySourceLauncherText $actionText) {
+                Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
+                Disable-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue | Out-Null
+                Write-Host "    已停用旧源码计划任务：$($task.TaskPath)$($task.TaskName)"
+            }
+        }
+    } catch {
+        Write-Host "    [WARN] 检查旧源码计划任务失败：$($_.Exception.Message)"
+    }
+
+    # 当前仍在运行的 powershell/cmd 等启动器，只在命令行明确命中历史脚本名时停止。
+    $launchers = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        Test-IsLegacySourceLauncherText ([string]$_.CommandLine)
+    })
+    foreach ($launcher in $launchers) {
+        if ([int]$launcher.ProcessId -eq $PID) { continue }
+        Write-Host "    停止旧源码启动器 PID $($launcher.ProcessId) $($launcher.Name)"
+        Stop-Process -Id ([int]$launcher.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Test-IsVerifiedLegacySourceAppProcess($process, $pythonExecutable, $expectedVersion, $listenPort) {
@@ -148,61 +213,85 @@ if ($LASTEXITCODE -ne 0) { throw "[4/7] 校验失败（退出码 $LASTEXITCODE�
 Write-Host ""
 Write-Host "[5/7] 停止 $port 与桌面启动器"
 
-# 旧版曾通过 autostart_album.ps1 使用“python run.py”占用 5088。
-# 仅当 Python 路径、run.py 命令行、以及本机 /api/bootstrap 的本产品结构签名全部匹配时才关闭；
-# 任一条件不满足都仍按外部程序处理并 fail-closed。
-$legacyListenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
-    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
-foreach ($listenerPid in $legacyListenerPids) {
-    $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
-    if ($owner -and (Test-IsVerifiedLegacySourceAppProcess $owner $pythonPath $expectedVersion $port)) {
-        Write-Host "    识别并停止本项目旧源码实例 PID $listenerPid ($($owner.Name) run.py)"
-        Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
-    }
-}
-Start-Sleep -Milliseconds 700
+Disable-LegacySourceAutostart
 
-# 只处理 $installDir 下的固定正式进程名；同名但位于其它目录的程序不受影响。
-$procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { Test-IsInstalledAppProcess $_ })
-foreach ($proc in $procs) {
-    Write-Host "    停止 PID $($proc.ProcessId) $($proc.Name)"
-    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-}
-Start-Sleep -Milliseconds 700
+# 把 5088 收口到“空闲”状态。每次只允许两类进程被关闭：
+# 1) 目标安装目录中的正式程序；2) 经 /api/bootstrap 产品签名验证的旧 python run.py。
+# 其它任何监听者均 fail-closed，不会按 Python 名称或端口做全局杀进程。
+$sourceStopDeadline = (Get-Date).AddSeconds(15)
+do {
+    $listenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+    if (-not $listenerPids) { break }
 
-# 重新读取端口。剩余监听者只能是本安装目录的正式程序，否则记录占用者并直接失败。
-$listenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
-    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
-foreach ($listenerPid in $listenerPids) {
-    $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
-    if (-not $owner) {
-        Write-Host "    [BLOCK] PID $listenerPid：无法读取进程信息"
-        throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
-    }
-    if (-not (Test-IsInstalledAppProcess $owner)) {
+    foreach ($listenerPid in $listenerPids) {
+        $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
+        if (-not $owner) {
+            Write-Host "    [BLOCK] PID $listenerPid：无法读取进程信息"
+            throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
+        }
+
+        if (Test-IsInstalledAppProcess $owner) {
+            Write-Host "    停止本应用监听 PID $listenerPid"
+            Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+            continue
+        }
+
+        if (Test-IsVerifiedLegacySourceAppProcess $owner $pythonPath $expectedVersion $port) {
+            $parent = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$owner.ParentProcessId) -ErrorAction SilentlyContinue
+            if ($parent) {
+                $parentCommandLine = Get-SafeProcessCommandLine $parent
+                Write-Host "    旧源码父进程 PID $($parent.ProcessId) Name=$($parent.Name)"
+                if ($parentCommandLine) { Write-Host "    旧源码父进程 CommandLine=$parentCommandLine" }
+                if (Test-IsLegacySourceLauncherText ([string]$parent.CommandLine)) {
+                    Write-Host "    停止明确命中旧启动器的父进程 PID $($parent.ProcessId)"
+                    Stop-Process -Id ([int]$parent.ProcessId) -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Write-Host "    识别并停止本项目旧源码实例 PID $listenerPid ($($owner.Name) run.py)"
+            Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+            continue
+        }
+
         $ownerPath = [string]$owner.ExecutablePath
         $ownerCommandLine = Get-SafeProcessCommandLine $owner
         Write-Host "    [BLOCK] PID $listenerPid Name=$($owner.Name) ParentPID=$($owner.ParentProcessId)"
         Write-Host "    [BLOCK] ExecutablePath=$ownerPath"
-        if ($ownerCommandLine) {
-            Write-Host "    [BLOCK] CommandLine=$ownerCommandLine"
-        }
+        if ($ownerCommandLine) { Write-Host "    [BLOCK] CommandLine=$ownerCommandLine" }
         throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
     }
-    Write-Host "    停止本应用监听 PID $listenerPid"
-    Stop-Process -Id $listenerPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 350
+} while ((Get-Date) -lt $sourceStopDeadline)
+
+$remainingListenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+if ($remainingListenerPids) {
+    throw "旧源码实例在 15 秒内持续复活，部署已停止；请检查旧启动器注册。"
 }
 
-# 等待进程退出并释放 DLL 句柄（最多 30 秒）
+# 端口清空后由当前部署进程临时占位，防止历史自启动器在备份/复制的几秒空窗重新抢占 5088。
+# 占位器只监听本机端口，不处理业务请求；正式服务启动前立即释放。
+$portGuard = $null
+try {
+    $portGuard = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, [int]$port)
+    $portGuard.Start()
+    Write-Host "    已建立 5088 临时部署占位，阻止旧源码回抢端口"
+} catch {
+    throw "无法建立 $port 临时部署占位：$($_.Exception.Message)"
+}
+
+# 等待目标安装目录中的旧进程完全退出并释放 DLL 句柄（最多 30 秒）。
+$alive = @()
 for ($i = 0; $i -lt 30; $i++) {
     $alive = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { Test-IsInstalledAppProcess $_ })
     if (-not $alive) { break }
     Start-Sleep -Seconds 1
 }
-if ($alive) { throw "目标安装目录中的旧版本未能退出，部署已停止。" }
-Start-Sleep -Seconds 1
+if ($alive) {
+    if ($portGuard) { $portGuard.Stop() }
+    throw "目标安装目录中的旧版本未能退出，部署已停止。"
+}
 
 # ---------- 6. 备份旧版（首次安装时旧文件不存在则跳过） ----------
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -226,7 +315,10 @@ for ($i = 0; $i -lt 30; $i++) {
         }
         break
     } catch {
-        if ($i -ge 29) { throw "无法删除 _internal（文件被占用）: $_" }
+        if ($i -ge 29) {
+            if ($portGuard) { $portGuard.Stop() }
+            throw "无法删除 _internal（文件被占用）: $_"
+        }
         Start-Sleep -Seconds 1
     }
 }
@@ -255,22 +347,43 @@ if ($env:ALBUM_CLOUD_AUTO_USER) {
     $cloudEnv = ""
 }
 $cmdLine = 'cmd /d /c set ALBUM_HOST=0.0.0.0&& set ALBUM_PORT=' + $port + '&& set ALBUM_DATA_DIR=' + $dataDir + '&& set ALBUM_LICENSE_FILE=' + $licPath + $cloudEnv + '&& ' + $exePath + ' >> ' + $outLog + ' 2>> ' + $errLog
+
+# 文件替换完成后立即释放占位并启动正式服务，把无监听窗口压缩到最小。
+if ($portGuard) {
+    $portGuard.Stop()
+    $portGuard = $null
+    Write-Host "    已释放 5088 临时部署占位"
+}
 $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmdLine; CurrentDirectory = $installDir }
 if ($created.ReturnValue -ne 0) {
     throw "[7/7] WMI 启动失败（返回值 $($created.ReturnValue)）"
 }
 
-# OCR 等大模块首次加载较慢（可能 20 秒+），轮询等待健康（最多 60 秒）
+# OCR 等大模块首次加载较慢（可能 20 秒+）。健康检查不仅要求 HTTP 200，
+# 还要求版本号等于本次发布版本，且 5088 的实际监听进程来自目标安装目录。
 $healthy = $false
 for ($i = 0; $i -lt 60; $i++) {
     try {
-        $resp = Invoke-WebRequest "http://127.0.0.1:$port/api/projects" -UseBasicParsing -TimeoutSec 5
-        if ($resp.StatusCode -eq 200) { $healthy = $true; break }
+        $resp = Invoke-WebRequest "http://127.0.0.1:$port/api/bootstrap" -UseBasicParsing -TimeoutSec 5
+        if ($resp.StatusCode -eq 200) {
+            $bootstrap = $resp.Content | ConvertFrom-Json
+            if ([string]$bootstrap.app_version -eq [string]$expectedVersion) {
+                $healthPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+                if ($healthPids.Count -eq 1) {
+                    $healthOwner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$healthPids[0]) -ErrorAction SilentlyContinue
+                    if ($healthOwner -and (Test-IsInstalledAppProcess $healthOwner)) {
+                        $healthy = $true
+                        break
+                    }
+                }
+            }
+        }
     } catch {
         # 服务未就绪，继续等
     }
     Start-Sleep -Seconds 1
 }
-if (-not $healthy) { throw "[7/7] 健康检查失败：60 秒内未就绪" }
+if (-not $healthy) { throw "[7/7] 健康检查失败：60 秒内未确认新版本正式服务" }
 Write-Host ""
-Write-Host "[OK] 部署完成，$port 健康检查通过"
+Write-Host "[OK] 部署完成，$port 新版本 $expectedVersion 健康检查通过"
