@@ -143,9 +143,10 @@ describe('独立水印副本与手动定位', () => {
     vi.useFakeTimers()
     const { api } = mockWechat()
     api.getImageInfo.mockImplementation(() => undefined)
-    const promise=generatePhotoWatermark('/user/photo.jpg',{title:'测试'})
+    const promise = generatePhotoWatermark('/user/photo.jpg',{title:'测试'})
+    const rejection = expect(promise).rejects.toThrow('处理超时')
     await vi.advanceTimersByTimeAsync(16_000)
-    await expect(promise).rejects.toThrow('处理超时')
+    await rejection
     vi.useRealTimers()
   })
 })
