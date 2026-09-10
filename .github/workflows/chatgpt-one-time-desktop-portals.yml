@@ -1,0 +1,37 @@
+name: ChatGPT one-time desktop portals patch
+
+on:
+  push:
+    branches:
+      - chatgpt/desktop-miniapp-qr-20260910
+    paths:
+      - .github/workflows/chatgpt-one-time-desktop-portals.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chatgpt/desktop-miniapp-qr-20260910
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Apply desktop portal patch
+        run: python tools/chatgpt_patch_desktop_portals_20260910.py
+      - name: Verify targeted contract
+        run: python -m unittest tests.test_desktop_portals -v
+      - name: Commit patched desktop UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add templates/index.html tests/test_desktop_portals.py
+          git diff --cached --check
+          git commit -m "feat: add website and mini program buttons to desktop header"
+          git push origin HEAD:chatgpt/desktop-miniapp-qr-20260910
