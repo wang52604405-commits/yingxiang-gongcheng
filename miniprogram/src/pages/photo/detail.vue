@@ -34,39 +34,94 @@ const deleteVisible = ref(false)
 const deleteError = ref('')
 const editForm = reactive({ title: '', photo_date: '', assignment: undefined as Assignment | undefined })
 let choosingAssignment = false
+const currentScope = computed(() => local.value?.draft.scope || cloud.value?.scope || 'engineering')
 const canEdit = computed(() => {
   const project = selectionStorage.getProject() as ProjectSummary
-  if (!cloud.value || !canCaptureProject(project)) return false
-  return ['owner','admin'].includes(project.access_role || 'owner') || String(cloud.value.uploaded_by_account_id || '') === String(sessionState.account?.id || '')
+  if (!canCaptureProject(project)) return false
+  if (cloud.value) {
+    return ['owner', 'admin'].includes(project.access_role || 'owner')
+      || String(cloud.value.uploaded_by_account_id || '') === String(sessionState.account?.id || '')
+  }
+  if (local.value) {
+    return String(local.value.owner_account_id || '') === String(sessionState.account?.id || '')
+      && local.value.status !== 'uploading'
+  }
+  return false
 })
-const detailRows = computed(() => buildPhotoDetailRows({ local: cloud.value ? null : local.value, cloud: cloud.value, projectName: projectName.value, hierarchy: hierarchy.value, localActor: localActor.value }).map(row => row.key === 'captured_at' && cloud.value?.photo_date ? { ...row, label: '拍摄日期', value: cloud.value.photo_date } : row))
+const detailRows = computed(() => {
+  const photoDate = local.value?.photo_date || cloud.value?.photo_date || ''
+  return buildPhotoDetailRows({
+    local: cloud.value ? null : local.value,
+    cloud: cloud.value,
+    projectName: projectName.value,
+    hierarchy: hierarchy.value,
+    localActor: localActor.value,
+  }).map((row) => row.key === 'captured_at' && photoDate
+    ? { ...row, label: '拍摄日期', value: photoDate }
+    : row)
+})
 function stillCurrent() { return detailOwner.value === selectionStorage.getOwner() && detailProject.value === String(selectionStorage.getProject().id) }
-function startEditing() { if (!canEdit.value) return; editForm.title = cloud.value!.title; editForm.photo_date = cloud.value!.photo_date; editForm.assignment = undefined; editError.value = ''; editing.value = true }
-function chooseAssignment() { if (changing.value || !stillCurrent()) return; consumePhotoEditDestination(detailOwner.value,detailProject.value); choosingAssignment = true; uni.navigateTo({url:`/pages/destination/select?scope=${cloud.value?.scope || 'engineering'}&return=photo-edit`}) }
+function startEditing() {
+  if (!canEdit.value) return
+  editForm.title = cloud.value?.title || local.value?.title || ''
+  editForm.photo_date = cloud.value?.photo_date || local.value?.photo_date || ''
+  editForm.assignment = undefined
+  editError.value = ''
+  editing.value = true
+}
+function chooseAssignment() {
+  if (changing.value || !stillCurrent()) return
+  consumePhotoEditDestination(detailOwner.value, detailProject.value)
+  choosingAssignment = true
+  uni.navigateTo({ url: `/pages/destination/select?scope=${currentScope.value}&return=photo-edit` })
+}
 async function saveInfo() {
   if (!stillCurrent() || !canEdit.value || changing.value) return
-  changing.value = true; editError.value = ''
+  if (!editForm.photo_date) {
+    editError.value = '请选择照片日期'
+    return
+  }
+  changing.value = true
+  editError.value = ''
   try {
-    const result = await photoActions.edit(photoId.value,detailProject.value,{...editForm})
-    if (!stillCurrent()) return
-    cloud.value = result; editing.value = false
-    queueRuntime.applyCloudPhotoInfo(photoId.value,{title:result.title,photo_date:result.photo_date,assignment:editForm.assignment})
-    if (local.value) { local.value.title = result.title; local.value.photo_date = result.photo_date }
+    if (cloud.value) {
+      const result = await photoActions.edit(photoId.value, detailProject.value, { ...editForm })
+      if (!stillCurrent()) return
+      cloud.value = result
+      queueRuntime.applyCloudPhotoInfo(photoId.value, { title: result.title, photo_date: result.photo_date, assignment: editForm.assignment })
+    } else if (local.value) {
+      queueRuntime.applyCloudPhotoInfo(photoId.value, { title: editForm.title.trim(), photo_date: editForm.photo_date, assignment: editForm.assignment })
+      local.value.title = editForm.title.trim()
+      local.value.photo_date = editForm.photo_date
+      local.value.draft.title = editForm.title.trim()
+      local.value.draft.photo_date = editForm.photo_date
+      if (editForm.assignment) local.value.draft.assignment = { ...editForm.assignment }
+    }
+    editing.value = false
     await loadProjectDetails()
-    uni.showToast({ title: '已保存，电脑端将同步', icon:'success' })
-  } catch (error) { editError.value = error instanceof Error ? error.message : '保存失败' }
-  finally { changing.value = false }
+    uni.showToast({ title: cloud.value ? '已保存，电脑端将同步' : '已保存到待上传照片', icon: 'success' })
+  } catch (error) {
+    editError.value = error instanceof Error ? error.message : '保存失败'
+  } finally {
+    changing.value = false
+  }
 }
 async function confirmDelete(password: string) {
-  if (!stillCurrent() || !canEdit.value || changing.value) return
-  changing.value = true; deleteError.value = ''
+  if (!stillCurrent() || !canEdit.value || changing.value || !cloud.value) return
+  changing.value = true
+  deleteError.value = ''
   try {
-    await photoActions.delete(photoId.value,detailProject.value,password)
+    await photoActions.delete(photoId.value, detailProject.value, password)
     if (!stillCurrent()) return
     queueRuntime.markCloudPhotoDeleted(photoId.value)
-    deleteVisible.value = false; uni.showToast({title:'照片已删除',icon:'success'}); uni.navigateBack()
-  } catch(error) { deleteError.value = error instanceof Error ? error.message : '删除失败' }
-  finally { changing.value = false }
+    deleteVisible.value = false
+    uni.showToast({ title: '照片已删除', icon: 'success' })
+    uni.navigateBack()
+  } catch (error) {
+    deleteError.value = error instanceof Error ? error.message : '删除失败'
+  } finally {
+    changing.value = false
+  }
 }
 
 function photoProjectId(): string {
@@ -121,17 +176,51 @@ function openWatermark() {
   const owner = selectionStorage.getOwner()
   const currentProjectId = String(selectionStorage.getProject().id || '')
   if (!owner || !currentProjectId || String(sessionState.account?.id || '') !== owner) return
-  if (owner !== detailOwner.value || currentProjectId !== detailProject.value) { uni.showToast({ title: '账号或工程已切换，请重新打开照片', icon: 'none' }); return }
-  if (local.value && String(local.value.owner_account_id) !== owner) { uni.showToast({ title: '账号已切换，请重新打开照片', icon: 'none' }); return }
+  if (owner !== detailOwner.value || currentProjectId !== detailProject.value) {
+    uni.showToast({ title: '账号或工程已切换，请重新打开照片', icon: 'none' })
+    return
+  }
+  if (local.value && String(local.value.owner_account_id) !== owner) {
+    uni.showToast({ title: '账号已切换，请重新打开照片', icon: 'none' })
+    return
+  }
   const sourcePath = local.value?.original_path || imageUrl.value
-  if (!sourcePath) { uni.showToast({ title: '照片暂时无法读取', icon: 'none' }); return }
+  if (!sourcePath) {
+    uni.showToast({ title: '照片暂时无法读取', icon: 'none' })
+    return
+  }
   try {
-    setWatermarkContext(owner, currentProjectId, { sourcePath, sourceQuality: local.value?.original_path ? 'original' : 'preview', sourceKind: 'detail', capturedAt: local.value?.client_captured_at || cloud.value?.captured_at || '', unitProjectName: local.value?.draft.assignment?.unit_project_name || cloud.value?.unit_project_name || '', partName: local.value?.draft.assignment?.part_name || cloud.value?.part_name || '', unitName: local.value?.draft.assignment?.unit_name || cloud.value?.unit_name || '', scope: local.value?.draft.scope || cloud.value?.scope || 'engineering', category: local.value?.draft.category || cloud.value?.category, sitePart: [local.value?.draft.assignment?.unit_name || cloud.value?.unit_name, local.value?.draft.assignment?.process_name || cloud.value?.process_name].filter(Boolean).join(' / '), project: projectName.value, title: local.value?.title || cloud.value?.title || '', photographer: cloud.value?.photographer || local.value?.draft.photographer || '', photoDate: local.value?.photo_date || cloud.value?.photo_date || '' })
+    setWatermarkContext(owner, currentProjectId, {
+      sourcePath,
+      sourceQuality: local.value?.original_path ? 'original' : 'preview',
+      sourceKind: 'detail',
+      capturedAt: local.value?.client_captured_at || cloud.value?.captured_at || '',
+      unitProjectName: local.value?.draft.assignment?.unit_project_name || cloud.value?.unit_project_name || '',
+      partName: local.value?.draft.assignment?.part_name || cloud.value?.part_name || '',
+      unitName: local.value?.draft.assignment?.unit_name || cloud.value?.unit_name || '',
+      scope: currentScope.value,
+      category: local.value?.draft.category || cloud.value?.category,
+      sitePart: [local.value?.draft.assignment?.unit_name || cloud.value?.unit_name, local.value?.draft.assignment?.process_name || cloud.value?.process_name].filter(Boolean).join(' / '),
+      project: projectName.value,
+      title: local.value?.title || cloud.value?.title || '',
+      photographer: cloud.value?.photographer || local.value?.draft.photographer || '',
+      photoDate: local.value?.photo_date || cloud.value?.photo_date || '',
+    })
     uni.navigateTo({ url: '/pages/photo/watermark' })
-  } catch (reason) { uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' }) }
+  } catch (reason) {
+    uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' })
+  }
 }
 
-onShow(() => { if (choosingAssignment) { choosingAssignment = false; if (stillCurrent()) { const picked = consumePhotoEditDestination(detailOwner.value, detailProject.value); if (picked && picked.scope === cloud.value?.scope) editForm.assignment = picked.assignment } } })
+onShow(() => {
+  if (choosingAssignment) {
+    choosingAssignment = false
+    if (stillCurrent()) {
+      const picked = consumePhotoEditDestination(detailOwner.value, detailProject.value)
+      if (picked && picked.scope === currentScope.value) editForm.assignment = picked.assignment
+    }
+  }
+})
 onLoad((query) => {
   detailOwner.value = selectionStorage.getOwner()
   detailProject.value = String(selectionStorage.getProject().id || '')
@@ -153,13 +242,19 @@ onLoad((query) => {
       <button v-if="imageUrl || local?.original_path" class="watermark-button primary-button pressable" @tap="openWatermark">{{ local?.original_path ? '保存水印照片' : '保存水印预览' }}</button>
       <view v-if="canEdit" class="photo-actions">
         <button class="secondary-button photo-action-button edit-action pressable" @tap="startEditing">编辑照片信息</button>
-        <button class="photo-action-button danger-outline-button pressable" @tap="deleteError = ''; deleteVisible = true">删除照片</button>
+        <button v-if="cloud" class="photo-action-button danger-outline-button pressable" @tap="deleteError = ''; deleteVisible = true">删除照片</button>
+        <button v-else class="photo-action-button pending-action" disabled>待上传照片</button>
       </view>
       <view v-if="editing" class="detail-card edit-panel card">
-        <text class="field-label">题名</text>
+        <text class="field-label">照片名称</text>
         <input v-model="editForm.title" class="input" maxlength="200" :disabled="changing" />
-        <text class="field-label">拍摄日期</text>
-        <picker mode="date" :value="editForm.photo_date" :disabled="changing" @change="editForm.photo_date = $event.detail.value"><view class="input">{{ editForm.photo_date || '选择日期' }}</view></picker>
+        <text class="field-label date-label">照片日期</text>
+        <picker mode="date" :value="editForm.photo_date" :disabled="changing" @change="editForm.photo_date = $event.detail.value">
+          <view class="input date-picker-value">
+            <text>{{ editForm.photo_date || '选择照片日期' }}</text>
+            <text class="date-arrow">›</text>
+          </view>
+        </picker>
         <button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button>
         <text v-if="editError" class="edit-error">{{ editError }}</text>
         <view class="photo-actions"><button :disabled="changing" @tap="editing = false">取消</button><button class="primary-button" :disabled="changing" @tap="saveInfo">{{ changing ? '保存中…' : '保存信息' }}</button></view>
@@ -186,9 +281,13 @@ onLoad((query) => {
 .photo-action-button { box-shadow: none; }
 .edit-action { border-color: var(--primary-strong); color: var(--primary-strong); }
 .danger-outline-button { border: 1rpx solid var(--danger); color: var(--danger); background: var(--surface); }
+.pending-action { border: 1rpx solid var(--line); color: var(--muted); background: var(--surface-2); opacity: .8; }
 .edit-panel { padding: 24rpx !important; }
 .edit-panel .input { min-height: 48px; }
 .edit-panel > button { margin-top: 20rpx; font-size: 25rpx; }
+.date-label { margin-top: 22rpx; }
+.date-picker-value { display: flex; align-items: center; justify-content: space-between; color: var(--text); }
+.date-arrow { color: var(--muted); font-size: 36rpx; line-height: 1; }
 .edit-error { display: block; margin-top: 12rpx; color: var(--danger); }
 .detail-card { overflow: hidden; margin-top: 24rpx; padding: 0 22rpx; }
 .detail-row { display: grid; grid-template-columns: 174rpx 1fr; gap: 18rpx; padding: 23rpx 0; border-bottom: 1rpx solid var(--line); line-height: 1.5; }
