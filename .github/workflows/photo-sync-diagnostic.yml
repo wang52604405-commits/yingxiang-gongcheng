@@ -1,0 +1,121 @@
+name: 照片同步诊断
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".diag/photo-sync-trigger.txt"
+  workflow_dispatch:
+
+concurrency:
+  group: photo-sync-diagnostic
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    name: 读取 5088 照片同步状态
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 8
+    steps:
+      - name: 输出生产端同步状态（脱敏）
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $dataDir = 'D:\工程影像资料'
+          $installDir = 'C:\Users\Administrator\AppData\Local\工程影像管理平台'
+
+          Write-Host "=== 5088 health ==="
+          try {
+            $boot = Invoke-RestMethod -Uri 'http://127.0.0.1:5088/api/bootstrap' -TimeoutSec 8
+            Write-Host ("app_version=" + [string]$boot.app_version)
+            Write-Host ("bootstrap_ok=" + [string]$boot.ok)
+          } catch {
+            Write-Host ("bootstrap_error=" + $_.Exception.Message)
+          }
+
+          Write-Host "=== cloud account (sanitized) ==="
+          $accountPath = Join-Path $dataDir 'cloud_account.json'
+          if (Test-Path -LiteralPath $accountPath) {
+            try {
+              $a = Get-Content -LiteralPath $accountPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("account_id=" + [string]$a.account_id)
+              Write-Host ("username=" + [string]$a.username)
+              Write-Host ("server=" + [string]$a.server)
+              Write-Host ("has_token_protected=" + [string][bool]$a.token_protected)
+              Write-Host ("has_desktop_sync_token_protected=" + [string][bool]$a.desktop_sync_token_protected)
+            } catch { Write-Host ("account_read_error=" + $_.Exception.Message) }
+          } else { Write-Host 'cloud_account.json missing' }
+
+          Write-Host "=== engineering project ownership ==="
+          $projectsPath = Join-Path $dataDir 'engineering_projects.json'
+          if (Test-Path -LiteralPath $projectsPath) {
+            try {
+              $pdoc = Get-Content -LiteralPath $projectsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("document_type=" + $pdoc.GetType().Name)
+              $items = @()
+              if ($pdoc -is [System.Array]) { $items = @($pdoc) }
+              elseif ($pdoc.projects) { $items = @($pdoc.projects) }
+              elseif ($pdoc.items) { $items = @($pdoc.items) }
+              else { $items = @($pdoc) }
+              foreach ($p in $items) {
+                if ($null -eq $p) { continue }
+                Write-Host ("project id={0} name={1} cloud_owner_id={2} cloud_project_ref={3} active={4}" -f [string]$p.id,[string]$p.project_name,[string]$p.cloud_owner_id,[string]$p.cloud_project_ref,[string]$p.active)
+              }
+            } catch { Write-Host ("projects_read_error=" + $_.Exception.Message) }
+          } else { Write-Host 'engineering_projects.json missing' }
+
+          Write-Host "=== mobile sync state ==="
+          $statePath = Join-Path $dataDir 'mobile_sync_state.json'
+          if (Test-Path -LiteralPath $statePath) {
+            try {
+              $doc = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("state_version=" + [string]$doc.version)
+              Write-Host ("active_identity=" + [string]$doc.active_identity)
+              if ($doc.scopes) {
+                foreach ($prop in $doc.scopes.PSObject.Properties) {
+                  $s = $prop.Value
+                  $backfilledCount = 0
+                  $errorCount = 0
+                  if ($s.backfilled) { $backfilledCount = @($s.backfilled.PSObject.Properties).Count }
+                  if ($s.backfill_errors) { $errorCount = @($s.backfill_errors.PSObject.Properties).Count }
+                  Write-Host ("scope={0}" -f $prop.Name)
+                  Write-Host ("  reconcile_revision={0}" -f [string]$s.backfill_reconcile_revision)
+                  Write-Host ("  reconcile_started_at={0}" -f [string]$s.backfill_reconcile_started_at)
+                  Write-Host ("  backfill_paused={0}" -f [string]$s.backfill_paused)
+                  Write-Host ("  snapshot_revision={0}" -f [string]$s.snapshot_revision)
+                  Write-Host ("  project_ref={0}" -f [string]$s.project_ref)
+                  Write-Host ("  backfilled_count={0}" -f $backfilledCount)
+                  Write-Host ("  backfill_error_count={0}" -f $errorCount)
+                  Write-Host ("  backfill_updated_at={0}" -f [string]$s.backfill_updated_at)
+                  if ($s.backfill_inventory) {
+                    Write-Host ("  inventory=" + ($s.backfill_inventory | ConvertTo-Json -Compress -Depth 8))
+                  }
+                  if ($s.backfill_errors) {
+                    $groups = @($s.backfill_errors.PSObject.Properties | ForEach-Object {
+                      $e = $_.Value
+                      [pscustomobject]@{ code=[string]$e.code; http_status=[string]$e.http_status; permanent=[string]$e.permanent }
+                    } | Group-Object code,http_status,permanent | Sort-Object Count -Descending | Select-Object -First 12)
+                    foreach ($g in $groups) { Write-Host ("  error_group count={0} key={1}" -f $g.Count,$g.Name) }
+                  }
+                }
+              }
+            } catch { Write-Host ("state_read_error=" + $_.Exception.Message) }
+          } else { Write-Host 'mobile_sync_state.json missing' }
+
+          Write-Host "=== service logs (filtered) ==="
+          if (Test-Path -LiteralPath $installDir) {
+            Get-ChildItem -LiteralPath $installDir -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Extension -in '.log','.txt' -and $_.Length -lt 20MB } |
+              ForEach-Object {
+                Write-Host ("log=" + $_.FullName + " size=" + $_.Length)
+                try {
+                  Get-Content -LiteralPath $_.FullName -Tail 200 -ErrorAction Stop |
+                    Where-Object { $_ -match '(?i)mobile|backfill|sync|ownership|account|error|fail|exception' } |
+                    ForEach-Object {
+                      $line = [regex]::Replace([string]$_,'(?i)Bearer\s+[A-Za-z0-9._~-]+','Bearer ***')
+                      $line = [regex]::Replace($line,'(?i)(password|passwd|token|secret|key)\s*[:=]\s*\S+','$1=***')
+                      Write-Host $line
+                    }
+                } catch { Write-Host ("log_read_error=" + $_.Exception.Message) }
+              }
+          }
