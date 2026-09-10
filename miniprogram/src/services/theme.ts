@@ -25,6 +25,15 @@ function syncTabTheme(next: 'light' | 'dark') {
     }
   } catch {}
 }
+function syncSystemBar(next: 'light' | 'dark') {
+  try {
+    uni.setNavigationBarColor({
+      frontColor: next === 'light' ? '#000000' : '#ffffff',
+      backgroundColor: next === 'light' ? '#ffffff' : '#0f444d',
+      animation: { duration: 0, timingFunc: 'linear' },
+    })
+  } catch {}
+}
 export function refreshTheme(date?: Date) {
   let next: 'light' | 'dark'
   if (themeState.mode !== 'auto') {
@@ -33,12 +42,11 @@ export function refreshTheme(date?: Date) {
     const daylight = solarDaylight(date, themeState.latitude, themeState.longitude)
     next = daylight === null ? systemTheme() : daylight ? 'light' : 'dark'
   } else {
-    // Runtime navigation stays on the system appearance. Location changes must not repaint
-    // the page or tab bar while entering the camera; explicit dated calls remain solar-aware.
     next = systemTheme()
   }
   if (themeState.resolved !== next) themeState.resolved = next
   syncTabTheme(next)
+  syncSystemBar(next)
 }
 export function setThemeLocation(latitude: number, longitude: number) {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return
