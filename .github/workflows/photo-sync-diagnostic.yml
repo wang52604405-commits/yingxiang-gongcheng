@@ -17,56 +17,50 @@ jobs:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 8
     steps:
-      - name: 定位实际数据目录并输出同步状态（脱敏）
+      - name: Locate runtime state and print sanitized sync diagnostics
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-          $roots = @(
-            'D:\工程影像资料',
-            'D:\工程影像资料\data',
-            'C:\Users\Administrator\AppData\Local\工程影像管理平台\data',
-            'C:\Users\Administrator\AppData\Local\工程影像管理平台'
-          ) | Select-Object -Unique
-
           Write-Host "=== 5088 health ==="
           try {
             $boot = Invoke-RestMethod -Uri 'http://127.0.0.1:5088/api/bootstrap' -TimeoutSec 8
             Write-Host ("app_version=" + [string]$boot.app_version)
             Write-Host ("bootstrap_ok=" + [string]$boot.ok)
             Write-Host ("bootstrap_keys=" + (($boot.PSObject.Properties.Name | Sort-Object) -join ','))
-            if ($boot.dashboard) { Write-Host ("dashboard=" + ($boot.dashboard | ConvertTo-Json -Compress -Depth 4)) }
+            if ($boot.user) { Write-Host ("bootstrap_user_present=" + [string][bool]$boot.user) }
           } catch { Write-Host ("bootstrap_error=" + $_.Exception.Message) }
 
-          Write-Host "=== candidate data roots ==="
-          foreach ($r in $roots) {
-            Write-Host ("root={0} exists={1}" -f $r,(Test-Path -LiteralPath $r))
-            if (Test-Path -LiteralPath $r) {
-              $dirs = @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue | Select-Object -First 25 -ExpandProperty Name)
-              Write-Host ("  dirs=" + ($dirs -join '|'))
-              $files = @(Get-ChildItem -LiteralPath $r -File -ErrorAction SilentlyContinue | Select-Object -First 40 -ExpandProperty Name)
-              Write-Host ("  files=" + ($files -join '|'))
+          Write-Host "=== listener ==="
+          $listenerPids = @(Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+          foreach ($pidValue in $listenerPids) {
+            $proc = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$pidValue) -ErrorAction SilentlyContinue
+            if ($proc) {
+              Write-Host ("pid={0} name={1} executable={2}" -f $proc.ProcessId,$proc.Name,$proc.ExecutablePath)
             }
           }
 
           Write-Host "=== locate state files ==="
           $names = @('cloud_account.json','engineering_projects.json','mobile_sync_state.json','project_info.json')
-          $found = @{}
-          foreach ($root in @('D:\工程影像资料','C:\Users\Administrator\AppData\Local\工程影像管理平台')) {
+          $searchRoots = @('D:\','C:\Users\Administrator')
+          $allFound = @{}
+          foreach ($name in $names) { $allFound[$name] = @() }
+          foreach ($root in $searchRoots) {
             if (-not (Test-Path -LiteralPath $root)) { continue }
             foreach ($name in $names) {
-              $matches = @(Get-ChildItem -LiteralPath $root -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 8)
+              $matches = @(Get-ChildItem -LiteralPath $root -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 12)
               foreach ($m in $matches) {
+                $allFound[$name] += $m.FullName
                 Write-Host ("found {0} -> {1} size={2} modified={3}" -f $name,$m.FullName,$m.Length,$m.LastWriteTime.ToString('s'))
-                if (-not $found.ContainsKey($name)) { $found[$name] = $m.FullName }
               }
             }
           }
 
-          if ($found.ContainsKey('cloud_account.json')) {
+          $accountPath = @($allFound['cloud_account.json'] | Sort-Object | Select-Object -First 1)
+          if ($accountPath.Count) {
             Write-Host "=== cloud account (sanitized) ==="
             try {
-              $a = Get-Content -LiteralPath $found['cloud_account.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
-              Write-Host ("account_path=" + $found['cloud_account.json'])
+              $a = Get-Content -LiteralPath $accountPath[0] -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("account_path=" + $accountPath[0])
               Write-Host ("account_id=" + [string]$a.account_id)
               Write-Host ("username=" + [string]$a.username)
               Write-Host ("server=" + [string]$a.server)
@@ -75,11 +69,12 @@ jobs:
             } catch { Write-Host ("account_read_error=" + $_.Exception.Message) }
           }
 
-          if ($found.ContainsKey('engineering_projects.json')) {
+          $projectsPath = @($allFound['engineering_projects.json'] | Sort-Object | Select-Object -First 1)
+          if ($projectsPath.Count) {
             Write-Host "=== engineering project ownership ==="
             try {
-              $pdoc = Get-Content -LiteralPath $found['engineering_projects.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
-              Write-Host ("projects_path=" + $found['engineering_projects.json'])
+              $pdoc = Get-Content -LiteralPath $projectsPath[0] -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("projects_path=" + $projectsPath[0])
               $items = @()
               if ($pdoc -is [System.Array]) { $items = @($pdoc) }
               elseif ($pdoc.projects) { $items = @($pdoc.projects) }
@@ -92,11 +87,12 @@ jobs:
             } catch { Write-Host ("projects_read_error=" + $_.Exception.Message) }
           }
 
-          if ($found.ContainsKey('mobile_sync_state.json')) {
+          $statePaths = @($allFound['mobile_sync_state.json'] | Sort-Object)
+          foreach ($statePath in $statePaths) {
             Write-Host "=== mobile sync state ==="
             try {
-              $doc = Get-Content -LiteralPath $found['mobile_sync_state.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
-              Write-Host ("state_path=" + $found['mobile_sync_state.json'])
+              $doc = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("state_path=" + $statePath)
               Write-Host ("state_version=" + [string]$doc.version)
               Write-Host ("active_identity=" + [string]$doc.active_identity)
               if ($doc.scopes) {
