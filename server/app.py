@@ -123,8 +123,13 @@ def _normalized_product_config(value=None) -> dict:
     pricing["lifetime_price"] = max(1, min(99999, int(pricing.get("lifetime_price") or 399)))
     pricing["price_label"] = str(pricing.get("price_label") or "原价")[:40]
     mini_program = product["mini_program"]
-    raw_limit = mini_program.get("free_upload_limit", 100)
-    mini_program["free_upload_limit"] = max(0, min(100000, int(100 if raw_limit is None else raw_limit)))
+    raw_limit = mini_program.get("free_upload_limit", 500)
+    parsed_limit = int(500 if raw_limit is None else raw_limit)
+    # 100 是旧版本的小程序默认额度；产品策略升级后自动迁移为 500。
+    # 0 和其它管理员明确设置的数值仍保持原意。
+    if parsed_limit == 100:
+        parsed_limit = 500
+    mini_program["free_upload_limit"] = max(0, min(100000, parsed_limit))
     free = product["free"]
     free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
     # 免费版 300 张为完整可用额度，不叠加产品水印。

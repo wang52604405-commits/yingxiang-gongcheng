@@ -65,7 +65,7 @@ def mobile_upload_quota(conn, owner_id, *, exclude_uuid="", timestamp=None):
     """Owner-wide lifetime usage plus active chunk reservations, never desktop backfill."""
     from .app import _has_active_membership, _product_config
     owner_id = int(owner_id)
-    raw_limit = _product_config(conn).get("mini_program", {}).get("free_upload_limit", 100)
+    raw_limit = _product_config(conn).get("mini_program", {}).get("free_upload_limit", 500)
     try:
         limit = max(0, int(raw_limit))
     except (TypeError, ValueError):
@@ -2974,7 +2974,9 @@ def register_mobile_api(
             except ApiProblem:
                 status = "revoked"
         can_review = False
-        if int(actor_id) in {int(item["approver_account_id"]), int(item["project_owner_account_id"])} and int(actor_id) != int(item["applicant_account_id"]):
+        # 负责人和当前任一管理员都能审核待加入申请；申请人本人永远不能审核自己。
+        # 原分享人仍须保有管理权限，避免已被降权/移除的旧邀请继续产生有效审批链。
+        if int(actor_id) != int(item["applicant_account_id"]):
             try:
                 project_for(conn, actor_id, _project_ref(item["project_owner_account_id"], item["project_id"]), MANAGE_MEMBER_ROLES)
                 project_for(conn, item["approver_account_id"], _project_ref(item["project_owner_account_id"], item["project_id"]), MANAGE_MEMBER_ROLES)
@@ -3036,7 +3038,17 @@ def register_mobile_api(
         conn = db.connect()
         try:
             reference = str(request.args.get("project_id") or "")
-            rows = conn.execute("SELECT * FROM project_join_requests WHERE applicant_account_id = ? OR approver_account_id = ? OR project_owner_account_id = ? ORDER BY id DESC", (current["id"], current["id"], current["id"])).fetchall()
+            if reference:
+                # 项目成员页/首页徽标按项目读取：负责人和任一管理员都能看到该项目的申请。
+                managed_project = project_for(conn, current["id"], reference, MANAGE_MEMBER_ROLES)
+                rows = conn.execute(
+                    "SELECT * FROM project_join_requests WHERE project_owner_account_id = ? "
+                    "AND project_id = ? ORDER BY id DESC",
+                    (managed_project["account_id"], managed_project["project_id"]),
+                ).fetchall()
+            else:
+                # 无 project_id 时兼容申请人自己的状态页，以及旧版分享人/负责人读取方式。
+                rows = conn.execute("SELECT * FROM project_join_requests WHERE applicant_account_id = ? OR approver_account_id = ? OR project_owner_account_id = ? ORDER BY id DESC", (current["id"], current["id"], current["id"])).fetchall()
             visible = []
             for row in rows:
                 project_ref = _project_ref(row["project_owner_account_id"], row["project_id"])
@@ -3061,7 +3073,7 @@ def register_mobile_api(
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM project_join_requests WHERE id = ?", (request_id,)).fetchone()
-            if not row or int(current["id"]) not in {int(row["approver_account_id"]), int(row["project_owner_account_id"])} or int(current["id"]) == int(row["applicant_account_id"]):
+            if not row or int(current["id"]) == int(row["applicant_account_id"]):
                 raise ApiProblem("join_request_not_found", "申请不存在或无权审批", 404)
             reference = _project_ref(row["project_owner_account_id"], row["project_id"])
             project_for(conn, current["id"], reference, MANAGE_MEMBER_ROLES)
