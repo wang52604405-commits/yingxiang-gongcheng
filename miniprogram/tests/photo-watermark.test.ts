@@ -85,7 +85,7 @@ describe('独立水印副本与手动定位', () => {
     expect(result.height).toBe(3000)
     expect(ctx.drawImage).toHaveBeenCalledTimes(2)
     expect(ctx.fillRect).toHaveBeenCalledTimes(3)
-    expect(ctx.fillText.mock.calls.map((call: any) => call[0])).toContain('时间：未取得拍摄日期')
+    expect(ctx.fillText.mock.calls.map((call: any) => call[0])).not.toContain('时间：未取得拍摄日期')
     expect(ctx.textBaseline).toBe('middle')
   })
 
