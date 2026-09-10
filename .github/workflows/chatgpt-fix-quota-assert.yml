@@ -1,0 +1,35 @@
+name: ChatGPT final quota assertion fix
+
+on:
+  push:
+    branches:
+      - chatgpt/miniapp-admin-date-quota-20260910
+    paths:
+      - .github/workflows/chatgpt-fix-quota-assert.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chatgpt/miniapp-admin-date-quota-20260910
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Fix stale quota expectation
+        run: python tools/chatgpt_fix_quota_assert_20260910.py
+      - name: Commit test fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_mobile_server.py
+          git diff --cached --check
+          git commit -m "test: expect 500-photo mini program quota"
+          git push origin HEAD:chatgpt/miniapp-admin-date-quota-20260910
