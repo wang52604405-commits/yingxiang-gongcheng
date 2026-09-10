@@ -12,90 +12,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    needs: deploy-auth
+  # 完整回归放到 GitHub 托管 Windows 上运行，避免生产电脑上的后台服务、
+  # 微信工具或本地 SQLite I/O 干扰并发测试。只有托管回归全部通过，
+  # 才允许唯一的生产 Windows Runner 接手签名、5088 部署和安装包发布。
+  validate:
+    name: 发布前完整回归
     if: github.ref == 'refs/heads/main'
-    # 本机自托管 runner（登录时启动的计划任务，以 Administrator 账户运行），
-    # 构建+签名+替换+重启+发布安装包都在本机完成，权限与手动操作一致
-    runs-on: [self-hosted, windows, x64]
-    timeout-minutes: 30
-    env:
-      # 本机走代理才能访问 GitHub（Clash 7897），checkout 也要用代理
-      HTTPS_PROXY: http://127.0.0.1:7897
-      HTTP_PROXY: http://127.0.0.1:7897
-      ALL_PROXY: http://127.0.0.1:7897
-      NO_PROXY: 127.0.0.1,localhost
+    runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 生成本次桌面发布版本
-        shell: powershell
-        run: |
-          python prepare_release_version.py
-          if ($LASTEXITCODE -ne 0) { throw "release version preparation failed: exit code $LASTEXITCODE" }
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
 
-      - name: 准备临时发布凭据
+      - name: 安装依赖
         shell: powershell
-        env:
-          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
-          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
-        run: |
-          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布密钥 Secrets" }
-          $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
-          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
-          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
-          $sshKey = Join-Path $credentialDir "server_key"
-          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
-          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
-          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
-          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
-          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
+        run: python -m pip install -r requirements.txt -r server/requirements.txt
 
-      - name: 验证测试、版本与发布密钥
+      - name: 运行完整 Python 回归
         shell: powershell
         run: |
-          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
-          if ($LASTEXITCODE -ne 0) { throw "asset line-ending normalization failed: exit code $LASTEXITCODE" }
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
-          python verify_release.py
-          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
-      - name: 构建并部署 5088
-        shell: powershell
-        env:
-          ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
-          ALBUM_DATA_DIR: D:\工程影像资料
-          ALBUM_PORT: "5088"
-          # 云预览自动同步账号（存在 GitHub Secrets，不进仓库）
-          ALBUM_CLOUD_AUTO_USER: ${{ secrets.ALBUM_CLOUD_AUTO_USER }}
-          ALBUM_CLOUD_AUTO_PASS: ${{ secrets.ALBUM_CLOUD_AUTO_PASS }}
-        run: |
-          Set-ExecutionPolicy -Scope Process Bypass -Force
-          .\deploy_prod.ps1
-
-      - name: 发布安装包到更新通道
-        shell: powershell
-        env:
-          # SKIP_BUILD=1：deploy_prod.ps1 已构建 dist 并签名，此处直接打 Inno 安装包
-          SKIP_BUILD: "1"
-        run: |
-          Set-ExecutionPolicy -Scope Process Bypass -Force
-          python publish_update.py
-
-      - name: 清理临时发布凭据
-        if: always()
+      - name: 编译检查
         shell: powershell
         run: |
-          if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_CREDENTIAL_DIR)) {
-            Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
-          }
+          python -m compileall -q app.py cloud_client.py mobile_sync.py mobile_sync_reconcile.py validate_mobile_migration.py tests/run_mobile_staging_e2e.py server
+          if ($LASTEXITCODE -ne 0) { throw "compile check failed: exit code $LASTEXITCODE" }
+          git diff --check HEAD
+          if ($LASTEXITCODE -ne 0) { throw "git diff check failed: exit code $LASTEXITCODE" }
 
-  # 授权中心自动部署：仅当 server/** 代码变更时触发
+  # 授权中心自动部署：仅当 server/** 代码变更时触发。
+  # 这里不再重复跑 189 项完整回归；validate 已在隔离的托管 Windows 完成。
   deploy-auth:
-    if: github.ref == 'refs/heads/main'
+    needs: validate
+    if: github.ref == 'refs/heads/main' && needs.validate.result == 'success'
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     env:
@@ -133,13 +93,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
 
-      - name: 部署前运行完整回归与发布校验
+      - name: 校验发布版本与密钥
         shell: powershell
         run: |
           python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
           if ($LASTEXITCODE -ne 0) { throw "asset line-ending normalization failed: exit code $LASTEXITCODE" }
-          python -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "unit tests failed: exit code $LASTEXITCODE" }
           python verify_release.py
           if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
 
@@ -182,8 +140,7 @@ jobs:
       - name: 部署授权中心到阿里云
         if: steps.check.outputs.run_deploy == 'true'
         shell: powershell
-        run: |
-          python deploy_auth.py
+        run: python deploy_auth.py
 
       - name: 清理临时服务器凭据
         if: always()
@@ -193,8 +150,83 @@ jobs:
             Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
           }
 
+  deploy:
+    needs: deploy-auth
+    if: github.ref == 'refs/heads/main' && needs.deploy-auth.result == 'success'
+    # 本机自托管 runner 只负责真正的生产发布，不再承担并发回归测试。
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 30
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 生成本次桌面发布版本
+        shell: powershell
+        run: |
+          python prepare_release_version.py
+          if ($LASTEXITCODE -ne 0) { throw "release version preparation failed: exit code $LASTEXITCODE" }
+
+      - name: 准备临时发布凭据
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布密钥 Secrets" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
+          $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_CREDENTIAL_DIR=$credentialDir"
+
+      - name: 校验发布版本与密钥
+        shell: powershell
+        run: |
+          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
+          if ($LASTEXITCODE -ne 0) { throw "asset line-ending normalization failed: exit code $LASTEXITCODE" }
+          python verify_release.py
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
+
+      - name: 构建并部署 5088
+        shell: powershell
+        env:
+          ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
+          ALBUM_DATA_DIR: D:\工程影像资料
+          ALBUM_PORT: "5088"
+          ALBUM_CLOUD_AUTO_USER: ${{ secrets.ALBUM_CLOUD_AUTO_USER }}
+          ALBUM_CLOUD_AUTO_PASS: ${{ secrets.ALBUM_CLOUD_AUTO_PASS }}
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\deploy_prod.ps1
+
+      - name: 发布安装包到更新通道
+        shell: powershell
+        env:
+          SKIP_BUILD: "1"
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          python publish_update.py
+
+      - name: 清理临时发布凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
+          }
+
   trigger-wechat-release:
-    name: 触发微信开发者工具发布包
+    name: 触发微信发布包生成
     needs: deploy
     if: github.ref == 'refs/heads/main' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
