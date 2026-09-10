@@ -20,6 +20,11 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     timeout-minutes: 25
+    env:
+      # GitHub 托管 Windows 的默认控制台可能是 cp1252；测试中的中文日志
+      # 必须固定为 UTF-8，否则仅打印重试提示就会触发 UnicodeEncodeError。
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
