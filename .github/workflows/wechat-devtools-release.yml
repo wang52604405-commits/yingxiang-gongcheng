@@ -131,9 +131,9 @@ jobs:
           $releasePath = Join-Path $env:GITHUB_WORKSPACE 'release'
           $sourcePath = Join-Path $env:GITHUB_WORKSPACE 'source'
           $repository = (& git -C $releasePath remote get-url origin).Trim()
-          if (-not $repository) { throw '无法读取微信发布包 Git 远端地址' }
+          if (-not $repository) { throw 'Cannot read Git remote URL for WeChat release package.' }
           $version = "1.6.4.$env:GITHUB_RUN_NUMBER"
-          $description = '优化照片详情按钮对称布局、删除确认框、项目成员同行删除及水印编辑页间距'
+          $description = 'Miniapp UI polish: aligned photo actions, member delete action, watermark spacing.'
           & (Join-Path $sourcePath 'miniprogram\scripts\sync-wechat-devtools.ps1') `
             -ProjectPath $releasePath `
             -Repository $repository `
@@ -141,4 +141,4 @@ jobs:
             -Upload `
             -Version $version `
             -Description $description
-          if ($LASTEXITCODE -ne 0) { throw "微信开发版本上传失败: exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "WeChat development upload failed: exit code $LASTEXITCODE" }
