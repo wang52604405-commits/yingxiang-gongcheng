@@ -101,6 +101,13 @@ jobs:
                 if ($s.backfill_errors) {
                   $groups = @($s.backfill_errors.PSObject.Properties | ForEach-Object { $e=$_.Value; [pscustomobject]@{code=[string]$e.code;http=[string]$e.http_status;permanent=[string]$e.permanent} } | Group-Object code,http,permanent | Sort-Object Count -Descending | Select-Object -First 10)
                   foreach ($g in $groups) { Write-Host ("  error_group count={0} key={1}" -f $g.Count,$g.Name) }
+                  $samples = @($s.backfill_errors.PSObject.Properties | Select-Object -First 8)
+                  foreach ($sample in $samples) {
+                    $e = $sample.Value
+                    $msg = [string]$e.error
+                    $msg = [regex]::Replace($msg,'(?i)(password|passwd|token|secret|key)\s*[:=]\s*\S+','$1=***')
+                    Write-Host ("  sample_error code={0} message={1}" -f [string]$e.code,$msg)
+                  }
                 }
               }
             }
