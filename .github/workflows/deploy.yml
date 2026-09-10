@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths-ignore:
       - "**/*.md"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/photo-sync-diagnostic.yml"
+      - ".diag/**"
   workflow_dispatch:
 
 concurrency:
