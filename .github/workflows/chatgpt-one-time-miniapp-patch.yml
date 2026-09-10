@@ -2,29 +2,31 @@ name: ChatGPT one-time miniapp admin patch
 
 on:
   push:
-    branches: [chatgpt/miniapp-admin-date-quota-20260910]
+    branches:
+      - chatgpt/miniapp-admin-date-quota-20260910
     paths:
-      - ".github/workflows/chatgpt-one-time-miniapp-patch.yml"
-  workflow_dispatch:
+      - .github/workflows/chatgpt-one-time-miniapp-patch.yml
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'chore: run one-time admin review patch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
         with:
           ref: chatgpt/miniapp-admin-date-quota-20260910
-      - uses: actions/setup-python@v7
+      - name: Setup Python
+        uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - name: Apply targeted source patches
         run: python tools/chatgpt_patch_miniapp_admin_quota_20260910.py
       - name: Commit patched source
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
