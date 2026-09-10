@@ -18,6 +18,7 @@ import { shortDate } from '@/utils/format'
 const project = ref(selectionStorage.getProject())
 const scope = ref<Scope | 'all'>('all')
 const category = ref<PhotoCategory | 'all'>('all')
+const unitSearch = ref('')
 const selectedDestination = ref(selectionStorage.getLibraryFilter())
 const activeDestination = computed(() => selectedDestination.value?.scope === scope.value
   && selectedDestination.value?.project_id === project.value.id ? selectedDestination.value : null)
@@ -72,11 +73,22 @@ function chooseDestination() {
   uni.navigateTo({ url: `/pages/destination/select?scope=${scope.value}&return=library` })
 }
 
+function searchUnit() {
+  choosingDestination = true
+  const keyword = unitSearch.value.trim()
+  const suffix = keyword ? `&keyword=${encodeURIComponent(keyword)}` : ''
+  uni.navigateTo({
+    url: `/pages/destination/select?scope=engineering&return=library${suffix}`,
+    fail: () => { choosingDestination = false },
+  })
+}
+
 function clearDestination() {
   selectionStorage.clearLibraryFilter()
   selectedDestination.value = null
   scope.value = 'all'
   category.value = 'all'
+  unitSearch.value = ''
   void loadPhotos()
 }
 
@@ -87,12 +99,18 @@ onShow(() => {
   if (context !== lastContext) {
     scope.value = 'all'
     category.value = 'all'
+    unitSearch.value = ''
     selectionStorage.clearLibraryFilter()
     choosingDestination = false
     lastContext = context
   }
   selectedDestination.value = selectionStorage.getLibraryFilter()
-  if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) scope.value = selectedDestination.value.scope
+  if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) {
+    scope.value = selectedDestination.value.scope
+    unitSearch.value = selectedDestination.value.scope === 'engineering'
+      ? String(selectedDestination.value.assignment.unit_name || selectedDestination.value.assignment.unit_code || '')
+      : ''
+  }
   choosingDestination = false
   if (returningFromPhoto) void loadPhotos()
   else void library.refreshIfStale()
@@ -114,6 +132,20 @@ onReachBottom(() => { void loadPhotos(false) })
         <button class="segment-button pressable" :class="{ active: scope === 'engineering' }" @tap="changeScope('engineering')">工程影像</button>
         <button class="segment-button pressable" :class="{ active: scope === 'other' }" @tap="changeScope('other')">其它影像</button>
       </view>
+
+      <view class="unit-search-box">
+        <UiIcon class="unit-search-icon" name="search" :size="18" />
+        <input
+          v-model="unitSearch"
+          class="unit-search-input"
+          placeholder="搜索单元名称或编码"
+          placeholder-class="input-placeholder"
+          confirm-type="search"
+          @confirm="searchUnit"
+        />
+        <button class="unit-search-button pressable" @tap="searchUnit">搜索</button>
+      </view>
+
       <view v-if="scope !== 'all'" class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
         <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? activeDestination.assignment.unit_name || activeDestination.assignment.other_node_name : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
@@ -157,6 +189,10 @@ onReachBottom(() => { void loadPhotos(false) })
 <style scoped>
 .library-controls { margin-top: var(--space-lg); padding: 12rpx; }
 .library-segment { margin: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.unit-search-box { display: grid; grid-template-columns: 42rpx minmax(0, 1fr) auto; align-items: center; gap: 8rpx; min-height: 82rpx; margin: 12rpx 0 4rpx; padding: 0 10rpx 0 18rpx; border: 1rpx solid var(--line); border-radius: 18rpx; background: var(--surface); }
+.unit-search-icon { color: var(--primary-strong); }
+.unit-search-input { width: 100%; min-width: 0; height: 72rpx; color: var(--text); font-size: 25rpx; }
+.unit-search-button { display: inline-flex; align-items: center; justify-content: center; min-width: 92rpx; min-height: 58rpx; padding: 0 18rpx; border-radius: 14rpx; color: #fff; background: var(--primary-strong); font-size: 23rpx; font-weight: 600; line-height: 1; }
 .path-row { display: flex; align-items: center; gap: 8rpx; margin: 8rpx 0; }
 .path-card { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: space-between; min-height: 88rpx; padding: 0 14rpx; border-radius: 16rpx; text-align: left; background: transparent; }
 .clear-filter { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 40px; padding: 0 14rpx; color: var(--primary-strong); font-size: 22rpx; }
