@@ -1,0 +1,35 @@
+name: ChatGPT one-time miniapp admin patch
+
+on:
+  push:
+    branches: [chatgpt/miniapp-admin-date-quota-20260910]
+    paths:
+      - ".github/workflows/chatgpt-one-time-miniapp-patch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'chore: run one-time admin review patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: chatgpt/miniapp-admin-date-quota-20260910
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Apply targeted source patches
+        run: python tools/chatgpt_patch_miniapp_admin_quota_20260910.py
+      - name: Commit patched source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/mobile_api.py server/app.py tests/test_product_core.py
+          git diff --cached --check
+          git commit -m "feat: allow admins to review joins and set miniapp quota to 500"
+          git push origin HEAD:chatgpt/miniapp-admin-date-quota-20260910
