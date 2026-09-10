@@ -4889,7 +4889,7 @@ class MobileServerContractTest(unittest.TestCase):
         own_payload = next(p for p in projects if p["id"]==own_ref)
         self.assertTrue(own_payload["can_capture"])
         self.assertFalse(own_payload["can_manage_members"])
-        self.assertEqual(own_payload["upload_quota"]["remaining"], 100)
+        self.assertEqual(own_payload["upload_quota"]["remaining"], 500)
         self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{own_ref}/tree",headers=self._headers(token)).status_code,200)
         payload={"client_batch_id":str(uuid.uuid4()),"project_id":own_ref,"scope":"engineering","category":"construction","mode":"auto"}
         denied=self.client.post("/api/mobile/v1/batches",json=payload,headers=self._headers(token))
