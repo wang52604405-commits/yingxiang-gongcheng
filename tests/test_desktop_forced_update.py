@@ -430,6 +430,8 @@ class DesktopForcedUpdateTest(unittest.TestCase):
         self.assertIn("Test-IsInstalledAppProcess", deploy)
         self.assertNotIn("Get-Process album_server", deploy)
         self.assertIn("目标安装目录之外的程序占用", deploy)
+        self.assertIn("正在退出，等待端口表刷新", deploy)
+        self.assertNotIn('PID $listenerPid：无法读取进程信息"\n            throw', deploy)
         self.assertIn("stop_installed_app_processes(target)", legacy_installer)
         self.assertNotIn('ExecutablePath -like "$InstallDir\\*"', legacy_installer)
 

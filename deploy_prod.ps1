@@ -227,8 +227,11 @@ do {
     foreach ($listenerPid in $listenerPids) {
         $owner = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$listenerPid) -ErrorAction SilentlyContinue
         if (-not $owner) {
-            Write-Host "    [BLOCK] PID $listenerPid：无法读取进程信息"
-            throw "端口 $port 被目标安装目录之外的程序占用；为避免误杀，部署已停止。"
+            # Stop-Process may have already ended the listener while TCP's table still
+            # contains the PID for a moment. Recheck instead of mistaking that exit
+            # race for an unrelated application.
+            Write-Host "    PID $listenerPid 正在退出，等待端口表刷新"
+            continue
         }
 
         if (Test-IsInstalledAppProcess $owner) {
