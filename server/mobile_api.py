@@ -59,6 +59,13 @@ _PHOTO_UPLOAD_LOCKS_GUARD = threading.Lock()
 _CHUNK_SESSION_LOCKS = {}
 _CHUNK_SESSION_LOCKS_GUARD = threading.Lock()
 ANALYSIS_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mobile-ocr")
+_ACTIVE_ANALYSIS_JOBS: set[int] = set()
+_ACTIVE_ANALYSIS_JOBS_LOCK = threading.Lock()
+
+
+def _is_active_analysis_job(job_id: int) -> bool:
+    with _ACTIVE_ANALYSIS_JOBS_LOCK:
+        return int(job_id) in _ACTIVE_ANALYSIS_JOBS
 
 
 def mobile_upload_quota(conn, owner_id, *, exclude_uuid="", timestamp=None):
@@ -4876,6 +4883,7 @@ def register_mobile_api(
                     "AND status = 'running' AND updated_at < ?",
                     (cutoff,),
                 ).fetchall()
+                stale = [job for job in stale if not _is_active_analysis_job(job["id"])]
             if not stale:
                 return
             # 常规批次轮询先只读；确实存在候选后才拿短写锁，并在锁内重查
@@ -4892,6 +4900,7 @@ def register_mobile_api(
                     "AND status = 'running' AND updated_at < ?",
                     (cutoff,),
                 ).fetchall()
+                stale = [job for job in stale if not _is_active_analysis_job(job["id"])]
             if not stale:
                 conn.rollback()
                 return
@@ -5230,6 +5239,8 @@ def register_mobile_api(
             heartbeat_stop.set()
             if heartbeat_thread is not None:
                 heartbeat_thread.join(timeout=2.0)
+            with _ACTIVE_ANALYSIS_JOBS_LOCK:
+                _ACTIVE_ANALYSIS_JOBS.discard(job_id)
 
     @blueprint.post("/api/mobile/v1/batches/<int:batch_id>/analyze")
     def analyze_batch(batch_id):
@@ -5326,10 +5337,14 @@ def register_mobile_api(
             )
             conn.commit()
             try:
+                with _ACTIVE_ANALYSIS_JOBS_LOCK:
+                    _ACTIVE_ANALYSIS_JOBS.add(job_id)
                 ANALYSIS_EXECUTOR.submit(
                     execute_analysis_job, current["id"], batch_id, job_id
                 )
             except RuntimeError as exc:
+                with _ACTIVE_ANALYSIS_JOBS_LOCK:
+                    _ACTIVE_ANALYSIS_JOBS.discard(job_id)
                 degrade_analysis_job(current["id"], batch_id, job_id, exc)
             job = conn.execute(
                 "SELECT * FROM mobile_jobs WHERE id = ?", (job_id,)
