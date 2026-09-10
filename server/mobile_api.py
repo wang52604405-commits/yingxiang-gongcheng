@@ -69,7 +69,7 @@ def mobile_upload_quota(conn, owner_id, *, exclude_uuid="", timestamp=None):
     try:
         limit = max(0, int(raw_limit))
     except (TypeError, ValueError):
-        limit = 100
+        limit = 500
     used = int(conn.execute(
         "SELECT COUNT(*) FROM (SELECT photo_uuid FROM mobile_upload_usage WHERE project_owner_account_id=? "
         "UNION SELECT photo_uuid FROM cloud_photos WHERE project_owner_account_id=? AND source='mobile')",
