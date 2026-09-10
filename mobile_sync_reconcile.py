@@ -7,11 +7,15 @@ record loss/migration this can leave the desktop inventory larger than the
 mobile library indefinitely.
 
 This compatibility patch keeps ``mobile_sync.py`` stable while making the
-installed 2.92 server process do one authoritative rescan of every local photo.
+installed desktop service do one authoritative rescan of every local photo.
 Existing cloud rows remain idempotent; mobile-origin rows that already exist
 return ``photo_uuid_conflict`` when replayed through the desktop endpoint and
 are treated as verified.  Missing rows are recreated from the durable desktop
 copy as preview-only desktop records.
+
+The reconciliation revision intentionally remains v1: machines that already
+started the 2.93 scan keep their verified progress instead of clearing it and
+starting over.  This revision only accelerates the remaining work.
 """
 
 from __future__ import annotations
@@ -22,7 +26,10 @@ from pathlib import Path
 import mobile_sync
 
 RECONCILE_REVISION = "desktop-full-inventory-v1-20260910"
-MIN_BACKFILL_BATCH = 25
+# Reconciliation is a temporary repair pass, not the normal steady-state
+# backfill.  A 25-item network budget made a 2k+ photo project take far too
+# long, so process up to 200 authoritative checks/uploads per cycle.
+MIN_BACKFILL_BATCH = 200
 
 
 def _iter_all_backfill_candidates(self, inventory=None):
@@ -188,6 +195,8 @@ def _sync_backfill_full(self):
                 "mobile_existing_count": mobile_existing,
                 "checked_at": datetime.now().isoformat(timespec="seconds"),
                 "cycle_attempted": attempted,
+                "cycle_processed": attempted + verified,
+                "cycle_budget": self.backfill_limit,
                 "cycle_uploaded": uploaded,
                 "cycle_verified": verified,
             }
@@ -204,11 +213,19 @@ def _sync_backfill_full(self):
         0,
     )
     candidates = candidates[position:] + candidates[:position]
+    # The historical defect specifically skipped mobile-origin local copies.
+    # Give that risk set priority so lost mobile cloud rows are repaired first,
+    # while the stable sort still preserves cursor order inside each group.
+    candidates.sort(key=lambda item: 0 if item.get("mobile_origin") else 1)
 
     for candidate in candidates:
         if not still_current():
             return finish({"ok": False})
-        if attempted + verified >= self.backfill_limit:
+        # ``attempted`` is the authoritative network/validation budget.  A
+        # mobile-origin 409 is both an attempted request and a verification;
+        # adding ``verified`` here used to charge it twice and cut a 25-item
+        # cycle to roughly half its intended size.
+        if attempted >= self.backfill_limit:
             break
         photo_uuid = candidate["photo_uuid"]
         photo = candidate["photo"]
