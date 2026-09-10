@@ -62,7 +62,7 @@ async function load() {
   }
 }
 
-function openWatermarkSettings() { if(canManage.value) uni.navigateTo({url:'/pages/project/watermark-settings'}) }
+function openWatermarkSettings() { if (canManage.value) uni.navigateTo({ url: '/pages/project/watermark-settings' }) }
 
 function openInvite() {
   if (canManage.value) uni.navigateTo({ url: '/pages/project/invite' })
@@ -112,18 +112,20 @@ async function removeMember(member: ProjectMember) {
   const accountId = sessionState.account?.id
   try {
     const confirmed = await new Promise<boolean>((resolve) => uni.showModal({
-      title: `将${memberName(member)}移出项目？`,
-      content: '已有照片会保留。对方将失去本项目的查看和上传权限。',
-      confirmText: '移出项目', confirmColor: '#ff6b66',
-      success: ({ confirm }) => resolve(Boolean(confirm)), fail: () => resolve(false),
+      title: `确定将${memberName(member)}移出项目？`,
+      content: '已有照片会保留。删除成员后，对方将失去本项目的查看和上传权限。',
+      confirmText: '删除',
+      confirmColor: '#b52e28',
+      success: ({ confirm }) => resolve(Boolean(confirm)),
+      fail: () => resolve(false),
     }))
     if (!confirmed || sessionState.account?.id !== accountId || selectionStorage.getProject().id !== projectId) return
     await mobileApi.removeProjectMember(projectId, member.account_id)
     if (sessionState.account?.id !== accountId) return
-    uni.showToast({ title: '已移出项目', icon: 'none' })
+    uni.showToast({ title: '成员已删除', icon: 'none' })
     await load()
   } catch (error) {
-    uni.showToast({ title: error instanceof Error ? error.message : '移出失败，请重试', icon: 'none' })
+    uni.showToast({ title: error instanceof Error ? error.message : '删除成员失败，请重试', icon: 'none' })
   } finally { changing.value = false }
 }
 
@@ -135,17 +137,39 @@ onShow(() => { if (!loading.value) void load() })
   <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs members-page" :style="themeStyle">
     <PageHeader title="项目成员" :subtitle="project.name" />
-    <button v-if="canManage" class="application-entry card pressable" @tap="openApplications"><text>加入申请</text><view class="application-entry-trailing"><text v-if="pendingCount" class="application-count">{{ pendingCount }} 人待审核</text><text v-else>查看</text><text>›</text></view></button>
-    <button v-if="canManage" class="application-entry card pressable" @tap="openWatermarkSettings"><text>图标与施工单位</text><view class="application-entry-trailing"><text>统一设置</text><text>›</text></view></button>
+    <button v-if="canManage" class="application-entry card pressable" @tap="openApplications">
+      <text>加入申请</text>
+      <view class="application-entry-trailing">
+        <text v-if="pendingCount" class="application-count">{{ pendingCount }} 人待审核</text>
+        <text v-else>查看</text>
+        <text>›</text>
+      </view>
+    </button>
+    <button v-if="canManage" class="application-entry card pressable" @tap="openWatermarkSettings">
+      <text>图标与施工单位</text>
+      <view class="application-entry-trailing"><text>统一设置</text><text>›</text></view>
+    </button>
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="members.length" class="member-list card">
-      <view v-for="member in members" :key="member.account_id" class="member-item">
-      <button class="member-row pressable" :disabled="changing || !canManage || member.is_me || member.role === 'owner'" @tap="changeMember(member)">
-        <view class="member-avatar">{{ memberName(member).slice(0, 1) }}</view>
-        <view class="member-copy"><text class="member-name">{{ memberName(member) }}<text v-if="member.is_me" class="me-label">我</text></text><text class="member-account">{{ memberSubtitle(member) }}</text></view>
-        <text class="status-chip">{{ PROJECT_ROLE_LABELS[member.role] }}</text>
-      </button>
-      <button v-if="project.access_role === 'owner' && !member.is_me && member.role !== 'owner'" class="remove-member pressable" :disabled="changing" @tap="removeMember(member)">移出项目</button>
+      <view v-for="member in members" :key="member.account_id" class="member-row">
+        <button
+          class="member-main pressable"
+          :disabled="changing || !canManage || member.is_me || member.role === 'owner'"
+          @tap="changeMember(member)"
+        >
+          <view class="member-avatar">{{ memberName(member).slice(0, 1) }}</view>
+          <view class="member-copy">
+            <text class="member-name">{{ memberName(member) }}<text v-if="member.is_me" class="me-label">我</text></text>
+            <text class="member-account">{{ memberSubtitle(member) }}</text>
+          </view>
+        </button>
+        <text class="status-chip member-role">{{ PROJECT_ROLE_LABELS[member.role] }}</text>
+        <button
+          v-if="project.access_role === 'owner' && !member.is_me && member.role !== 'owner'"
+          class="remove-member pressable"
+          :disabled="changing"
+          @tap.stop="removeMember(member)"
+        >删除</button>
       </view>
     </view>
     <view v-else class="empty-state"><text class="empty-title">暂无成员</text></view>
@@ -159,16 +183,17 @@ onShow(() => { if (!loading.value) void load() })
 .application-entry-trailing { display: flex; align-items: center; gap: 16rpx; color: var(--muted); font-size: 24rpx; }
 .application-count { color: var(--primary-strong); }
 .member-list { overflow: hidden; }
-.member-item { border-bottom: 1rpx solid var(--line); }
-.member-item:last-child { border-bottom: 0; }
-.remove-member { display: block; margin: 0 20rpx 14rpx auto; padding: 10rpx 18rpx; min-height: 64rpx; background: transparent; color: var(--danger); font-size: 23rpx; }
-.member-row { display: grid; grid-template-columns: 72rpx minmax(0, 1fr) auto; align-items: center; gap: 16rpx; width: 100%; min-height: 104rpx; padding: 15rpx 20rpx; border-bottom: 1rpx solid var(--line); text-align: left; background: transparent; }
+.member-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14rpx; min-height: 116rpx; padding: 12rpx 18rpx; border-bottom: 1rpx solid var(--line); background: var(--surface); }
 .member-row:last-child { border-bottom: 0; }
-.member-row, button.member-row[disabled] { opacity: 1; background: var(--surface) !important; color: var(--text) !important; }
+.member-main { display: grid; grid-template-columns: 72rpx minmax(0, 1fr); align-items: center; gap: 16rpx; width: 100%; min-width: 0; min-height: 88rpx; padding: 0; color: var(--text); text-align: left; background: transparent; }
+.member-main, button.member-main[disabled] { opacity: 1; color: var(--text) !important; background: transparent !important; }
 .member-avatar { display: grid; place-items: center; width: 68rpx; height: 68rpx; border-radius: 21rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 28rpx; font-weight: 700; }
 .member-copy { min-width: 0; }
 .member-name { display: block; overflow: hidden; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .member-account { display: block; overflow: hidden; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; text-overflow: ellipsis; white-space: nowrap; }
 .me-label { margin-left: 10rpx; color: var(--primary-strong); font-size: 20rpx; font-weight: 500; }
+.member-role { justify-self: end; }
+.remove-member { display: flex; align-items: center; justify-content: center; min-width: 82rpx; min-height: 64rpx; padding: 0 10rpx 0 18rpx; border-left: 1rpx solid var(--line); border-radius: 0; color: var(--danger); background: transparent; font-size: 23rpx; font-weight: 600; line-height: 1; }
+.remove-member[disabled] { opacity: 0.45; }
 .invite-button { margin-top: 26rpx; }
 </style>
