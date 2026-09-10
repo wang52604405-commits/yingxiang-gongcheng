@@ -69,7 +69,6 @@ async function confirmDelete(password: string) {
   finally { changing.value = false }
 }
 
-
 function photoProjectId(): string {
   return local.value?.draft.project_id || cloud.value?.project_id || ''
 }
@@ -151,9 +150,20 @@ onLoad((query) => {
         <image v-if="imageUrl" :src="imageUrl" mode="aspectFit" />
         <view v-else class="preview-placeholder">暂无预览</view>
       </button>
-      <button v-if="imageUrl || local?.original_path" class="watermark-button secondary-button pressable" @tap="openWatermark">{{ local?.original_path ? '保存水印照片' : '保存水印预览' }}</button>
-      <view v-if="canEdit" class="photo-actions"><button class="secondary-button pressable" @tap="startEditing">编辑照片信息</button><button class="text-delete pressable" @tap="deleteError = ''; deleteVisible = true">删除照片</button></view>
-      <view v-if="editing" class="detail-card edit-panel card"><text class="field-label">题名</text><input v-model="editForm.title" class="input" maxlength="200" :disabled="changing" /><text class="field-label">拍摄日期</text><picker mode="date" :value="editForm.photo_date" :disabled="changing" @change="editForm.photo_date = $event.detail.value"><view class="input">{{ editForm.photo_date || '选择日期' }}</view></picker><button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button><text v-if="editError" class="edit-error">{{ editError }}</text><view class="photo-actions"><button :disabled="changing" @tap="editing = false">取消</button><button class="primary-button" :disabled="changing" @tap="saveInfo">{{ changing ? '保存中…' : '保存信息' }}</button></view></view>
+      <button v-if="imageUrl || local?.original_path" class="watermark-button primary-button pressable" @tap="openWatermark">{{ local?.original_path ? '保存水印照片' : '保存水印预览' }}</button>
+      <view v-if="canEdit" class="photo-actions">
+        <button class="secondary-button photo-action-button edit-action pressable" @tap="startEditing">编辑照片信息</button>
+        <button class="photo-action-button danger-outline-button pressable" @tap="deleteError = ''; deleteVisible = true">删除照片</button>
+      </view>
+      <view v-if="editing" class="detail-card edit-panel card">
+        <text class="field-label">题名</text>
+        <input v-model="editForm.title" class="input" maxlength="200" :disabled="changing" />
+        <text class="field-label">拍摄日期</text>
+        <picker mode="date" :value="editForm.photo_date" :disabled="changing" @change="editForm.photo_date = $event.detail.value"><view class="input">{{ editForm.photo_date || '选择日期' }}</view></picker>
+        <button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button>
+        <text v-if="editError" class="edit-error">{{ editError }}</text>
+        <view class="photo-actions"><button :disabled="changing" @tap="editing = false">取消</button><button class="primary-button" :disabled="changing" @tap="saveInfo">{{ changing ? '保存中…' : '保存信息' }}</button></view>
+      </view>
       <view class="detail-card card">
         <view v-for="row in detailRows" :key="row.key" class="detail-row">
           <text>{{ row.label }}</text>
@@ -166,16 +176,24 @@ onLoad((query) => {
 </template>
 
 <style scoped>
-.photo-actions{display:flex;gap:18rpx;align-items:center;margin-top:20rpx}.photo-actions button{flex:1;min-height:44px;font-size:25rpx}.text-delete{color:#ff9999;background:transparent}.edit-panel{padding:24rpx!important}.edit-panel .input{min-height:48px}.edit-panel>button{margin-top:20rpx;font-size:25rpx}.edit-error{display:block;color:#ff9999;margin-top:12rpx}
 .detail-page { padding-bottom: calc(48rpx + var(--safe-bottom)); }
-.photo-preview { display: grid; place-items: center; width: 100%; height: 510rpx; overflow: hidden; border-radius: 28rpx; background: #071215; }
+.photo-preview { display: grid; place-items: center; width: 100%; height: 510rpx; overflow: hidden; border: 1rpx solid var(--line); border-radius: 28rpx; background: #071215; }
 .photo-preview image { width: 100%; height: 100%; }
 .preview-placeholder { color: var(--muted); font-size: 24rpx; }
+.watermark-button { margin-top: 24rpx; min-height: 92rpx; font-size: 28rpx; }
+.photo-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; align-items: stretch; margin-top: 18rpx; }
+.photo-actions button { display: flex; align-items: center; justify-content: center; width: 100%; min-width: 0; min-height: 88rpx; padding: 14rpx 18rpx; border-radius: 20rpx; font-size: 25rpx; font-weight: 600; line-height: 1.25; }
+.photo-action-button { box-shadow: none; }
+.edit-action { border-color: var(--primary-strong); color: var(--primary-strong); }
+.danger-outline-button { border: 1rpx solid var(--danger); color: var(--danger); background: var(--surface); }
+.edit-panel { padding: 24rpx !important; }
+.edit-panel .input { min-height: 48px; }
+.edit-panel > button { margin-top: 20rpx; font-size: 25rpx; }
+.edit-error { display: block; margin-top: 12rpx; color: var(--danger); }
 .detail-card { overflow: hidden; margin-top: 24rpx; padding: 0 22rpx; }
 .detail-row { display: grid; grid-template-columns: 174rpx 1fr; gap: 18rpx; padding: 23rpx 0; border-bottom: 1rpx solid var(--line); line-height: 1.5; }
 .detail-row:last-child { border-bottom: 0; }
 .detail-row > text:first-child { color: var(--muted); font-size: 24rpx; }
 .detail-row > text:last-child { color: var(--text); font-size: 27rpx; text-align: right; word-break: break-all; }
 .detail-row .status-value { color: var(--primary-strong); }
-.watermark-button { margin-top:24rpx; min-height:44px; font-size:27rpx; }
 </style>
