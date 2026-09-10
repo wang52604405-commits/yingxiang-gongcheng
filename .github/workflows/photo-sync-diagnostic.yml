@@ -17,41 +17,69 @@ jobs:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 8
     steps:
-      - name: 输出生产端同步状态（脱敏）
+      - name: 定位实际数据目录并输出同步状态（脱敏）
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-          $dataDir = 'D:\工程影像资料'
-          $installDir = 'C:\Users\Administrator\AppData\Local\工程影像管理平台'
+          $roots = @(
+            'D:\工程影像资料',
+            'D:\工程影像资料\data',
+            'C:\Users\Administrator\AppData\Local\工程影像管理平台\data',
+            'C:\Users\Administrator\AppData\Local\工程影像管理平台'
+          ) | Select-Object -Unique
 
           Write-Host "=== 5088 health ==="
           try {
             $boot = Invoke-RestMethod -Uri 'http://127.0.0.1:5088/api/bootstrap' -TimeoutSec 8
             Write-Host ("app_version=" + [string]$boot.app_version)
             Write-Host ("bootstrap_ok=" + [string]$boot.ok)
-          } catch {
-            Write-Host ("bootstrap_error=" + $_.Exception.Message)
+            Write-Host ("bootstrap_keys=" + (($boot.PSObject.Properties.Name | Sort-Object) -join ','))
+            if ($boot.dashboard) { Write-Host ("dashboard=" + ($boot.dashboard | ConvertTo-Json -Compress -Depth 4)) }
+          } catch { Write-Host ("bootstrap_error=" + $_.Exception.Message) }
+
+          Write-Host "=== candidate data roots ==="
+          foreach ($r in $roots) {
+            Write-Host ("root={0} exists={1}" -f $r,(Test-Path -LiteralPath $r))
+            if (Test-Path -LiteralPath $r) {
+              $dirs = @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue | Select-Object -First 25 -ExpandProperty Name)
+              Write-Host ("  dirs=" + ($dirs -join '|'))
+              $files = @(Get-ChildItem -LiteralPath $r -File -ErrorAction SilentlyContinue | Select-Object -First 40 -ExpandProperty Name)
+              Write-Host ("  files=" + ($files -join '|'))
+            }
           }
 
-          Write-Host "=== cloud account (sanitized) ==="
-          $accountPath = Join-Path $dataDir 'cloud_account.json'
-          if (Test-Path -LiteralPath $accountPath) {
+          Write-Host "=== locate state files ==="
+          $names = @('cloud_account.json','engineering_projects.json','mobile_sync_state.json','project_info.json')
+          $found = @{}
+          foreach ($root in @('D:\工程影像资料','C:\Users\Administrator\AppData\Local\工程影像管理平台')) {
+            if (-not (Test-Path -LiteralPath $root)) { continue }
+            foreach ($name in $names) {
+              $matches = @(Get-ChildItem -LiteralPath $root -Filter $name -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 8)
+              foreach ($m in $matches) {
+                Write-Host ("found {0} -> {1} size={2} modified={3}" -f $name,$m.FullName,$m.Length,$m.LastWriteTime.ToString('s'))
+                if (-not $found.ContainsKey($name)) { $found[$name] = $m.FullName }
+              }
+            }
+          }
+
+          if ($found.ContainsKey('cloud_account.json')) {
+            Write-Host "=== cloud account (sanitized) ==="
             try {
-              $a = Get-Content -LiteralPath $accountPath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $a = Get-Content -LiteralPath $found['cloud_account.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("account_path=" + $found['cloud_account.json'])
               Write-Host ("account_id=" + [string]$a.account_id)
               Write-Host ("username=" + [string]$a.username)
               Write-Host ("server=" + [string]$a.server)
               Write-Host ("has_token_protected=" + [string][bool]$a.token_protected)
               Write-Host ("has_desktop_sync_token_protected=" + [string][bool]$a.desktop_sync_token_protected)
             } catch { Write-Host ("account_read_error=" + $_.Exception.Message) }
-          } else { Write-Host 'cloud_account.json missing' }
+          }
 
-          Write-Host "=== engineering project ownership ==="
-          $projectsPath = Join-Path $dataDir 'engineering_projects.json'
-          if (Test-Path -LiteralPath $projectsPath) {
+          if ($found.ContainsKey('engineering_projects.json')) {
+            Write-Host "=== engineering project ownership ==="
             try {
-              $pdoc = Get-Content -LiteralPath $projectsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-              Write-Host ("document_type=" + $pdoc.GetType().Name)
+              $pdoc = Get-Content -LiteralPath $found['engineering_projects.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("projects_path=" + $found['engineering_projects.json'])
               $items = @()
               if ($pdoc -is [System.Array]) { $items = @($pdoc) }
               elseif ($pdoc.projects) { $items = @($pdoc.projects) }
@@ -62,22 +90,20 @@ jobs:
                 Write-Host ("project id={0} name={1} cloud_owner_id={2} cloud_project_ref={3} active={4}" -f [string]$p.id,[string]$p.project_name,[string]$p.cloud_owner_id,[string]$p.cloud_project_ref,[string]$p.active)
               }
             } catch { Write-Host ("projects_read_error=" + $_.Exception.Message) }
-          } else { Write-Host 'engineering_projects.json missing' }
+          }
 
-          Write-Host "=== mobile sync state ==="
-          $statePath = Join-Path $dataDir 'mobile_sync_state.json'
-          if (Test-Path -LiteralPath $statePath) {
+          if ($found.ContainsKey('mobile_sync_state.json')) {
+            Write-Host "=== mobile sync state ==="
             try {
-              $doc = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+              $doc = Get-Content -LiteralPath $found['mobile_sync_state.json'] -Raw -Encoding UTF8 | ConvertFrom-Json
+              Write-Host ("state_path=" + $found['mobile_sync_state.json'])
               Write-Host ("state_version=" + [string]$doc.version)
               Write-Host ("active_identity=" + [string]$doc.active_identity)
               if ($doc.scopes) {
                 foreach ($prop in $doc.scopes.PSObject.Properties) {
                   $s = $prop.Value
-                  $backfilledCount = 0
-                  $errorCount = 0
-                  if ($s.backfilled) { $backfilledCount = @($s.backfilled.PSObject.Properties).Count }
-                  if ($s.backfill_errors) { $errorCount = @($s.backfill_errors.PSObject.Properties).Count }
+                  $backfilledCount = if ($s.backfilled) { @($s.backfilled.PSObject.Properties).Count } else { 0 }
+                  $errorCount = if ($s.backfill_errors) { @($s.backfill_errors.PSObject.Properties).Count } else { 0 }
                   Write-Host ("scope={0}" -f $prop.Name)
                   Write-Host ("  reconcile_revision={0}" -f [string]$s.backfill_reconcile_revision)
                   Write-Host ("  reconcile_started_at={0}" -f [string]$s.backfill_reconcile_started_at)
@@ -87,9 +113,7 @@ jobs:
                   Write-Host ("  backfilled_count={0}" -f $backfilledCount)
                   Write-Host ("  backfill_error_count={0}" -f $errorCount)
                   Write-Host ("  backfill_updated_at={0}" -f [string]$s.backfill_updated_at)
-                  if ($s.backfill_inventory) {
-                    Write-Host ("  inventory=" + ($s.backfill_inventory | ConvertTo-Json -Compress -Depth 8))
-                  }
+                  if ($s.backfill_inventory) { Write-Host ("  inventory=" + ($s.backfill_inventory | ConvertTo-Json -Compress -Depth 8)) }
                   if ($s.backfill_errors) {
                     $groups = @($s.backfill_errors.PSObject.Properties | ForEach-Object {
                       $e = $_.Value
@@ -100,22 +124,4 @@ jobs:
                 }
               }
             } catch { Write-Host ("state_read_error=" + $_.Exception.Message) }
-          } else { Write-Host 'mobile_sync_state.json missing' }
-
-          Write-Host "=== service logs (filtered) ==="
-          if (Test-Path -LiteralPath $installDir) {
-            Get-ChildItem -LiteralPath $installDir -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Extension -in '.log','.txt' -and $_.Length -lt 20MB } |
-              ForEach-Object {
-                Write-Host ("log=" + $_.FullName + " size=" + $_.Length)
-                try {
-                  Get-Content -LiteralPath $_.FullName -Tail 200 -ErrorAction Stop |
-                    Where-Object { $_ -match '(?i)mobile|backfill|sync|ownership|account|error|fail|exception' } |
-                    ForEach-Object {
-                      $line = [regex]::Replace([string]$_,'(?i)Bearer\s+[A-Za-z0-9._~-]+','Bearer ***')
-                      $line = [regex]::Replace($line,'(?i)(password|passwd|token|secret|key)\s*[:=]\s*\S+','$1=***')
-                      Write-Host $line
-                    }
-                } catch { Write-Host ("log_read_error=" + $_.Exception.Message) }
-              }
           }
