@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Apply targeted source patches
+      - name: Apply final targeted source patches
         run: python tools/chatgpt_patch_miniapp_admin_quota_20260910.py
       - name: Commit patched source
         shell: bash
@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add server/mobile_api.py server/app.py tests/test_product_core.py
+          git add server/mobile_api.py tests/test_mobile_server.py
           git diff --cached --check
-          git commit -m "feat: allow admins to review joins and set miniapp quota to 500"
+          git commit -m "test: verify admin join review and 500-photo fallback"
           git push origin HEAD:chatgpt/miniapp-admin-date-quota-20260910
