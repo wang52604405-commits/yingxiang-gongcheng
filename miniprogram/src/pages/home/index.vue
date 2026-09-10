@@ -16,19 +16,40 @@ import { shortTime } from '@/utils/format'
 import { syncTabBar } from '@/services/navigation'
 import { STATUS_LABELS } from '@/services/photo-state'
 import { countTodayCaptures, visibleLocalHomePhotos } from '@/services/home-photo-visibility'
+import { canManageProjectMembers } from '@/services/project-membership'
+import { projectApplicationsApi } from '@/services/project-applications'
 
 const fallbackProject = ref<ProjectSummary>(selectionStorage.getProject())
 const project = computed(() => bootstrapState.currentProject || fallbackProject.value)
 const recent = computed<CloudPhoto[]>(() => bootstrapState.recentUploads)
 const loading = ref(false)
 const motionReady = ref(false)
+const pendingReviewCount = ref(0)
 let motionPlayed = false
+let reviewGeneration = 0
 const localRecent = computed(() => visibleLocalHomePhotos(queueRuntime.state.photos))
 const uniApi = uni
 
 const todayCaptureCount = computed(() => countTodayCaptures(recent.value, queueRuntime.state.photos, new Date().toISOString()))
 const pendingCount = computed(() => queueRuntime.pendingCount.value)
 const requirementCount = computed(() => Number(project.value.requirement_count || 0))
+
+async function loadPendingReviews(accountId: string | number, activeProject: ProjectSummary) {
+  const generation = ++reviewGeneration
+  pendingReviewCount.value = 0
+  if (!activeProject?.id || !canManageProjectMembers(activeProject)) return
+  const projectId = activeProject.id
+  try {
+    const rows = await projectApplicationsApi.pending(projectId)
+    if (
+      generation === reviewGeneration
+      && String(sessionState.account?.id || '') === String(accountId)
+      && String(project.value?.id || '') === String(projectId)
+    ) pendingReviewCount.value = rows.length
+  } catch {
+    if (generation === reviewGeneration) pendingReviewCount.value = 0
+  }
+}
 
 async function loadHome() {
   if (loading.value) return
@@ -41,6 +62,8 @@ async function loadHome() {
   } catch {
     fallbackProject.value = selectionStorage.getProject()
   } finally {
+    const activeProject = bootstrapState.currentProject || fallbackProject.value
+    void loadPendingReviews(account.id, activeProject)
     loading.value = false
   }
 }
@@ -54,6 +77,10 @@ function prepareMotion() {
   void nextTick(() => setTimeout(() => { motionReady.value = true }, 24))
 }
 function openProject() { uni.navigateTo({ url: '/pages/project/select' }) }
+function openApplications() {
+  if (!project.value?.id || !canManageProjectMembers(project.value)) return
+  uni.navigateTo({ url: '/pages/project/applications' })
+}
 function openRequirements() {
   if (!selectionStorage.hasProject()) {
     uni.showModal({ title: '还没有工程', content: '请先选择或加入工程。', showCancel: false, success: () => openProject() })
@@ -83,7 +110,13 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
 <template>
   <page-meta :page-style="themeStyle" />
   <view class="page-shell home-page" :class="{ 'motion-ready': motionReady }" :style="themeStyle">
-    <AppHeader :project-name="project.name" :online="queueRuntime.state.online" @select-project="openProject" />
+    <AppHeader
+      :project-name="project.name"
+      :online="queueRuntime.state.online"
+      :pending-reviews="pendingReviewCount"
+      @select-project="openProject"
+      @open-applications="openApplications"
+    />
     <view class="project-context motion-block motion-1">
       <text class="context-title">工作台</text>
     </view>

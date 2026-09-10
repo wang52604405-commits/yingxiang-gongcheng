@@ -78,8 +78,12 @@ function roleChoices(member: ProjectMember): ProjectAccessRole[] {
   return ['capturer', 'viewer'].filter((role) => role !== member.role) as ProjectAccessRole[]
 }
 
+function canChangeRole(member: ProjectMember): boolean {
+  return canManage.value && !changing.value && !member.is_me && member.role !== 'owner' && roleChoices(member).length > 0
+}
+
 async function changeMember(member: ProjectMember) {
-  if (!canManage.value || changing.value || member.is_me || member.role === 'owner') return
+  if (!canChangeRole(member)) return
   const roles = roleChoices(member)
   const items = roles.map((role) => `设为${PROJECT_ROLE_LABELS[role]}`)
   if (!items.length) return
@@ -90,6 +94,7 @@ async function changeMember(member: ProjectMember) {
     changing.value = true
     try {
       await mobileApi.updateProjectMember(project.value.id, member.account_id, role)
+      uni.showToast({ title: `已设为${PROJECT_ROLE_LABELS[role]}`, icon: 'none' })
       await load()
     } catch (error) {
       uni.showToast({ title: error instanceof Error ? error.message : '角色修改失败', icon: 'none' })
@@ -152,18 +157,22 @@ onShow(() => { if (!loading.value) void load() })
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="members.length" class="member-list card">
       <view v-for="member in members" :key="member.account_id" class="member-row">
-        <button
-          class="member-main pressable"
-          :disabled="changing || !canManage || member.is_me || member.role === 'owner'"
-          @tap="changeMember(member)"
-        >
+        <view class="member-main">
           <view class="member-avatar">{{ memberName(member).slice(0, 1) }}</view>
           <view class="member-copy">
             <text class="member-name">{{ memberName(member) }}<text v-if="member.is_me" class="me-label">我</text></text>
             <text class="member-account">{{ memberSubtitle(member) }}</text>
           </view>
+        </view>
+        <button
+          class="status-chip member-role"
+          :class="{ 'role-editable': canChangeRole(member) }"
+          :disabled="!canChangeRole(member)"
+          @tap.stop="changeMember(member)"
+        >
+          <text>{{ PROJECT_ROLE_LABELS[member.role] }}</text>
+          <text v-if="canChangeRole(member)" class="role-chevron">⌄</text>
         </button>
-        <text class="status-chip member-role">{{ PROJECT_ROLE_LABELS[member.role] }}</text>
         <button
           v-if="project.access_role === 'owner' && !member.is_me && member.role !== 'owner'"
           class="remove-member pressable"
@@ -173,6 +182,7 @@ onShow(() => { if (!loading.value) void load() })
       </view>
     </view>
     <view v-else class="empty-state"><text class="empty-title">暂无成员</text></view>
+    <text v-if="project.access_role === 'owner' && members.length" class="role-tip">点击成员角色可设为管理员、采集员或只读。</text>
     <button v-if="canManage" class="primary-button pressable invite-button" @tap="openInvite">邀请成员</button>
   </view>
 </template>
@@ -183,17 +193,20 @@ onShow(() => { if (!loading.value) void load() })
 .application-entry-trailing { display: flex; align-items: center; gap: 16rpx; color: var(--muted); font-size: 24rpx; }
 .application-count { color: var(--primary-strong); }
 .member-list { overflow: hidden; }
-.member-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14rpx; min-height: 116rpx; padding: 12rpx 18rpx; border-bottom: 1rpx solid var(--line); background: var(--surface); }
+.member-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12rpx; min-height: 116rpx; padding: 12rpx 18rpx; border-bottom: 1rpx solid var(--line); background: var(--surface); }
 .member-row:last-child { border-bottom: 0; }
-.member-main { display: grid; grid-template-columns: 72rpx minmax(0, 1fr); align-items: center; gap: 16rpx; width: 100%; min-width: 0; min-height: 88rpx; padding: 0; color: var(--text); text-align: left; background: transparent; }
-.member-main, button.member-main[disabled] { opacity: 1; color: var(--text) !important; background: transparent !important; }
+.member-main { display: grid; grid-template-columns: 72rpx minmax(0, 1fr); align-items: center; gap: 16rpx; width: 100%; min-width: 0; min-height: 88rpx; color: var(--text); text-align: left; }
 .member-avatar { display: grid; place-items: center; width: 68rpx; height: 68rpx; border-radius: 21rpx; color: var(--primary-strong); background: var(--primary-soft); font-size: 28rpx; font-weight: 700; }
 .member-copy { min-width: 0; }
 .member-name { display: block; overflow: hidden; color: var(--text); font-size: 27rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .member-account { display: block; overflow: hidden; margin-top: 5rpx; color: var(--muted); font-size: 21rpx; text-overflow: ellipsis; white-space: nowrap; }
 .me-label { margin-left: 10rpx; color: var(--primary-strong); font-size: 20rpx; font-weight: 500; }
-.member-role { justify-self: end; }
-.remove-member { display: flex; align-items: center; justify-content: center; min-width: 82rpx; min-height: 64rpx; padding: 0 10rpx 0 18rpx; border-left: 1rpx solid var(--line); border-radius: 0; color: var(--danger); background: transparent; font-size: 23rpx; font-weight: 600; line-height: 1; }
+.member-role { display: flex; align-items: center; justify-content: center; justify-self: end; min-height: 52rpx; margin: 0; padding: 0 14rpx; border: 1rpx solid transparent; font-size: 21rpx; line-height: 1; }
+.member-role[disabled] { opacity: 1; }
+.member-role.role-editable { border-color: rgba(32, 132, 121, .28); color: var(--primary-strong); background: var(--primary-soft); }
+.role-chevron { margin-left: 7rpx; font-size: 20rpx; transform: translateY(-2rpx); }
+.remove-member { display: flex; align-items: center; justify-content: center; min-width: 76rpx; min-height: 64rpx; padding: 0 8rpx 0 16rpx; border-left: 1rpx solid var(--line); border-radius: 0; color: var(--danger); background: transparent; font-size: 23rpx; font-weight: 600; line-height: 1; }
 .remove-member[disabled] { opacity: 0.45; }
+.role-tip { display: block; margin: 14rpx 6rpx 0; color: var(--muted); font-size: 21rpx; line-height: 1.5; }
 .invite-button { margin-top: 26rpx; }
 </style>

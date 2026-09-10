@@ -150,7 +150,7 @@ DEFAULT_PRODUCT_CONFIG = {
         "lifetime_price": 399,
         "price_label": "原价",
     },
-    "mini_program": {"free_upload_limit": 100},
+    "mini_program": {"free_upload_limit": 500},
     "free": {
         "photo_limit": 300,
         "watermark_enabled": False,
