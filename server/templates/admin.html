@@ -3,128 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>授权中心管理后台</title>
+  <title>授权工作台 · 工程影像管理平台</title><meta name="robots" content="noindex, nofollow">
   <style>
-    :root {
-      --bg: #0d1117;
-      --panel: #161b22;
-      --panel2: #1c2230;
-      --line: #2d3748;
-      --text: #f0f6fc;
-      --muted: #8b949e;
-      --accent: #2f81f7;
-      --accent2: #58a6ff;
-      --green: #3fb950;
-      --gold: #d29922;
-      --red: #f85149;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; color: var(--text);
-      background:
-        radial-gradient(1200px 500px at 50% -100px, rgba(47,129,247,.12), transparent 60%),
-        var(--bg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-    }
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px; }
-
-    /* 顶栏 */
-    .topbar {
-      display: flex; align-items: center; gap: 14px; padding: 16px 22px;
-      background: rgba(22,27,34,.8); border: 1px solid var(--line); border-radius: 14px;
-      margin-bottom: 22px; backdrop-filter: blur(8px);
-    }
-    .topbar .logo {
-      width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px;
-      background: linear-gradient(135deg, var(--accent), #1158c7); font-weight: 800; color: #fff;
-      box-shadow: 0 4px 16px rgba(47,129,247,.35);
-    }
-    .topbar h1 { margin: 0; font-size: 18px; }
-    .topbar .muted { color: var(--muted); font-size: 12px; }
-    .spacer { flex: 1; }
-    .btn {
-      padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
-      background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
-      font-weight: 700; cursor: pointer; transition: transform 140ms cubic-bezier(.23,1,.32,1), border-color 160ms ease, background-color 160ms ease, color 160ms ease;
-    }
-    .btn:active { transform: scale(.97); }
-    @media (hover:hover) and (pointer:fine) { .btn:hover { border-color: var(--accent); color: #fff; } }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn.primary:hover { background: #3b8af5; }
-    .btn.danger { color: var(--red); }
-    .btn.danger:hover { border-color: var(--red); }
-    .btn.sm { padding: 5px 10px; font-size: 12px; }
-
-    /* 统计卡 */
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 22px; }
-    .stat {
-      padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
-    }
-    .stat .num { font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
-    .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
-    .stat.green .num { color: var(--green); }
-    .stat.blue .num { color: var(--accent2); }
-    .stat.gold .num { color: var(--gold); }
-    .stat.red .num { color: var(--red); }
-
-    /* 卡片 */
-    .card {
-      padding: 20px; margin-bottom: 16px;
-      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-    }
-    .card h2 { margin: 0 0 14px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
-    .card h2 .hint { color: var(--muted); font-size: 12px; font-weight: 400; }
-
-    /* 表格 */
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #242f3e; vertical-align: top; }
-    th { color: var(--muted); background: rgba(28,34,48,.5); font-weight: 700; font-size: 12px; }
-    tr:hover td { background: rgba(47,129,247,.04); }
-    .muted { color: var(--muted); font-size: 12px; }
-    .mono { font-family: Consolas, monospace; font-size: 12px; color: var(--accent2); word-break: break-all; }
-
-    /* 徽章 */
-    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-    .badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
-    .badge.off { background: rgba(248,81,73,.15); color: var(--red); }
-    .badge.gold { background: rgba(210,153,34,.15); color: var(--gold); }
-    .badge.blue { background: rgba(47,129,247,.15); color: var(--accent2); }
-
-    /* 登录框 */
-    #loginBox { max-width: 400px; margin: 90px auto; }
-    #loginBox .brand { text-align: center; margin-bottom: 20px; }
-    #loginBox .brand .logo { width: 56px; height: 56px; margin: 0 auto 12px; display: grid; place-items: center;
-      border-radius: 14px; background: linear-gradient(135deg, var(--accent), #1158c7); font-size: 24px; font-weight: 800; color: #fff; }
-    input {
-      width: 100%; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px;
-      background: var(--bg); color: var(--text); font: inherit; outline: none;
-    }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,129,247,.15); }
-
-    .notice { display: none; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
-    .notice.show { display: block; }
-    .notice.ok { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
-    .notice.err { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
-    .machine-chip {
-      display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; border-radius: 6px;
-      background: rgba(47,129,247,.08); color: var(--accent2); font-size: 11px; font-family: Consolas, monospace;
-    }
-    .admin-grid { display:grid; grid-template-columns:repeat(4,minmax(140px,1fr)); gap:12px; }
-    .admin-grid label { color:var(--muted); font-size:12px; }
-    .admin-grid input, .admin-grid select { margin:6px 0 0; }
-    .admin-grid .wide { grid-column:1/-1; }
-    .check { display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px; }
-    .check input { width:auto; margin:0; }
-    .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-    .toolbar input, .toolbar select { width:auto; min-width:160px; margin:0; }
-    details summary { cursor:pointer; color:var(--accent2); }
-    pre { white-space:pre-wrap; word-break:break-word; max-width:520px; color:var(--muted); font:11px/1.6 Consolas,monospace; }
-    dialog { width:min(520px,calc(100vw - 32px)); color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; }
-    dialog::backdrop { background:rgba(0,0,0,.62); }
-    dialog h2 { margin-top:0; }
-    @media (max-width:800px) { .admin-grid { grid-template-columns:1fr 1fr; } .wrap { padding:14px 10px 40px; } }
-    @media (max-width:520px) { .admin-grid { grid-template-columns:1fr; } .topbar { flex-wrap:wrap; } }
-    @media (prefers-reduced-motion:reduce) { .btn { transition:color 120ms ease, background-color 120ms ease; } .btn:active { transform:none; } }
+    :root{--bg:#f3f6f5;--panel:#fff;--panel2:#edf3f1;--line:#d9e3df;--text:#203b33;--muted:#61736c;--accent:#087f6c;--accent2:#076957;--green:#187647;--gold:#966416;--red:#b62f3b}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,"Microsoft YaHei",sans-serif}button,input,select,textarea{font:inherit}button,a,input,select,textarea{outline-offset:3px}:focus-visible{outline:2px solid var(--accent)}[hidden]{display:none!important}
+    .wrap{max-width:1440px;margin:auto;padding:32px}.topbar{display:flex;gap:16px;align-items:center;margin-bottom:24px}.logo{width:48px;height:48px;display:grid;place-items:center;background:var(--accent);color:white;border-radius:12px;font-size:24px;font-weight:800}.topbar h1{margin:0;font-size:24px}.spacer{flex:1}.muted,.hint{color:var(--muted);font-size:14px}.mono{font:14px/1.6 Consolas,monospace;overflow-wrap:anywhere;color:var(--muted)}
+    .btn{display:inline-flex;justify-content:center;align-items:center;min-height:44px;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--text);font-weight:600;cursor:pointer;text-decoration:none}.btn:hover{background:var(--panel2);border-color:var(--accent)}.btn.primary{background:var(--accent);color:white;border-color:var(--accent)}.btn.primary:hover{background:#066454}.btn.danger{color:var(--red)}.btn.sm{padding:8px;font-size:14px;margin:0 4px 4px 0}.btn:disabled{opacity:.5;cursor:wait}.btn:active{transform:translateY(1px)}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}.stat{padding:24px;background:white;border:1px solid var(--line);border-radius:12px}.num{font-size:32px;font-weight:750}.lbl{color:var(--muted);font-size:14px}.green .num,.blue .num{color:var(--accent)}.gold .num{color:var(--gold)}.red .num{color:var(--text)}
+    .card{background:white;border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:24px}.card h2{font-size:20px;margin:0 0 16px}.hint{display:inline-block;margin-left:8px;font-weight:400}.tabs{display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--line);padding-bottom:16px}.tabs button[aria-selected=true]{background:var(--accent);color:white;border-color:var(--accent)}
+    .toolbar{display:flex;align-items:end;gap:16px;flex-wrap:wrap;margin-bottom:16px}.toolbar label{font-size:14px;color:var(--muted)}.toolbar input,.toolbar select{display:block;margin-top:8px}.toolbar input{min-width:240px}.toolbar select{min-width:144px}input,select,textarea{padding:8px 12px;min-height:44px;background:white;color:var(--text);border:1px solid var(--line);border-radius:8px;max-width:100%}input:focus,select:focus,textarea:focus{border-color:var(--accent)}input[type=checkbox]{min-height:auto}input[type=hidden]{display:none}label{display:block}label input{width:100%;margin:8px 0 16px}
+    table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:16px 12px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#f7f9f8;color:var(--muted);font-weight:600;white-space:nowrap}tr:hover td{background:#fafcfb}td:last-child{min-width:200px}td strong{font-size:16px}.table-wrap{overflow-x:auto}.badge{display:inline-block;padding:4px 8px;border-radius:6px;white-space:nowrap;font-size:13px;background:var(--panel2);color:var(--muted)}.badge.ok,.badge.blue{background:#e4f3eb;color:var(--accent2)}.badge.off{background:#fcecee;color:var(--red)}.badge.gold{background:#fcf2df;color:var(--gold)}.machine-chip{display:inline-block;background:var(--panel2);border-radius:4px;padding:4px 8px;margin:4px 4px 0 0;font-size:13px;overflow-wrap:anywhere}.pager{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:16px}.empty{padding:40px;text-align:center;color:var(--muted)}
+    .notice{display:none;padding:16px;border-radius:8px;margin:0 0 16px;overflow-wrap:anywhere}.notice.show{display:block}.notice.ok{background:#e4f3eb;color:var(--accent2)}.notice.err{background:#fcecee;color:var(--red)}#notice{position:sticky;top:8px;z-index:2}.admin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.admin-grid label{font-size:14px;color:var(--muted)}.wide{grid-column:1/-1}.check{display:flex;align-items:center;gap:8px}.check input{width:auto;margin:0}.section-note{color:var(--muted);margin:0 0 24px}
+    #loginBox{max-width:440px;margin:64px auto;padding:32px}.brand{margin-bottom:24px}.brand .logo{margin-bottom:16px}#loginBox input{width:100%}#loginBox h1{font-size:24px!important}.error-message{max-width:440px;overflow-wrap:anywhere}.error-meta{color:var(--muted);font-size:13px;margin-top:8px}.error-guidance{padding:16px;border-left:3px solid var(--accent);background:var(--panel2);margin:16px 0}details summary{cursor:pointer;color:var(--accent);padding:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:16px;border-radius:8px;font:13px/1.7 Consolas,monospace;max-height:320px;overflow:auto}dialog{border:1px solid var(--line);border-radius:16px;padding:32px;background:white;color:var(--text);width:min(640px,calc(100vw - 32px));max-height:90vh;overflow:auto}dialog::backdrop{background:rgba(15,35,29,.4)}dialog h2{margin:0 0 16px}dialog .toolbar{justify-content:flex-end}dialog textarea{width:100%}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.detail-grid dt{color:var(--muted);font-size:14px}.detail-grid dd{margin:4px 0 0;overflow-wrap:anywhere}
+    @media(max-width:850px){.wrap{padding:16px}.stats{grid-template-columns:1fr 1fr}.admin-grid{grid-template-columns:1fr 1fr}.topbar{flex-wrap:wrap}.card{padding:16px}.toolbar input{min-width:0;width:100%}.toolbar label{flex:1}.tabs{overflow-x:auto}.tabs .btn{white-space:nowrap}}@media(max-width:520px){.admin-grid,.detail-grid{grid-template-columns:1fr}.stat{padding:16px}.toolbar{align-items:stretch;flex-direction:column}.toolbar label,.toolbar input,.toolbar select{width:100%}dialog{padding:24px 16px}.hint{display:block;margin-left:0}.topbar .spacer{display:none}}
+    .toolbar label input{margin-bottom:0}#loginBox>input{margin:8px 0 16px}.toolbar label:first-child:has(#accountSearch){flex:1;max-width:480px}#accountSearch{width:100%}
+</style>
+  <style>
+    .overview-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}.overview-head h2{margin:0;font-size:24px}.overview-grid{display:grid;grid-template-columns:2fr 1fr;gap:24px}.overview-grid .card{margin:0}.metric-note{font-size:14px;color:var(--muted);margin-top:8px}.trend{display:flex;gap:8px;align-items:end;height:240px;overflow-x:auto;padding:24px 0 8px}.trend-day{flex:1;min-width:32px;display:flex;flex-direction:column;align-items:center;justify-content:end;height:100%;font-size:12px}.trend-bar{width:65%;background:var(--accent);border-radius:4px 4px 0 0;min-height:2px}.trend-day.missing{color:var(--muted)}.trend-day.missing .trend-bar{background:var(--line)}.channel-row{display:flex;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--line)}.recent-row{display:flex;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}.recent-row:last-child{border-bottom:0}.overview-foot{margin:24px 0}.status-note{max-width:240px;overflow-wrap:anywhere;font-size:13px;color:var(--muted)}
+    @media(max-width:850px){.overview-grid{grid-template-columns:1fr}.overview-head{align-items:start;flex-direction:column}}
   </style>
 </head>
 <body>
@@ -136,8 +32,8 @@
         <h1 style="margin:0;font-size:22px;">授权中心管理后台</h1>
         <p class="muted" style="margin:6px 0 0;">仅管理员可登录</p>
       </div>
-      <input id="loginUser" placeholder="管理员账号" autocomplete="username">
-      <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password">
+      <label for="loginUser">管理员账号</label><input id="loginUser" placeholder="管理员账号" autocomplete="username">
+      <label for="loginPass">登录密码</label><input id="loginPass" type="password" placeholder="密码" autocomplete="current-password">
       <button id="loginBtn" class="btn primary" style="width:100%">登录</button>
       <div id="loginNotice" class="notice"></div>
     </div>
@@ -147,19 +43,38 @@
       <div class="topbar">
         <div class="logo">影</div>
         <div>
-          <h1>授权中心管理后台</h1>
+          <h1>授权工作台</h1>
           <div class="muted" id="whoami"></div>
         </div>
         <div class="spacer"></div>
-        <button id="refreshBtn" class="btn">刷新列表</button>
+        <button id="refreshBtn" class="btn">刷新当前页面</button>
         <button id="logoutBtn" class="btn danger">退出登录</button>
       </div>
 
-      <div class="stats" id="statsRow"></div>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <nav class="tabs" aria-label="后台区域">
+        <button class="btn" data-tab="overview" aria-selected="true">使用概览</button>
+        <button class="btn" data-tab="accounts" aria-selected="false">客户授权</button>
+        <button class="btn" data-tab="errors" aria-selected="false">错误处理</button>
+        <button class="btn" data-tab="settings" aria-selected="false">产品设置</button>
+      </nav>
 
-      <div class="card">
+      <section id="overviewPanel" aria-label="使用仪表盘">
+        <div class="overview-head"><div><h2>今天，使用情况一目了然</h2><div class="muted" id="dashboardUpdated">正在读取真实数据…</div></div><span class="badge">北京时间 · 按账号去重</span></div>
+        <div id="dashboardNotice" class="notice" role="status"></div>
+        <div class="stats" id="usageStats"></div>
+        <div class="overview-grid">
+          <div class="card"><h2>近 14 日联网活跃</h2><p class="muted">同一账号一天计一次；含客户端后台同步，不代表人工操作时长。</p><div id="usageTrend" class="trend" role="img" aria-label="活跃趋势正在加载"></div></div>
+          <div class="card"><h2>今日连接来源</h2><div id="usageChannels"></div><p class="muted">同一账号可使用多个端，分项之和可能大于今日活跃总数。</p><button class="btn" data-tab="errors">去处理错误</button></div>
+          <div class="card wide"><h2>今日最近活跃账号</h2><div id="usageRecent"></div></div>
+        </div>
+        <details class="overview-foot"><summary>统计口径与数据边界</summary><p id="usageCoverage" class="muted"></p><p class="muted">活跃来自非管理员账号的成功认证联网请求，包含自动同步和轮询，排除匿名访问、失败请求和错误上报。桌面端与会员网页暂合并统计。没有采集离线操作或使用时长。</p><p class="muted">今日上传为云端照片记录创建数（含桌面同步，不含旧版模糊缩略图）；电脑接收按照片导入回执时间统计。错误数为收到的日志条数，不等于故障人数。日活保留当日后续停用账号的历史；近15分钟活跃排除当前停用账号。活动记录刷新精度约1分钟。</p></details>
+      </section>
+      <div class="card" id="accountsPanel" hidden>
+        <div class="stats" id="statsRow"></div>
         <h2>客户与授权管理 <span class="hint">开通 / 续期 / 吊销 / 解绑</span></h2>
-        <div id="notice" class="notice"></div>
+        <div class="toolbar"><label>账号状态<select id="accountStatusFilter"><option value="active">正常账号</option><option value="disabled">已停用账号</option><option value="">全部账号</option></select></label><span class="muted">停用保留数据；恢复不延期、不重新开通授权。</span></div>
+        <div class="toolbar"><label>搜索客户<input id="accountSearch" placeholder="账号、昵称、邀请码或设备 ID"></label><label>授权状态<select id="accountFilter"><option value="">全部授权</option><option value="term">限期会员</option><option value="lifetime">终身会员</option><option value="expired">已到期</option><option value="none">未开通 / 已吊销</option></select></label><span id="accountCount" class="muted"></span></div>
         <div style="overflow-x:auto">
           <table>
             <thead>
@@ -173,14 +88,13 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="settingsPanel" hidden>
         <h2>产品策略 <span class="hint">客户端自动同步，断网使用最近缓存</span></h2>
-        <form id="productForm" class="admin-grid">
+        <p class="section-note">保存后向客户端下发。仅在需要调整产品策略时修改此页。</p><form id="productForm" class="admin-grid">
           <label>月度会员价格<input id="cfgMonthly" type="number" min="1" max="9999"></label>
           <label>终身会员价格<input id="cfgLifetime" type="number" min="1" max="99999"></label>
           <label>价格标签<input id="cfgPriceLabel" maxlength="40"></label>
-          <label>电脑免费版照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>
-          <label>小程序免费累计上传上限<input id="cfgMiniFreeLimit" type="number" min="0" max="100000"><small>按项目主账号累计；成员共用，电脑同步照片不占用</small></label>
+          <label>免费照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>
           <label>有效邀请门槛<input id="cfgInviteMilestone" type="number" min="1" max="1000"></label>
           <label>每次奖励天数<input id="cfgInviteDays" type="number" min="0" max="3650"></label>
           <label>云图最长边(px)<input id="cfgThumbSide" type="number" min="320" max="1600"></label>
@@ -192,16 +106,18 @@
         </form>
       </div>
 
-      <div class="card">
+      <div class="card" id="errorsPanel" hidden>
         <h2>客户端错误中心 <span class="hint" id="errorSummary">正在读取</span></h2>
         <div class="toolbar">
-          <select id="errorStatus"><option value="0">未处理</option><option value="">全部</option><option value="1">已处理</option></select>
-          <input id="errorSearch" placeholder="搜索账号、模块或错误内容">
+          <label>处理状态<select id="errorStatus"><option value="0">未处理</option><option value="">全部</option><option value="1">已处理</option></select></label>
+          <label>检索记录<input id="errorSearch" placeholder="账号、来源或错误关键词"></label>
+          <label>级别<select id="errorSeverity"><option value="">所有级别</option><option value="critical">严重</option><option value="error">错误</option><option value="warning">警告</option><option value="info">信息</option></select></label>
+          <label>显示方式<select id="errorView"><option value="records">逐条记录</option><option value="groups">同类问题汇总</option></select></label>
           <button id="errorSearchBtn" class="btn" type="button">查询</button>
         </div>
-        <div style="overflow-x:auto">
+        <p id="errorScope" class="muted"></p><div style="overflow-x:auto">
           <table>
-            <thead><tr><th>时间</th><th>级别</th><th>来源/账号</th><th>错误</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>最近时间</th><th>级别</th><th>用户 / 来源</th><th>问题与线索</th><th>状态</th><th>查看 / 处理</th></tr></thead>
             <tbody id="errorRows"></tbody>
           </table>
         </div>
@@ -209,10 +125,19 @@
     </div>
   </div>
 
+  <dialog id="statusDialog" aria-labelledby="statusTitle">
+    <form id="statusForm"><h2 id="statusTitle">调整账号状态</h2><p id="statusDescription"></p><p class="muted">不删除项目、照片、邀请或授权记录。离线电脑无法被服务器即时控制，已有离线授权仍遵循软件原有校验规则。</p><label>操作备注<textarea id="statusNote" maxlength="500" rows="3" placeholder="记录停用原因或恢复说明"></textarea></label><div id="statusNotice" class="notice" role="status"></div><div class="toolbar"><button id="cancelStatusBtn" class="btn" type="button">取消</button><button class="btn primary" type="submit">确认操作</button></div></form>
+  </dialog>
+  <dialog id="errorDialog" aria-labelledby="errorTitle">
+    <h2 id="errorTitle">错误记录详情</h2><div id="errorDetail"></div>
+    <label for="resolutionNote">处理备注</label><textarea id="resolutionNote" maxlength="1000" rows="3" placeholder="记录核查结果、处理步骤或需要用户补充的信息"></textarea>
+    <div id="errorDialogNotice" class="notice" role="status"></div>
+    <div class="toolbar"><button id="closeErrorBtn" class="btn">关闭</button><button id="saveErrorBtn" class="btn primary">标记已处理</button></div>
+  </dialog>
   <dialog id="licenseDialog">
     <form id="licenseForm" method="dialog">
       <h2>开通或调整会员</h2>
-      <p class="muted" id="licenseAccountText"></p>
+      <p class="muted" id="licenseAccountText"></p><div id="licenseNotice" class="notice" role="status"></div>
       <input id="licenseAccountId" type="hidden">
       <label>授权类型<select id="licenseType" style="width:100%;padding:10px 12px;margin:6px 0 12px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;"><option value="term">限期会员</option><option value="lifetime">终身会员</option></select></label>
       <label id="licenseDaysLabel">有效天数<input id="licenseDays" type="number" min="1" max="3650" value="30"></label>
@@ -223,6 +148,7 @@
 
   <script>
     const $ = (s) => document.querySelector(s);
+    let accountsCache = [], errorsCache = [], activeTab = "overview", selectedError = null, errorRequest = 0, selectedAccountStatus = null, dashboardRequest = 0;
     let token = localStorage.getItem("album_admin_token") || "";
 
     function reportError(message, context = {}, stack = "", severity = "error") {
@@ -246,7 +172,16 @@
       el.className = `notice show ${isErr ? "err" : "ok"}`;
     }
 
+    const pendingWrites=new Set();
     async function api(url, options = {}) {
+      const write=options.method === "POST";
+      if(write && pendingWrites.size)throw new Error("请求正在处理，请勿重复提交");
+      const buttons=write?Array.from(document.querySelectorAll("button")).filter(b=>!b.disabled):[];
+      if(write){pendingWrites.add(url);buttons.forEach(b=>{b.disabled=true;b.setAttribute("aria-busy","true");});}
+      try{return await requestApi(url,options);}
+      finally{if(write){pendingWrites.delete(url);buttons.forEach(b=>{b.disabled=false;b.removeAttribute("aria-busy");});}}
+    }
+    async function requestApi(url, options = {}) {
       const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
       if (token) headers.Authorization = `Bearer ${token}`;
       let resp;
@@ -256,7 +191,14 @@
         reportError(error.message || "网络请求失败", { url, method: options.method || "GET" }, error.stack || "", "warning");
         throw error;
       }
-      const data = await resp.json().catch(() => ({}));
+      const data = await resp.json().catch(() => null);
+      if(resp.status === 401 && url !== "/api/login") {
+        token="";localStorage.removeItem("album_admin_token");
+        document.querySelectorAll("dialog[open]").forEach(dialog=>dialog.close());
+        $("#mainBox").style.display="none";$("#loginBox").style.display="block";
+        notice($("#loginNotice"),"登录已失效，请重新登录后继续。",true);
+      }
+      if(!data || typeof data !== "object")throw new Error(`服务返回内容异常（HTTP ${resp.status}），请稍后重试。`);
       if (!resp.ok || data.ok === false) {
         reportError(data.error || `请求失败(${resp.status})`, { url, method: options.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
         throw new Error(data.error || `请求失败(${resp.status})`);
@@ -271,6 +213,7 @@
           body: JSON.stringify({ username: $("#loginUser").value.trim(), password: $("#loginPass").value })
         });
         if (data.account.role !== "admin") throw new Error("该账号不是管理员");
+        $("#loginPass").value = "";
         token = data.token;
         localStorage.setItem("album_admin_token", token);
         enterAdmin(data.account);
@@ -283,14 +226,15 @@
       $("#loginBox").style.display = "none";
       $("#mainBox").style.display = "block";
       $("#whoami").textContent = `当前管理员：${account.display_name || account.username}`;
-      Promise.all([loadAccounts(), loadProductConfig(), loadErrors()]).catch(() => {});
+      Promise.all([loadDashboard(), loadAccounts(), loadProductConfig(), loadErrors()]).catch(error => notice($("#notice"),error.message,true));
     }
 
     async function loadAccounts() {
       try {
         const data = await api("/api/admin/accounts");
-        renderStats(data.accounts);
-        renderAccounts(data.accounts);
+        accountsCache = data.accounts || [];
+        renderStats(accountsCache);
+        filterAccounts();
       } catch (e) {
         notice($("#notice"), e.message, true);
         if (/登录|权限/.test(e.message)) {
@@ -304,12 +248,12 @@
 
     function renderStats(accounts) {
       const total = accounts.length;
-      const members = accounts.filter(a => a.license && a.license.has_license).length;
-      const lifetime = accounts.filter(a => a.license && a.license.license_type === "lifetime").length;
+      const members = accounts.filter(a => a.account.status === "active" && ["term","lifetime"].includes(licenseState(a.license))).length;
+      const lifetime = accounts.filter(a => a.account.status === "active" && licenseState(a.license) === "lifetime").length;
       const machines = accounts.reduce((s, a) => s + ((a.license && a.license.machine_count) || 0), 0);
       const stats = [
         { cls: "blue", num: total, lbl: "总账号数" },
-        { cls: "green", num: members, lbl: "会员账号" },
+        { cls: "green", num: members, lbl: "有效会员" },
         { cls: "gold", num: lifetime, lbl: "终身会员" },
         { cls: "red", num: machines, lbl: "已绑定机器" },
       ];
@@ -321,11 +265,10 @@
     function renderAccounts(accounts) {
       $("#rows").innerHTML = accounts.map(({ account, license, invite_code, invitees, invited_by, invite_count, invite_qualified_count }) => {
         const lic = license || {};
-        const typeText = lic.has_license
-          ? (lic.license_type === "lifetime" ? "终身" : "限期")
-          : "未开通";
-        const typeCls = lic.has_license ? (lic.license_type === "lifetime" ? "gold" : "blue") : "off";
-        const expText = lic.license_type === "lifetime" ? "终身" : (lic.expires_at || "-");
+        const state = licenseState(lic);
+        const typeText = {term:"限期会员", lifetime:"终身会员", expired:"已到期", none:"未开通 / 已吊销"}[state];
+        const typeCls = ["term","lifetime"].includes(state) ? (lic.license_type === "lifetime" ? "gold" : "blue") : "off";
+        const expText = state === "none" ? "—" : lic.license_type === "lifetime" ? "终身" : formatTime(lic.expires_at);
         const machineText = `${lic.machine_count || 0}/${lic.machine_limit || 3} 台`;
         const machines = (lic.machines || []).map(m => `<span class="machine-chip">${escapeHtml(m.machine_id.slice(-8))}</span>`).join("");
         const machineButtons = (lic.machines || []).map(m =>
@@ -342,24 +285,28 @@
           <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : "停用"}</span></td>
           <td><span class="badge ${typeCls}">${typeText}</span></td>
           <td class="mono">${escapeHtml(expText)}</td>
-          <td>${invText}<br>${inviteList}</td>
+          <td><details><summary>有效 ${invite_qualified_count || 0} 人</summary>${invText}<br>${inviteList}</details></td>
           <td><span class="muted">${machineText}</span><br>${machines || '<span class="muted">-</span>'}</td>
           <td>
+            ${account.role !== 'admin' ? `<button class="btn sm ${account.status === 'active' ? 'danger' : 'primary'}" data-action="status" data-account="${account.id}">${account.status === 'active' ? '停用并归档' : '恢复账号'}</button>` : '<span class="muted">管理员受保护</span>'}
+            ${account.last_status_change ? `<div class="status-note">${escapeHtml(account.last_status_change.note || '无操作备注')} · ${escapeHtml(formatTime(account.last_status_change.created_at))}</div>` : ''}
             <button class="btn sm" data-action="license" data-account="${account.id}" data-user="${escapeAttr(account.username)}">开通/续期</button>
             <button class="btn sm danger" data-action="revoke" data-account="${account.id}">吊销</button>
             ${machineButtons}
           </td>
         </tr>`;
-      }).join("");
+      }).join("") || '<tr><td colspan="7" class="empty">没有匹配的客户，请调整搜索或筛选条件。</td></tr>';
     }
 
     function issueLicense(accountId, username) {
       $("#licenseAccountId").value = accountId;
       $("#licenseAccountText").textContent = `账号：${username}`;
-      $("#licenseType").value = "term";
+      const current = accountsCache.find(item => item.account.id === Number(accountId))?.license;
+      $("#licenseNotice").className = "notice";
+      $("#licenseType").value = current?.license_type === "lifetime" ? "lifetime" : "term";
       $("#licenseDays").value = "30";
-      $("#licenseLimit").value = "3";
-      $("#licenseDaysLabel").style.display = "block";
+      $("#licenseLimit").value = String(current?.machine_limit ?? 3);
+      $("#licenseDaysLabel").style.display = $("#licenseType").value === "term" ? "block" : "none";
       $("#licenseDialog").showModal();
     }
 
@@ -382,11 +329,11 @@
         $("#licenseDialog").close();
         notice($("#notice"), "会员已开通或更新");
         loadAccounts();
-      } catch (error) { notice($("#notice"), error.message, true); }
+      } catch (error) { notice($("#licenseNotice"), error.message, true); }
     });
 
     function revoke(accountId) {
-      if (!confirm("吊销后该账号所有机器立即失效，确定？")) return;
+      if (!confirm(`确认吊销账号「${accountsCache.find(x=>x.account.id===accountId)?.account.username || accountId}」？该账号所有机器的授权将立即失效。`)) return;
       api("/api/admin/revoke", { method: "POST", body: JSON.stringify({ account_id: accountId }) })
         .then(() => { notice($("#notice"), "已吊销"); loadAccounts(); })
         .catch(e => notice($("#notice"), e.message, true));
@@ -403,16 +350,15 @@
       const data = await api("/api/product-config");
       const product = data.product || {};
       const pricing = product.pricing || {}, free = product.free || {}, invite = product.invite || {}, cloud = product.cloud_preview || {}, logging = product.logging || {};
-      $("#cfgMonthly").value = pricing.monthly_price || 39;
-      $("#cfgLifetime").value = pricing.lifetime_price || 399;
+      $("#cfgMonthly").value = pricing.monthly_price ?? 39;
+      $("#cfgLifetime").value = pricing.lifetime_price ?? 399;
       $("#cfgPriceLabel").value = pricing.price_label || "原价";
-      $("#cfgFreeLimit").value = free.photo_limit || 300;
-      $("#cfgMiniFreeLimit").value = product.mini_program?.free_upload_limit ?? 100;
-      $("#cfgInviteMilestone").value = invite.milestone || 10;
-      $("#cfgInviteDays").value = invite.reward_days || 30;
-      $("#cfgThumbSide").value = cloud.thumb_max_side || 720;
-      $("#cfgThumbQuality").value = cloud.thumb_quality || 76;
-      $("#cfgThumbCount").value = cloud.max_thumbs_per_project || 240;
+      $("#cfgFreeLimit").value = free.photo_limit ?? 300;
+      $("#cfgInviteMilestone").value = invite.milestone ?? 10;
+      $("#cfgInviteDays").value = invite.reward_days ?? 30;
+      $("#cfgThumbSide").value = cloud.thumb_max_side ?? 720;
+      $("#cfgThumbQuality").value = cloud.thumb_quality ?? 76;
+      $("#cfgThumbCount").value = cloud.max_thumbs_per_project ?? 240;
       $("#cfgBetaCloud").checked = Boolean(cloud.beta_free_access);
       $("#cfgLogging").checked = logging.enabled !== false;
       $("#configVersion").textContent = `配置版本 ${product.config_version || 1}`;
@@ -425,7 +371,6 @@
           method: "POST",
           body: JSON.stringify({ product: {
             pricing: { monthly_price: Number($("#cfgMonthly").value), lifetime_price: Number($("#cfgLifetime").value), price_label: $("#cfgPriceLabel").value.trim() },
-            mini_program: { free_upload_limit: Number($("#cfgMiniFreeLimit").value) },
             free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: false },
             invite: { milestone: Number($("#cfgInviteMilestone").value), reward_days: Number($("#cfgInviteDays").value), enabled: true },
             cloud_preview: { thumb_max_side: Number($("#cfgThumbSide").value), thumb_quality: Number($("#cfgThumbQuality").value), max_thumbs_per_project: Number($("#cfgThumbCount").value), beta_free_access: $("#cfgBetaCloud").checked },
@@ -438,35 +383,65 @@
     });
 
     async function loadErrors() {
-      const status = $("#errorStatus").value;
-      const q = $("#errorSearch").value.trim();
-      const params = new URLSearchParams({ limit: "100" });
-      if (status !== "") params.set("resolved", status);
-      if (q) params.set("q", q);
+      const generation = ++errorRequest;
+      const params = new URLSearchParams({limit:"200"});
+      if($("#errorStatus").value !== "") params.set("resolved",$("#errorStatus").value);
+      if($("#errorSearch").value.trim()) params.set("q",$("#errorSearch").value.trim());
+      $("#errorSummary").textContent = "正在获取记录…";
       try {
         const data = await api(`/api/admin/errors?${params}`);
+        if(generation !== errorRequest) return;
+        errorsCache = data.errors || [];
         const summary = data.summary || {};
-        $("#errorSummary").textContent = `未处理 ${summary.unresolved || 0} 条，严重 ${summary.critical || 0} 条，共 ${summary.total || 0} 条`;
-        $("#errorRows").innerHTML = (data.errors || []).map((item) => {
-          const detail = [item.stack, JSON.stringify(item.context || {}, null, 2)].filter(Boolean).join("\n");
-          const levelClass = item.severity === "critical" ? "off" : item.severity === "warning" ? "gold" : "blue";
-          return `<tr><td class="mono">${escapeHtml(item.created_at || "-")}</td><td><span class="badge ${levelClass}">${escapeHtml(item.severity)}</span></td><td>${escapeHtml(item.source)}<br><span class="muted">${escapeHtml(item.username || "未登录")}</span></td><td><strong>${escapeHtml(item.error_type || "错误")}</strong><br>${escapeHtml(item.message || "-")}${detail ? `<details><summary>技术详情</summary><pre>${escapeHtml(detail)}</pre></details>` : ""}</td><td>${item.resolved ? '<span class="badge ok">已处理</span>' : '<span class="badge off">待处理</span>'}</td><td>${item.resolved ? "" : `<button class="btn sm" data-resolve-error="${item.id}">标记已处理</button>`}</td></tr>`;
-        }).join("") || '<tr><td colspan="6" class="muted">暂无符合条件的错误记录</td></tr>';
-      } catch (error) { $("#errorSummary").textContent = error.message; }
+        $("#errorSummary").textContent = `全部日志：待处理 ${summary.unresolved || 0} · 严重待处理 ${summary.critical || 0} · 总计 ${summary.total || 0}`;
+        renderErrors();
+      } catch(error) { if(generation === errorRequest) { errorsCache=[]; $("#errorRows").innerHTML='<tr><td colspan="6" class="empty">加载失败，请重试查询。</td></tr>'; $("#errorSummary").textContent=error.message; } }
+    }
+
+    function renderErrors() {
+      const filtered=errorsCache.filter(e=>!$("#errorSeverity").value || e.severity === $("#errorSeverity").value);
+      const grouped=$("#errorView").value === "groups";
+      const groups=new Map();
+      filtered.forEach(e=>{ const key=grouped ? (e.fingerprint || [e.source,e.error_type,e.message].join("|")) : e.id; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(e); });
+      $("#errorScope").textContent=`本次最多读取匹配条件的最新 200 条，已读取 ${errorsCache.length} 条；级别筛选后 ${filtered.length} 条，显示 ${groups.size} ${grouped?"组":"条"}。汇总仅统计本次读取范围，非历史累计。`;
+      $("#errorRows").innerHTML=Array.from(groups.values()).map(items=>{
+        const e=items[0], clue=errorClue(e), level={critical:"严重",error:"错误",warning:"警告",info:"信息"}[e.severity] || "未知";
+        return `<tr><td class="mono">${escapeHtml(formatTime(e.created_at))}</td><td><span class="badge ${e.severity==='critical'||e.severity==='error'?'off':'gold'}">${level}</span></td><td><strong>${escapeHtml(e.username || "未关联账号")}</strong><div class="muted">${escapeHtml(e.source || "来源未上报")}</div><div class="muted">版本 ${escapeHtml(e.app_version || "未上报")}</div></td><td class="error-message"><strong>${escapeHtml(e.error_type || "未上报错误类型")}</strong><div>${escapeHtml(e.message || "未上报错误描述")}</div><div class="error-meta">${escapeHtml(clue.evidence)}</div>${grouped?`<div class="error-meta">本次 ${items.length} 次 · ${new Set(items.map(x=>x.account_id || x.username || "未关联")).size} 个账号标识</div>`:""}</td><td><span class="badge ${e.resolved?'ok':'off'}">${e.resolved?'已处理':'待处理'}</span>${grouped?`<div class="muted">本组待处理 ${items.filter(x=>!x.resolved).length} 条</div>`:""}</td><td><button class="btn sm" data-error-detail="${Number(e.id)}">${grouped?'查看最新一条':'查看 / 处理'}</button>${grouped?'<div class="muted">处理仅影响此条记录</div>':''}</td></tr>`;
+      }).join("") || '<tr><td colspan="6" class="empty">暂无符合条件的记录。</td></tr>';
+    }
+
+    function errorClue(e) {
+      const c=e.context && typeof e.context === "object" ? e.context : {};
+      const evidence=[c.method,c.url || c.path,c.status?`HTTP ${c.status}`:"",c.code].filter(Boolean).join(" · ") || "未上报请求路径或状态码，请查看原始详情";
+      let suggestion="现有信息不足以确定原因。结合操作步骤、发生时间和原始上下文排查；必要时请用户补充复现步骤。";
+      if([401,403].includes(Number(c.status))) suggestion="优先核查登录状态与账号权限，再让用户重新登录验证；这条状态码本身不能证明授权已到期。";
+      else if(Number(c.status)>=500) suggestion="优先按时间和请求路径核查服务器日志，确认对应接口是否异常。";
+      else if(/network|timeout|网络|超时/i.test(e.message || "")) suggestion="优先核查网络与服务可达性，对照发生时间确认是否为持续故障；当前提示不足以区分客户端或服务器原因。";
+      return {evidence,suggestion};
+    }
+
+    function openError(id) {
+      selectedError=errorsCache.find(e=>Number(e.id)===Number(id)); if(!selectedError)return;
+      const e=selectedError, clue=errorClue(e);
+      const fields=[["记录编号",e.id],["账号",e.username || "未关联账号"],["发生时间（北京时间）",formatTime(e.created_at)],["客户端时间（北京时间）",formatTime(e.client_time)],["来源",e.source],["版本",e.app_version],["设备标识（脱敏）",e.machine_id],["处理时间（北京时间）",formatTime(e.resolved_at)]];
+      $("#errorDetail").innerHTML=`<dl class="detail-grid">${fields.map(([k,v])=>`<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v || "未上报 / 暂无")}</dd></div>`).join("")}</dl><p>${escapeHtml(e.message)}</p><div class="error-guidance"><strong>排查建议（非已确认原因）</strong><div>${escapeHtml(clue.suggestion)}</div></div><details><summary>原始上下文与堆栈</summary><pre>${escapeHtml(JSON.stringify(e.context || {},null,2))}</pre><pre>${escapeHtml(e.stack || "未上报堆栈")}</pre></details>`;
+      $("#resolutionNote").value=e.resolution_note || "";
+      $("#saveErrorBtn").textContent=e.resolved?"重新打开此记录":"保存备注并标记已处理";
+      $("#errorDialogNotice").className="notice"; $("#errorDialog").showModal();
     }
 
     $("#errorSearchBtn").addEventListener("click", loadErrors);
     $("#errorStatus").addEventListener("change", loadErrors);
-    $("#errorRows").addEventListener("click", async (event) => {
-      const button = event.target.closest("button[data-resolve-error]");
-      if (!button) return;
-      try {
-        await api(`/api/admin/errors/${button.dataset.resolveError}/resolve`, { method: "POST", body: JSON.stringify({ resolved: true }) });
-        loadErrors();
-      } catch (error) { notice($("#notice"), error.message, true); }
+    $("#errorRows").addEventListener("click",event=>{const button=event.target.closest("button[data-error-detail]");if(button)openError(button.dataset.errorDetail);});
+    $("#closeErrorBtn").addEventListener("click",()=>$("#errorDialog").close());
+    $("#saveErrorBtn").addEventListener("click",async()=>{
+      if(!selectedError)return;
+      try{await api(`/api/admin/errors/${selectedError.id}/resolve`,{method:"POST",body:JSON.stringify({resolved:!selectedError.resolved,note:$("#resolutionNote").value.trim()})});$("#errorDialog").close();await loadErrors();notice($("#notice"),"处理状态已更新");}
+      catch(error){notice($("#errorDialogNotice"),error.message,true);}
     });
-
-    $("#refreshBtn").addEventListener("click", () => Promise.all([loadAccounts(), loadErrors(), loadProductConfig()]));
+    $("#errorSeverity").addEventListener("change",renderErrors); $("#errorView").addEventListener("change",renderErrors);
+    $("#errorSearch").addEventListener("keydown",e=>{if(e.key==='Enter')loadErrors();});
+    $("#refreshBtn").addEventListener("click",()=>{ if(activeTab === "settings" && !confirm("重新读取将覆盖尚未保存的编辑，继续？"))return; (activeTab === "overview"?loadDashboard():activeTab === "accounts"?loadAccounts():activeTab === "errors"?loadErrors():loadProductConfig()).catch(e=>notice($("#notice"),e.message,true)); });
     $("#logoutBtn").addEventListener("click", () => {
       token = "";
       localStorage.removeItem("album_admin_token");
@@ -481,9 +456,75 @@
       const username = btn.getAttribute("data-user") || "";
       const machineId = btn.getAttribute("data-machine") || "";
       if (action === "license") issueLicense(Number(accountId), username);
+      else if (action === "status") openAccountStatus(Number(accountId));
       else if (action === "revoke") revoke(Number(accountId));
       else if (action === "unbind") unbind(Number(accountId), machineId);
     });
+
+
+    async function loadDashboard() {
+      const generation=++dashboardRequest;
+      $("#dashboardUpdated").textContent="正在刷新…";
+      try {
+        const data=await api('/api/admin/dashboard');
+        if(generation!==dashboardRequest)return;
+        if(!data.dashboard)throw new Error('统计接口尚未就绪');
+        renderDashboard(data.dashboard);
+        $("#dashboardNotice").className='notice';
+      } catch(error) {
+        if(generation!==dashboardRequest)return;
+        $("#dashboardUpdated").textContent='数据加载失败，请点击“刷新当前页面”重试';
+        ['usageStats','usageTrend','usageChannels','usageRecent'].forEach(id=>$('#'+id).innerHTML='');
+        notice($("#dashboardNotice"),error.message,true);
+      }
+    }
+    function renderDashboard(d) {
+      const metrics=[['今日联网活跃',d.today_active,'按账号去重，含后台同步'],['近15分钟活跃',d.recent_active,'近期成功连接，非实时在线'],['近7日活跃',d.week_active,'近7个自然日去重账号'],['今日新增账号',d.registered_today,'不含管理员账号'],['今日云端新增照片',d.uploaded_today,'按照片记录创建时间'],['今日电脑接收',d.imported_today,'按照片导入回执时间'],['今日错误日志',d.errors_today,'收到的日志条数'],['待处理错误',d.unresolved,'全部历史未处理记录']];
+      $('#usageStats').innerHTML=metrics.map(([label,value,hint])=>`<div class="stat"><div class="lbl">${label}</div><div class="num">${escapeHtml(value ?? '—')}</div><div class="metric-note">${hint}</div></div>`).join('');
+      $('#dashboardUpdated').textContent=`${d.day} · 更新于 ${formatTime(d.generated_at)}`;
+      $('#usageCoverage').textContent=`活跃采集始于 ${formatTime(d.started_at)}（北京时间）。首日为不完整日；此前日期显示“未采集”，不补造历史。近7日数据在采集满7天前为部分覆盖。今日未结束，不能直接与完整日比较。`;
+      const trend=d.trend || [], max=Math.max(1,...trend.map(x=>Number(x.active)||0));
+      $('#usageTrend').innerHTML=trend.map(x=>`<div class="trend-day ${x.active===null?'missing':''}" title="${escapeAttr(x.day)}：${x.active===null?'未采集':Number(x.active)+' 个活跃账号'}"><span>${x.active===null?'—':Number(x.active)}</span><div class="trend-bar" style="height:${x.active===null?2:Math.max(2,Math.round(Number(x.active)/max*160))}px"></div><span>${escapeHtml(x.day.slice(5))}</span></div>`).join('');
+      $('#usageTrend').setAttribute('aria-label',trend.map(x=>`${x.day}：${x.active===null?'未采集':x.active+'个活跃账号'}`).join('；'));
+      $('#usageChannels').innerHTML=(d.channels || []).map(x=>`<div class="channel-row"><span>${x.channel==='mobile'?'微信小程序':'桌面端 / 会员网页'}</span><strong>${Number(x.active)} 个账号</strong></div>`).join('') || '<p class="muted">今日暂无已采集的联网活动</p>';
+      $('#usageRecent').innerHTML=(d.latest || []).map(x=>`<div class="recent-row"><div><strong>${escapeHtml(x.username)}</strong> <span class="muted">${escapeHtml(x.display_name || '')}</span>${x.status!=='active'?'<span class="badge off">现已停用</span>':''}</div><span class="mono">${escapeHtml(formatTime(Number(x.last_seen)*1000))}</span></div>`).join('') || '<p class="muted">暂无记录。客户下一次成功联网后会开始显示。</p>';
+    }
+    function openAccountStatus(id) {
+      const item=accountsCache.find(x=>x.account.id===id);
+      if(!item || item.account.role==='admin')return;
+      selectedAccountStatus={id,status:item.account.status==='active'?'disabled':'active'};
+      $('#statusTitle').textContent=selectedAccountStatus.status==='disabled'?'停用并归档账号':'恢复账号';
+      $('#statusDescription').textContent=selectedAccountStatus.status==='disabled'?`确认停用「${item.account.username}」？此账号将无法登录或继续访问联网接口，并从正常账号列表隐藏。`:`确认恢复「${item.account.username}」？恢复后需重新登录，原授权期限不变；已过期或吊销的会员不会自动开通。`;
+      $('#statusNote').value='';$('#statusNotice').className='notice';$('#statusDialog').showModal();
+    }
+    $('#cancelStatusBtn').addEventListener('click',()=>$('#statusDialog').close());
+    $('#statusForm').addEventListener('submit',async event=>{
+      event.preventDefault();if(!selectedAccountStatus)return;
+      try {
+        const target=selectedAccountStatus;
+        await api(`/api/admin/accounts/${target.id}/status`,{method:'POST',body:JSON.stringify({status:target.status,note:$('#statusNote').value.trim()})});
+        $('#statusDialog').close();notice($('#notice'),target.status==='disabled'?'账号已停用归档，可在“已停用账号”中恢复':'账号已恢复，请客户重新登录');
+        await Promise.all([loadAccounts(),loadDashboard()]);
+      } catch(error){notice($('#statusNotice'),error.message,true);}
+    });
+    function licenseState(lic) {
+      if(!lic?.has_license)return "none";
+      if(lic.license_type === "lifetime")return "lifetime";
+      if(lic.expires_at && Date.parse(lic.expires_at)<Date.now())return "expired";
+      return "term";
+    }
+    function filterAccounts(){const q=$("#accountSearch").value.trim().toLowerCase(), state=$("#accountFilter").value;
+      const status=$("#accountStatusFilter").value;
+      const filtered=accountsCache.filter(item=>(!status || item.account.status===status) && (!state || licenseState(item.license)===state) && (!q || [item.account.username,item.account.display_name,item.invite_code,...(item.license?.machines || []).map(m=>m.machine_id)].join(" ").toLowerCase().includes(q)));
+      $("#accountCount").textContent=`显示 ${filtered.length} / ${accountsCache.length} 个账号`;renderAccounts(filtered);
+    }
+    $("#accountSearch").addEventListener("input",filterAccounts);$("#accountFilter").addEventListener("change",filterAccounts);
+    $("#accountStatusFilter").addEventListener("change",filterAccounts);
+    document.querySelectorAll("[data-tab]").forEach(button=>button.addEventListener("click",()=>{
+      activeTab=button.dataset.tab; ["overview","accounts","errors","settings"].forEach(name=>$("#"+name+"Panel").hidden=name!==activeTab);
+      document.querySelectorAll("[data-tab]").forEach(tab=>tab.setAttribute("aria-selected",String(tab.dataset.tab===activeTab)));
+    }));
+    $("#loginPass").addEventListener("keydown",event=>{if(event.key==='Enter')$("#loginBtn").click();});
 
     function escapeHtml(v) {
       return String(v == null ? "" : v).replace(/[&<>"']/g, c => (
@@ -491,6 +532,12 @@
       ));
     }
     function escapeAttr(v) { return escapeHtml(v).replace(/"/g, "&quot;"); }
+
+    function formatTime(value) {
+      if(!value)return "—";
+      const date=new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(date);
+    }
 
     (async () => {
       if (!token) return;
