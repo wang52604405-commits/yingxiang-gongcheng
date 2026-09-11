@@ -212,7 +212,7 @@
         <h1>工程影像管理平台</h1>
       </div>
       <h2>账号登录</h2>
-      
+      <p>登录后进入工程工作台；首次使用请直接注册账号。</p>
       <div class="auth-form">
         <label>账号<input id="gateUsername" type="text" placeholder="手机号 / QQ / 邮箱" autocomplete="username"></label>
         <label>密码<input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"></label>
@@ -302,7 +302,7 @@
                   <div class="support-rules">
                     <div id="supportLicenseStatus" class="support-license-status">
                       正在读取软件到期时间...
-                      
+                      <small>打开本面板后自动刷新授权和试用状态。</small>
                     </div>
                     <div style="margin-top:10px;padding:10px;background:#f4f8fb;border-radius:8px;">
                       <strong id="pricingLabel">会员收费标准（原价）：</strong><br>
@@ -330,7 +330,7 @@
                           <label style="display:block;margin-top:6px;">工程删除密码<input id="cloudDeletePass" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="6~32 位，请勿使用 114405"></label>
                           <label style="display:block;margin-top:6px;">确认工程删除密码<input id="cloudDeletePassConfirm" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="再次输入删除密码"></label>
                           <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
-                          
+                          <small style="display:block;margin-top:7px;color:#765b22;line-height:1.5;">登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。</small>
                         </div>
                       </div>
                       <div id="cloudProjectOwnershipBox" style="display:none;margin-top:9px;padding:9px 10px;border-radius:7px;line-height:1.55;"></div>
@@ -620,7 +620,7 @@
             <div class="upload-choice-head">
               <div>
                 <h3 id="uploadChoiceTitle">上传照片</h3>
-                <p id="uploadChoiceSub" hidden></p>
+                <p id="uploadChoiceSub">确认归档位置后添加照片。</p>
               </div>
               <button class="ghost" type="button" id="closeUploadChoiceBtn">关闭</button>
             </div>
@@ -697,7 +697,7 @@
             <div class="upload-choice-head">
               <div>
                 <h3 id="batchPrintTitle">批量打印</h3>
-                <p id="batchPrintSub" hidden></p>
+                <p id="batchPrintSub">按合同、单位、分部、单元分级多选，也可以输入名称、编号或缩略词检索。</p>
               </div>
               <button class="ghost" type="button" id="closeBatchPrintBtn">关闭</button>
             </div>
@@ -921,7 +921,7 @@
               <label>工程地点<input id="projectInfoLocationInput" type="text" placeholder="可选"></label>
               <label>开工日期<input id="projectInfoStartDateInput" type="date"></label>
               <label>工程删除密码<input id="projectInfoDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="新工程必填；编辑时留空表示不修改"></label>
-              
+              <p class="import-hint wide">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
               <div class="project-settings-card wide" id="professionalPlanSummary"><strong>专业影像采集模板</strong><p class="import-hint">水利沿用现有项目划分；房建、市政、电力会按专业模板同步“必拍 / 条件必拍 / 推荐”清单到小程序。</p><button class="secondary" type="button" id="openProfessionalPlanBtn">查看详细采集清单</button></div>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
             </div>
@@ -930,7 +930,7 @@
             <div class="settings-section-heading">
               <div>
                 <h4>项目划分</h4>
-                
+                <p class="import-hint">下载模板、导入划分和清除划分使用同一套操作逻辑。</p>
               </div>
             </div>
             <div class="project-import-menu open settings-static-menu" id="projectImportMenu" aria-hidden="false">
@@ -997,7 +997,7 @@
               <label>监理起始号<input id="settingsSupervisionStart" type="number" min="1" step="1"></label>
               <label>监理流水位数<input id="settingsSupervisionDigits" type="number" min="1" max="8" step="1"></label>
             </div>
-            
+            <p class="import-hint">可用中文占位：单元编号、单元顺序号、流水号、类别。示例：【单元编号】-SY【流水号】。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="matching" data-project-settings-group="upload">
             <h4>导入匹配</h4>
@@ -1011,7 +1011,7 @@
             </div>
             <div class="project-settings-card">
               <strong>单元与工序分层归档</strong>
-              
+              <p class="import-hint">先匹配单元，再由上传面板明确选择“单元照片”或具体工序；系统不会根据模糊文字擅自创建工序。</p>
             </div>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="fields" data-project-settings-group="upload">
@@ -1020,7 +1020,7 @@
               <label>描述位置<select id="settingsPrintCaptionPositionInput" class="orientation-select"><option value="left">照片左侧</option><option value="right">照片右侧</option><option value="top">照片上方</option><option value="bottom">照片下方</option></select></label>
             </div>
             <label class="wide">照片详情字段<textarea id="settingsPhotoFieldsInput" placeholder="每行一个字段：标签=来源，例如：施工部位=project_name；桩号=自定义文字"></textarea></label>
-            
+            <p class="import-hint">上传时自动识别水印：施工内容写入题名，施工区域用于匹配项目划分，拍摄时间写入照片日期。字段来源可用：id、title、project_name、photo_date、photographer、description。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="print" data-project-settings-group="print">
             <h4>打印设置</h4>
@@ -1051,7 +1051,7 @@
             <div class="settings-section-heading">
               <div>
                 <h4>账号与会员</h4>
-                
+                <p class="import-hint">登录、微信绑定、项目归属、会员与邀请都在这里管理。</p>
               </div>
             </div>
             <div id="settingsAccountHost" class="settings-account-host"></div>
@@ -1137,7 +1137,7 @@
           <label class="wide">工程删除密码<input id="newEngineeringProjectDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="6–32 位；用于删除本工程"></label>
           <label class="wide">确认删除密码<input id="newEngineeringProjectDeletePasswordConfirmInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="再次输入删除密码"></label>
         </div>
-        <div class="new-engineering-project-note"><strong>独立边界</strong></div>
+        <div class="new-engineering-project-note"><strong>独立边界</strong><span>不会带入当前工程的照片、项目划分、编号、打印设置、成员或其它影像目录。</span></div>
         <div class="photo-edit-actions">
           <button class="secondary" type="button" id="cancelNewEngineeringProjectBtn">取消</button>
           <button type="submit" id="submitNewEngineeringProjectBtn">创建并进入工程</button>
@@ -1155,7 +1155,7 @@
         </div>
         <button class="ghost" type="button" id="closeFolderReviewBtn">关闭</button>
       </div>
-      
+      <div class="folder-review-help">施工内容已作为题名；施工区域用于匹配单位、分部和单元。请特别检查低置信度和“多候选”项目，确认后才会写入工程。</div>
       <datalist id="folderReviewProjects"></datalist>
       <div class="folder-review-table-wrap">
         <table class="folder-review-table">
@@ -1206,7 +1206,7 @@
         <label>监理编号格式<input id="supervisionNumberTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
         <label>监理起始号<input id="supervisionNumberStart" type="number" min="1" step="1"></label>
         <label>监理流水位数<input id="supervisionNumberDigits" type="number" min="1" max="8" step="1"></label>
-        
+        <p class="import-hint">示例：【单元编号】-【类别】【流水号】 会生成 YNLQ-001-SG001；自定义文字也可以写入格式中。</p>
         <div class="photo-edit-actions">
           <button class="secondary" type="button" id="cancelNumberingRulesBtn">取消</button>
           <button type="submit">保存规则</button>
@@ -1241,7 +1241,7 @@
         <a class="button-link" id="downloadUpdateLink" href="/api/cloud/download-update" target="_blank" rel="noopener">立即下载新版本</a>
         <button class="secondary" type="button" id="dismissUpdateBtn">稍后提醒我</button>
       </div>
-      <p class="update-footnote" id="updateFootnote" hidden></p>
+      <p class="update-footnote" id="updateFootnote">安装前先关闭工程影像管理平台；工程资料不会被覆盖或删除。</p>
     </section>
   </div>
 
