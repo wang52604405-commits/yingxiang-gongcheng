@@ -348,6 +348,40 @@ class DesktopSecurityContractTest(unittest.TestCase):
             [node.get("code") for node in restored_tree.get("nodes", [])],
         )
 
+    def test_new_engineering_project_keeps_old_projects_visible_and_syncs_its_own_id(self):
+        """新建后旧工程仍在列表中；新工程按独立 ID 归属并立即通知手机同步。"""
+        with self.client.session_transaction() as session:
+            session["username"] = "多工程验收员"
+        before = self.client.get("/api/project-info").get_json()
+        previous_id = before["active_engineering_project_id"]
+        sync_service = MagicMock()
+        with patch.object(self.desktop.cloud_client, "desktop_sync_account_id", return_value="account-lifetime"), patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_username", return_value="17737397395"
+        ), patch.object(self.desktop, "desktop_mobile_sync_service", return_value=sync_service):
+            response = self.client.post(
+                "/api/engineering-projects",
+                json={
+                    "project_name": "房屋加固",
+                    "industry": "房屋建筑工程",
+                    "delete_password": "House7286",
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        project_ids = {item["id"] for item in payload["engineering_projects"]}
+        self.assertIn(previous_id, project_ids)
+        self.assertIn(payload["active_engineering_project_id"], project_ids)
+        self.assertEqual(payload["project_info"]["project_name"], "房屋加固")
+        self.assertEqual(payload["project_info"]["cloud_owner_id"], "account-lifetime")
+        self.assertEqual(
+            payload["project_info"]["cloud_project_ref"],
+            f"account-lifetime:{payload['active_engineering_project_id']}",
+        )
+        sync_service.request_project_sync.assert_called_once_with()
+        with patch.object(self.desktop, "desktop_mobile_sync_service", return_value=sync_service):
+            switched = self.client.post("/api/engineering-projects/active", json={"id": previous_id})
+        self.assertEqual(switched.status_code, 200, switched.get_json())
+
     def test_unit_photos_never_keep_a_process_number(self):
         """历史 GY 残留只能归到单元照片，真实工序照片仍使用 GX 编号。"""
         from PIL import Image
@@ -725,8 +759,9 @@ class DesktopSecurityContractTest(unittest.TestCase):
         upload_pos = html.index('id="globalUploadBtn"')
         settings_pos = html.index('id="settingsMenuBtn"')
         self.assertLess(upload_pos, settings_pos, "上传按钮必须直接出现在顶部主菜单")
-        self.assertIn('id="engineeringProjectSearch"', html)
-        self.assertIn('list="engineeringProjectOptions"', html)
+        self.assertIn('id="engineeringProjectSelect" class="project-select"', html)
+        self.assertNotIn('id="engineeringProjectSearch"', html)
+        self.assertNotIn('id="engineeringProjectOptions"', html)
         self.assertIn('id="gateRegisterBtn" href="https://shuiliyingxiang.cn/member#register"', html)
         for tab in ("info", "division", "members", "upload", "print", "account", "device"):
             self.assertIn(f'data-project-settings-tab="{tab}"', html)
@@ -756,6 +791,16 @@ class DesktopSecurityContractTest(unittest.TestCase):
 
         script_path = next((self.desktop.BASE_DIR / "assets").glob("app-A*.js"))
         script = script_path.read_text(encoding="utf-8")
+        self.assertIn('return project.project_name || projectInfoContractName() || "未命名工程"', script)
+        self.assertNotIn('return `${name} / ${code}`', script)
+        self.assertIn('const KEY = "album-guide-workspace-v2-done"', script)
+        self.assertIn('title: "第一步：新建独立工程"', script)
+        self.assertIn('title: "第三步：导入项目划分"', script)
+        self.assertIn('title: "第四步：检查编号规则"', script)
+        self.assertIn("const observer = new MutationObserver", script)
+        self.assertNotIn("waitAuthed(20)", script)
+        self.assertIn('setRouteUnitCode("");\n      openOverview("construction");', script)
+        self.assertNotIn('localStorage.getItem("last-unit-code")', script)
         self.assertIn('form.append("process_name", processName)', script)
         self.assertIn('state.uploadQueuedFiles', script)
         self.assertIn('class="recent-upload-thumb', script)

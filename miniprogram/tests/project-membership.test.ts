@@ -34,8 +34,11 @@ describe('共享工程角色与选择状态', () => {
     expect(capturePermissionMessage(project({ access_role: 'viewer', can_capture: false }))?.title).toBe('当前为只读成员')
   })
 
-  it('主账号付费权限只跟随所选项目，免费项目不继承其他工程权限', () => {
+  it('终身会员切换本人项目不受旧缓存限制，免费项目仍按后台额度校验', () => {
     expect(canCaptureProject(project({ upload_allowed: false, can_capture: true }))).toBe(false)
+    expect(canCaptureProject(project({ upload_allowed: false, membership_active: true, can_capture: true }))).toBe(true)
+    expect(canCaptureProject(project({ upload_allowed: false, upload_quota: { unlimited: true }, can_capture: true }))).toBe(true)
+    expect(capturePermissionMessage(project({ upload_allowed: false, membership_active: true, can_capture: true }))).toBeNull()
     expect(canCaptureProject(project({ upload_allowed: true, access_role: 'capturer', can_capture: true }))).toBe(true)
     expect(canCaptureProject(project({ upload_allowed: true, access_role: 'viewer', can_capture: false }))).toBe(false)
     expect(canManageProjectMembers(project({ upload_allowed: false, access_role: 'owner' }))).toBe(false)
@@ -76,6 +79,13 @@ describe('共享工程角色与选择状态', () => {
     applyBootstrap('A', response, joined.id)
     expect(bootstrapState.currentProject).toMatchObject({ id: '32:YNLQ', access_role: 'capturer' })
     expect(selectionStorage.getProject()).toMatchObject({ id: '32:YNLQ', can_capture: true })
+  })
+
+  it('工程切换页用服务器新列表刷新权限缓存', () => {
+    const source = readFileSync(resolve('src/pages/project/select.vue'), 'utf8')
+    expect(source).toContain('bootstrapState.projects = [...projects.value]')
+    expect(source).toContain('selectionStorage.setProject(refreshed)')
+    expect(source).toContain('selectionStorage.clearProject()')
   })
 })
 

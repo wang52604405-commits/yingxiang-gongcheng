@@ -6866,6 +6866,9 @@ def api_save_project_info():
             data.setdefault("projects", []).append(project)
         data["active_id"] = project_id
         write_engineering_projects(data)
+        manager.invalidate_projects_cache()
+        if str(project.get("cloud_owner_id") or "").strip():
+            desktop_mobile_sync_service().request_project_sync()
         return jsonify({
             "ok": True,
             "project_info": _public_project(project),
@@ -6908,6 +6911,8 @@ def api_create_engineering_project():
         backup_dir = backup_engineering_metadata("before-create-project")
         bind_legacy_project_state_before_split(data)
         now = now_text()
+        cloud_account_id = str(cloud_client.desktop_sync_account_id() or "").strip()
+        cloud_account_username = str(cloud_client.desktop_sync_account_username() or "").strip()
         project = default_engineering_project()
         project.update({
             "id": project_id,
@@ -6926,6 +6931,12 @@ def api_create_engineering_project():
                 professional_templates.catalog().get("version") or "V1.0"
             ).strip(),
             "delete_password_hash": generate_password_hash(delete_password),
+            # 新工程直接归属当前已登录的主账号。否则它只能留在电脑本地，
+            # 小程序看不到，也会误以为终身会员切换工程后失去上传权限。
+            "cloud_owner_id": cloud_account_id,
+            "cloud_owner_username": cloud_account_username,
+            "cloud_owner_claimed_at": now if cloud_account_id else "",
+            "cloud_project_ref": f"{cloud_account_id}:{project_id}" if cloud_account_id else "",
             # 必须是新副本：不能继承当前工程的编号、照片字段或打印设置。
             "engineering_settings": deep_default_settings(),
             # 空树明确表示不从其它工程自动读取目录或照片。
@@ -6937,6 +6948,8 @@ def api_create_engineering_project():
         data["active_id"] = project_id
         write_engineering_projects(data)
         manager.invalidate_projects_cache()
+        if cloud_account_id:
+            desktop_mobile_sync_service().request_project_sync()
         return jsonify({
             "ok": True,
             "project_info": _public_project(project),
@@ -6962,6 +6975,10 @@ def api_set_active_engineering_project():
         return json_error("工程项目不存在", 404)
     data["active_id"] = project_id
     write_engineering_projects(data)
+    manager.invalidate_projects_cache()
+    selected = current_engineering_project(data)
+    if str(selected.get("cloud_owner_id") or "").strip():
+        desktop_mobile_sync_service().request_project_sync()
     return jsonify({
         "ok": True,
         "project_info": _public_project(current_engineering_project(data)),
@@ -6986,6 +7003,13 @@ def api_delete_engineering_project(project_id):
         return json_error("当前工程尚未设置删除密码，请先编辑工程并设置", 403)
     if not check_password_hash(target_hash, str(payload.get("delete_password", ""))):
         return json_error("当前工程删除密码错误", 403)
+    cloud_unbind = {"ok": True, "skipped": True}
+    cloud_owner_id = str(target.get("cloud_owner_id") or "").strip()
+    current_cloud_id = str(cloud_client.desktop_sync_account_id() or "").strip()
+    if cloud_owner_id and cloud_owner_id == current_cloud_id:
+        cloud_unbind = cloud_client.desktop_deactivate_project(
+            target_id, licensing.machine_id()
+        )
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = ALBUMS_DIR / f"_deleted_engineering_project_{target_id}_{stamp}"
     moved = 0
@@ -7014,6 +7038,7 @@ def api_delete_engineering_project(project_id):
         "project_info": _public_project(current_engineering_project(data)),
         "engineering_projects": [_public_project(p) for p in data.get("projects", [])],
         "active_engineering_project_id": data.get("active_id"),
+        "cloud_unbind": cloud_unbind,
     })
 
 

@@ -106,6 +106,18 @@ def _require_mobile_upload_quota(conn, owner_id, photo_uuid, timestamp=None):
     return quota
 
 
+def mobile_project_binding_limit(conn, account_id: int) -> int:
+    """主账号可绑定到小程序的独立工程数：免费 1、月费 2、终身 3。"""
+    from .app import _account_license, _has_active_membership
+
+    license_row = _account_license(conn, int(account_id))
+    if not _has_active_membership(conn, int(account_id)):
+        return 1
+    if str(license_row["license_type"] if license_row else "") == "lifetime":
+        return 3
+    return 2
+
+
 @contextmanager
 def _photo_upload_lock(account_id: int, photo_uuid: str):
     """单 worker 多线程下按照片 UUID 串行，避免幂等对象键相互覆盖。"""
@@ -350,10 +362,14 @@ def _project_payload(row) -> dict:
     project_ref = _project_ref(owner_account_id, local_project_id)
     access_role = str(item.get("access_role") or "owner")
     permissions = _project_permissions(access_role)
-    if item.get("upload_allowed") is False:
+    membership_active = bool(item.get("membership_active"))
+    # 终身/月度会员的权限属于主账号名下工程。切换同一主账号的工程时，
+    # 不能沿用旧缓存里的 upload_allowed=false 把采集入口再次锁住。
+    upload_allowed = True if membership_active else item.get("upload_allowed", True)
+    if upload_allowed is False:
         permissions["can_capture"] = False
         permissions["can_manage_members"] = False
-    if item.get("membership_active") is False:
+    if not membership_active:
         permissions["can_manage_members"] = False
     member_count = int(item.get("member_count") or 1)
     return {
@@ -371,7 +387,8 @@ def _project_payload(row) -> dict:
         "updated_at": item["updated_at"],
         "metadata": _json(item.get("metadata_json"), {}),
         "access_role": access_role,
-        "upload_allowed": item.get("upload_allowed", True),
+        "upload_allowed": upload_allowed,
+        "membership_active": membership_active,
         "upload_quota": item.get("upload_quota"),
         "photographer_name": str(item.get("photographer_name") or ""),
         "photographer_verified": bool(item.get("photographer_verified")),
@@ -5598,6 +5615,43 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.delete("/api/desktop/v1/projects/<project_id>")
+    def desktop_deactivate_project(project_id):
+        current = user()
+        local_project_id = _project_id(project_id)
+        desktop_machine_id = require_desktop_client(
+            current, _machine_id(request.args.get("desktop_machine_id"))
+        )
+        conn = db.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            project = conn.execute(
+                "SELECT * FROM cloud_engineering_projects WHERE account_id = ? AND project_id = ?",
+                (current["id"], local_project_id),
+            ).fetchone()
+            if not project or not bool(project["active"]):
+                conn.commit()
+                return jsonify({"ok": True, "idempotent": True, "project_id": local_project_id})
+            bound_machine = _machine_id(project["desktop_machine_id"])
+            if bound_machine and bound_machine != desktop_machine_id:
+                raise ApiProblem(
+                    "project_archive_machine_conflict",
+                    "该工程由另一台归档电脑管理，不能从本机解除绑定",
+                    409,
+                )
+            conn.execute(
+                "UPDATE cloud_engineering_projects SET active = 0, updated_at = ? "
+                "WHERE account_id = ? AND project_id = ?",
+                (now(), current["id"], local_project_id),
+            )
+            conn.commit()
+            return jsonify({"ok": True, "idempotent": False, "project_id": local_project_id})
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     @blueprint.post("/api/desktop/v1/project-snapshot")
     def desktop_project_snapshot():
         current = user()
@@ -5629,6 +5683,21 @@ def register_mobile_api(
                 "SELECT * FROM cloud_engineering_projects WHERE account_id = ? AND project_id = ?",
                 (current["id"], project_id),
             ).fetchone()
+            if not existing or not bool(existing["active"]):
+                project_count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM cloud_engineering_projects "
+                        "WHERE account_id = ? AND active = 1",
+                        (current["id"],),
+                    ).fetchone()[0]
+                )
+                project_limit = mobile_project_binding_limit(conn, current["id"])
+                if project_count >= project_limit:
+                    raise ApiProblem(
+                        "project_binding_limit",
+                        f"当前会员最多绑定{project_limit}个项目；已有{project_count}个，请先停用旧项目或升级会员",
+                        409,
+                    )
             if existing and revision < int(existing["revision"] or 0):
                 raise ApiProblem("stale_revision", "工程快照版本早于服务器版本", 409)
             existing_archive_machine = _machine_id(

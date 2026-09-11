@@ -29,6 +29,28 @@ class DesktopMemberNavigationContractTest(unittest.TestCase):
         self.assertIn('@app.route("/api/cloud/login", methods=["POST"])', app)
         self.assertIn('/api/license/status', app)
 
+    def test_public_registration_hash_opens_registration_and_login_returns_main(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "server" / "templates" / "member_center.html").read_text(encoding="utf-8")
+        self.assertIn('function showAccountPanel(panel, updateHash = true)', page)
+        self.assertIn('location.hash === "#register" ? "register"', page)
+        self.assertIn('history.replaceState(null, "", location.pathname);', page)
+        self.assertIn('window.scrollTo(0, 0);', page)
+
+    def test_website_tutorial_covers_desktop_mini_program_and_first_use(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "website" / "usage.html").read_text(encoding="utf-8")
+        for expected in (
+            "桌面端 + 微信小程序",
+            "新建独立工程",
+            "导入项目划分",
+            "修改照片编号规则",
+            "小程序完整流程",
+            "同步与隔离",
+            "月费会员最多 2 个，终身会员最多 3 个",
+        ):
+            self.assertIn(expected, page)
+
 
 if __name__ == "__main__":
     unittest.main()

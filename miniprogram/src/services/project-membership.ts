@@ -22,7 +22,9 @@ export function projectRoleLabel(projectOrRole: ProjectSummary | ProjectAccessRo
  * 当时账号下的工程均为本人工程，因此保留离线采集兼容；服务器仍会逐次校验。
  */
 export function canCaptureProject(project: ProjectSummary | null | undefined): boolean {
-  if (!project?.id || project.upload_allowed === false) return false
+  if (!project?.id) return false
+  const paidProject = project.membership_active === true || project.upload_quota?.unlimited === true
+  if (project.upload_allowed === false && !paidProject) return false
   if (typeof project.can_capture === 'boolean') return project.can_capture
   const role = normalizeProjectRole(project.access_role)
   return role ? role !== 'viewer' : true
@@ -43,7 +45,8 @@ export function projectMemberSummary(project: ProjectSummary | null | undefined)
 
 export function capturePermissionMessage(project: ProjectSummary | null | undefined): { title: string; content: string } | null {
   if (!project?.id) return { title: '还没有工程', content: '请先选择或加入工程。' }
-  if (project.upload_allowed === false) return { title: '仅可查看和本地水印', content: '本项目主账号需开通会员，才可上传或修改项目照片。' }
+  const paidProject = project.membership_active === true || project.upload_quota?.unlimited === true
+  if (project.upload_allowed === false && !paidProject) return { title: '仅可查看和本地水印', content: '本项目主账号需开通会员，才可上传或修改项目照片。' }
   if (!canCaptureProject(project)) return { title: '当前为只读成员', content: '该角色不能采集影像。' }
   return null
 }

@@ -160,6 +160,7 @@
           <li>打印 / 导出无水印</li>
           <li>局域网内完整使用</li>
           <li>远程云预览</li>
+          <li>最多绑定 2 个小程序项目</li>
           <li class="no">永久有效</li>
         </ul>
         <button class="btn primary" id="monthlyBtn">开通月度会员</button>
@@ -174,6 +175,7 @@
           <li>打印 / 导出无水印</li>
           <li>局域网内完整使用</li>
           <li>远程云预览</li>
+          <li>最多绑定 3 个小程序项目</li>
           <li>永久有效</li>
         </ul>
         <button class="btn primary" id="lifetimeBtn">开通终身会员</button>
@@ -350,6 +352,14 @@
       box.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
+    function showAccountPanel(panel, updateHash = true) {
+      const mode = ["register", "forgot"].includes(panel) ? panel : "login";
+      $("#accountLoginForm").style.display = mode === "login" ? "block" : "none";
+      $("#accountRegForm").style.display = mode === "register" ? "block" : "none";
+      $("#accountForgotForm").style.display = mode === "forgot" ? "block" : "none";
+      if (updateHash) history.replaceState(null, "", mode === "login" ? location.pathname : `#${mode}`);
+    }
+
     async function refreshCloud() {
       const data = await api("/api/me");
       if (data.ok) {
@@ -388,16 +398,16 @@
       localStorage.setItem("album_cloud_user", username);
       $("#cloudUser").value = ""; $("#cloudPass").value = "";
       notice("登录成功");
-      refreshCloud();
+      await refreshCloud();
+      history.replaceState(null, "", location.pathname);
+      window.scrollTo(0, 0);
     });
 
     $("#showRegBtn").addEventListener("click", () => {
-      $("#accountLoginForm").style.display = "none";
-      $("#accountRegForm").style.display = "block";
+      showAccountPanel("register");
     });
     $("#backLoginBtn").addEventListener("click", () => {
-      $("#accountRegForm").style.display = "none";
-      $("#accountLoginForm").style.display = "block";
+      showAccountPanel("login");
     });
 
     $("#regBtn").addEventListener("click", async () => {
@@ -413,20 +423,17 @@
       const d = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
       notice(d.ok ? "注册成功。首次进入桌面软件时请立即设置并保存工程删除密码。" : (d.error || "注册失败"), !d.ok);
       if (d.ok) {
-        $("#accountRegForm").style.display = "none";
-        $("#accountLoginForm").style.display = "block";
+        showAccountPanel("login");
         $("#cloudUser").value = payload.username;
       }
     });
 
     // ---- 忘记密码 ----
     $("#showForgotBtn").addEventListener("click", () => {
-      $("#accountLoginForm").style.display = "none";
-      $("#accountForgotForm").style.display = "block";
+      showAccountPanel("forgot");
     });
     $("#backLoginBtn2").addEventListener("click", () => {
-      $("#accountForgotForm").style.display = "none";
-      $("#accountLoginForm").style.display = "block";
+      showAccountPanel("login");
     });
 
     let forgotCooldown = 0;
@@ -454,8 +461,7 @@
         account, code, new_password: newPass }) });
       if (!d.ok) { notice(d.error || "重置失败", true); return; }
       notice("密码已重置，请用新密码登录");
-      $("#accountForgotForm").style.display = "none";
-      $("#accountLoginForm").style.display = "block";
+      showAccountPanel("login");
       $("#forgotUser").value = ""; $("#forgotCode").value = ""; $("#forgotPass").value = "";
       $("#cloudUser").value = account;
     });
@@ -479,6 +485,8 @@
       window.location.href = "/cloud-preview";
     });
 
+    showAccountPanel(location.hash === "#register" ? "register" : location.hash === "#forgot" ? "forgot" : "login", false);
+    window.addEventListener("hashchange", () => showAccountPanel(location.hash.slice(1), false));
     loadProduct();
     refreshCloud();
   </script>

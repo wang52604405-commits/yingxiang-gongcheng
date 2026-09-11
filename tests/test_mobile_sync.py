@@ -520,9 +520,9 @@ class DesktopMobileSyncTest(unittest.TestCase):
         )
         self.assertTrue(queued["queued"])
         document = json.loads((self.root / "state.json").read_text(encoding="utf-8"))
-        self.assertIn("fake-account|MACHINE-A", document["scopes"])
-        self.assertNotIn("__logged_out__|MACHINE-A", document["scopes"])
-        self.assertIn(photo_uuid, document["scopes"]["fake-account|MACHINE-A"]["delete_pending"])
+        self.assertIn("fake-account|MACHINE-A|default", document["scopes"])
+        self.assertNotIn("__logged_out__|MACHINE-A|default", document["scopes"])
+        self.assertIn(photo_uuid, document["scopes"]["fake-account|MACHINE-A|default"]["delete_pending"])
 
         cloud.identity = "fake-account"
         synced = service.run_once()
@@ -900,8 +900,8 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertEqual(restored_b["ack_pending"], {})
 
         document = json.loads((self.root / "state.json").read_text(encoding="utf-8"))
-        self.assertIn("account-A|MACHINE-A", document["scopes"])
-        self.assertIn("account-B|MACHINE-A", document["scopes"])
+        self.assertIn("account-A|MACHINE-A|default", document["scopes"])
+        self.assertIn("account-B|MACHINE-A|default", document["scopes"])
 
     def test_legacy_single_scope_cleanup_state_migrates_without_loss(self):
         legacy_uuid = str(uuid.uuid4())
@@ -931,9 +931,34 @@ class DesktopMobileSyncTest(unittest.TestCase):
         self.assertEqual(migrated["backfilled"], {"OLD-PHOTO": "OLD-HASH"})
         service._write_state(migrated)
         document = json.loads((self.root / "state.json").read_text(encoding="utf-8"))
-        scoped = document["scopes"]["fake-account|MACHINE-A"]
+        scoped = document["scopes"]["fake-account|MACHINE-A|default"]
         self.assertIn(legacy_uuid, scoped["ack_pending"])
         self.assertEqual(scoped["inbox_cursor"], "LEGACY-CURSOR")
+
+    def test_same_account_machine_keeps_each_project_sync_state_separate(self):
+        service = self.service(FakeCloud(identity="fake-account"))
+        first = service._read_state()
+        first["inbox_cursor"] = "DEFAULT-CURSOR"
+        first["backfilled"] = {"DEFAULT-PHOTO": "DEFAULT-HASH"}
+        service._write_state(first)
+
+        self.project["id"] = "house-project"
+        service._ensure_account_identity()
+        house = service._read_state()
+        self.assertEqual(house["inbox_cursor"], "")
+        self.assertEqual(house["backfilled"], {})
+        house["inbox_cursor"] = "HOUSE-CURSOR"
+        house["backfilled"] = {"HOUSE-PHOTO": "HOUSE-HASH"}
+        service._write_state(house)
+
+        self.project["id"] = "default"
+        service._ensure_account_identity()
+        restored = service._read_state()
+        self.assertEqual(restored["inbox_cursor"], "DEFAULT-CURSOR")
+        self.assertEqual(restored["backfilled"], {"DEFAULT-PHOTO": "DEFAULT-HASH"})
+        document = json.loads((self.root / "state.json").read_text(encoding="utf-8"))
+        self.assertIn("fake-account|MACHINE-A|default", document["scopes"])
+        self.assertIn("fake-account|MACHINE-A|house-project", document["scopes"])
 
     def test_mobile_png_original_is_imported_with_exact_sha_and_extension(self):
         self.add_unit()
@@ -1217,8 +1242,11 @@ class DesktopMobileSyncTest(unittest.TestCase):
             def wait(self, delay):
                 self.delays.append(delay)
                 return len(self.delays) == 7
+            def clear(self):
+                pass
         event = FakeEvent()
-        service._stop_event = event
+        service._sync_request_event = event
+        service._stop_event.is_set = lambda: len(event.delays) == 7
         with patch.object(service, "run_once", side_effect=[progress, idle, error, paused, permanent_only, partial, legacy_verified]) as run:
             service._run_forever()
         self.assertEqual(event.delays, [2.0, 30.0, 30.0, 30.0, 30.0, 30.0, 2.0])

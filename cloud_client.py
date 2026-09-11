@@ -990,6 +990,15 @@ def desktop_project_snapshot(snapshot: dict) -> dict:
     )
 
 
+def desktop_deactivate_project(project_id: str, desktop_machine_id: str) -> dict:
+    """删除本地工程时解除其小程序绑定，释放会员项目名额。"""
+    return _cloud_api_json(
+        f"/api/desktop/v1/projects/{urllib.parse.quote(str(project_id or '').strip(), safe='')}",
+        method="DELETE",
+        query={"desktop_machine_id": str(desktop_machine_id or "").strip()},
+    )
+
+
 def desktop_project_members(project_id: str, desktop_machine_id: str) -> dict:
     """读取当前归档工程的成员；服务器仍以 owner + 归档机做最终鉴权。"""
     return _cloud_api_json(

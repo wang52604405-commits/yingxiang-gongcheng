@@ -696,10 +696,18 @@ class DesktopMobileSync:
         self._cycle_lock = threading.Lock()
         self._start_lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._sync_request_event = threading.Event()
         self._thread = None
         self._startup_snapshot_pending = True
         self._active_state_identity = ""
         self.last_result = {"ok": True, "state": "idle"}
+
+    def request_project_sync(self) -> None:
+        """工程新建或切换后立即唤醒同步线程，刷新手机端工程列表。"""
+        self._active_state_identity = ""
+        self._startup_snapshot_pending = True
+        self._sync_request_event.set()
+        self.start()
 
     def _cloud_account_id(self) -> str:
         reader = getattr(self.cloud, "desktop_sync_account_id", None)
@@ -762,8 +770,11 @@ class DesktopMobileSync:
         except Exception:
             account_identity = ""
         machine_identity = self._desktop_machine_id() or "unknown-machine"
-        # 未登录状态也使用独立分区，绝不能看到上一个账号的 pending。
-        return f"{account_identity or '__logged_out__'}|{machine_identity}"
+        project_identity = _engineering_project_identity(
+            self.engineering_project_reader() or {}
+        )["local_project_id"] or "default"
+        # 同一账号、同一电脑的不同工程也必须使用独立游标和待办队列。
+        return f"{account_identity or '__logged_out__'}|{machine_identity}|{project_identity}"
 
     @staticmethod
     def _normalized_scope_state(data: dict, identity: str) -> dict:
@@ -806,6 +817,12 @@ class DesktopMobileSync:
                 for key, value in raw["scopes"].items()
                 if str(key) and isinstance(value, dict)
             }
+            # 旧分区只有“账号|电脑”。首次升级时把它归入当前工程，
+            # 其它工程从空状态开始，避免把回填、删除或收件箱串过去。
+            if current_identity not in scopes and current_identity.count("|") >= 2:
+                legacy_identity = current_identity.rsplit("|", 1)[0]
+                if legacy_identity in scopes:
+                    scopes[current_identity] = scopes.pop(legacy_identity)
             return {
                 "version": 2,
                 "active_identity": str(raw.get("active_identity") or ""),
@@ -815,6 +832,11 @@ class DesktopMobileSync:
         # 旧版单层状态原位迁移到它原本的账号+机器分区。若旧文件还
         # 没写 account_identity，才归到当前分区。
         legacy_identity = str(raw.get("account_identity") or current_identity).strip()
+        if (
+            legacy_identity.count("|") == 1
+            and current_identity.startswith(legacy_identity + "|")
+        ):
+            legacy_identity = current_identity
         scopes = {legacy_identity: dict(raw)} if raw and legacy_identity else {}
         return {"version": 2, "active_identity": legacy_identity, "scopes": scopes}
 
@@ -846,13 +868,17 @@ class DesktopMobileSync:
             _atomic_write_json(self.state_path, document)
             return result
 
-    def _state_identity_for_account(self, account_id: str) -> str:
+    def _state_identity_for_account(self, account_id: str, project_id: str = "") -> str:
         """得到指定云账号在本机的确定分区；登出时也不落入 logged-out。"""
         account_id = str(account_id or "").strip()
         if not account_id:
             return ""
         current_account_id = self._cloud_account_id()
-        if current_account_id == account_id:
+        current_project_id = _engineering_project_identity(
+            self.engineering_project_reader() or {}
+        )["local_project_id"] or "default"
+        target_project_id = str(project_id or current_project_id).strip() or "default"
+        if current_account_id == account_id and target_project_id == current_project_id:
             current = self._state_identity()
             if not current.startswith("__logged_out__|"):
                 return current
@@ -863,7 +889,7 @@ class DesktopMobileSync:
             account_identity = ""
         if not account_identity:
             return ""
-        return f"{account_identity}|{self._desktop_machine_id() or 'unknown-machine'}"
+        return f"{account_identity}|{self._desktop_machine_id() or 'unknown-machine'}|{target_project_id}"
 
     def _write_state(self, state: dict) -> None:
         supplied = dict(state or {})
@@ -903,7 +929,9 @@ class DesktopMobileSync:
         state = self._read_state()
         ownership = self._project_ownership_status()
         if not ownership.get("account_id") and ownership.get("owner_id"):
-            owner_identity = self._state_identity_for_account(ownership["owner_id"])
+            owner_identity = self._state_identity_for_account(
+                ownership["owner_id"], ownership.get("local_project_id")
+            )
             if owner_identity:
                 state = self._read_state_for_identity(owner_identity)
         return {
@@ -1020,7 +1048,7 @@ class DesktopMobileSync:
                 "code": "project_owner_mismatch",
                 "message": "当前登录账号不是工程所属账号，未发送云端删除",
             }
-        identity = self._state_identity_for_account(owner_id)
+        identity = self._state_identity_for_account(owner_id, project_id)
         if not identity:
             return {
                 "ok": True,
@@ -2038,7 +2066,11 @@ class DesktopMobileSync:
 
     def _run_forever(self) -> None:
         result = self.run_once()  # 启动后立即同步，不等第一个 30 秒。
-        while not self._stop_event.wait(self._next_sync_delay(result)):
+        while not self._stop_event.is_set():
+            self._sync_request_event.wait(self._next_sync_delay(result))
+            self._sync_request_event.clear()
+            if self._stop_event.is_set():
+                break
             result = self.run_once()
 
     def start(self):
@@ -2056,6 +2088,7 @@ class DesktopMobileSync:
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop_event.set()
+        self._sync_request_event.set()
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(max(0.0, float(timeout)))

@@ -1127,10 +1127,15 @@ const $ = (selector) => document.querySelector(selector);
 
     function engineeringProjectLabel(project) {
       if (!project) return "";
-      const name = project.project_name || projectInfoContractName() || project.id || "未命名工程";
-      const code = project.project_code || "";
-      if (!code || code === "default" || code === name) return name;
-      return `${name} / ${code}`;
+      // 顶部只显示用户填写的工程名称。project-xxxx 是内部隔离 ID，
+      // 对用户没有意义，也不应该因为工程编号留空就出现在界面上。
+      return project.project_name || projectInfoContractName() || "未命名工程";
+    }
+
+    function engineeringProjectDisplayCode(project) {
+      const code = String(project?.project_code || "").trim();
+      const id = String(project?.id || "").trim();
+      return code && !(code === id && /^project-[a-f0-9]{12}$/i.test(code)) ? code : "";
     }
 
     function currentEngineeringProject() {
@@ -1143,50 +1148,9 @@ const $ = (selector) => document.querySelector(selector);
       select.innerHTML = state.engineeringProjects.map((project) => `
         <option value="${escapeHtml(project.id || "")}" ${project.id === state.activeEngineeringProjectId ? "selected" : ""}>${escapeHtml(engineeringProjectLabel(project))}</option>
       `).join("");
-      const search = $("#engineeringProjectSearch");
-      const options = $("#engineeringProjectOptions");
-      if (options) {
-        options.innerHTML = state.engineeringProjects.map((project) =>
-          `<option value="${escapeHtml(engineeringProjectLabel(project))}"></option>`
-        ).join("");
-      }
-      if (search) {
-        const active = currentEngineeringProject();
-        const label = engineeringProjectLabel(active);
-        search.value = label;
-        search.title = label ? `当前工程：${label}。可直接输入名称或编号搜索。` : "搜索或切换工程";
-      }
-    }
-
-    function resolveEngineeringProjectSearch(value) {
-      const query = String(value || "").trim().toLowerCase();
-      if (!query) return null;
-      const exact = state.engineeringProjects.find((project) => engineeringProjectLabel(project).toLowerCase() === query);
-      if (exact) return exact;
-      const matches = state.engineeringProjects.filter((project) => {
-        const searchable = [engineeringProjectLabel(project), project.project_name, project.project_code, project.id]
-          .filter(Boolean).join(" ").toLowerCase();
-        return searchable.includes(query);
-      });
-      return matches.length === 1 ? matches[0] : null;
-    }
-
-    function commitEngineeringProjectSearch() {
-      const search = $("#engineeringProjectSearch");
-      const project = resolveEngineeringProjectSearch(search?.value);
-      if (!project) {
-        renderEngineeringProjectSelect();
-        showNotice("没有找到唯一工程，请输入更完整的工程名称或编号。", true);
-        return;
-      }
-      if (project.id === state.activeEngineeringProjectId) {
-        renderEngineeringProjectSelect();
-        return;
-      }
-      setActiveEngineeringProject(project.id).catch((error) => {
-        renderEngineeringProjectSelect();
-        showNotice(error.message, true);
-      });
+      const active = currentEngineeringProject();
+      const label = engineeringProjectLabel(active);
+      select.title = label ? `当前工程：${label}。展开可查看全部工程。` : "展开查看并切换工程";
     }
 
     async function setActiveEngineeringProject(projectId) {
@@ -1198,6 +1162,11 @@ const $ = (selector) => document.querySelector(selector);
       state.projectInfo = data.project_info || {};
       state.engineeringProjects = data.engineering_projects || [];
       state.activeEngineeringProjectId = data.active_engineering_project_id || projectId;
+      state.selectedProject = null;
+      state.selectedCode = "";
+      state.selectedOtherCode = "";
+      setRouteUnitCode("");
+      openOverview("construction");
       renderEngineeringProjectSelect();
       renderProjectInfo();
       await refreshAll();
@@ -1647,7 +1616,7 @@ const $ = (selector) => document.querySelector(selector);
       const construction = rules.construction || {};
       const supervision = rules.supervision || {};
       $("#projectInfoNameInput").value = projectInfoValue("project_name");
-      $("#projectInfoCodeInput").value = projectInfoValue("project_code");
+      $("#projectInfoCodeInput").value = engineeringProjectDisplayCode(currentEngineeringProject());
       $("#projectInfoIndustryInput").value = projectInfoValue("industry") || "水利工程";
       $("#projectInfoRegionInput").value = projectInfoValue("region");
       refreshProfessionalProjectTypes(projectInfoValue("project_type")).catch(() => {});
@@ -1883,7 +1852,8 @@ const $ = (selector) => document.querySelector(selector);
       state.selectedCode = "";
       closeProjectInfoModal();
       await refreshAll();
-      showNotice(`工程已删除，${data.deleted || 0} 个单元已移入备份。`);
+      const cloudMessage = data.cloud_unbind?.ok === false ? "；小程序项目名额将在联网解除绑定后释放" : "；小程序项目名额已释放";
+      showNotice(`工程已删除，${data.deleted || 0} 个单元已移入备份${cloudMessage}。`);
     }
 
     async function importEngineeringPackage(file) {
@@ -3017,17 +2987,16 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function routeUnitCode() {
-      return new URLSearchParams(window.location.search).get("unit") || localStorage.getItem("last-unit-code") || "";
+      // 单元属于具体工程，不能跨工程或跨启动复用上次单元编号。
+      return new URLSearchParams(window.location.search).get("unit") || "";
     }
 
     function setRouteUnitCode(code) {
       const url = new URL(window.location.href);
       if (code) {
         url.searchParams.set("unit", code);
-        localStorage.setItem("last-unit-code", code);
       } else {
         url.searchParams.delete("unit");
-        localStorage.removeItem("last-unit-code");
       }
       window.history.replaceState({}, "", url);
     }
@@ -4796,12 +4765,6 @@ const $ = (selector) => document.querySelector(selector);
     $("#engineeringProjectSelect").addEventListener("change", (event) => {
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
     });
-    $("#engineeringProjectSearch")?.addEventListener("change", commitEngineeringProjectSearch);
-    $("#engineeringProjectSearch")?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      commitEngineeringProjectSearch();
-    });
     $("#newEngineeringProjectBtn")?.addEventListener("click", openNewEngineeringProjectModal);
     $("#closeNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
     $("#cancelNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
@@ -5876,18 +5839,29 @@ const $ = (selector) => document.querySelector(selector);
 
     // ============ 首开引导：工作台整体界面操作流程 ============
     (function initWorkspaceGuide() {
-      const KEY = "album-guide-workspace-done";
+      const KEY = "album-guide-workspace-v2-done";
       if (localStorage.getItem(KEY)) return;
 
       // 工作台引导需等已登录(body.is-authed)且界面渲染完成后再触发。
       // loadBootstrap 是异步的，这里监听 body class 变化，一旦出现 is-authed 即启动。
-      function waitAuthed(tries) {
+      let workspaceGuideStarted = false;
+      function waitAuthed() {
         if (document.body.classList.contains("is-authed")) { start(); return; }
-        if (tries <= 0) return;
-        setTimeout(() => waitAuthed(tries - 1), 300);
+        if (!window.MutationObserver) {
+          setTimeout(waitAuthed, 500);
+          return;
+        }
+        const observer = new MutationObserver(() => {
+          if (!document.body.classList.contains("is-authed")) return;
+          observer.disconnect();
+          start();
+        });
+        observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
       }
 
       function start() {
+        if (workspaceGuideStarted) return;
+        workspaceGuideStarted = true;
         // 再等一帧让工作台各区域完成渲染、布局稳定
         setTimeout(() => {
           overlay.classList.add("active");
@@ -5899,33 +5873,39 @@ const $ = (selector) => document.querySelector(selector);
 
       const steps = [
         {
-          target: "#topConstructionBtn",
-          title: "施工影像 / 其它影像",
-          desc: "顶部这里可以切换查看【施工影像】或【其它影像】。",
-          placement: "bottom"
-        },
-        {
-          target: "#globalUploadBtn",
-          title: "上传照片",
-          desc: "最常用的上传始终在顶部。选择单元、施工或监理及工序，确认后再开始上传。",
+          target: "#newEngineeringProjectBtn",
+          title: "第一步：新建独立工程",
+          desc: "点右侧加号，填写工程名称、专业和独立删除密码。每个工程的划分、照片、成员和设置互不混用。",
           placement: "bottom"
         },
         {
           target: "#engineeringProjectSelect",
-          title: "切换工程",
-          desc: "长工程名会自动省略；展开这里可查看全名、专业并切换工程。",
+          title: "第二步：确认当前工程",
+          desc: "这里会列出全部工程。导入和上传前先确认选中的是哪个工程，展开即可切换。",
+          placement: "bottom"
+        },
+        {
+          target: "#settingsMenuBtn",
+          title: "第三步：导入项目划分",
+          desc: "进入【设置 → 项目划分】，先下载标准 Excel 模板，再选择填写好的文件导入。只会写入当前工程。",
+          placement: "bottom"
+        },
+        {
+          target: "#settingsMenuBtn",
+          title: "第四步：检查编号规则",
+          desc: "进入【设置 → 上传与匹配 → 编号规则】，分别确认施工单元、施工工序、监理单元和监理工序格式，保存后仅对当前工程生效。",
           placement: "bottom"
         },
         {
           target: "#tree",
-          title: "工程目录",
-          desc: "左边是工程目录树，点击某个工程就能查看它的照片和详情。",
+          title: "第五步：核对工程目录",
+          desc: "导入完成后，左侧会按单位工程、分部工程、单元工程显示。先点一个单元检查名称和编号。",
           placement: "right"
         },
         {
-          target: "#settingsMenuBtn",
-          title: "统一设置中心",
-          desc: "项目划分、成员、账号会员、打印存储和更新都集中在这里。",
+          target: "#globalUploadBtn",
+          title: "第六步：开始上传",
+          desc: "选择单元、施工或监理、单元照片或具体工序，确认目标后再加入照片；小程序也会同步使用同一工程划分。",
           placement: "bottom"
         }
       ];
@@ -6044,6 +6024,6 @@ const $ = (selector) => document.querySelector(selector);
       $skip.addEventListener("click", finish);
       window.addEventListener("resize", () => show(idx));
 
-      // 等已登录进入工作台后再触发（最长等 20 次 * 300ms = 6s）
-      waitAuthed(20);
+      // 用户停留在登录页多久都可以；真正登录并渲染工作台后再提示。
+      waitAuthed();
     })();

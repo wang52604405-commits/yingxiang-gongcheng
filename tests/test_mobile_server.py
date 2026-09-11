@@ -186,6 +186,8 @@ class MobileServerContractTest(unittest.TestCase):
         legacy_photo_uuids=None,
         processes=None,
         deletion_password_hash=None,
+        enforce_project_limit=False,
+        expected_status=200,
     ):
         # 大多数测试传账号登录令牌以表示租户；新桌面契约
         # 实际上传必须换成与请求机器一致的 desktop_sync_token。
@@ -258,12 +260,22 @@ class MobileServerContractTest(unittest.TestCase):
         if legacy_photo_uuids is not None:
             payload["photo_inventory_complete"] = True
             payload["photo_uuids"] = list(legacy_photo_uuids)
-        response = cls.client.post(
-            "/api/desktop/v1/project-snapshot",
-            json=payload,
-            headers=cls._headers(token),
-        )
-        if response.status_code != 200:
+        if enforce_project_limit:
+            response = cls.client.post(
+                "/api/desktop/v1/project-snapshot",
+                json=payload,
+                headers=cls._headers(token),
+            )
+        else:
+            # 既有用例会在同一测试账号下构造大量临时工程，只测试各自业务；
+            # 项目数量限制由专门用例覆盖，避免无关用例互相占用名额。
+            with patch("server.mobile_api.mobile_project_binding_limit", return_value=10_000):
+                response = cls.client.post(
+                    "/api/desktop/v1/project-snapshot",
+                    json=payload,
+                    headers=cls._headers(token),
+                )
+        if response.status_code != expected_status:
             raise AssertionError(response.get_json())
         return response
 
@@ -1192,9 +1204,10 @@ class MobileServerContractTest(unittest.TestCase):
             }
             for index in range(1, 889)
         ]
-        response = self.client.post(
-            "/api/desktop/v1/project-snapshot",
-            json={
+        with patch("server.mobile_api.mobile_project_binding_limit", return_value=10_000):
+            response = self.client.post(
+                "/api/desktop/v1/project-snapshot",
+                json={
                 "snapshot_id": str(uuid.uuid4()),
                 "revision": 1,
                 "desktop_machine_id": "MACHINE-A",
@@ -1225,9 +1238,9 @@ class MobileServerContractTest(unittest.TestCase):
                 "other_tree": [
                     {"node_code": "YNLQ-FULL-OTHER", "name": "其它影像"}
                 ],
-            },
-            headers=self._headers(self.desktop_token_a),
-        )
+                },
+                headers=self._headers(self.desktop_token_a),
+            )
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()["unit_count"], 888)
         self.assertEqual(response.get_json()["process_count"], 1)
@@ -4852,15 +4865,14 @@ class MobileServerContractTest(unittest.TestCase):
         from server.mobile_api import mobile_upload_quota
         token, desktop, machine, project, owner = self._free_upload_owner()
         second = project + "-second"
-        self._snapshot(desktop, "同主账号另一工程", project_id=second, desktop_machine_id=machine)
         conn = self.db.connect()
         member = conn.execute("SELECT id FROM accounts WHERE username='tenant_b'").fetchone()[0]
-        conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,status,joined_at,updated_at) VALUES(?,?,?,'capturer','active','2026-09-10','2026-09-10')", (owner, second, member))
+        conn.execute("INSERT INTO project_members(project_owner_account_id,project_id,member_account_id,role,status,joined_at,updated_at) VALUES(?,?,?,'capturer','active','2026-09-10','2026-09-10')", (owner, project, member))
         conn.commit(); conn.close()
         with patch("server.app._product_config", return_value={"mini_program": {"free_upload_limit": 2}}):
             backfilled = self._backfill(desktop, str(uuid.uuid4()), project, desktop_machine_id=machine)
             self.assertEqual(backfilled.status_code, 201, backfilled.get_json())
-            batches = [self._create_batch(token, project_id=f"{owner}:{project}"), self._create_batch(self.token_b, project_id=f"{owner}:{second}")]
+            batches = [self._create_batch(token, project_id=f"{owner}:{project}"), self._create_batch(self.token_b, project_id=f"{owner}:{project}")]
             content = self._jpeg((37, 80, 128)); photo_uuid = str(uuid.uuid4())
             first = self._upload(token, batches[0], photo_uuid, content)
             self.assertEqual(first.status_code, 201, first.get_json())
@@ -4889,6 +4901,61 @@ class MobileServerContractTest(unittest.TestCase):
             conn.execute("INSERT INTO licenses(account_id,license_type,valid_days,active) VALUES(?,'lifetime',0,1)", (owner,)); conn.commit(); conn.close()
             unlimited = self._upload(token, batches[0], str(uuid.uuid4()), content)
             self.assertEqual(unlimited.status_code, 201, unlimited.get_json())
+            self._snapshot(desktop, "同主账号另一工程", project_id=second, desktop_machine_id=machine)
+            switched_batch = self._create_batch(token, project_id=f"{owner}:{second}")
+            switched_upload = self._upload(token, switched_batch, str(uuid.uuid4()), content)
+            self.assertEqual(switched_upload.status_code, 201, switched_upload.get_json())
+
+    def test_project_binding_limits_are_one_free_two_monthly_three_lifetime(self):
+        cases = (("free", "", 1), ("monthly", "term", 2), ("lifetime", "lifetime", 3))
+        for label, license_type, limit in cases:
+            username = f"project-limit-{label}-{uuid.uuid4().hex[:8]}"
+            password = "ProjectLimit2026"
+            self._register(username, password)
+            account_token = self._login(username, password)
+            machine = f"LIMIT-{label.upper()}-{uuid.uuid4().hex[:6]}"
+            desktop_token = self._activate(account_token, machine)
+            if license_type:
+                account_id = self._account_id(username)
+                conn = self.db.connect()
+                conn.execute(
+                    "INSERT INTO licenses(account_id,license_type,valid_days,active) VALUES(?,?,?,1)",
+                    (account_id, license_type, 30 if license_type == "term" else 0),
+                )
+                conn.commit()
+                conn.close()
+            for index in range(limit):
+                allowed = self._snapshot(
+                    desktop_token,
+                    f"{label}工程{index + 1}",
+                    project_id=f"{label}-project-{index + 1}",
+                    desktop_machine_id=machine,
+                    enforce_project_limit=True,
+                )
+                self.assertEqual(allowed.status_code, 200, allowed.get_json())
+            blocked = self._snapshot(
+                desktop_token,
+                f"{label}超额工程",
+                project_id=f"{label}-project-over-limit",
+                desktop_machine_id=machine,
+                enforce_project_limit=True,
+                expected_status=409,
+            )
+            self.assertEqual(blocked.get_json()["code"], "project_binding_limit")
+            self.assertIn(f"最多绑定{limit}个项目", blocked.get_json()["error"])
+            released = self.client.delete(
+                f"/api/desktop/v1/projects/{label}-project-1?desktop_machine_id={machine}",
+                headers=self._headers(desktop_token),
+            )
+            self.assertEqual(released.status_code, 200, released.get_json())
+            replacement = self._snapshot(
+                desktop_token,
+                f"{label}替换工程",
+                project_id=f"{label}-project-replacement",
+                desktop_machine_id=machine,
+                enforce_project_limit=True,
+            )
+            self.assertEqual(replacement.status_code, 200, replacement.get_json())
 
     def test_free_mobile_quota_final_transaction_stops_parallel_uploads(self):
         from server import mobile_api

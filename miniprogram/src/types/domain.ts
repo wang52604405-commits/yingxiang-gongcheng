@@ -34,6 +34,8 @@ export interface ProjectSummary {
   access_role?: ProjectAccessRole
   member_count?: number
   upload_allowed?: boolean
+  membership_active?: boolean
+  upload_quota?: { limit?: number; used?: number; reserved?: number; remaining?: number | null; unlimited?: boolean }
   can_capture?: boolean
   can_manage_members?: boolean
   revision?: number

@@ -18,6 +18,20 @@ async function load() {
   try {
     const response = await mobileApi.projects()
     projects.value = response.projects || []
+    bootstrapState.projects = [...projects.value]
+    const refreshed = projects.value.find(project => project.id === current.value.id)
+    if (refreshed) {
+      current.value = refreshed
+      bootstrapState.currentProject = refreshed
+      selectionStorage.setProject(refreshed)
+    } else if (projects.value.length) {
+      current.value = projects.value[0]
+      bootstrapState.currentProject = projects.value[0]
+      selectionStorage.setProject(projects.value[0])
+    } else {
+      bootstrapState.currentProject = null
+      selectionStorage.clearProject()
+    }
   } catch {
     uni.showToast({ title: '工程列表读取失败，请检查网络', icon: 'none' })
   } finally {
