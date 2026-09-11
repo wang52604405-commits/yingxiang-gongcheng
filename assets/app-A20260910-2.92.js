@@ -1272,7 +1272,8 @@ const $ = (selector) => document.querySelector(selector);
       ["{unit_order}", "【单元顺序号】"],
       ["{seq}", "【流水号】"],
       ["{category}", "【类别】"],
-      ["{code}", "【单元编号】"]
+      ["{code}", "【单元编号】"],
+      ["{process_code}", "【工序编码】"]
     ];
 
     function numberTemplateToReadable(template) {
@@ -1281,6 +1282,24 @@ const $ = (selector) => document.querySelector(selector);
         value = value.split(token).join(label);
       });
       return value;
+    }
+
+    // 显示用：把等价的 {unit_code} 统一成 {code} 再转中文占位符，
+    // 避免界面上出现 "…-SY【流水号】" 这种半截英文的写法。
+    function numberTemplateToReadableDisplay(template) {
+      return numberTemplateToReadable(String(template || "").split("{unit_code}").join("{code}"));
+    }
+
+    // 工序格式留空时，自动把单元格式的 {seq} 位置插入工序编码，
+    // 保证工序照片编号里一定带工序，不会和单元照片撞号。
+    function processTemplateFromUnit(unitTemplate, category) {
+      const template = String(unitTemplate || "").trim();
+      const fallback = category === "supervision"
+        ? "{unit_code}-{process_code}-JY{seq}"
+        : "{unit_code}-{process_code}-SY{seq}";
+      if (!template) return fallback;
+      if (!template.includes("{seq}")) return `${template}{process_code}{seq}`;
+      return template.replace("{seq}", "{process_code}{seq}");
     }
 
     function readableToNumberTemplate(template) {
@@ -1646,12 +1665,25 @@ const $ = (selector) => document.querySelector(selector);
       $("#projectInfoDescriptionInput").value = projectInfoValue("description");
       $("#settingsNumberingModeInput").value = settings.numbering_mode || "custom";
       $("#settingsUnitOrderDigitsInput").value = settings.unit_order_digits || 3;
-      $("#settingsConstructionUnitTemplate").value = numberTemplateToReadable(construction.unit_template || construction.template || "{unit_code}-SY{seq}");
+      const constructionUnitReadable = construction.unit_template || construction.template || "{unit_code}-SY{seq}";
+      const supervisionUnitReadable = supervision.unit_template || supervision.template || "{unit_code}-JY{seq}";
+      $("#settingsConstructionUnitTemplate").value = numberTemplateToReadableDisplay(constructionUnitReadable);
       $("#settingsConstructionStart").value = construction.start || 1;
       $("#settingsConstructionDigits").value = construction.digits || 3;
-      $("#settingsSupervisionUnitTemplate").value = numberTemplateToReadable(supervision.unit_template || supervision.template || "{unit_code}-JY{seq}");
+      $("#settingsSupervisionUnitTemplate").value = numberTemplateToReadableDisplay(supervisionUnitReadable);
       $("#settingsSupervisionStart").value = supervision.start || 1;
       $("#settingsSupervisionDigits").value = supervision.digits || 3;
+      // 工序格式：优先用工程已保存的值；没存过就按单元格式自动推导，界面上看得见、可改。
+      if ($("#settingsConstructionProcessTemplate")) {
+        $("#settingsConstructionProcessTemplate").value = numberTemplateToReadableDisplay(
+          construction.process_template || processTemplateFromUnit(constructionUnitReadable, "construction")
+        );
+      }
+      if ($("#settingsSupervisionProcessTemplate")) {
+        $("#settingsSupervisionProcessTemplate").value = numberTemplateToReadableDisplay(
+          supervision.process_template || processTemplateFromUnit(supervisionUnitReadable, "supervision")
+        );
+      }
       $("#settingsPrintLayoutInput").value = settings.print_layout || "landscape";
       $("#settingsPrintPageSizeInput").value = String(settings.print_page_size || 4);
       $("#settingsPrintSingleAlignmentInput").value = settings.print_single_alignment || "center";
@@ -1767,6 +1799,14 @@ const $ = (selector) => document.querySelector(selector);
       }).filter((field) => field.label);
       const constructionUnitTemplate = readableToNumberTemplate($("#settingsConstructionUnitTemplate").value);
       const supervisionUnitTemplate = readableToNumberTemplate($("#settingsSupervisionUnitTemplate").value);
+      const constructionProcessInput = $("#settingsConstructionProcessTemplate");
+      const supervisionProcessInput = $("#settingsSupervisionProcessTemplate");
+      const constructionProcessTemplate = readableToNumberTemplate(
+        (constructionProcessInput && constructionProcessInput.value) || ""
+      ) || processTemplateFromUnit(constructionUnitTemplate, "construction");
+      const supervisionProcessTemplate = readableToNumberTemplate(
+        (supervisionProcessInput && supervisionProcessInput.value) || ""
+      ) || processTemplateFromUnit(supervisionUnitTemplate, "supervision");
       const settingsPayload = {
         numbering_mode: $("#settingsNumberingModeInput").value,
         process_prefix: "",
@@ -1786,14 +1826,14 @@ const $ = (selector) => document.querySelector(selector);
           construction: {
             template: constructionUnitTemplate,
             unit_template: constructionUnitTemplate,
-            process_template: constructionUnitTemplate,
+            process_template: constructionProcessTemplate,
             start: Number($("#settingsConstructionStart").value || 1),
             digits: Number($("#settingsConstructionDigits").value || 3)
           },
           supervision: {
             template: supervisionUnitTemplate,
             unit_template: supervisionUnitTemplate,
-            process_template: supervisionUnitTemplate,
+            process_template: supervisionProcessTemplate,
             start: Number($("#settingsSupervisionStart").value || 1),
             digits: Number($("#settingsSupervisionDigits").value || 3)
           }

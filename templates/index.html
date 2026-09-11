@@ -991,13 +991,15 @@
               <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">编号完全自定义</option><option value="unit_order">按项目划分单元编号排序</option></select></label>
               <label>单元排序编号位数<input id="settingsUnitOrderDigitsInput" type="number" min="1" max="8" step="1"></label>
               <label class="wide">施工单元编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
+              <label class="wide">施工工序编号格式<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
               <label>施工起始号<input id="settingsConstructionStart" type="number" min="1" step="1"></label>
               <label>施工流水位数<input id="settingsConstructionDigits" type="number" min="1" max="8" step="1"></label>
               <label class="wide">监理单元编号格式<input id="settingsSupervisionUnitTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
+              <label class="wide">监理工序编号格式<input id="settingsSupervisionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-JY【流水号】"></label>
               <label>监理起始号<input id="settingsSupervisionStart" type="number" min="1" step="1"></label>
               <label>监理流水位数<input id="settingsSupervisionDigits" type="number" min="1" max="8" step="1"></label>
             </div>
-            <p class="import-hint">可用中文占位：单元编号、单元顺序号、流水号、类别。示例：【单元编号】-SY【流水号】。</p>
+            <p class="import-hint">可用中文占位：单元编号、单元顺序号、工序编码、流水号、类别。示例：【单元编号】-SY【流水号】。工序格式用于带工序的照片，留空则自动在单元格式里插入工序编码。保存后对本工程全部单元生效。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="matching" data-project-settings-group="upload">
             <h4>导入匹配</h4>

@@ -200,6 +200,30 @@ class FrontendPhotoManagementContractTest(unittest.TestCase):
         self.assertLess(html.index("unitListSearchInput"), html.index("part-scroll-panel"))
         self.assertIn('class="orientation-select" size="7"', html)
 
+    def test_settings_panel_exposes_a_separate_process_template(self):
+        """设置里的编号规则必须能单独配“工序格式”，不能被单元格式覆盖。
+
+        回归背景：设置面板此前把 process_template 直接写成单元模板，
+        工序编码从未进入编号；而且没有工序格式输入框，客户无处可改。
+        """
+        root = Path(__file__).resolve().parents[1]
+        html = (root / "templates" / "index.html").read_text(encoding="utf-8")
+        js = sorted((root / "assets").glob("app-A*.js"))[0].read_text(encoding="utf-8")
+
+        # 施工 / 监理各有一个独立的工序格式输入框
+        self.assertIn('id="settingsConstructionProcessTemplate"', html)
+        self.assertIn('id="settingsSupervisionProcessTemplate"', html)
+        # 占位符表必须支持【工序编码】，否则界面读写会丢工序编码
+        self.assertIn('【工序编码】', js)
+        self.assertIn('"{process_code}"', js)
+        # 保存时工序模板取自工序输入框，而不是照抄单元模板
+        self.assertIn('process_template: constructionProcessTemplate', js)
+        self.assertIn('process_template: supervisionProcessTemplate', js)
+        self.assertNotIn('process_template: constructionUnitTemplate', js)
+        self.assertNotIn('process_template: supervisionUnitTemplate', js)
+        # 工序格式留空时自动在单元格式里插入工序编码
+        self.assertIn("function processTemplateFromUnit(", js)
+
 
 if __name__ == "__main__":
     unittest.main()
