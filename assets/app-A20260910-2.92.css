@@ -9376,3 +9376,346 @@
   .batch-category-group { width: 100%; }
   .batch-category-group button { flex: 1; }
 }
+/* batch-print-picker-compact-20260911: 批量打印选单元弹窗紧凑化。
+   只压缩尺寸与间距，不改任何交互：单元/工序按钮、卡片点击、检索行为全部保持原样。
+   用 #batchPrintModal 作用域提高特异性，避免被上方大量重复规则和嵌套 @media 覆盖。 */
+#batchPrintModal #batchPrintBody { padding: 6px; }
+#batchPrintModal .picker-projects {
+  grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+  gap: 5px;
+  padding: 5px;
+}
+#batchPrintModal .picker-project {
+  min-height: 0;
+  gap: 1px;
+  padding: 5px 7px;
+  border-radius: 7px;
+}
+#batchPrintModal .picker-project strong { font-size: 12px; line-height: 1.25; }
+#batchPrintModal .picker-project span { font-size: 10.5px; line-height: 1.2; }
+#batchPrintModal .batch-project { padding-right: 8px; }
+#batchPrintModal .batch-level-buttons { gap: 4px; margin-top: 3px; }
+#batchPrintModal .batch-level {
+  padding: 3px 6px;
+  min-height: 0;
+  font-size: 11px;
+  line-height: 1.25;
+  border-radius: 5px;
+}
+#batchPrintModal .picker-contract { margin: 5px; }
+#batchPrintModal .picker-unit,
+#batchPrintModal .picker-part { margin: 4px; }
+#batchPrintModal .picker-contract-head,
+#batchPrintModal .picker-unit-head,
+#batchPrintModal .picker-part-head {
+  min-height: 0;
+  padding: 5px 7px;
+  gap: 6px;
+}
+#batchPrintModal .picker-head-toggle {
+  padding: 2px 4px;
+  gap: 6px;
+  min-height: 0;
+  font-size: 12px;
+}
+#batchPrintModal .picker-count { font-size: 10.5px; }
+#batchPrintModal .picker-caret { font-size: 11px; }
+#batchPrintModal .batch-node-select {
+  padding: 2px 7px;
+  min-height: 0;
+  font-size: 11px;
+  border-radius: 5px;
+}
+#batchPrintModal .upload-choice-head { padding: 6px 10px; }
+#batchPrintModal .upload-choice-head h3 { font-size: 14px; }
+#batchPrintModal .upload-choice-head p { font-size: 11px; }
+#batchPrintModal .batch-category-row { padding: 5px 10px; gap: 7px; }
+#batchPrintModal .batch-category-group { padding: 2px; }
+#batchPrintModal .batch-category-group button {
+  min-width: 62px;
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+#batchPrintModal .batch-category-row small { font-size: 11px; }
+#batchPrintModal .project-picker-search { padding: 6px 10px; }
+#batchPrintModal .project-picker-search label { gap: 5px; font-size: 12px; }
+#batchPrintModal .project-picker-search input { padding: 5px 7px; font-size: 12px; }
+#batchPrintModal .batch-print-toolbar { padding: 6px 10px; gap: 8px; }
+#batchPrintModal .batch-print-toolbar .pill { font-size: 11px; padding: 3px 8px; }
+#batchPrintModal .batch-print-toolbar .actions { gap: 6px; }
+#batchPrintModal .batch-print-toolbar .actions button {
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+/* 选中态用一眼能分辨的配色：单元=主色实心，工序=蓝色实心 */
+#batchPrintModal .batch-level { border-color: #cfd9e6; background: #fff; color: var(--text); }
+#batchPrintModal .batch-level:hover { background: #eef4ff; border-color: #9db8d8; }
+#batchPrintModal .batch-level.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+#batchPrintModal .batch-project.active {
+  background: #e8f6f3;
+  border-color: #7fc9bb;
+  box-shadow: inset 0 0 0 1px rgba(15, 138, 122, .35);
+}
+#batchPrintModal .batch-node-select.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+@media (max-width: 760px) {
+  #batchPrintModal .picker-projects { grid-template-columns: 1fr; gap: 5px; }
+  #batchPrintModal .picker-project { min-height: 44px; padding: 6px 8px; }
+  #batchPrintModal .batch-level { min-height: 32px; padding: 5px 8px; font-size: 12px; }
+  #batchPrintModal .batch-print-toolbar .actions button { min-height: 36px; }
+}
+
+/* ===========================================================================
+   button-system-unify-20260911
+   统一二级/三级/四级界面的按钮配色与尺寸。
+
+   背景：本文件累积了 9 个 :root 令牌块和多个 UI 层，实测 145 个按钮出现
+   圆角 5 种（6/8/9/10/12px）、字重 5 种（400/700/750/800/900）、
+   同类按钮高度 30~52px 不等，选中态同色系难以分辨。
+
+   这里只做“收敛”，不改任何交互与 DOM，也不改顶栏（#topbar 上一版已统一）
+   与登录门户（#gate 用深色底，另有自己的配色）。
+   =========================================================================== */
+
+/* 1) 统一尺寸与排版 */
+.app button[class],
+.app button:not([class]),
+.app a.btn[class],
+.app [role="button"][class] {
+  border-radius: 9px;
+  min-height: 36px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* 保留真正的小图标按钮 */
+.app .ghost[class],
+.app .mini-program-popover-close[class],
+.app .top-new-project-btn[class],
+.app [class*="icon-btn"] {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+/* 2) 统一主按钮（青绿实心） */
+.app button[class]:not(.secondary):not(.ghost):not(.danger):not([class*="tool"]):not([class*="card"]):not([class*="level"]):not([class*="segment"]),
+.app button:not([class]),
+.app .primary-link[class] {
+  color: #fff;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
+}
+.app button[class]:not(.secondary):not(.ghost):not(.danger):not([class*="tool"]):not([class*="card"]):not([class*="level"]):not([class*="segment"]):hover,
+.app button:not([class]):hover,
+.app .primary-link[class]:hover {
+  background: var(--top-dark);
+  border-color: var(--top-dark);
+  box-shadow: none;
+  transform: none;
+}
+
+/* 3) 统一次按钮（白底描边） */
+.app .secondary[class],
+.app button.secondary,
+.app .secondary-tool[class] {
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}
+.app .secondary[class]:hover,
+.app button.secondary:hover,
+.app .secondary-tool[class]:hover {
+  color: var(--text);
+  background: var(--primary-2);
+  border-color: var(--primary);
+  box-shadow: none;
+  transform: none;
+}
+
+/* 4) 统一弱化按钮（无底、灰字） */
+.app .ghost[class],
+.app button.ghost {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+.app .ghost[class]:hover,
+.app button.ghost:hover {
+  color: var(--text);
+  background: #eef3f6;
+  border-color: var(--line);
+  box-shadow: none;
+  transform: none;
+}
+
+/* 5) 统一危险按钮 */
+.app .danger[class],
+.app button.danger,
+.app .danger-tool[class] {
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+}
+.app .danger[class]:hover,
+.app button.danger:hover,
+.app .danger-tool[class]:hover {
+  background: #b3271f;
+  border-color: #b3271f;
+}
+
+/* 6) 卡片型按钮：统一选中态配色，让一眼能分辨 */
+.app .settings-device-card[class],
+.app .upload-choice-card[class],
+.app .overview-tile[class] {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: #fff;
+}
+.app .settings-device-card[class]:hover,
+.app .upload-choice-card[class]:hover {
+  background: var(--primary-2);
+  border-color: var(--primary);
+}
+.app .settings-device-card[class].active,
+.app .upload-choice-card[class].active,
+.app .overview-tile[class].active {
+  color: var(--text);
+  background: var(--primary-2);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.app .settings-device-card[class] strong,
+.app .upload-choice-card[class] strong { font-size: 13px; font-weight: 700; }
+.app .settings-device-card[class] span,
+.app .upload-choice-card[class] span { font-size: 12px; color: var(--muted); }
+
+/* 7) 打印设置里的版式卡片同理 */
+.app .print-style-card[class] {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+}
+.app .print-style-card[class].active {
+  background: var(--primary-2);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.app .print-style-card[class] > strong { font-size: 13px; font-weight: 700; }
+.app .print-style-card[class] > .print-style-desc { font-size: 12px; color: var(--muted); }
+
+/* 8) 分段开关（版式/标签/类别）统一为一套 */
+.app .print-segment-group[class],
+.app .batch-category-group[class] {
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: #fff;
+  padding: 2px;
+}
+.app .print-segment-group[class] button,
+.app .batch-category-group[class] button {
+  min-height: 30px;
+  padding: 5px 13px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: none;
+}
+.app .print-segment-group[class] button:hover,
+.app .batch-category-group[class] button:hover {
+  color: var(--text);
+  background: #eef3f6;
+  transform: none;
+}
+.app .print-segment-group[class] button.active,
+.app .batch-category-group[class] button.active {
+  color: #fff;
+  background: var(--primary);
+}
+
+/* 9) 补强：下面这些按钮原来由 #id / 高特异性规则单独定尺寸，
+      实测仍是 43px/52px、14px、8px 圆角，是“各级界面按钮不统一”的主要残留。 */
+#batchPrintModal .batch-category-group button,
+#printSetupModal .print-segment-group button {
+  min-height: 30px;
+  padding: 5px 13px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+#printSetupModal .print-segment-group button.active,
+#batchPrintModal .batch-category-group button.active {
+  color: #fff;
+  background: var(--primary);
+}
+#confirmPrintSetupBtn,
+#startUploadBtn,
+#autoMatchUploadBtn,
+#saveProjectInfoBtn,
+#createProjectInviteBtn,
+#refreshProjectMembersBtn {
+  min-height: 36px;
+  padding: 7px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+#dismissUpdateBtn {
+  min-height: 36px;
+  padding: 7px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+/* 顶部“施工/其它”与侧栏同类切换：统一成同一套分段按钮 */
+.top-filter-group button,
+.side-switch button,
+[data-top-filter] button {
+  border-radius: 8px;
+  min-height: 30px;
+  font-size: 13px;
+  font-weight: 700;
+}
+/* 设置中心左侧页签：原来 43px/14px，明显偏大 */
+[data-project-settings-tab] {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+/* 二级/三级弹窗底部动作按钮统一 */
+.modal-backdrop .ghost[class],
+.support-panel .ghost[class] {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 10) 设置中心左侧页签：原规则 .project-info-modal .project-settings-tabs button
+       把尺寸锁成 43px/10px 圆角/字重 750，这里用同等或更高的特异性收口，
+       使各层界面共用同一套按钮尺寸（保持其左对齐的列表形态不变）。 */
+.project-info-modal .project-settings-tabs button[data-project-settings-tab] {
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.project-info-modal .project-settings-tabs button[data-project-settings-tab].active {
+  font-weight: 700;
+}

@@ -8153,6 +8153,23 @@ def asset_file(filename):
     return response
 
 
+def ordered_unique_codes(*raw_values):
+    """把逗号分隔的单元编码按“出现顺序”去重展开。
+
+    批量打印必须严格跟随客户勾选顺序出页；用 set/sorted 会把顺序变成按编码
+    字母排序，导致打印册错页。多个入参按先后拼接后统一去重。
+    """
+    seen = set()
+    ordered = []
+    for raw in raw_values:
+        for item in str(raw or "").split(","):
+            code = item.strip()
+            if code and code not in seen:
+                seen.add(code)
+                ordered.append(code)
+    return ordered
+
+
 @app.route("/print/<category>/batch")
 def print_album_category_batch(category):
     try:
@@ -8170,12 +8187,16 @@ def print_album_category_batch(category):
         photo_height_mm = float(print_settings["print_photo_height_cm"]) * 10
         raw_units = request.args.get("units", "")
         raw_processes = request.args.get("processes", "")
-        unit_codes = {c.strip() for c in raw_units.split(",") if c.strip()}
-        process_codes = {c.strip() for c in raw_processes.split(",") if c.strip()}
+        # 保持用户勾选顺序：这里必须用保序去重，不能用 set/sorted，
+        # 否则打印册的页序会变成按编码字母排序，和客户的选择顺序不一致（错页）。
+        unit_codes = ordered_unique_codes(raw_units)
+        process_codes = ordered_unique_codes(raw_processes)
+        unit_code_set = set(unit_codes)
+        process_code_set = set(process_codes)
         has_level_selection = bool(raw_units or raw_processes)
         if not codes:
-            # 兼容新参数：单元编码从 units/processes 汇总
-            codes = sorted(set(unit_codes) | set(process_codes))
+            # 兼容新参数：单元编码从 units/processes 汇总，同样保持勾选顺序
+            codes = ordered_unique_codes(raw_units, raw_processes)
         if not codes:
             return "请选择要打印的单元工程", 400
         # 单元照片与工序照片分别成册：各册内部按单元顺序排，页码各自连续
@@ -8195,8 +8216,8 @@ def print_album_category_batch(category):
                 continue
             enriched = enrich_print_photos(project, project_photos, print_settings)
             unit_photos, process_photos = split_photos_by_level(project, enriched)
-            want_unit = not has_level_selection or code in unit_codes
-            want_process = not has_level_selection or code in process_codes
+            want_unit = not has_level_selection or code in unit_code_set
+            want_process = not has_level_selection or code in process_code_set
             name = project.get("project_name") or project.get("name") or code
             if want_unit and unit_photos:
                 last_item = _last_print_item(project, unit_photos, category)
