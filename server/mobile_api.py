@@ -51,7 +51,9 @@ PROJECT_ROLES = {"owner", "admin", "capturer", "viewer"}
 CAPTURE_ROLES = {"owner", "admin", "capturer"}
 MANAGE_MEMBER_ROLES = {"owner", "admin"}
 INVITABLE_ROLES = {"admin", "capturer", "viewer"}
-PROJECT_INVITE_TTL_SECONDS = 7 * 24 * 60 * 60
+# Project invite codes are reusable access-request codes. People still provide
+# their identity and wait for approval; the code itself does not expire.
+PROJECT_INVITE_TTL_SECONDS = None
 PROJECT_INVITE_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 JPEG_1M_TRANSFER_PROFILE = "jpeg_1m"
 _PHOTO_UPLOAD_LOCKS = {}
@@ -1297,9 +1299,15 @@ def register_mobile_api(
     def expire_project_invitations(conn):
         conn.execute(
             "UPDATE project_invitations SET status = 'expired', updated_at = ? "
-            "WHERE status = 'pending' AND expires_at <= ?",
+            "WHERE status = 'pending' AND expires_at <> '' AND expires_at <= ?",
             (now(), now()),
         )
+
+    def invitation_is_usable(invitation, timestamp=None):
+        if not invitation or invitation["status"] != "pending":
+            return False
+        expires_at = str(invitation["expires_at"] or "")
+        return not expires_at or expires_at > (timestamp or now())
 
     def project_members_rows(conn, owner_account_id, local_project_id):
         return conn.execute(
@@ -1405,7 +1413,7 @@ def register_mobile_api(
                 current["id"],
                 timestamp,
                 timestamp,
-                _future_timestamp(timestamp, int(expires_in)),
+                _future_timestamp(timestamp, int(expires_in)) if expires_in else "",
             ),
         )
         row = conn.execute(
@@ -2853,11 +2861,10 @@ def register_mobile_api(
         conn = db.connect()
         try:
             row = conn.execute(
-                "SELECT * FROM project_invitations WHERE invite_code_hash = ? "
-                "AND status = 'pending' AND expires_at > ?",
-                (code_hash, now()),
+                "SELECT * FROM project_invitations WHERE invite_code_hash = ?",
+                (code_hash,),
             ).fetchone()
-            if not row:
+            if not invitation_is_usable(row):
                 raise ApiProblem(
                     "project_invite_invalid", "邀请码无效或已过期", 404
                 )
@@ -2903,16 +2910,8 @@ def register_mobile_api(
         ).fetchone()
         timestamp = now()
         already_member = bool(existing and existing["status"] == "active")
-        idempotent = bool(
-            invitation["status"] == "accepted"
-            and int(invitation["accepted_by_account_id"] or 0)
-            == int(current["id"])
-            and already_member
-        )
-        if not idempotent and (
-            invitation["status"] != "pending"
-            or invitation["expires_at"] <= timestamp
-        ):
+        idempotent = already_member
+        if not idempotent and not invitation_is_usable(invitation, timestamp):
             raise ApiProblem(
                 "project_invite_invalid", "邀请码无效、已使用或已过期", 404
             )
@@ -2938,16 +2937,6 @@ def register_mobile_api(
                         timestamp,
                     ),
                 )
-            changed = conn.execute(
-                "UPDATE project_invitations SET status = 'accepted', "
-                "accepted_by_account_id = ?, accepted_at = ?, updated_at = ? "
-                "WHERE id = ? AND status = 'pending'",
-                (current["id"], timestamp, timestamp, invitation["id"]),
-            )
-            if changed.rowcount != 1:
-                raise ApiProblem(
-                    "project_invite_invalid", "邀请码已被使用", 409
-                )
         project = project_for(conn, current["id"], _project_ref(invitation["project_owner_account_id"], invitation["project_id"]), PROJECT_ROLES)
         return _project_payload(project), idempotent, already_member
 
@@ -2968,7 +2957,7 @@ def register_mobile_api(
         if status == "pending":
             if not invitation or invitation["status"] != "pending" or not project or not project["active"]:
                 status = "revoked"
-            elif invitation["expires_at"] <= now():
+            elif not invitation_is_usable(invitation):
                 status = "expired"
             else:
                 try:
@@ -3009,7 +2998,7 @@ def register_mobile_api(
         if existing and existing["status"] == "approved":
             project = project_for(conn, current["id"], reference, PROJECT_ROLES)
             return {"join_request": request_payload(conn, existing, current["id"]), "pending_approval": False, "idempotent": True, "project": _project_payload(project), "membership": _project_payload(project)["membership"], "already_member": True}
-        if invitation["status"] != "pending" or invitation["expires_at"] <= now():
+        if not invitation_is_usable(invitation):
             raise ApiProblem("project_invite_invalid", "邀请码无效、已使用或已过期", 404)
         project_for(conn, invitation["created_by_account_id"], reference, MANAGE_MEMBER_ROLES)
         if existing:
@@ -3093,7 +3082,7 @@ def register_mobile_api(
                     project_for(conn, row["applicant_account_id"], reference, PROJECT_ROLES)
                 return jsonify({"ok": True, "join_request": request_payload(conn, row, current["id"]), "idempotent": True})
             invitation = conn.execute("SELECT * FROM project_invitations WHERE id = ?", (row["invitation_id"],)).fetchone()
-            if not invitation or invitation["status"] != "pending" or invitation["expires_at"] <= now():
+            if not invitation or not invitation_is_usable(invitation):
                 raise ApiProblem("project_invite_invalid", "邀请码已失效，请重新邀请", 409)
             applicant = conn.execute("SELECT * FROM accounts WHERE id = ? AND status = 'active'", (row["applicant_account_id"],)).fetchone()
             if not applicant:
@@ -3101,8 +3090,6 @@ def register_mobile_api(
             timestamp = now()
             if desired == "approved":
                 accept_project_invitation(conn, dict(applicant), invitation["invite_code_hash"])
-                # Existing invitations remain one-use. Resolve competing requests explicitly.
-                conn.execute("UPDATE project_join_requests SET status = 'rejected', decision_reason = '邀请码已用于其他申请，请联系分享者重新邀请', decided_by_account_id = ?, decided_at = ?, updated_at = ? WHERE invitation_id = ? AND id != ? AND status = 'pending'", (current["id"], timestamp, timestamp, invitation["id"], request_id))
             conn.execute("UPDATE project_join_requests SET status = ?, decided_by_account_id = ?, decided_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'", (desired, current["id"], timestamp, timestamp, request_id))
             conn.commit()
             updated = conn.execute("SELECT * FROM project_join_requests WHERE id = ?", (request_id,)).fetchone()
@@ -3131,7 +3118,7 @@ def register_mobile_api(
             else:
                 # Validate before allocating an account; failures below roll back everything.
                 invite = conn.execute("SELECT * FROM project_invitations WHERE invite_code_hash = ?", (code_hash,)).fetchone()
-                if not invite or invite["status"] != "pending" or invite["expires_at"] <= now():
+                if not invite or not invitation_is_usable(invite):
                     raise ApiProblem("project_invite_invalid", "邀请码无效、已使用或已过期", 404)
                 project_record_for_owner(conn, invite["project_owner_account_id"], invite["project_id"])
                 cursor = conn.execute("INSERT INTO accounts (username, password_hash, display_name, role, status) VALUES (?, ?, ?, 'user', 'active')", ("wx_" + uuid.uuid4().hex, generate_password_hash(secrets.token_urlsafe(48)), display_name))

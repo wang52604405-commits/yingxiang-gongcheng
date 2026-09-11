@@ -3285,14 +3285,15 @@ class MobileServerContractTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_wechat_join_disabled_identity_and_used_invite_are_rejected(self):
+    def test_wechat_join_disabled_identity_and_reusable_invite(self):
         _, invite = self._wechat_join_invite("viewer")
         identity = uuid.uuid4().hex
         first = self._wechat_join(invite, identity).get_json()
         self.assertEqual(first["join_request"]["role"], "viewer")
         self.client.post(f"/api/mobile/v1/project-join-requests/{first['join_request']['id']}/approve", json={}, headers=self._headers(self.token_a))
         other = self._wechat_join(invite, uuid.uuid4().hex)
-        self.assertEqual(other.status_code, 404)
+        self.assertEqual(other.status_code, 200, other.get_json())
+        self.assertTrue(other.get_json()["pending_approval"])
         conn = self.db.connect()
         try:
             conn.execute("UPDATE accounts SET status = 'disabled' WHERE id = ?", (first["account"]["id"],))
@@ -3322,11 +3323,10 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertTrue(all(r["can_review"] for r in owners))
         result = self.client.post(f"/api/mobile/v1/project-join-requests/{first_id}/approve", json={"role": "owner"}, headers=self._headers(self.token_a))
         self.assertEqual(result.status_code, 200, result.get_json())
-        rejected = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(second["token"])).get_json()["requests"][0]
-        self.assertEqual(rejected["status"], "rejected")
-        self.assertIn("其他申请", rejected["decision_reason"])
-        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{second_id}/approve", json={}, headers=self._headers(self.token_a)).status_code, 409)
-        self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{snapshot['project_ref']}/tree", headers=self._headers(second["token"])).status_code, 404)
+        pending_second = self.client.get("/api/mobile/v1/project-join-requests", headers=self._headers(second["token"])).get_json()["requests"][0]
+        self.assertEqual(pending_second["status"], "pending")
+        self.assertEqual(self.client.post(f"/api/mobile/v1/project-join-requests/{second_id}/approve", json={}, headers=self._headers(self.token_a)).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/mobile/v1/projects/{snapshot['project_ref']}/tree", headers=self._headers(second["token"])).status_code, 200)
         _, another = self._wechat_join_invite()
         pending = self._wechat_join(another, uuid.uuid4().hex).get_json()
         rid = pending["join_request"]["id"]
@@ -3752,6 +3752,35 @@ class MobileServerContractTest(unittest.TestCase):
         self.assertEqual(retried_join.status_code, 200, retried_join.get_json())
         self.assertTrue(retried_join.get_json()["idempotent"])
         self.assertTrue(retried_join.get_json()["already_member"])
+
+        # One permanent project code may collect several independently reviewed
+        # applicants. Approval must not consume the code or reject another person.
+        second_username = "team_member_" + uuid.uuid4().hex[:8]
+        self._register(second_username, "TeamMember2026")
+        second_token = self._login(second_username, "TeamMember2026")
+        second_join = self.client.post(
+            "/api/mobile/v1/project-invites/join",
+            json={"code": code, "display_name": "成员丙", "phone": "13800138000"},
+            headers=self._headers(second_token),
+        )
+        self.assertEqual(second_join.status_code, 200, second_join.get_json())
+        second_request_id = second_join.get_json()["join_request"]["id"]
+        second_approved = self.client.post(
+            f"/api/mobile/v1/project-join-requests/{second_request_id}/approve",
+            json={},
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(second_approved.status_code, 200, second_approved.get_json())
+        conn = self.db.connect()
+        try:
+            permanent = conn.execute(
+                "SELECT status, expires_at FROM project_invitations WHERE id = ?",
+                (invitation["invite_id"],),
+            ).fetchone()
+            self.assertEqual(permanent["status"], "pending")
+            self.assertEqual(permanent["expires_at"], "")
+        finally:
+            conn.close()
 
         members = self.client.get(
             f"/api/desktop/v1/project-members?project_id={project_id}"
