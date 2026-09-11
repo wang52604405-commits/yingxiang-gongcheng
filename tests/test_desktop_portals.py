@@ -50,6 +50,17 @@ class DesktopPortalContractTest(unittest.TestCase):
         self.assertIn("项目人员入口", html)
         self.assertIn('/api/cloud/project-staff-entry', asset)
 
+    def test_top_actions_share_one_style_and_exception_queue_moves_to_sidebar(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+        self.assertIn('id="batchPrintQuickBtn" class="top-tool-btn"', html)
+        self.assertIn('id="actionsMenuBtn" class="top-tool-btn"', html)
+        self.assertIn('id="settingsMenuBtn" class="top-settings-btn top-tool-btn"', html)
+        self.assertIn('id="unclassifiedQueueBtn" class="side-unclassified-link"', html)
+        self.assertNotIn('>待分类影像</a>\n        <button type="button" id="globalUploadBtn"', html)
+        self.assertIn('$("#batchPrintQuickBtn")?.addEventListener', asset)
+        self.assertIn('node.type === "contract"', asset)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,36 @@
       outline: none;
     }
     .top-actions .desktop-portal-action:active { transform: translateY(0) scale(.98); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .top-actions .top-tool-btn,
+    .top-actions .settings-menu-wrap > .top-tool-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      min-width: 64px;
+      height: 40px !important;
+      min-height: 40px !important;
+      padding: 0 13px !important;
+      border: 1px solid rgba(255,255,255,.24) !important;
+      border-radius: 10px !important;
+      color: #fff !important;
+      background: rgba(255,255,255,.11) !important;
+      box-shadow: none !important;
+      font-size: 13px !important;
+      font-weight: 750 !important;
+      line-height: 1 !important;
+    }
+    .top-actions .top-tool-btn:hover,
+    .top-actions .top-tool-btn:focus-visible { background: rgba(255,255,255,.2) !important; border-color: rgba(255,255,255,.42) !important; }
+    .top-actions #authBox { display: none !important; }
+    .side-unclassified-link { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 12px 12px 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel-soft); text-decoration: none; font-size: 13px; font-weight: 700; }
+    .side-unclassified-link span { color: var(--primary-2); font-size: 12px; font-weight: 650; }
+    #overviewView .page-head { position: relative; overflow: hidden; margin-bottom: 22px; padding: 26px 28px; border: 1px solid rgba(18,137,129,.18); border-radius: 18px; background: linear-gradient(125deg, rgba(230,250,246,.95), rgba(255,255,255,.98) 58%, rgba(229,244,250,.82)); box-shadow: 0 12px 30px rgba(16,91,86,.08); }
+    #overviewView .page-head::after { content: "工程概览"; position: absolute; right: 24px; bottom: -10px; color: rgba(15,138,122,.08); font-size: 64px; font-weight: 800; letter-spacing: -4px; pointer-events: none; }
+    #overviewView .page-head h2 { position: relative; z-index: 1; margin-bottom: 7px; font-size: 28px; letter-spacing: -.6px; }
+    #overviewView .page-head p { position: relative; z-index: 1; max-width: 620px; color: var(--muted); }
+    #overviewView .overview-tiles { gap: 16px; }
+    #overviewView .overview-board { border-radius: 16px; box-shadow: 0 8px 22px rgba(18,64,68,.06); }
     .project-staff-entry {
       margin-top: 18px;
       padding-top: 18px;
@@ -228,8 +258,8 @@
       </div>
       <div class="top-actions">
         <span class="app-version-badge" id="appVersionBadge" title="当前软件版本"></span>
-        <a id="officialWebsiteBtn" class="desktop-portal-action" href="https://shuiliyingxiang.cn/" target="_blank" rel="noopener noreferrer" title="打开工程影像官网">官网</a>
-        <button id="miniProgramPortalBtn" class="desktop-portal-action" type="button" aria-expanded="false" aria-controls="miniProgramPopover" title="打开工程影像小程序码">小程序</button>
+        <a id="officialWebsiteBtn" class="desktop-portal-action top-tool-btn" href="https://shuiliyingxiang.cn/" target="_blank" rel="noopener noreferrer" title="打开工程影像官网">官网</a>
+        <button id="miniProgramPortalBtn" class="desktop-portal-action top-tool-btn" type="button" aria-expanded="false" aria-controls="miniProgramPopover" title="打开工程影像小程序码">小程序</button>
         <div id="miniProgramPopover" class="mini-program-popover" aria-hidden="true" role="dialog" aria-label="工程影像小程序">
           <div class="mini-program-popover-head">
             <div>
@@ -243,20 +273,18 @@
           </div>
           <p class="mini-program-popover-note">用于现场拍照、上传和查看工程影像。</p>
         </div>
-        <a href="/unclassified" class="secondary" style="display:inline-flex;align-items:center;min-height:36px;padding:0 12px">待分类影像</a>
         <button type="button" id="globalUploadBtn" class="top-upload-btn">＋ 上传照片</button>
+        <button type="button" id="batchPrintQuickBtn" class="top-tool-btn">批量打印</button>
         <div class="settings-menu-wrap actions-menu-wrap">
-          <button type="button" id="actionsMenuBtn" aria-expanded="false">更多</button>
+          <button type="button" id="actionsMenuBtn" class="top-tool-btn" aria-expanded="false">更多</button>
           <div class="settings-menu" id="actionsMenu">
             <button type="button" id="folderImportBtn">导入文件夹</button>
             <input type="file" id="folderImportInput" webkitdirectory multiple accept=".jpg,.jpeg,.png" style="display:none">
-            <button type="button" id="menuPrintConstructionBtn">施工打印</button>
-            <button type="button" id="menuPrintSupervisionBtn">监理打印</button>
             <button type="button" id="exportPhotoStatsBtn">导出统计表</button>
             <button type="button" id="refreshBtn" title="重新读取工程、统计和照片数据">刷新数据</button>
           </div>
         </div>
-        <button type="button" id="settingsMenuBtn" class="top-settings-btn">设置</button>
+        <button type="button" id="settingsMenuBtn" class="top-settings-btn top-tool-btn">设置</button>
         <div class="support-wrap settings-portal-source">
           <button type="button" id="supportBtn" hidden>账号与会员</button>
           <div id="supportPanel" class="support-panel" aria-hidden="true">
@@ -412,6 +440,7 @@
             </div>
             <div id="otherImagesTree" class="tree"></div>
           </div>
+          <a id="unclassifiedQueueBtn" class="side-unclassified-link" href="/unclassified"><span>待分类影像</span><span>待处理 →</span></a>
         </section>
       </aside>
 

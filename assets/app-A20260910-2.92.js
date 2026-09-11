@@ -2450,7 +2450,9 @@ const $ = (selector) => document.querySelector(selector);
         const key = row.dataset.key;
         const node = findNode(state.treeRoot, key);
         if (!node) return;
-        if (node.type === "part") {
+        if (node.type === "contract") {
+          openOverview("construction");
+        } else if (node.type === "part") {
           openPart(node);
         }
         // 项目划分树固定展开，点击不折叠
@@ -5566,6 +5568,7 @@ const $ = (selector) => document.querySelector(selector);
 
     $("#printConstructionBtn").addEventListener("click", () => openUnitPrint("construction"));
     $("#printSupervisionBtn").addEventListener("click", () => openUnitPrint("supervision"));
+    $("#batchPrintQuickBtn")?.addEventListener("click", () => openBatchPrint("construction", "print"));
     $("#menuPrintConstructionBtn").addEventListener("click", () => openBatchPrint("construction", "print"));
     $("#menuPrintSupervisionBtn").addEventListener("click", () => openBatchPrint("supervision", "print"));
     $("#exportZipBtn").addEventListener("click", exportSelectedZip);
