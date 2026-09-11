@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import uuid
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
@@ -40,20 +41,34 @@ class LocalObjectStorage:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._directory_lock = threading.Lock()
+
+    def ensure_parent(self, path: Path) -> None:
+        # Windows 上两个首批上传同时创建同一项目目录时，mkdir 的父级递归
+        # 偶尔会竞争并被误报为存储不可用。目录初始化很短，串行更可靠。
+        with self._directory_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, key: str) -> Path:
         safe_key = _validate_key(key)
-        path = (self.root / Path(*PurePosixPath(safe_key).parts)).resolve()
+        # Windows 在目录刚创建的瞬间，Path.resolve() 偶尔返回带 \\?\ 前缀的
+        # 扩展路径，而 self.root 仍是普通盘符路径；relative_to 会把同一目录
+        # 误判成越界。对象键已拒绝绝对路径和 ..，这里用规范化绝对路径比较。
+        path = Path(os.path.abspath(self.root / Path(*PurePosixPath(safe_key).parts)))
+        root_norm = os.path.normcase(os.path.abspath(self.root))
+        path_norm = os.path.normcase(os.path.abspath(path))
         try:
-            path.relative_to(self.root)
-        except ValueError as exc:
-            raise StorageError("对象键越界") from exc
+            within_root = os.path.commonpath([root_norm, path_norm]) == root_norm
+        except ValueError:
+            within_root = False
+        if not within_root:
+            raise StorageError("对象键越界")
         return path
 
     def put_bytes(self, key: str, data: bytes, content_type: str) -> None:
         del content_type
         path = self.path_for(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        self.ensure_parent(path)
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             temporary.write_bytes(data)
@@ -68,7 +83,7 @@ class LocalObjectStorage:
     def put_stream(self, key: str, stream, size_bytes: int, content_type: str) -> None:
         del content_type
         path = self.path_for(key)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        self.ensure_parent(path)
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             stream.seek(0)

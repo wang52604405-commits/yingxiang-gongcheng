@@ -4971,7 +4971,11 @@ class MobileServerContractTest(unittest.TestCase):
         with patch("server.app._product_config", return_value={"mini_program": {"free_upload_limit": 1}}), patch.object(mobile_api, "_require_mobile_upload_quota", side_effect=synchronized_precheck):
             with ThreadPoolExecutor(max_workers=2) as pool:
                 responses = list(pool.map(lambda _: self._upload(token, batch, str(uuid.uuid4()), self._jpeg()), range(2)))
-            self.assertEqual(sorted(r.status_code for r in responses), [201, 403])
+            self.assertEqual(
+                sorted(r.status_code for r in responses),
+                [201, 403],
+                [r.get_json() for r in responses],
+            )
             conn = self.db.connect()
             self.assertEqual(mobile_api.mobile_upload_quota(conn, owner)["used"], 1)
             conn.close()
