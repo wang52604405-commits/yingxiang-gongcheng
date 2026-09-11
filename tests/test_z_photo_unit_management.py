@@ -91,6 +91,57 @@ class PhotoUnitManagementTest(unittest.TestCase):
         self.assertNotIn("YNLQ-2024", unit_id)
         self.assertNotIn("YNLQ-2024", process_id)
 
+    def test_custom_numbering_rule_applies_when_project_has_processes(self):
+        """定义工序的工程也必须跟随“编号规则”里的模板。
+
+        回归背景：两级编号分支曾把格式写死成 SYDY/SYGX，且不读 unit_template /
+        process_template，导致客户在设置里改模板完全无效（只有起始号、位数生效）。
+        """
+        data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
+        custom = {
+            "construction": {
+                "template": "{code}-GC{seq}",
+                "unit_template": "{code}-GC{seq}",
+                "process_template": "{code}-GC{process_code}{seq}",
+                "start": 5,
+                "digits": 4,
+                "label": "施工单元影像",
+            },
+            "supervision": dict(self.desktop_app.DEFAULT_NUMBERING_RULES["supervision"]),
+        }
+        self.settings.stop()
+        self.settings = patch.object(
+            self.desktop_app,
+            "read_engineering_settings",
+            return_value={
+                "process_digits": 3,
+                "unit_order_digits": 3,
+                "numbering_rules": custom,
+            },
+        )
+        self.settings.start()
+
+        unit_id = self.manager._archive_id_for_photo(data, {"process_name": ""}, "construction", 5)
+        process_id = self.manager._archive_id_for_photo(
+            data, {"process_name": "土方开挖"}, "construction", 5
+        )
+
+        self.assertEqual(unit_id, "YNLQ-2024-SG-1-01-001-GC0005")
+        self.assertEqual(process_id, "YNLQ-2024-SG-1-01-001-GCGY0010005")
+        # 自定义后不应再出现写死的 SYDY / SYGX 标记
+        self.assertNotIn("SYDY", unit_id)
+        self.assertNotIn("SYGX", process_id)
+
+    def test_default_rule_still_uses_legacy_two_level_format(self):
+        """未自定义模板时，两级编号必须保持原有的短格式，避免老工程编号突变。"""
+        data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
+        unit_id = self.manager._archive_id_for_photo(data, {"process_name": ""}, "construction", 1)
+        process_id = self.manager._archive_id_for_photo(
+            data, {"process_name": "土方开挖"}, "construction", 1
+        )
+        self.assertEqual(unit_id, "SYDY001")
+        self.assertEqual(process_id, "GY001-SYGX001")
+
     def test_rename_process_keeps_order_and_photo_uuid(self):
         self.make_unit("SRC-001", "源单元", ["土方开挖", "模板安装"])
         permanent = self.add_photo("SRC-001", "土方开挖")

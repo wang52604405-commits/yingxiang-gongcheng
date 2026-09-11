@@ -1701,17 +1701,35 @@ const $ = (selector) => document.querySelector(selector);
 
     async function saveNumberingRules(event) {
       event.preventDefault();
-      const rules = {
-        construction: {
-          template: readableToNumberTemplate($("#constructionNumberTemplate").value),
-          start: Number($("#constructionNumberStart").value || 1),
-          digits: Number($("#constructionNumberDigits").value || 3)
-        },
-        supervision: {
-          template: readableToNumberTemplate($("#supervisionNumberTemplate").value),
-          start: Number($("#supervisionNumberStart").value || 1),
-          digits: Number($("#supervisionNumberDigits").value || 3)
+      // 设置里只有"一个"模板输入框，但编号实际分单元/工序两套模板。
+      // 只提交 template 会让 process_template 永远停留在默认值（旧值里的
+      // SY/JY 前缀会一直出现，客户以为改的设置没生效）。这里三个字段一起提交：
+      // 工序模板 = 用户模板把 {seq} 换成 {process_code}{seq}，保证工序照片也
+      // 沿用用户选定的编码与样式。
+      const processTemplateFrom = (template) => {
+        if (template.includes("{seq}")) {
+          return template.replace("{seq}", "{process_code}{seq}");
         }
+        return template + "{process_code}{seq}";
+      };
+      const buildRule = (template, start, digits) => ({
+        template,
+        unit_template: template,
+        process_template: processTemplateFrom(template),
+        start,
+        digits
+      });
+      const rules = {
+        construction: buildRule(
+          readableToNumberTemplate($("#constructionNumberTemplate").value),
+          Number($("#constructionNumberStart").value || 1),
+          Number($("#constructionNumberDigits").value || 3)
+        ),
+        supervision: buildRule(
+          readableToNumberTemplate($("#supervisionNumberTemplate").value),
+          Number($("#supervisionNumberStart").value || 1),
+          Number($("#supervisionNumberDigits").value || 3)
+        )
       };
       await apiJson("/api/numbering-rules", {
         method: "POST",

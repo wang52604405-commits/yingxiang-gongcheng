@@ -1859,9 +1859,36 @@ class AlbumManager:
                 digits = 3
             seq = f"{int(sequence):0{digits}d}"
             cat = "JY" if category == "supervision" else "SY"
-            # 两级照片编号不再重复携带单元工程编码。单元归属由父目录/元数据
-            # 唯一确定；打印、同步与跨单元移动均同时携带 project_code + photo_uuid。
-            # 单元级：SYDY001 / JYDY001；工序级：GY001-SYGX001 / GY001-JYGX001。
+            # 注意：两级工程的默认编号是刻意的短格式（单元归属由父目录唯一确定，
+            # 不重复携带编码）。所以这里只在操作人"显式自定义过模板"时才改用模板，
+            # 否则保持 SYDY001 / GY001-SYGX001，避免所有老工程编号外观突变。
+            defaults = DEFAULT_NUMBERING_RULES[category]
+            unit_template = str(rule.get("unit_template") or rule.get("template") or "").strip()
+            process_template = str(rule.get("process_template") or "").strip()
+            unit_customized = bool(unit_template) and unit_template != defaults["unit_template"]
+            process_customized = bool(process_template) and process_template != defaults["process_template"]
+            if (process_customized if process_code else unit_customized):
+                settings_for_code = read_engineering_settings()
+                try:
+                    unit_order_digits = max(1, min(8, int(settings_for_code.get("unit_order_digits") or 3)))
+                except (TypeError, ValueError):
+                    unit_order_digits = 3
+                code_value = data.get("display_project_code") or data.get("project_code")
+                selected = process_template if process_code else unit_template
+                try:
+                    return str(selected).format(
+                        code=safe_project_code(code_value),
+                        unit_code=safe_project_code(code_value),
+                        unit_order=f"{self._project_unit_order(data):0{unit_order_digits}d}",
+                        process_code=process_code,
+                        process_order=process_code,
+                        category=cat,
+                        seq=seq,
+                    )
+                except (KeyError, IndexError, ValueError):
+                    pass
+            # 默认（未自定义）两级编号：
+            # 单元级 SYDY001 / JYDY001；工序级 GY001-SYGX001 / GY001-JYGX001。
             process_segment = f"{safe_project_code(process_code)}-" if process_code else ""
             return f"{process_segment}{cat}{'GX' if process_code else 'DY'}{seq}"
         settings = read_engineering_settings()
