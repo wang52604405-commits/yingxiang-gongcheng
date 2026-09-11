@@ -701,6 +701,14 @@
               </div>
               <button class="ghost" type="button" id="closeBatchPrintBtn">关闭</button>
             </div>
+            <div class="print-segment-row batch-category-row">
+              <span class="print-choice-label">影像类别</span>
+              <div class="batch-category-group" id="batchPrintCategoryToggle" role="group" aria-label="批量打印影像类别">
+                <button type="button" class="active" data-batch-category="construction" aria-pressed="true">施工</button>
+                <button type="button" data-batch-category="supervision" aria-pressed="false">监理</button>
+              </div>
+              <small>施工与监理影像分别成册，切换后重新选择要打印的单元。</small>
+            </div>
             <div class="project-picker-search">
               <label>搜索单元名称、编号或缩略词<input id="batchPrintSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
             </div>

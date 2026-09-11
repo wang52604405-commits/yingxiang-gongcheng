@@ -61,6 +61,64 @@ class DesktopPortalContractTest(unittest.TestCase):
         self.assertIn('$("#batchPrintQuickBtn")?.addEventListener', asset)
         self.assertIn('node.type === "contract"', asset)
 
+    def test_batch_print_keeps_the_supervision_category_reachable(self):
+        """顶栏“批量打印”只带一个类别入口，模态框必须能切到监理。"""
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+
+        self.assertIn('id="batchPrintCategoryToggle"', html)
+        self.assertIn('data-batch-category="construction"', html)
+        self.assertIn('data-batch-category="supervision"', html)
+        self.assertIn("syncBatchPrintCategoryButtons", asset)
+        # 切到监理后必须重渲染列表，否则选了“监理”却还在打印施工单元。
+        self.assertIn("state.batchSelectedUnits = new Set();", asset)
+
+    def test_removed_actions_menu_entries_are_not_bound_again(self):
+        """操作菜单里的施工/监理打印已删除；再绑定会抛 TypeError 并中断整个初始化脚本。"""
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+
+        self.assertNotIn("menuPrintConstructionBtn", html)
+        self.assertNotIn("menuPrintSupervisionBtn", html)
+        self.assertNotIn("$('#menuPrintConstructionBtn')", asset)
+        self.assertNotIn('$("#menuPrintConstructionBtn")', asset)
+        self.assertNotIn('$("#menuPrintSupervisionBtn")', asset)
+
+    def test_every_selector_dereferenced_without_a_guard_exists_in_the_page(self):
+        """初始化脚本对不存在的元素直接取属性会抛错，必须逐个对得上。"""
+        import re
+
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+        present = set(re.findall(r'id="([A-Za-z0-9_-]+)"', html))
+
+        guarded = set()
+        for match in re.finditer(r'\$\("#([A-Za-z0-9_-]+)"\)\.([A-Za-z_]+)', asset):
+            missing = match.group(1)
+            if missing in present:
+                continue
+            line_start = asset.rfind("\n", 0, match.start()) + 1
+            line_end = asset.find("\n", match.start())
+            source_line = asset[line_start:line_end]
+            if "?." in source_line:
+                continue
+            if f'if ($("#{missing}"))' in source_line:
+                continue
+            guarded.add(missing)
+
+        # 这些元素只在与后端返回的开关联动时才解引用，页面里本来就不该有。
+        allowed = {
+            "packageFile",
+            "packageFileLabel",
+            "unitImageActiveTitle",
+            "unitImageActiveWrap",
+            "unitImageEntrances",
+            "updateDevActions",
+            "updateRetryActions",
+            "uploadModalDetailBtn",
+        }
+        self.assertEqual(guarded - allowed, set())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9326,3 +9326,53 @@
   .print-segment-group { width: 100%; }
   .print-segment-group button { flex: 1; }
 }
+
+/* batch-print-category-toggle-20260911: 批量打印内恢复施工/监理入口（顶栏 quick 按钮只带类别，不再有独立监理按钮）。 */
+.batch-category-row {
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fbff;
+}
+.batch-category-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+}
+.batch-category-group button {
+  min-width: 72px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  font-weight: 700;
+}
+.batch-category-group button:hover {
+  color: var(--top-dark);
+  background: var(--click);
+  box-shadow: none;
+  transform: none;
+}
+.batch-category-group button.active {
+  color: #fff;
+  background: var(--primary);
+}
+.batch-category-group button.active:hover { color: #fff; background: var(--top-dark); }
+.batch-category-row small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+@media (max-width: 720px) {
+  .batch-category-row { align-items: flex-start; }
+  .batch-category-group { width: 100%; }
+  .batch-category-group button { flex: 1; }
+}

@@ -596,6 +596,15 @@ const $ = (selector) => document.querySelector(selector);
       return normalizePhotoCategory(category) === "supervision" ? "监理" : "施工";
     }
 
+    function syncBatchPrintCategoryButtons() {
+      const active = normalizePhotoCategory(state.batchPrintCategory);
+      document.querySelectorAll("[data-batch-category]").forEach((button) => {
+        const isActive = normalizePhotoCategory(button.dataset.batchCategory) === active;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+    }
+
     async function openBatchPrint(category, mode = "print") {
       state.batchPrintCategory = normalizePhotoCategory(category);
       state.batchPrintMode = mode === "pdf" ? "pdf" : "print";
@@ -603,6 +612,7 @@ const $ = (selector) => document.querySelector(selector);
       state.batchSelectedProcesses = new Set();
       state.batchVisibleCodes = [];
       $("#batchPrintTitle").textContent = `${batchLabel(state.batchPrintCategory)}${state.batchPrintMode === "pdf" ? "批量导出PDF" : "批量打印"}`;
+      syncBatchPrintCategoryButtons();
       $("#batchPrintSearch").value = "";
       $("#batchPrintModal").classList.add("open");
       $("#batchPrintModal").setAttribute("aria-hidden", "false");
@@ -5568,9 +5578,19 @@ const $ = (selector) => document.querySelector(selector);
 
     $("#printConstructionBtn").addEventListener("click", () => openUnitPrint("construction"));
     $("#printSupervisionBtn").addEventListener("click", () => openUnitPrint("supervision"));
-    $("#batchPrintQuickBtn")?.addEventListener("click", () => openBatchPrint("construction", "print"));
-    $("#menuPrintConstructionBtn").addEventListener("click", () => openBatchPrint("construction", "print"));
-    $("#menuPrintSupervisionBtn").addEventListener("click", () => openBatchPrint("supervision", "print"));
+    $("#batchPrintQuickBtn")?.addEventListener("click", () => openBatchPrint(state.activePhotoCategory || "construction", "print"));
+    $("#batchPrintCategoryToggle")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-batch-category]");
+      if (!button) return;
+      const category = normalizePhotoCategory(button.dataset.batchCategory);
+      if (category === normalizePhotoCategory(state.batchPrintCategory)) return;
+      state.batchPrintCategory = category;
+      state.batchSelectedUnits = new Set();
+      state.batchSelectedProcesses = new Set();
+      $("#batchPrintTitle").textContent = `${batchLabel(category)}${state.batchPrintMode === "pdf" ? "批量导出PDF" : "批量打印"}`;
+      syncBatchPrintCategoryButtons();
+      renderBatchPrintPicker();
+    });
     $("#exportZipBtn").addEventListener("click", exportSelectedZip);
     $("#deleteUnitBtn").addEventListener("click", () => deleteUnit().catch((error) => showNotice(error.message, true)));
     $("#exportPhotoStatsBtn").addEventListener("click", () => { window.location.href = "/api/export/photo-statistics.xlsx"; });
