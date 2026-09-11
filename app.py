@@ -1085,7 +1085,12 @@ def current_user():
     username = session.get("username")
     if not username:
         return None
-    return {"username": username, "role": "user"}
+    role = str(session.get("role") or "user")
+    return {
+        "username": username,
+        "role": role,
+        "project_ref": str(session.get("project_staff_project_ref") or ""),
+    }
 
 
 def login_required_json():
@@ -1093,6 +1098,27 @@ def login_required_json():
     if not user:
         return None, json_error("请先登录后再操作", 401)
     return user, None
+
+
+@app.before_request
+def _project_staff_write_boundary():
+    """LAN staff may view and upload, never change owner-level project settings."""
+    if session.get("role") != "project_staff":
+        return None
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    if request.path in {"/api/auth/logout", "/api/client-error"}:
+        return None
+    upload_routes = (
+        "/api/upload/",
+        "/api/upload-folder",
+        "/api/upload-match-preview",
+        "/api/upload-match-commit",
+        "/api/upload-auto-match",
+    )
+    if any(request.path.startswith(path) for path in upload_routes):
+        return None
+    return json_error("项目人员入口仅允许查看和上传影像，负责人设置请由项目负责人操作", 403)
 
 
 @app.route("/api/auth/me")
@@ -1169,7 +1195,7 @@ def auth_login():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
-    session.pop("username", None)
+    session.clear()
     return jsonify({"ok": True})
 
 
@@ -5640,6 +5666,44 @@ def _cloud_proxy_response(result):
     return jsonify(payload), max(200, min(599, status))
 
 
+@app.route("/api/cloud/project-staff-entry", methods=["POST"])
+def api_cloud_project_staff_entry():
+    """Use approved mini-program identity for the restricted LAN staff entrance."""
+    payload = request.get_json(silent=True) or {}
+    display_name = str(payload.get("display_name") or "").strip()
+    phone = str(payload.get("phone") or "").strip()
+    if not display_name or len(display_name) > 60:
+        return json_error("请输入审批时填写的真实姓名", 400)
+    if not re.fullmatch(r"1[3-9][0-9]{9}", phone):
+        return json_error("请输入审批时填写的11位手机号", 400)
+    try:
+        project_id, machine_id = _desktop_team_project_context()
+    except ValueError as exc:
+        return json_error(str(exc), 409)
+    result = cloud_client.desktop_verify_project_member(
+        project_id, display_name, phone, machine_id
+    )
+    if not result.get("ok"):
+        return _cloud_proxy_response(result)
+    member = dict(result.get("member") or {})
+    project = dict(result.get("project") or {})
+    session.clear()
+    session["username"] = str(member.get("display_name") or display_name)
+    session["role"] = "project_staff"
+    session["project_staff_project_ref"] = str(
+        project.get("project_ref") or project.get("project_id") or ""
+    )
+    session.permanent = False
+    return jsonify(
+        {
+            "ok": True,
+            "user": current_user(),
+            "project": project,
+            "member": member,
+        }
+    )
+
+
 @app.route("/api/cloud/project-members", methods=["GET"])
 def api_cloud_project_members():
     _user, error = login_required_json()
@@ -5767,6 +5831,8 @@ def api_cloud_login():
     )
     if not result.get("ok"):
         return jsonify({"ok": False, "error": result.get("error", "登录失败")}), 400
+    session.pop("role", None)
+    session.pop("project_staff_project_ref", None)
     session["username"] = str(result.get("account") or payload.get("username") or "").strip()
     session.permanent = bool(payload.get("remember", True))
     result["user"] = {"username": session["username"]}
@@ -5811,6 +5877,8 @@ def api_cloud_register():
     if not login_result.get("ok"):
         return jsonify({"ok": False, "error": "注册已完成，但自动登录失败，请返回登录页重新登录"}), 400
     result = {**registration, **login_result}
+    session.pop("role", None)
+    session.pop("project_staff_project_ref", None)
     session["username"] = str(login_result.get("account") or payload.get("username") or "").strip()
     session.permanent = bool(payload.get("remember", True))
     result["user"] = {"username": session["username"]}
@@ -6470,7 +6538,7 @@ def api_cloud_apply_update():
 def api_cloud_logout():
     result = desktop_mobile_sync_service().account_transition(cloud_client.logout)
     if result.get("ok"):
-        session.pop("username", None)
+        session.clear()
     return jsonify(result)
 
 

@@ -1805,6 +1805,7 @@ const $ = (selector) => document.querySelector(selector);
     function renderAuth() {
       const user = state.auth.user;
       document.body.classList.toggle("is-authed", Boolean(user));
+      document.body.classList.toggle("is-project-staff", user?.role === "project_staff");
       $("#authStatus").textContent = user ? `当前：${user.username}` : "未填写姓名";
       $("#logoutBtn").style.display = user ? "" : "none";
     }
@@ -2093,6 +2094,32 @@ const $ = (selector) => document.querySelector(selector);
       showNotice("已进入软件");
       // 登录成功后重新加载工作台数据并显示加载进度
       await loadBootstrap().catch((error) => showNotice(error.message, true));
+    }
+
+    async function submitProjectStaffEntry() {
+      const nameInput = $("#gateStaffName");
+      const phoneInput = $("#gateStaffPhone");
+      const display_name = nameInput.value.trim();
+      const phone = phoneInput.value.trim();
+      if (!display_name || !/^1[3-9]\d{9}$/.test(phone)) {
+        showNotice("请输入小程序审批时填写的真实姓名和11位手机号。", true);
+        return;
+      }
+      const button = $("#gateStaffEnterBtn");
+      button.disabled = true;
+      try {
+        const data = await apiJson("/api/cloud/project-staff-entry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name, phone })
+        });
+        state.auth.user = data.user || null;
+        renderAuth();
+        showNotice(`已进入项目：${data.project?.project_name || "当前项目"}`);
+        await loadBootstrap().catch((error) => showNotice(error.message, true));
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function norm(text) {
@@ -4803,6 +4830,7 @@ const $ = (selector) => document.querySelector(selector);
       if (event.target.id === "otherImageModal") closeOtherImageModal();
     });
     $("#gateLoginBtn").addEventListener("click", () => submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true)));
+    $("#gateStaffEnterBtn")?.addEventListener("click", () => submitProjectStaffEntry().catch((error) => showNotice(error.message || "项目人员进入失败", true)));
     // 输入即记住账号密码，未登录回填
     ["gateUsername", "gatePassword"].forEach((id) => {
       const el = document.getElementById(id);

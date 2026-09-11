@@ -36,6 +36,22 @@
       outline: none;
     }
     .top-actions .desktop-portal-action:active { transform: translateY(0) scale(.98); }
+    .project-staff-entry {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .project-staff-entry-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .project-staff-entry-head strong { color: var(--text); font-size: 14px; }
+    .project-staff-entry-head span { color: var(--muted); font-size: 12px; text-align: right; }
+    .project-staff-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .project-staff-entry button { width: 100%; min-height: 38px; margin-top: 12px; }
+    .is-project-staff #newEngineeringProjectBtn,
+    .is-project-staff #actionsMenuBtn,
+    .is-project-staff #settingsMenuBtn,
+    .is-project-staff #projectInfoBtn,
+    .is-project-staff #supportBtn,
+    .is-project-staff #officialWebsiteBtn + #miniProgramPortalBtn + .mini-program-popover ~ a.secondary { display: none !important; }
     .mini-program-popover {
       position: absolute;
       top: calc(100% + 12px);
@@ -136,6 +152,7 @@
       .top-actions .desktop-portal-action { padding: 0 10px; }
       .mini-program-popover { position: fixed; top: 66px; right: 12px; }
       .mini-program-popover::before { display: none; }
+      .project-staff-fields { grid-template-columns: 1fr; }
     }
     @media (prefers-reduced-motion: reduce) {
       .top-actions .desktop-portal-action, .mini-program-popover { transition: none; }
@@ -173,6 +190,17 @@
           <button type="button" id="gateLoginBtn">登录</button>
           <a class="secondary auth-register-link" id="gateRegisterBtn" href="https://shuiliyingxiang.cn/member#register" target="_blank" rel="noopener noreferrer" role="button">注册</a>
         </div>
+        <section class="project-staff-entry" aria-labelledby="projectStaffEntryTitle">
+          <div class="project-staff-entry-head">
+            <strong id="projectStaffEntryTitle">项目人员入口</strong>
+            <span>小程序已审批人员直接进入</span>
+          </div>
+          <div class="project-staff-fields">
+            <label>真实姓名<input id="gateStaffName" type="text" placeholder="填写审批时的姓名" autocomplete="name"></label>
+            <label>手机号<input id="gateStaffPhone" type="tel" inputmode="numeric" maxlength="11" placeholder="填写审批时的手机号" autocomplete="tel"></label>
+          </div>
+          <button type="button" id="gateStaffEnterBtn" class="secondary">进入已加入项目</button>
+        </section>
       </div>
       <div id="gateNotice" class="notice"></div>
     </div>

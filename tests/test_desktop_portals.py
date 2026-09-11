@@ -41,6 +41,15 @@ class DesktopPortalContractTest(unittest.TestCase):
         self.assertIn(">微信小程序<", html)
         self.assertIn("object-fit:contain", css)
 
+    def test_lan_login_exposes_a_separate_project_staff_entry(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+        self.assertIn('id="gateStaffName"', html)
+        self.assertIn('id="gateStaffPhone"', html)
+        self.assertIn('id="gateStaffEnterBtn"', html)
+        self.assertIn("项目人员入口", html)
+        self.assertIn('/api/cloud/project-staff-entry', asset)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1001,6 +1001,25 @@ def desktop_project_members(project_id: str, desktop_machine_id: str) -> dict:
     )
 
 
+def desktop_verify_project_member(
+    project_id: str,
+    display_name: str,
+    phone: str,
+    desktop_machine_id: str,
+) -> dict:
+    """Verify an already approved project member for the LAN staff entrance."""
+    return _cloud_api_json(
+        "/api/desktop/v1/project-members/verify",
+        method="POST",
+        payload={
+            "project_id": str(project_id or "").strip(),
+            "display_name": str(display_name or "").strip(),
+            "phone": str(phone or "").strip(),
+            "desktop_machine_id": str(desktop_machine_id or "").strip(),
+        },
+    )
+
+
 def desktop_project_invites(project_id: str, desktop_machine_id: str) -> dict:
     """读取邀请状态；已生成的邀请码明文不会由列表接口再次返回。"""
     return _cloud_api_json(

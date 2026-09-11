@@ -1511,6 +1511,43 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(blocked.status_code, 409)
         blocked_call.assert_not_called()
 
+    def test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password(self):
+        ownership = {
+            "state": "matched",
+            "local_project_id": "owner-local-project",
+            "project_ref": "42:owner-local-project",
+        }
+        verified = {
+            "ok": True,
+            "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
+            "member": {"display_name": "现场人员", "role": "capturer"},
+        }
+        with patch.object(
+            self.desktop, "current_project_cloud_ownership", return_value=ownership
+        ), patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_verify_project_member",
+            return_value=verified,
+        ) as verify:
+            entered = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "现场人员", "phone": "13800138000"},
+            )
+        self.assertEqual(entered.status_code, 200, entered.get_json())
+        self.assertEqual(entered.get_json()["user"]["role"], "project_staff")
+        verify.assert_called_once_with(
+            "owner-local-project", "现场人员", "13800138000", "ARCHIVE-PC"
+        )
+        with self.client.session_transaction() as session:
+            self.assertEqual(session["role"], "project_staff")
+            self.assertEqual(session["project_staff_project_ref"], "42:owner-local-project")
+        blocked = self.client.post("/api/engineering-settings", json={})
+        self.assertEqual(blocked.status_code, 403, blocked.get_json())
+        with self.client.session_transaction() as session:
+            session.clear()
+
 
 if __name__ == "__main__":
     unittest.main()

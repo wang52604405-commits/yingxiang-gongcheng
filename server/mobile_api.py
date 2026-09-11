@@ -5908,6 +5908,49 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.post("/api/desktop/v1/project-members/verify")
+    def desktop_verify_project_member():
+        """Resolve a LAN staff entry only when mobile approval already exists."""
+        current = user()
+        data = json_body()
+        desktop_machine_id = require_desktop_client(
+            current,
+            data.get("desktop_machine_id") or data.get("machine_id"),
+        )
+        display_name, phone = join_contact(data)
+        conn = db.connect()
+        try:
+            project = desktop_project_context(
+                conn, current, data.get("project_id"), desktop_machine_id
+            )
+            row = conn.execute(
+                "SELECT pm.*, a.username, a.display_name FROM project_members pm "
+                "JOIN accounts a ON a.id = pm.member_account_id "
+                "JOIN project_join_requests r ON r.applicant_account_id = pm.member_account_id "
+                "AND r.project_owner_account_id = pm.project_owner_account_id "
+                "AND r.project_id = pm.project_id "
+                "WHERE pm.project_owner_account_id = ? AND pm.project_id = ? "
+                "AND pm.status = 'active' AND r.status = 'approved' "
+                "AND r.display_name = ? AND r.phone = ? "
+                "ORDER BY r.decided_at DESC, r.id DESC LIMIT 1",
+                (current["id"], project["project_id"], display_name, phone),
+            ).fetchone()
+            if not row:
+                raise ApiProblem(
+                    "project_staff_not_approved",
+                    "未找到已审批的项目人员，请先在小程序完成加入申请并等待审批",
+                    403,
+                )
+            return jsonify(
+                {
+                    "ok": True,
+                    "project": _project_payload(project),
+                    "member": member_payload(row, current["id"]),
+                }
+            )
+        finally:
+            conn.close()
+
     @blueprint.get("/api/desktop/v1/project-invites")
     def desktop_project_invites():
         current = user()

@@ -3256,6 +3256,43 @@ class MobileServerContractTest(unittest.TestCase):
         denied = self._wechat_join(invite, identity)
         self.assertEqual(denied.status_code, 404)
 
+    def test_desktop_staff_entry_verifies_only_an_approved_project_member(self):
+        snapshot, invite = self._wechat_join_invite("capturer")
+        joined = self._wechat_join(invite, uuid.uuid4().hex)
+        self.assertEqual(joined.status_code, 200, joined.get_json())
+        request_id = joined.get_json()["join_request"]["id"]
+        self.assertEqual(
+            self.client.post(
+                f"/api/mobile/v1/project-join-requests/{request_id}/approve",
+                json={},
+                headers=self._headers(self.token_a),
+            ).status_code,
+            200,
+        )
+        verified = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": snapshot["project_ref"].split(":", 1)[1],
+                "desktop_machine_id": "MACHINE-A",
+                "display_name": "新成员",
+                "phone": "13800138000",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(verified.status_code, 200, verified.get_json())
+        self.assertEqual(verified.get_json()["member"]["role"], "capturer")
+        denied = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": snapshot["project_ref"].split(":", 1)[1],
+                "desktop_machine_id": "MACHINE-A",
+                "display_name": "新成员",
+                "phone": "13900139000",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(denied.status_code, 403, denied.get_json())
+
     def test_wechat_join_rejects_expired_revoked_inactive_and_invalid_wechat_without_accounts(self):
         from server.mobile_api import ApiProblem
         conn = self.db.connect()
