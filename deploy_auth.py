@@ -46,6 +46,7 @@ EXPECTED_ACCOUNTS = int(_EXPECTED_ACCOUNTS_RAW) if _EXPECTED_ACCOUNTS_RAW else N
 # 要上传的代码文件（不含私钥/敏感文件）
 CODE_FILES = [
     "app.py",
+    "admin_ops.py",
     "config.py",
     "db.py",
     "mailer.py",
