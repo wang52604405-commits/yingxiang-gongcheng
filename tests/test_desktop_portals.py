@@ -73,6 +73,28 @@ class DesktopPortalContractTest(unittest.TestCase):
         # 切到监理后必须重渲染列表，否则选了“监理”却还在打印施工单元。
         self.assertIn("state.batchSelectedUnits = new Set();", asset)
 
+    def test_batch_print_submits_codes_in_real_click_order(self):
+        """批量打印要按真实勾选顺序提交 codes，单元/工序交错也不能被打乱。
+
+        服务端已按 codes 保序出册；这里锁定前端：必须记录真实点选顺序并提交，
+        否则单元与工序会各排各的（先全部单元、再全部工序），与实际勾选不符。
+        """
+        asset = next((ROOT / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+        gz = next((ROOT / "assets").glob("app-A*.js.gz")).read_bytes()
+
+        self.assertIn("batchSelectionOrder", asset)
+        self.assertIn("function syncBatchSelectionOrder()", asset)
+        self.assertIn('params.set("codes", ordered.join(","))', asset)
+        # 5 处调用：单元点选、工序点选、树节点批量选、全选可见、提交前。
+        # 少一处就会出现"后点的那一类挤到前面"。
+        self.assertEqual(asset.count("syncBatchSelectionOrder();"), 5)
+
+        # 预压缩资源必须同步更新：服务端在浏览器带 gzip 时优先返回 .gz，
+        # 只改明文 JS 会让客户继续拿到旧代码。
+        import gzip
+
+        self.assertIn(b"batchSelectionOrder", gzip.decompress(gz))
+
     def test_removed_actions_menu_entries_are_not_bound_again(self):
         """操作菜单里的施工/监理打印已删除；再绑定会抛 TypeError 并中断整个初始化脚本。"""
         html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
