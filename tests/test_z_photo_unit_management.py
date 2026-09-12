@@ -142,6 +142,72 @@ class PhotoUnitManagementTest(unittest.TestCase):
         self.assertEqual(unit_id, "SYDY001")
         self.assertEqual(process_id, "GY001-SYGX001")
 
+    def test_unit_order_mode_applies_to_units_with_processes(self):
+        data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
+        data["project_order"] = 12
+        data["source_fields"]["项目划分顺序"] = "12"
+        self.manager._write_metadata(data["project_code"], data)
+        self.settings.stop()
+        self.settings = patch.object(
+            self.desktop_app,
+            "read_engineering_settings",
+            return_value={
+                "numbering_mode": "unit_order",
+                "unit_order_digits": 3,
+                "numbering_rules": self.desktop_app.DEFAULT_NUMBERING_RULES,
+            },
+        )
+        self.settings.start()
+        unit_id = self.manager._archive_id_for_photo(data, {"process_name": ""}, "construction", 1)
+        process_id = self.manager._archive_id_for_photo(
+            data, {"process_name": "土方开挖"}, "construction", 1
+        )
+        self.assertEqual(unit_id, "012-SY001")
+        self.assertEqual(process_id, "012-GY001-SY001")
+
+    def test_saved_numbering_rule_renumbers_existing_photos_immediately(self):
+        data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
+        data["project_order"] = 12
+        data["source_fields"]["项目划分顺序"] = "12"
+        self.manager._write_metadata(data["project_code"], data)
+        self.add_photo(data["project_code"], "土方开挖")
+        self.assertEqual(self.manager.get_photos(data["project_code"])[0]["id"], "GY001-SYGX001")
+
+        self.settings.stop()
+        self.settings = patch.object(
+            self.desktop_app,
+            "read_engineering_settings",
+            return_value={
+                "numbering_mode": "unit_order",
+                "unit_order_digits": 3,
+                "numbering_rules": self.desktop_app.DEFAULT_NUMBERING_RULES,
+            },
+        )
+        self.settings.start()
+        result = self.manager.renumber_current_engineering_projects()
+        photo = self.manager.get_photos(data["project_code"])[0]
+        self.assertEqual(result["units"], 1)
+        self.assertEqual(result["photos"], 1)
+        self.assertEqual(photo["id"], "012-GY001-SY001")
+        self.assertTrue((self.manager._photos_dir(data["project_code"]) / photo["filename"]).is_file())
+
+    def test_renumber_uses_configured_start_number(self):
+        data = self.make_unit("START-UNIT", "起始号单元")
+        self.add_photo(data["project_code"])
+        rules = {
+            "construction": {**self.desktop_app.DEFAULT_NUMBERING_RULES["construction"], "start": 5},
+            "supervision": dict(self.desktop_app.DEFAULT_NUMBERING_RULES["supervision"]),
+        }
+        self.settings.stop()
+        self.settings = patch.object(
+            self.desktop_app,
+            "read_engineering_settings",
+            return_value={"numbering_mode": "custom", "unit_order_digits": 3, "numbering_rules": rules},
+        )
+        self.settings.start()
+        self.manager.renumber_current_engineering_projects()
+        self.assertTrue(self.manager.get_photos(data["project_code"])[0]["id"].endswith("005"))
+
     def test_rename_process_keeps_order_and_photo_uuid(self):
         self.make_unit("SRC-001", "源单元", ["土方开挖", "模板安装"])
         permanent = self.add_photo("SRC-001", "土方开挖")
@@ -223,6 +289,8 @@ class FrontendPhotoManagementContractTest(unittest.TestCase):
         self.assertNotIn('process_template: supervisionUnitTemplate', js)
         # 工序格式留空时自动在单元格式里插入工序编码
         self.assertIn("function processTemplateFromUnit(", js)
+        self.assertIn("保存后会立即重排本工程已有照片", html)
+        self.assertIn("settingsData.renumbered?.photos", js)
 
 
 if __name__ == "__main__":

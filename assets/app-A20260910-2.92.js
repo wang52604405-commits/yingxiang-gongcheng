@@ -1827,7 +1827,10 @@ const $ = (selector) => document.querySelector(selector);
       renderTree();
       renderOverview();
       closeProjectInfoModal();
-      showNotice("工程设置已保存。");
+      const renumberedPhotos = Number(settingsData.renumbered?.photos || 0);
+      showNotice(renumberedPhotos > 0
+        ? `工程设置已保存，已有 ${renumberedPhotos} 张照片按新规则重新编号。`
+        : "工程设置已保存，当前照片编号已按新规则检查。");
     }
 
     async function deleteCurrentEngineeringProject() {

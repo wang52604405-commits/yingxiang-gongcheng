@@ -1052,6 +1052,45 @@ def numbering_start(category):
         return 1
 
 
+def numbering_settings_signature(settings):
+    """只对会改变照片编号的设置生成稳定签名。"""
+    settings = settings if isinstance(settings, dict) else {}
+    payload = {
+        "numbering_mode": settings.get("numbering_mode") or "custom",
+        "unit_order_digits": settings.get("unit_order_digits") or 3,
+        "numbering_rules": settings.get("numbering_rules") or DEFAULT_NUMBERING_RULES,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def apply_current_engineering_numbering(force=False):
+    """把当前工程已保存的编号规则应用到所有已有照片。"""
+    settings = read_engineering_settings()
+    signature = numbering_settings_signature(settings)
+    applied = str(settings.get("numbering_applied_signature") or "")
+    # 旧版本已经保存为“按项目划分顺序”但没有实际重排的工程，在升级后
+    # 首次进入时自动补应用；自定义模式只在用户明确保存时重排。
+    should_apply = bool(force) or (
+        settings.get("numbering_mode") == "unit_order" and applied != signature
+    )
+    result = {"units": 0, "photos": 0, "changed": False}
+    if should_apply:
+        result = manager.renumber_current_engineering_projects()
+        result["changed"] = True
+    if should_apply or applied != signature:
+        data = read_engineering_projects()
+        project = current_engineering_project(data)
+        stored = project.get("engineering_settings")
+        stored = dict(stored) if isinstance(stored, dict) else dict(settings)
+        stored["numbering_applied_signature"] = signature
+        project["engineering_settings"] = stored
+        project["settings_updated_at"] = now_text()
+        write_engineering_projects(data)
+    return result
+
+
 def format_numbering_id(project_code, category, sequence):
     category = category if category in PHOTO_CATEGORIES else "construction"
     rule = read_numbering_rules().get(category) or DEFAULT_NUMBERING_RULES[category]
@@ -1846,7 +1885,8 @@ class AlbumManager:
         processes = data.get("processes") or []
         process_name = str(photo.get("process_name") or "").strip()
         process_code = self._process_code(data, process_name) if process_name else ""
-        if processes:
+        settings = read_engineering_settings()
+        if processes and settings.get("numbering_mode") != "unit_order":
             # 两级编号仍必须以单元工程编码开头；否则不同单元会出现相同的
             # SYDY001 / SYGX001，既无法辨认来源，也容易在打印、同步时混淆。
             # 单元级：<单元编码>-SYDY001；工序级：<单元编码>-GY001-SYGX001。
@@ -1891,7 +1931,6 @@ class AlbumManager:
             # 单元级 SYDY001 / JYDY001；工序级 GY001-SYGX001 / GY001-JYGX001。
             process_segment = f"{safe_project_code(process_code)}-" if process_code else ""
             return f"{process_segment}{cat}{'GX' if process_code else 'DY'}{seq}"
-        settings = read_engineering_settings()
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
         try:
@@ -1902,7 +1941,7 @@ class AlbumManager:
         process_code = str((photo or {}).get("process_code") or "").strip() or self._process_code(data, process_name)
         unit_order_digits = int(settings.get("unit_order_digits") or 3)
         unit_order = f"{self._project_unit_order(data):0{unit_order_digits}d}"
-        use_process = False
+        use_process = bool(process_name)
         if settings.get("numbering_mode") == "unit_order":
             if use_process:
                 template = rule.get("process_template") or "{unit_order}-{process_code}-{category}{seq}"
@@ -1960,13 +1999,14 @@ class AlbumManager:
         ]
         staged = []
         counters = {}
+        first_sequence = numbering_start(category)
         for photo in matching:
             process_name = str(photo.get("process_name") or "").strip()
             # 统一修正历史残留的 process_code：空工序名就是单元照片。
             photo["process_name"] = process_name
             photo["process_code"] = self._process_code(data, process_name) if process_name else ""
             scope = self._sequence_scope(data, photo, category)
-            counters[scope] = counters.get(scope, 0) + 1
+            counters[scope] = counters.get(scope, first_sequence - 1) + 1
             index = counters[scope]
             old_filename = photo.get("filename", "")
             old_path = photos_dir / old_filename
@@ -2813,6 +2853,34 @@ class AlbumManager:
                 self._renumber_category(project_code, data, category)
             self._write_metadata(data["project_code"], data)
             self.invalidate_projects_cache()
+
+    def renumber_current_engineering_projects(self):
+        """保存编号规则后，立即重排当前工程全部单元的已有照片。"""
+        units = 0
+        changed_photos = 0
+        project_codes = [
+            str(item.get("project_code") or "").strip()
+            for item in self.list_projects()
+            if str(item.get("project_code") or "").strip()
+        ]
+        for project_code in project_codes:
+            with self._project_write_lock(project_code):
+                data = self.get_project(project_code)
+                before = {
+                    str(photo.get("photo_uuid") or id(photo)): (
+                        str(photo.get("id") or ""), str(photo.get("filename") or "")
+                    )
+                    for photo in data.get("photos", [])
+                }
+                self._renumber_after_change(project_code, data)
+                after = self.get_project(project_code)
+                for photo in after.get("photos", []):
+                    key = str(photo.get("photo_uuid") or id(photo))
+                    current = (str(photo.get("id") or ""), str(photo.get("filename") or ""))
+                    if before.get(key) != current:
+                        changed_photos += 1
+                units += 1
+        return {"units": units, "photos": changed_photos}
 
     def classify(self, prompt):
         text = str(prompt or "").strip().lower()
@@ -6680,8 +6748,13 @@ def api_save_engineering_settings():
         return error
     payload = request.get_json(silent=True) or {}
     try:
-        settings = write_engineering_settings(payload.get("settings") or payload)
-        return jsonify({"ok": True, "settings": settings})
+        requested = payload.get("settings") or payload
+        settings = write_engineering_settings(requested)
+        numbering_requested = isinstance(requested, dict) and any(
+            key in requested for key in ("numbering_mode", "unit_order_digits", "numbering_rules")
+        )
+        renumbered = apply_current_engineering_numbering(force=numbering_requested)
+        return jsonify({"ok": True, "settings": read_engineering_settings(), "renumbered": renumbered})
     except ValueError as exc:
         return json_error(str(exc), 400)
 
@@ -7105,6 +7178,7 @@ def api_bootstrap():
             "dashboard": {}, "hierarchy": [], "optimization_status": _public_photo_optimization_status(),
             "app_version": cloud_client.APP_VERSION,
         })
+    apply_current_engineering_numbering(force=False)
     engineering_data = read_engineering_projects()
     snapshot = manager.hierarchy_snapshot()
     response = jsonify({
