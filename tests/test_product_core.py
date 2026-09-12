@@ -431,11 +431,11 @@ class DesktopSecurityContractTest(unittest.TestCase):
         photos = repaired.get_json()["photos"]
         self.assertEqual(
             {photo["id"] for photo in photos if photo["category"] == "construction"},
-            {"SYDY001"},
+            {f"{project_code}-SY001"},
         )
         self.assertEqual(
             {photo["id"] for photo in photos if photo["category"] == "supervision"},
-            {"JYDY001"},
+            {f"{project_code}-JY001"},
         )
         self.assertTrue(all(not photo["process_code"] for photo in photos))
 
@@ -446,7 +446,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
             process_name="混凝土浇筑",
             process_code="GY999",  # 调用方给错也必须按工序名称纠正。
         )[0]
-        self.assertEqual(actual_process["id"], "GY001-SYGX001")
+        self.assertEqual(actual_process["id"], f"{project_code}-GY001-SY001")
         self.assertEqual(actual_process["process_code"], "GY001")
 
     def test_delete_photo_enqueues_explicit_uuid_without_rolling_back_local_delete(self):

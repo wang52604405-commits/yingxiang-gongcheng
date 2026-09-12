@@ -190,6 +190,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     ],
     "numbering_rules": DEFAULT_NUMBERING_RULES,
 }
+NUMBERING_POLICY_VERSION = 2
 EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
 LEGACY_EXCEL_EXTENSIONS = {".xls"}
 PROJECT_IMPORT_EXTENSIONS = EXCEL_EXTENSIONS | {".csv"}
@@ -1056,6 +1057,7 @@ def numbering_settings_signature(settings):
     """只对会改变照片编号的设置生成稳定签名。"""
     settings = settings if isinstance(settings, dict) else {}
     payload = {
+        "policy_version": NUMBERING_POLICY_VERSION,
         "numbering_mode": settings.get("numbering_mode") or "custom",
         "unit_order_digits": settings.get("unit_order_digits") or 3,
         "numbering_rules": settings.get("numbering_rules") or DEFAULT_NUMBERING_RULES,
@@ -1070,11 +1072,9 @@ def apply_current_engineering_numbering(force=False):
     settings = read_engineering_settings()
     signature = numbering_settings_signature(settings)
     applied = str(settings.get("numbering_applied_signature") or "")
-    # 旧版本已经保存为“按项目划分顺序”但没有实际重排的工程，在升级后
-    # 首次进入时自动补应用；自定义模式只在用户明确保存时重排。
-    should_apply = bool(force) or (
-        settings.get("numbering_mode") == "unit_order" and applied != signature
-    )
+    # 编号策略升级或用户修改规则后都立即重排。策略版本进入签名，确保
+    # 旧的 SYDY/SYGX 短编号在升级后一次性迁移到项目划分编码。
+    should_apply = bool(force) or applied != signature
     result = {"units": 0, "photos": 0, "changed": False}
     if should_apply:
         result = manager.renumber_current_engineering_projects()
@@ -1882,55 +1882,9 @@ class AlbumManager:
     def _archive_id_for_photo(self, data, photo, category, sequence):
         category = self._normalize_category(category)
         photo = photo or {}
-        processes = data.get("processes") or []
         process_name = str(photo.get("process_name") or "").strip()
         process_code = self._process_code(data, process_name) if process_name else ""
         settings = read_engineering_settings()
-        if processes and settings.get("numbering_mode") != "unit_order":
-            # 两级编号仍必须以单元工程编码开头；否则不同单元会出现相同的
-            # SYDY001 / SYGX001，既无法辨认来源，也容易在打印、同步时混淆。
-            # 单元级：<单元编码>-SYDY001；工序级：<单元编码>-GY001-SYGX001。
-            settings = read_engineering_settings()
-            rules = settings.get("numbering_rules") or read_numbering_rules()
-            rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
-            try:
-                digits = max(1, min(8, int(rule.get("digits", 3))))
-            except (TypeError, ValueError):
-                digits = 3
-            seq = f"{int(sequence):0{digits}d}"
-            cat = "JY" if category == "supervision" else "SY"
-            # 注意：两级工程的默认编号是刻意的短格式（单元归属由父目录唯一确定，
-            # 不重复携带编码）。所以这里只在操作人"显式自定义过模板"时才改用模板，
-            # 否则保持 SYDY001 / GY001-SYGX001，避免所有老工程编号外观突变。
-            defaults = DEFAULT_NUMBERING_RULES[category]
-            unit_template = str(rule.get("unit_template") or rule.get("template") or "").strip()
-            process_template = str(rule.get("process_template") or "").strip()
-            unit_customized = bool(unit_template) and unit_template != defaults["unit_template"]
-            process_customized = bool(process_template) and process_template != defaults["process_template"]
-            if (process_customized if process_code else unit_customized):
-                settings_for_code = read_engineering_settings()
-                try:
-                    unit_order_digits = max(1, min(8, int(settings_for_code.get("unit_order_digits") or 3)))
-                except (TypeError, ValueError):
-                    unit_order_digits = 3
-                code_value = data.get("display_project_code") or data.get("project_code")
-                selected = process_template if process_code else unit_template
-                try:
-                    return str(selected).format(
-                        code=safe_project_code(code_value),
-                        unit_code=safe_project_code(code_value),
-                        unit_order=f"{self._project_unit_order(data):0{unit_order_digits}d}",
-                        process_code=process_code,
-                        process_order=process_code,
-                        category=cat,
-                        seq=seq,
-                    )
-                except (KeyError, IndexError, ValueError):
-                    pass
-            # 默认（未自定义）两级编号：
-            # 单元级 SYDY001 / JYDY001；工序级 GY001-SYGX001 / GY001-JYGX001。
-            process_segment = f"{safe_project_code(process_code)}-" if process_code else ""
-            return f"{process_segment}{cat}{'GX' if process_code else 'DY'}{seq}"
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
         try:
@@ -2195,10 +2149,10 @@ class AlbumManager:
         return items
 
     def repair_legacy_process_photo_scopes(self, project_code):
-        """修复两类历史两级编号问题。
+        """修复历史带工序单元编号问题。
 
         - 没有工序名却带 GY 编码的照片，属于单元照片，不能错标为工序照片；
-        - 旧版两级编号漏掉单元工程编码，例如 SYDY001 / SYGX001。
+        - 旧版短编号 SYDY001 / GY001-SYGX001 补上项目划分单元编码。
 
         修复仅重编号和安全改名，不删除照片、不改变题名或拍摄信息。
         """
@@ -2221,12 +2175,10 @@ class AlbumManager:
                     if process_code != expected_code:
                         photo["process_code"] = expected_code
                         needs_repair = True
-                # 新版以短编号为标准。仅识别旧版自动生成、且带当前单元工程
-                # 编码前缀的编号；用户自定义编号不参与迁移。
-                legacy_unit_prefix = safe_project_code(
-                    data.get("display_project_code") or data.get("project_code")
-                ).upper()
-                if has_processes and legacy_unit_prefix and archive_id.startswith(legacy_unit_prefix + "-"):
+                # 只迁移软件历史自动生成的短编号，用户自定义格式不参与。
+                if has_processes and re.fullmatch(
+                    r"(?:(?:SY|JY)DY\d+|GY\d+-(?:SY|JY)GX\d+)", archive_id
+                ):
                     needs_repair = True
             if not needs_repair:
                 return 0

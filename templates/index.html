@@ -986,7 +986,7 @@
           <section class="project-settings-panel" data-project-settings-panel="numbering" data-project-settings-group="upload">
             <h4>编号规则</h4>
             <div class="project-settings-grid">
-              <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">按单元工程编码（默认）</option><option value="unit_order">按项目划分顺序号（001、002…）</option></select></label>
+              <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">按项目划分单元编码（默认）</option><option value="unit_order">按项目划分顺序号（001、002…）</option></select></label>
               <label>单元排序编号位数<input id="settingsUnitOrderDigitsInput" type="number" min="1" max="8" step="1"></label>
               <label class="wide">施工单元编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
               <label class="wide">施工工序编号格式<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
@@ -997,7 +997,7 @@
               <label>监理起始号<input id="settingsSupervisionStart" type="number" min="1" step="1"></label>
               <label>监理流水位数<input id="settingsSupervisionDigits" type="number" min="1" max="8" step="1"></label>
             </div>
-            <p class="import-hint">“按单元工程编码”使用导入表里的单元编码；“按项目划分顺序号”使用 001、002…作为单元前缀。可用中文占位：单元编号、单元顺序号、工序编码、流水号、类别。保存后会立即重排本工程已有照片。</p>
+            <p class="import-hint">软件默认使用导入表里的单元工程编码，单元照片和工序照片都以该编码开头；“按项目划分顺序号”才使用 001、002…作为前缀。保存后会立即重排本工程已有照片。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="matching" data-project-settings-group="upload">
             <h4>导入匹配</h4>

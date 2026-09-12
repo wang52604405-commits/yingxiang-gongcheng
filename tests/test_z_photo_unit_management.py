@@ -82,14 +82,12 @@ class PhotoUnitManagementTest(unittest.TestCase):
         self.manager._renumber_after_change(code, data)
         return permanent
 
-    def test_two_level_numbering_drops_unit_prefix(self):
+    def test_default_numbering_always_uses_project_division_unit_code(self):
         data = self.make_unit("YNLQ-2024-001", "一号单元", ["土方开挖"])
         unit_id = self.manager._archive_id_for_photo(data, {"process_name": ""}, "construction", 1)
         process_id = self.manager._archive_id_for_photo(data, {"process_name": "土方开挖"}, "construction", 1)
-        self.assertEqual(unit_id, "SYDY001")
-        self.assertEqual(process_id, "GY001-SYGX001")
-        self.assertNotIn("YNLQ-2024", unit_id)
-        self.assertNotIn("YNLQ-2024", process_id)
+        self.assertEqual(unit_id, "YNLQ-2024-001-SY001")
+        self.assertEqual(process_id, "YNLQ-2024-001-GY001-SY001")
 
     def test_custom_numbering_rule_applies_when_project_has_processes(self):
         """定义工序的工程也必须跟随“编号规则”里的模板。
@@ -132,15 +130,15 @@ class PhotoUnitManagementTest(unittest.TestCase):
         self.assertNotIn("SYDY", unit_id)
         self.assertNotIn("SYGX", process_id)
 
-    def test_default_rule_still_uses_legacy_two_level_format(self):
-        """未自定义模板时，两级编号必须保持原有的短格式，避免老工程编号突变。"""
+    def test_default_rule_never_falls_back_to_legacy_short_format(self):
+        """带工序单元也必须默认携带项目划分编码。"""
         data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
         unit_id = self.manager._archive_id_for_photo(data, {"process_name": ""}, "construction", 1)
         process_id = self.manager._archive_id_for_photo(
             data, {"process_name": "土方开挖"}, "construction", 1
         )
-        self.assertEqual(unit_id, "SYDY001")
-        self.assertEqual(process_id, "GY001-SYGX001")
+        self.assertEqual(unit_id, "YNLQ-2024-SG-1-01-001-SY001")
+        self.assertEqual(process_id, "YNLQ-2024-SG-1-01-001-GY001-SY001")
 
     def test_unit_order_mode_applies_to_units_with_processes(self):
         data = self.make_unit("YNLQ-2024-SG-1-01-001", "一号单元", ["土方开挖"])
@@ -171,7 +169,10 @@ class PhotoUnitManagementTest(unittest.TestCase):
         data["source_fields"]["项目划分顺序"] = "12"
         self.manager._write_metadata(data["project_code"], data)
         self.add_photo(data["project_code"], "土方开挖")
-        self.assertEqual(self.manager.get_photos(data["project_code"])[0]["id"], "GY001-SYGX001")
+        self.assertEqual(
+            self.manager.get_photos(data["project_code"])[0]["id"],
+            "YNLQ-2024-SG-1-01-001-GY001-SY001",
+        )
 
         self.settings.stop()
         self.settings = patch.object(
@@ -239,7 +240,7 @@ class PhotoUnitManagementTest(unittest.TestCase):
         self.assertEqual(target_photos[0]["photo_uuid"], permanent)
         self.assertEqual(target_photos[0]["process_name"], "验收")
         self.assertEqual(target_photos[0]["process_code"], "GY001")
-        self.assertEqual(target_photos[0]["id"], "GY001-SYGX001")
+        self.assertEqual(target_photos[0]["id"], "YNLQ-2024-DST-GY001-SY001")
         self.assertEqual(moved["photo_uuid"], permanent)
         self.assertTrue((self.manager._photos_dir("YNLQ-2024-DST") / target_photos[0]["filename"]).is_file())
 
@@ -290,6 +291,7 @@ class FrontendPhotoManagementContractTest(unittest.TestCase):
         # 工序格式留空时自动在单元格式里插入工序编码
         self.assertIn("function processTemplateFromUnit(", js)
         self.assertIn("保存后会立即重排本工程已有照片", html)
+        self.assertIn("默认使用导入表里的单元工程编码", html)
         self.assertIn("settingsData.renumbered?.photos", js)
 
 
