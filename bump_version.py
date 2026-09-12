@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """版本号递增脚本：自动生成下一个版本号，并同步到三处代码。
 
-版本格式：A{8位日期}-{主}.{子}，如 A20260808-2.14。
-递增规则：子版本 +1；日期取当天（跨天自动用新日期）。
+版本格式：A{8位日期}-{主}.{子}，如 A20260912-3.0。
+递增规则：显示版本连续进位；2.9 后为 3.0，跨天也不重置。
 
 用法：
   python bump_version.py           # 生成并写入，打印新版本号
@@ -35,6 +35,7 @@ SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_VERSION_JSON = "/var/www/updates/version.json"
 
 VER_RE = re.compile(r"A(\d{8})-(\d+)\.(\d+)")
+MIN_DISPLAY_VERSION = (3, 0)
 
 
 def read_remote_version() -> str:
@@ -67,13 +68,21 @@ def read_current_version() -> str:
 
 
 def next_version(current: str) -> str:
-    """A{今天}-{主}.{子+1}。"""
+    """日期更新为今天，显示版本按一位小版本连续进位。"""
     m = VER_RE.fullmatch(current)
     if not m:
         raise SystemExit(f"非法版本号: {current!r}")
-    date_part, major, minor = m.groups()
+    _date_part, major, minor = m.groups()
     today = datetime.date.today().strftime("%Y%m%d")
-    return f"A{today}-{major}.{int(minor) + 1}"
+    major_value = int(major)
+    minor_value = int(minor)
+    if minor_value >= 9:
+        major_value, minor_value = major_value + 1, 0
+    else:
+        minor_value += 1
+    if (major_value, minor_value) < MIN_DISPLAY_VERSION:
+        major_value, minor_value = MIN_DISPLAY_VERSION
+    return f"A{today}-{major_value}.{minor_value}"
 
 
 def _replace_version(text: str, pattern: str, new_ver: str, label: str) -> str:

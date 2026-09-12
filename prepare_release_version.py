@@ -17,9 +17,8 @@ import json
 import os
 import re
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 UPDATE_URL = os.environ.get(
@@ -27,6 +26,8 @@ UPDATE_URL = os.environ.get(
 )
 VERSION_RE = re.compile(r"A(\d{8})-(\d+)\.(\d+)")
 ASSET_RE = re.compile(r"app-(A\d{8}-\d+\.\d+)\.(js|css)")
+MIN_DISPLAY_VERSION = (3, 0)
+CST = timezone(timedelta(hours=8))
 
 
 def _read_remote_version() -> str:
@@ -63,28 +64,31 @@ def _next_version(remote: str, source: str) -> str:
             raise SystemExit(f"指定发布版本 {forced} 不高于线上版本 {remote}")
         return forced
 
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    today = datetime.now(CST).strftime("%Y%m%d")
     remote_match = VERSION_RE.fullmatch(remote or "")
     source_match = VERSION_RE.fullmatch(source or "")
-    major = max(
-        int(remote_match.group(2)) if remote_match else 0,
-        int(source_match.group(2)) if source_match else 0,
-        2,
-    )
-
-    if remote_match and remote_match.group(1) == today:
-        minor = int(remote_match.group(3)) + 1
-    elif source_match and source_match.group(1) == today and (
-        not remote_match or _version_key(source) > _version_key(remote)
-    ):
-        minor = int(source_match.group(3))
+    base = remote_match or source_match
+    major = int(base.group(2)) if base else 2
+    minor = int(base.group(3)) if base else 0
+    # 用户看到的是连续的一位小版本：2.9 的下一版必须是 3.0。
+    # 日期只记录构建日，不能在跨天时把显示版本重置回 2.1。
+    if minor >= 9:
+        major, minor = major + 1, 0
     else:
-        minor = 1
+        minor += 1
+    if (major, minor) < MIN_DISPLAY_VERSION:
+        major, minor = MIN_DISPLAY_VERSION
 
     candidate = f"A{today}-{major}.{minor}"
     if remote and _version_key(candidate) <= _version_key(remote):
         # Handles a future-dated or unexpectedly advanced remote manifest safely.
-        candidate = f"A{remote_match.group(1)}-{int(remote_match.group(2))}.{int(remote_match.group(3)) + 1}"
+        remote_major = int(remote_match.group(2))
+        remote_minor = int(remote_match.group(3))
+        if remote_minor >= 9:
+            remote_major, remote_minor = remote_major + 1, 0
+        else:
+            remote_minor += 1
+        candidate = f"A{remote_match.group(1)}-{remote_major}.{remote_minor}"
     return candidate
 
 
