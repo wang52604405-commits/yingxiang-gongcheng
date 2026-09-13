@@ -1,0 +1,3 @@
+scope=project-admin-full-desktop-permissions
+source_commit=61b1a3bfacebcae8df231cd90dbdb919f3518a52
+requested_release=desktop-update-channel
