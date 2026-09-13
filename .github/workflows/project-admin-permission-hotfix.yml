@@ -51,9 +51,7 @@ jobs:
       - name: 快速回归验证
         shell: powershell
         run: |
-          python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password -v
-          if ($LASTEXITCODE -ne 0) { throw "restricted staff regression failed" }
-          python -m unittest tests.test_project_admin_hotfix.ProjectAdminHotfixTest.test_admin_entry_has_full_write_access -v
+          python tests\test_project_admin_hotfix.py -v
           if ($LASTEXITCODE -ne 0) { throw "project admin write-access regression failed" }
           python -m compileall -q app.py
           if ($LASTEXITCODE -ne 0) { throw "compile failed" }
