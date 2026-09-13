@@ -1,0 +1,3 @@
+trigger=2026-09-13T16:55:00+08:00
+release=A20260913-3.2
+mode=server-update-channel-only
