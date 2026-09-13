@@ -1,0 +1,4 @@
+trigger=2026-09-13T23:35:00+08:00
+policy=free-batch-print-disabled
+free_batch_print_enabled=false
+scope=backend-controlled
