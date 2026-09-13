@@ -36,6 +36,7 @@ jobs:
           $k = Join-Path $d "server_key"
           [IO.File]::WriteAllBytes($s,[Convert]::FromBase64String($env:SIGN_KEY_B64))
           [IO.File]::WriteAllBytes($k,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $d /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
           Add-Content $env:GITHUB_ENV "ALBUM_SIGN_KEY=$s"
           Add-Content $env:GITHUB_ENV "ALBUM_SSH_KEY=$k"
           Add-Content $env:GITHUB_ENV "ALBUM_CREDENTIAL_DIR=$d"
