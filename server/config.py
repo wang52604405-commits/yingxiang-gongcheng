@@ -153,6 +153,7 @@ DEFAULT_PRODUCT_CONFIG = {
     "mini_program": {"free_upload_limit": 500},
     "free": {
         "photo_limit": 300,
+        "batch_print_enabled": False,
         "watermark_enabled": False,
         "upload_expiry_enabled": False,
     },

@@ -607,6 +607,16 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function openBatchPrint(category, mode = "print") {
+      const [productData, licenseData] = await Promise.all([
+        apiJson("/api/cloud/product-config").catch(() => ({ product: {} })),
+        apiJson("/api/license/status").catch(() => ({ license: {} }))
+      ]);
+      const freePolicy = productData?.product?.free || {};
+      const license = licenseData?.license || {};
+      if (!license.ok && freePolicy.batch_print_enabled !== true) {
+        showNotice("免费版不支持批量打印，请进入单元后选择“打印当前”。", true);
+        return;
+      }
       state.batchPrintCategory = normalizePhotoCategory(category);
       state.batchPrintMode = mode === "pdf" ? "pdf" : "print";
       state.batchSelectedUnits = new Set();

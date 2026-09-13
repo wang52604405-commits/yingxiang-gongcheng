@@ -132,6 +132,7 @@ def _normalized_product_config(value=None) -> dict:
     mini_program["free_upload_limit"] = max(0, min(100000, parsed_limit))
     free = product["free"]
     free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))
+    free["batch_print_enabled"] = bool(free.get("batch_print_enabled", False))
     # 免费版 300 张为完整可用额度，不叠加产品水印。
     free["watermark_enabled"] = False
     free["upload_expiry_enabled"] = bool(free.get("upload_expiry_enabled", False))

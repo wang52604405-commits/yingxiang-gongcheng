@@ -4451,6 +4451,16 @@ def expired_license_response(action):
     return None
 
 
+def batch_print_permission_response():
+    """批量打印由后台产品策略控制；会员始终允许，免费版默认禁止。"""
+    if is_member_user():
+        return None
+    free_cfg = cloud_client.product_config(force=True).get("free", {})
+    if not bool(free_cfg.get("batch_print_enabled", False)):
+        return "免费版不支持批量打印，请进入单元后选择“打印当前”。升级会员可使用批量打印。", 403
+    return None
+
+
 def validate_upload_files(files):
     valid = []
     invalid = []
@@ -5845,7 +5855,7 @@ def api_cloud_wechat_binding():
 
 @app.route("/api/cloud/product-config")
 def api_cloud_product_config():
-    return jsonify({"ok": True, "product": cloud_client.product_config()})
+    return jsonify({"ok": True, "product": cloud_client.product_config(force=True)})
 
 
 @app.route("/api/client-error", methods=["POST"])
@@ -8255,6 +8265,9 @@ def print_album_category_batch(category):
         locked = expired_license_response("打印")
         if locked:
             return locked
+        restricted = batch_print_permission_response()
+        if restricted:
+            return restricted
         category = manager._normalize_category(category)
         raw_codes = request.args.get("codes", "")
         codes = [code.strip() for code in raw_codes.split(",") if code.strip()]
