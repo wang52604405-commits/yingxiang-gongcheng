@@ -7,15 +7,20 @@ permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, windows, x64]
     timeout-minutes: 5
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
     steps:
       - name: 检查 version.json 和安装包
-        shell: bash
+        shell: powershell
         run: |
-          set -euo pipefail
-          echo '=== version.json ==='
-          curl -fsSL --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/version.json
-          echo
-          echo '=== installer HEAD ==='
-          curl -fsSI --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/album-installer.exe | sed -n '1,20p'
+          Write-Host '=== version.json ==='
+          curl.exe -fsSL --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/version.json
+          if ($LASTEXITCODE -ne 0) { throw "version.json check failed" }
+          Write-Host "`n=== installer HEAD ==="
+          curl.exe -fsSI --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/album-installer.exe
+          if ($LASTEXITCODE -ne 0) { throw "installer HEAD failed" }
