@@ -1,0 +1,51 @@
+name: 直接发布桌面端安装包
+on:
+  push:
+    branches: [main]
+    paths: [".diag/direct-desktop-release-trigger.txt"]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+      ALBUM_RELEASE_VERSION: A20260913-3.2
+      UPDATE_NOTE: "修复项目管理员桌面端完整操作权限"
+    steps:
+      - uses: actions/checkout@v7
+      - name: 准备版本
+        shell: powershell
+        run: python prepare_release_version.py
+      - name: 准备凭据
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "missing secrets" }
+          $d = Join-Path $env:RUNNER_TEMP "album-direct-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $d -Force | Out-Null
+          $s = Join-Path $d "release_guard_private_key.pem"
+          $k = Join-Path $d "server_key"
+          [IO.File]::WriteAllBytes($s,[Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($k,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          Add-Content $env:GITHUB_ENV "ALBUM_SIGN_KEY=$s"
+          Add-Content $env:GITHUB_ENV "ALBUM_SSH_KEY=$k"
+          Add-Content $env:GITHUB_ENV "ALBUM_CREDENTIAL_DIR=$d"
+      - name: 发布到服务器更新通道
+        shell: powershell
+        run: python publish_update.py
+      - name: 验证远端版本
+        shell: powershell
+        run: python -c "import json,urllib.request; d=json.loads(urllib.request.urlopen('https://api.shuiliyingxiang.cn/update/version.json',timeout=15).read().decode()); print(d); assert d.get('version')=='A20260913-3.2'"
+      - name: 清理凭据
+        if: always()
+        shell: powershell
+        run: if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path $env:ALBUM_CREDENTIAL_DIR)) { Remove-Item $env:ALBUM_CREDENTIAL_DIR -Recurse -Force }
