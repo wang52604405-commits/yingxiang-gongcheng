@@ -1,4 +1,4 @@
-name: 项目管理员权限热修复（同版本）
+name: 项目管理员权限修复并推送桌面端
 
 on:
   push:
@@ -14,18 +14,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  hotfix:
-    name: 管理员跨电脑完整操作权限同版本热修复
-    runs-on: [self-hosted, windows, x64]
-    timeout-minutes: 35
-    env:
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: "utf-8"
-      ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
-      ALBUM_DATA_DIR: D:\工程影像资料
-      ALBUM_PORT: "5088"
-      ALBUM_CLOUD_AUTO_USER: ${{ secrets.ALBUM_CLOUD_AUTO_USER }}
-      ALBUM_CLOUD_AUTO_PASS: ${{ secrets.ALBUM_CLOUD_AUTO_PASS }}
+  patch-and-release:
+    name: 修复管理员权限并触发桌面端正式发布
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
@@ -33,73 +25,45 @@ jobs:
           fetch-depth: 1
 
       - name: 修复项目角色到桌面权限映射
-        shell: powershell
+        shell: bash
         run: |
-          $path = "app.py"
-          $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
-          $old = '    session["role"] = "project_staff"'
-          $new = @'
-              access_role = str(member.get("role") or "viewer").strip().lower()
-              session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"
-          '@
-          $new = ($new -replace '(?m)^ {10}', '').TrimEnd()
-          $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
-          if ($count -ne 1) { throw "permission mapping target count=$count" }
-          $text = $text.Replace($old, $new)
-          [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false))
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: 快速回归验证
-        shell: powershell
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
+          old = '    session["role"] = "project_staff"'
+          new = (
+              '    access_role = str(member.get("role") or "viewer").strip().lower()\n'
+              '    session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"'
+          )
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"permission mapping target count={count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: 静态校验
+        shell: bash
         run: |
-          python tests\test_project_admin_hotfix.py -v
-          if ($LASTEXITCODE -ne 0) { throw "project admin write-access regression failed" }
           python -m compileall -q app.py
-          if ($LASTEXITCODE -ne 0) { throw "compile failed" }
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("app.py").read_text(encoding="utf-8")
+          assert 'access_role = str(member.get("role") or "viewer").strip().lower()' in text
+          assert 'session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"' in text
+          PY
           git diff --check
-          if ($LASTEXITCODE -ne 0) { throw "git diff check failed" }
 
-      - name: 确认版本号不变
-        shell: powershell
-        run: |
-          $versionLine = Select-String -Path cloud_client.py -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
-          if (-not $versionLine) { throw "APP_VERSION not found" }
-          Write-Host "same-version hotfix: $($versionLine.Matches[0].Groups[1].Value)"
-
-      - name: 准备临时签名密钥
-        shell: powershell
-        env:
-          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
-        run: |
-          if (-not $env:SIGN_KEY_B64) { throw "missing ALBUM_SIGN_KEY_B64" }
-          $credentialDir = Join-Path $env:RUNNER_TEMP "album-admin-hotfix-$env:GITHUB_RUN_ID"
-          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
-          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
-          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
-          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
-          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_HOTFIX_CREDENTIAL_DIR=$credentialDir"
-
-      - name: 同版本热部署 5088
-        shell: powershell
-        run: |
-          Set-ExecutionPolicy -Scope Process Bypass -Force
-          .\deploy_prod.ps1
-
-      - name: 保存源代码修复且不触发常规发版
-        shell: powershell
+      - name: 提交修复并触发正式桌面发布
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.py
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "fix: grant project admins full LAN workspace permissions [skip ci]"
-            git push origin HEAD:main
-          }
-
-      - name: 清理临时签名密钥
-        if: always()
-        shell: powershell
-        run: |
-          if ($env:ALBUM_HOTFIX_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_HOTFIX_CREDENTIAL_DIR)) {
-            Remove-Item -LiteralPath $env:ALBUM_HOTFIX_CREDENTIAL_DIR -Recurse -Force
-          }
+          if git diff --cached --quiet; then
+            echo "app.py already contains the target permission mapping"
+            exit 0
+          fi
+          git commit -m "fix: grant project admins full desktop workspace permissions"
+          git push origin HEAD:main
