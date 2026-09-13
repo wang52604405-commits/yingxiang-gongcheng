@@ -1,0 +1,175 @@
+name: 免费版批量打印权限热修复
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".diag/free-batch-print-policy-trigger.txt"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: free-batch-print-policy-hotfix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    name: 写入后台开关与桌面权限识别
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 修改权限策略
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8-sig")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: target count={count} for {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "server/config.py",
+              '    "free": {\n        "photo_limit": 300,\n        "watermark_enabled": False,\n        "upload_expiry_enabled": False,\n    },',
+              '    "free": {\n        "photo_limit": 300,\n        "batch_print_enabled": False,\n        "watermark_enabled": False,\n        "upload_expiry_enabled": False,\n    },',
+          )
+
+          replace_once(
+              "server/app.py",
+              '    free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))\n    # 免费版 300 张为完整可用额度，不叠加产品水印。',
+              '    free["photo_limit"] = max(0, min(100000, int(free.get("photo_limit") or 300)))\n    free["batch_print_enabled"] = bool(free.get("batch_print_enabled", False))\n    # 免费版 300 张为完整可用额度，不叠加产品水印。',
+          )
+
+          replace_once(
+              "server/templates/admin.html",
+              '          <label>免费照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>',
+              '          <label>免费照片上限<input id="cfgFreeLimit" type="number" min="0" max="100000"></label>\n          <label class="check"><input id="cfgFreeBatchPrint" type="checkbox">免费版允许批量打印</label>',
+          )
+          replace_once(
+              "server/templates/admin.html",
+              '      $("#cfgFreeLimit").value = free.photo_limit ?? 300;',
+              '      $("#cfgFreeLimit").value = free.photo_limit ?? 300;\n      $("#cfgFreeBatchPrint").checked = free.batch_print_enabled === true;',
+          )
+          replace_once(
+              "server/templates/admin.html",
+              '            free: { photo_limit: Number($("#cfgFreeLimit").value), upload_expiry_enabled: false, watermark_enabled: false },',
+              '            free: { photo_limit: Number($("#cfgFreeLimit").value), batch_print_enabled: $("#cfgFreeBatchPrint").checked, upload_expiry_enabled: false, watermark_enabled: false },',
+          )
+
+          replace_once(
+              "cloud_client.py",
+              '    "free": {"photo_limit": 300, "watermark_enabled": False, "upload_expiry_enabled": False},',
+              '    "free": {"photo_limit": 300, "batch_print_enabled": False, "watermark_enabled": False, "upload_expiry_enabled": False},',
+          )
+
+          replace_once(
+              "app.py",
+              'def expired_license_response(action):\n    status = app_license_status()\n    if status.get("upload_locked"):\n        return f"当前免费策略已暂停{action}，请联系管理员。", 403\n    return None\n',
+              'def expired_license_response(action):\n    status = app_license_status()\n    if status.get("upload_locked"):\n        return f"当前免费策略已暂停{action}，请联系管理员。", 403\n    return None\n\n\ndef batch_print_permission_response():\n    """批量打印由后台产品策略控制；会员始终允许，免费版默认禁止。"""\n    if is_member_user():\n        return None\n    free_cfg = cloud_client.product_config(force=True).get("free", {})\n    if not bool(free_cfg.get("batch_print_enabled", False)):\n        return "免费版不支持批量打印，请进入单元后选择“打印当前”。升级会员可使用批量打印。", 403\n    return None\n',
+          )
+          replace_once(
+              "app.py",
+              '@app.route("/print/<category>/batch")\ndef print_album_category_batch(category):\n    try:\n        locked = expired_license_response("打印")\n        if locked:\n            return locked\n        category = manager._normalize_category(category)',
+              '@app.route("/print/<category>/batch")\ndef print_album_category_batch(category):\n    try:\n        locked = expired_license_response("打印")\n        if locked:\n            return locked\n        restricted = batch_print_permission_response()\n        if restricted:\n            return restricted\n        category = manager._normalize_category(category)',
+          )
+          replace_once(
+              "app.py",
+              'def api_cloud_product_config():\n    return jsonify({"ok": True, "product": cloud_client.product_config()})',
+              'def api_cloud_product_config():\n    return jsonify({"ok": True, "product": cloud_client.product_config(force=True)})',
+          )
+
+          js = Path("assets/app-A20260910-2.92.js")
+          text = js.read_text(encoding="utf-8-sig")
+          old = '    async function openBatchPrint(category, mode = "print") {\n      state.batchPrintCategory = normalizePhotoCategory(category);'
+          new = '''    async function openBatchPrint(category, mode = "print") {
+      const [productData, licenseData] = await Promise.all([
+        apiJson("/api/cloud/product-config").catch(() => ({ product: {} })),
+        apiJson("/api/license/status").catch(() => ({ license: {} }))
+      ]);
+      const freePolicy = productData?.product?.free || {};
+      const license = licenseData?.license || {};
+      if (!license.ok && freePolicy.batch_print_enabled !== true) {
+        showNotice("免费版不支持批量打印，请进入单元后选择“打印当前”。", true);
+        return;
+      }
+      state.batchPrintCategory = normalizePhotoCategory(category);'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"assets js: openBatchPrint target count={count}")
+          js.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          python -m compileall -q app.py cloud_client.py server/app.py server/config.py
+          git diff --check
+
+      - name: 提交修复
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/config.py server/app.py server/templates/admin.html cloud_client.py app.py assets/app-A20260910-2.92.js
+          git commit -m "feat: control free batch printing from backend [skip ci]"
+          git push origin HEAD:main
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  deploy-server:
+    name: 只部署后台权限策略
+    needs: patch
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 20
+    env:
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.patch.outputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: 准备服务器凭据
+        shell: powershell
+        env:
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SSH_KEY_B64) { throw "missing ALBUM_SSH_KEY_B64" }
+          $d = Join-Path $env:RUNNER_TEMP "album-free-print-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $d -Force | Out-Null
+          $k = Join-Path $d "server_key"
+          [IO.File]::WriteAllBytes($k,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          Add-Content $env:GITHUB_ENV "ALBUM_SSH_KEY=$k"
+          Add-Content $env:GITHUB_ENV "ALBUM_POLICY_CREDENTIAL_DIR=$d"
+
+      - name: 部署授权中心
+        shell: powershell
+        run: python deploy_auth.py
+
+      - name: 验证后台开关默认关闭
+        shell: powershell
+        run: |
+          $json = curl.exe -fsSL --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/api/product-config
+          if ($LASTEXITCODE -ne 0) { throw "product config fetch failed" }
+          $obj = $json | ConvertFrom-Json
+          if ($obj.product.free.batch_print_enabled -ne $false) { throw "batch_print_enabled is not false" }
+          Write-Host "free.batch_print_enabled=false"
+
+      - name: 清理凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_POLICY_CREDENTIAL_DIR -and (Test-Path $env:ALBUM_POLICY_CREDENTIAL_DIR)) {
+            Remove-Item $env:ALBUM_POLICY_CREDENTIAL_DIR -Recurse -Force
+          }
