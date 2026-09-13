@@ -1,0 +1,21 @@
+name: 检查桌面更新服务器状态
+on:
+  push:
+    branches: [main]
+    paths: [".diag/server-update-status-check-trigger.txt"]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检查 version.json 和安装包
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== version.json ==='
+          curl -fsSL --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/version.json
+          echo
+          echo '=== installer HEAD ==='
+          curl -fsSI --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/album-installer.exe | sed -n '1,20p'
