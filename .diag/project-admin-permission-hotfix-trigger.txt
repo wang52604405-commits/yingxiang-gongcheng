@@ -1,4 +1,4 @@
-trigger=2026-09-13T16:10:00+08:00
+trigger=2026-09-13T16:12:00+08:00
 scope=project-member-admin-full-write
-version_policy=same-version-hotfix
-retry=5
+release=desktop-update-channel
+retry=6
