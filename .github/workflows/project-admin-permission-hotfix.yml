@@ -1,4 +1,4 @@
-name: 项目管理员权限修复并推送桌面端
+name: 项目管理员修复仅发布桌面更新包
 
 on:
   push:
@@ -7,63 +7,74 @@ on:
       - ".diag/project-admin-permission-hotfix-trigger.txt"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: project-admin-permission-hotfix
   cancel-in-progress: false
 
 jobs:
-  patch-and-release:
-    name: 修复管理员权限并触发桌面端正式发布
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  publish-only:
+    name: 构建并上传桌面安装包到更新服务器
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+      UPDATE_NOTE: "项目管理员权限修复：负责人/管理员从项目入库进入后可完整管理照片与工序。"
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - name: 修复项目角色到桌面权限映射
-        shell: bash
+      - name: 生成发布版本
+        shell: powershell
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          python prepare_release_version.py
+          if ($LASTEXITCODE -ne 0) { throw "release version preparation failed: exit code $LASTEXITCODE" }
 
-          path = Path("app.py")
-          text = path.read_text(encoding="utf-8")
-          old = '    session["role"] = "project_staff"'
-          new = (
-              '    access_role = str(member.get("role") or "viewer").strip().lower()\n'
-              '    session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"'
-          )
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(f"permission mapping target count={count}")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          PY
-
-      - name: 静态校验
-        shell: bash
+      - name: 准备发布凭据
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          python -m compileall -q app.py
-          python - <<'PY'
-          from pathlib import Path
-          text = Path("app.py").read_text(encoding="utf-8")
-          assert 'access_role = str(member.get("role") or "viewer").strip().lower()' in text
-          assert 'session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"' in text
-          PY
-          git diff --check
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布密钥 Secrets" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-publish-only-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
+          $sshKey = Join-Path $credentialDir "server_key"
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($sshKey, [Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SSH_KEY=$sshKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_PUBLISH_CREDENTIAL_DIR=$credentialDir"
 
-      - name: 提交修复并触发正式桌面发布
-        shell: bash
+      - name: 校验发布版本
+        shell: powershell
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
-          if git diff --cached --quiet; then
-            echo "app.py already contains the target permission mapping"
-            exit 0
-          fi
-          git commit -m "fix: grant project admins full desktop workspace permissions"
-          git push origin HEAD:main
+          python -c "from pathlib import Path; files=list(Path('assets').glob('app-A*.js'))+list(Path('assets').glob('app-A*.css')); [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n')) for p in files]"
+          if ($LASTEXITCODE -ne 0) { throw "asset normalization failed" }
+          python verify_release.py
+          if ($LASTEXITCODE -ne 0) { throw "verify_release failed: exit code $LASTEXITCODE" }
+
+      - name: 仅构建并发布安装包到更新服务器
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          python publish_update.py
+          if ($LASTEXITCODE -ne 0) { throw "publish_update failed: exit code $LASTEXITCODE" }
+
+      - name: 清理临时凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_PUBLISH_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_PUBLISH_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_PUBLISH_CREDENTIAL_DIR -Recurse -Force
+          }
