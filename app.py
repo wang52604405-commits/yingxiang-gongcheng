@@ -5736,7 +5736,8 @@ def api_cloud_project_staff_entry():
     project = dict(result.get("project") or {})
     session.clear()
     session["username"] = str(member.get("display_name") or display_name)
-    session["role"] = "project_staff"
+    access_role = str(member.get("role") or "viewer").strip().lower()
+    session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"
     session["project_staff_project_ref"] = str(
         project.get("project_ref") or project.get("project_id") or ""
     )
