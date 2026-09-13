@@ -35,16 +35,26 @@ jobs:
       - name: 修复项目角色到桌面权限映射
         shell: powershell
         run: |
-          python -c "from pathlib import Path; p=Path('app.py'); s=p.read_text(encoding='utf-8'); old='    session[\"role\"] = \"project_staff\"\n'; new='    access_role = str(member.get(\"role\") or \"viewer\").strip().lower()\n    session[\"role\"] = \"project_admin\" if access_role in {\"owner\", \"admin\"} else \"project_staff\"\n'; assert s.count(old)==1, s.count(old); p.write_text(s.replace(old,new,1),encoding='utf-8')"
-          if ($LASTEXITCODE -ne 0) { throw "permission mapping patch failed" }
+          $path = "app.py"
+          $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+          $old = '    session["role"] = "project_staff"'
+          $new = @'
+              access_role = str(member.get("role") or "viewer").strip().lower()
+              session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"
+          '@
+          $new = ($new -replace '(?m)^ {10}', '').TrimEnd()
+          $count = ([regex]::Matches($text, [regex]::Escape($old))).Count
+          if ($count -ne 1) { throw "permission mapping target count=$count" }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false))
 
       - name: 快速回归验证
         shell: powershell
         run: |
           python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password -v
           if ($LASTEXITCODE -ne 0) { throw "restricted staff regression failed" }
-          python -c "from pathlib import Path; s=Path('app.py').read_text(encoding='utf-8'); assert 'access_role in {\"owner\", \"admin\"}' in s; assert 'session[\"role\"] = \"project_admin\"' in s"
-          if ($LASTEXITCODE -ne 0) { throw "admin permission assertion failed" }
+          python -m unittest tests.test_project_admin_hotfix.ProjectAdminHotfixTest.test_admin_entry_has_full_write_access -v
+          if ($LASTEXITCODE -ne 0) { throw "project admin write-access regression failed" }
           python -m compileall -q app.py
           if ($LASTEXITCODE -ne 0) { throw "compile failed" }
           git diff --check
@@ -53,8 +63,9 @@ jobs:
       - name: 确认版本号不变
         shell: powershell
         run: |
-          $version = python -c "import re,pathlib; s=pathlib.Path('cloud_client.py').read_text(encoding='utf-8-sig'); print(re.search(r'APP_VERSION\s*=\s*\"([^\"]+)\"', s).group(1))"
-          Write-Host "same-version hotfix APP_VERSION=$version"
+          $versionLine = Select-String -Path cloud_client.py -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $versionLine) { throw "APP_VERSION not found" }
+          Write-Host "same-version hotfix: $($versionLine.Matches[0].Groups[1].Value)"
 
       - name: 准备临时签名密钥
         shell: powershell
