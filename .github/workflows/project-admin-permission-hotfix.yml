@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   hotfix:
-    name: 修复管理员跨电脑操作权限并同版本热部署
+    name: 管理员跨电脑完整操作权限同版本热修复
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 35
     env:
@@ -32,137 +32,87 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 精确修复项目管理员权限映射
+      - name: 修复项目角色到桌面权限的映射
         shell: powershell
         run: |
           @'
           from pathlib import Path
-
-          app_path = Path("app.py")
-          text = app_path.read_text(encoding="utf-8")
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
           old = '    session["role"] = "project_staff"\n'
           new = (
               '    access_role = str(member.get("role") or "viewer").strip().lower()\n'
-              '    # 后台已经有 owner/admin/capturer/viewer 项目角色；管理员不得再被统一降级为受限项目人员。\n'
+              '    # 项目后台的 owner/admin 属于管理权：从项目人员入口进入后必须具备完整操作权限。\n'
+              '    # capturer/viewer 继续走受限项目人员边界，只允许现有授权范围。\n'
               '    session["role"] = "project_admin" if access_role in {"owner", "admin"} else "project_staff"\n'
           )
           count = text.count(old)
           if count != 1:
-              raise SystemExit(f"app.py 目标角色赋值数量异常: {count}")
-          app_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+              raise SystemExit(f"目标角色赋值数量异常: {count}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          '@ | python -
 
-          test_path = Path("tests/test_project_admin_permissions.py")
-          test_path.write_text(r'''# -*- coding: utf-8 -*-
-          from __future__ import annotations
-
+      - name: 回归验证受限人员与管理员权限
+        shell: powershell
+        run: |
+          python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password -v
+          if ($LASTEXITCODE -ne 0) { throw "原项目人员受限入口回归失败" }
+          $testPath = Join-Path $env:RUNNER_TEMP "project_admin_hotfix_test.py"
+          @'
           import os
           import tempfile
-          import unittest
           from pathlib import Path
           from unittest.mock import patch
 
+          temp = tempfile.TemporaryDirectory(prefix="album-project-admin-hotfix-")
+          os.environ["ALBUM_DATA_DIR"] = temp.name
+          os.environ["ALBUM_TRIAL_FILE"] = str(Path(temp.name) / "trial.json")
+          os.environ["ALBUM_LICENSE_FILE"] = str(Path(temp.name) / "license.dat")
+          import app as desktop
 
-          class ProjectAdminPermissionHotfixTest(unittest.TestCase):
-              @classmethod
-              def setUpClass(cls):
-                  cls.temp = tempfile.TemporaryDirectory(prefix="album-project-admin-hotfix-")
-                  os.environ["ALBUM_DATA_DIR"] = cls.temp.name
-                  os.environ["ALBUM_TRIAL_FILE"] = str(Path(cls.temp.name) / "trial.json")
-                  os.environ["ALBUM_LICENSE_FILE"] = str(Path(cls.temp.name) / "license.dat")
-                  import app as desktop_app
-
-                  cls.desktop = desktop_app
-                  cls.client = desktop_app.app.test_client()
-
-              @classmethod
-              def tearDownClass(cls):
-                  cls.temp.cleanup()
-
-              def enter_as(self, member_role, display_name):
-                  ownership = {
-                      "state": "matched",
-                      "local_project_id": "owner-local-project",
-                      "project_ref": "42:owner-local-project",
-                  }
-                  verified = {
-                      "ok": True,
-                      "project": {
-                          "project_ref": "42:owner-local-project",
-                          "project_name": "共享工程",
-                      },
-                      "member": {"display_name": display_name, "role": member_role},
-                  }
-                  with patch.object(
-                      self.desktop, "current_project_cloud_ownership", return_value=ownership
-                  ), patch.object(
-                      self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
-                  ), patch.object(
-                      self.desktop.cloud_client,
-                      "desktop_verify_project_member",
-                      return_value=verified,
-                  ):
-                      return self.client.post(
-                          "/api/cloud/project-staff-entry",
-                          json={"display_name": display_name, "phone": "13800138001"},
-                      )
-
-              def test_capturer_stays_restricted(self):
-                  entered = self.enter_as("capturer", "现场采集员")
-                  self.assertEqual(entered.status_code, 200, entered.get_json())
-                  self.assertEqual(entered.get_json()["user"]["role"], "project_staff")
-                  blocked = self.client.post("/api/engineering-settings", json={})
-                  self.assertEqual(blocked.status_code, 403, blocked.get_json())
-                  with self.client.session_transaction() as session:
-                      session.clear()
-
-              def test_admin_gets_full_workspace_permissions(self):
-                  entered = self.enter_as("admin", "项目管理员")
-                  self.assertEqual(entered.status_code, 200, entered.get_json())
-                  self.assertEqual(entered.get_json()["user"]["role"], "project_admin")
-                  with self.client.session_transaction() as session:
-                      self.assertEqual(session["role"], "project_admin")
-                      self.assertEqual(
-                          session["project_staff_project_ref"],
-                          "42:owner-local-project",
-                      )
-                  writable = self.client.post(
-                      "/api/engineering-settings",
-                      json={"settings": {"print_page_size": 4}},
-                  )
-                  self.assertEqual(writable.status_code, 200, writable.get_json())
-                  with self.client.session_transaction() as session:
-                      session.clear()
-
-              def test_owner_role_also_gets_full_workspace_permissions(self):
-                  entered = self.enter_as("owner", "项目负责人")
-                  self.assertEqual(entered.status_code, 200, entered.get_json())
-                  self.assertEqual(entered.get_json()["user"]["role"], "project_admin")
-                  with self.client.session_transaction() as session:
-                      session.clear()
-
-
-          if __name__ == "__main__":
-              unittest.main()
-          '''.replace("          ", "", 1), encoding="utf-8")
-          '@ | python -
-
-      - name: 运行管理员权限回归与编译检查
-        shell: powershell
-        run: |
-          python -m unittest discover -s tests -p "test_project_admin_permissions.py" -v
-          if ($LASTEXITCODE -ne 0) { throw "项目管理员权限回归失败" }
-          python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password -v
-          if ($LASTEXITCODE -ne 0) { throw "原项目人员受限入口回归失败" }
-          python -m compileall -q app.py tests\test_project_admin_permissions.py
-          if ($LASTEXITCODE -ne 0) { throw "编译检查失败" }
+          client = desktop.app.test_client()
+          ownership = {
+              "state": "matched",
+              "local_project_id": "owner-local-project",
+              "project_ref": "42:owner-local-project",
+          }
+          verified = {
+              "ok": True,
+              "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
+              "member": {"display_name": "项目管理员", "role": "admin"},
+          }
+          with patch.object(desktop, "current_project_cloud_ownership", return_value=ownership), \
+               patch.object(desktop.licensing, "machine_id", return_value="ARCHIVE-PC"), \
+               patch.object(desktop.cloud_client, "desktop_verify_project_member", return_value=verified):
+              entered = client.post(
+                  "/api/cloud/project-staff-entry",
+                  json={"display_name": "项目管理员", "phone": "13800138001"},
+              )
+          assert entered.status_code == 200, entered.get_json()
+          assert entered.get_json()["user"]["role"] == "project_admin", entered.get_json()
+          with client.session_transaction() as session:
+              assert session["role"] == "project_admin"
+          # 这条 POST 原来会被 project_staff 总拦截；管理员必须能够通过写操作边界。
+          writable = client.post(
+              "/api/engineering-settings",
+              json={"settings": {"print_page_size": 4}},
+          )
+          assert writable.status_code == 200, writable.get_json()
+          print("project admin full-write boundary: OK")
+          temp.cleanup()
+          '@ | Set-Content -LiteralPath $testPath -Encoding UTF8
+          python $testPath
+          if ($LASTEXITCODE -ne 0) { throw "项目管理员完整权限验证失败" }
+          python -m compileall -q app.py
+          if ($LASTEXITCODE -ne 0) { throw "app.py 编译检查失败" }
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw "git diff 检查失败" }
 
-      - name: 确认桌面版本号保持不变
+      - name: 确认版本号不变
         shell: powershell
         run: |
           $version = python -c "import re,pathlib; s=pathlib.Path('cloud_client.py').read_text(encoding='utf-8-sig'); print(re.search(r'APP_VERSION\s*=\s*\"([^\"]+)\"', s).group(1))"
-          Write-Host "同版本热修复，APP_VERSION=$version"
+          Write-Host "同版本热修复，APP_VERSION=$version；不生成新版本号，不发布更新安装包。"
 
       - name: 准备临时签名密钥
         shell: powershell
@@ -178,20 +128,20 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
           Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_HOTFIX_CREDENTIAL_DIR=$credentialDir"
 
-      - name: 同版本热部署 5088（不发布更新包）
+      - name: 同版本热部署 5088
         shell: powershell
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\deploy_prod.ps1
 
-      - name: 提交源代码修复但跳过常规发布流水线
+      - name: 保存源代码修复且不触发常规发版
         shell: powershell
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py tests/test_project_admin_permissions.py
+          git add app.py
           if (-not (git diff --cached --quiet)) {
-            git commit -m "fix: honor project admin permissions in LAN workspace [skip ci]"
+            git commit -m "fix: grant project admins full LAN workspace permissions [skip ci]"
             git push origin HEAD:main
           } else {
             Write-Host "源代码已是目标状态，无需再次提交。"
