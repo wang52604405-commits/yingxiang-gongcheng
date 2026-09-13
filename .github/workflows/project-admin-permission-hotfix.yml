@@ -1,0 +1,192 @@
+name: 项目管理员权限热修复（同版本）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".diag/project-admin-permission-hotfix-trigger.txt"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: project-admin-permission-hotfix
+  cancel-in-progress: false
+
+jobs:
+  hotfix:
+    name: 修复管理员跨电脑操作权限并同版本热部署
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      ALBUM_INSTALL_DIR: C:\Users\Administrator\AppData\Local\工程影像管理平台
+      ALBUM_DATA_DIR: D:\工程影像资料
+      ALBUM_PORT: "5088"
+      ALBUM_CLOUD_AUTO_USER: ${{ secrets.ALBUM_CLOUD_AUTO_USER }}
+      ALBUM_CLOUD_AUTO_PASS: ${{ secrets.ALBUM_CLOUD_AUTO_PASS }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 精确修复项目管理员权限映射
+        shell: powershell
+        run: |
+          @'
+          from pathlib import Path
+
+          app_path = Path("app.py")
+          text = app_path.read_text(encoding="utf-8")
+          old = '''    member = dict(result.get("member") or {})
+              project = dict(result.get("project") or {})
+              session.clear()
+              session["username"] = str(member.get("display_name") or display_name)
+              session["role"] = "project_staff"
+              session["project_staff_project_ref"] = str(
+                  project.get("project_ref") or project.get("project_id") or ""
+              )
+          '''
+          new = '''    member = dict(result.get("member") or {})
+              project = dict(result.get("project") or {})
+              access_role = str(member.get("role") or "viewer").strip().lower()
+              session.clear()
+              session["username"] = str(member.get("display_name") or display_name)
+              # 云端项目角色已经支持 owner/admin/capturer/viewer。此前这里无条件降级为
+              # project_staff，导致后台已设为“管理员”的成员在其它电脑上仍只能查看/上传。
+              # 管理员与负责人进入 LAN 工作台时保留完整操作权限；其它项目人员继续受
+              # 原有“只读/上传边界”保护。前端只把 project_staff 视为受限入口，因此
+              # project_admin 无需改 JS/CSS 即可立即恢复编辑、移动、删除等完整操作。
+              session["role"] = (
+                  "project_admin" if access_role in {"owner", "admin"} else "project_staff"
+              )
+              session["project_staff_project_ref"] = str(
+                  project.get("project_ref") or project.get("project_id") or ""
+              )
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f"app.py 目标片段数量异常: {text.count(old)}")
+          app_path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          test_path = Path("tests/test_product_core.py")
+          tests = test_path.read_text(encoding="utf-8")
+          marker = '''        with self.client.session_transaction() as session:
+              session.clear()
+          
+          
+          if __name__ == "__main__":
+              unittest.main()
+          '''
+          addition = '''        with self.client.session_transaction() as session:
+              session.clear()
+          
+              def test_z_project_admin_staff_entry_gets_full_workspace_permissions(self):
+                  ownership = {
+                      "state": "matched",
+                      "local_project_id": "owner-local-project",
+                      "project_ref": "42:owner-local-project",
+                  }
+                  verified = {
+                      "ok": True,
+                      "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
+                      "member": {"display_name": "项目管理员", "role": "admin"},
+                  }
+                  with patch.object(
+                      self.desktop, "current_project_cloud_ownership", return_value=ownership
+                  ), patch.object(
+                      self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+                  ), patch.object(
+                      self.desktop.cloud_client,
+                      "desktop_verify_project_member",
+                      return_value=verified,
+                  ) as verify:
+                      entered = self.client.post(
+                          "/api/cloud/project-staff-entry",
+                          json={"display_name": "项目管理员", "phone": "13800138001"},
+                      )
+                  self.assertEqual(entered.status_code, 200, entered.get_json())
+                  self.assertEqual(entered.get_json()["user"]["role"], "project_admin")
+                  verify.assert_called_once_with(
+                      "owner-local-project", "项目管理员", "13800138001", "ARCHIVE-PC"
+                  )
+                  with self.client.session_transaction() as session:
+                      self.assertEqual(session["role"], "project_admin")
+                      self.assertEqual(session["project_staff_project_ref"], "42:owner-local-project")
+                  # 管理员必须能通过原来拦截项目人员的写操作边界。
+                  writable = self.client.post(
+                      "/api/engineering-settings",
+                      json={"settings": {"print_page_size": 4}},
+                  )
+                  self.assertEqual(writable.status_code, 200, writable.get_json())
+                  with self.client.session_transaction() as session:
+                      session.clear()
+          
+          
+          if __name__ == "__main__":
+              unittest.main()
+          '''
+          if marker not in tests:
+              raise SystemExit("tests/test_product_core.py 未找到尾部插入点")
+          test_path.write_text(tests.replace(marker, addition, 1), encoding="utf-8")
+          '@ | python -
+
+      - name: 运行管理员权限回归与编译检查
+        shell: powershell
+        run: |
+          python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password -v
+          if ($LASTEXITCODE -ne 0) { throw "受限项目人员回归失败" }
+          python -m unittest tests.test_product_core.DesktopSecurityContractTest.test_z_project_admin_staff_entry_gets_full_workspace_permissions -v
+          if ($LASTEXITCODE -ne 0) { throw "项目管理员权限回归失败" }
+          python -m compileall -q app.py
+          if ($LASTEXITCODE -ne 0) { throw "app.py 编译检查失败" }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw "git diff 检查失败" }
+
+      - name: 确认桌面版本号保持不变
+        shell: powershell
+        run: |
+          $version = python -c "import re,pathlib; s=pathlib.Path('cloud_client.py').read_text(encoding='utf-8-sig'); print(re.search(r'APP_VERSION\s*=\s*\"([^\"]+)\"', s).group(1))"
+          Write-Host "同版本热修复，APP_VERSION=$version"
+
+      - name: 准备临时签名密钥
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+        run: |
+          if (-not $env:SIGN_KEY_B64) { throw "缺少 ALBUM_SIGN_KEY_B64" }
+          $credentialDir = Join-Path $env:RUNNER_TEMP "album-admin-hotfix-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
+          $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
+          [IO.File]::WriteAllBytes($signKey, [Convert]::FromBase64String($env:SIGN_KEY_B64))
+          icacls $credentialDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_SIGN_KEY=$signKey"
+          Add-Content -Path $env:GITHUB_ENV -Value "ALBUM_HOTFIX_CREDENTIAL_DIR=$credentialDir"
+
+      - name: 同版本热部署 5088（不发布更新包）
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\deploy_prod.ps1
+
+      - name: 提交源代码修复但跳过常规发布流水线
+        shell: powershell
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py tests/test_product_core.py
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "fix: honor project admin permissions in LAN workspace [skip ci]"
+            git push origin HEAD:main
+          } else {
+            Write-Host "源代码已是目标状态，无需再次提交。"
+          }
+
+      - name: 清理临时签名密钥
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_HOTFIX_CREDENTIAL_DIR -and (Test-Path -LiteralPath $env:ALBUM_HOTFIX_CREDENTIAL_DIR)) {
+            Remove-Item -LiteralPath $env:ALBUM_HOTFIX_CREDENTIAL_DIR -Recurse -Force
+          }
