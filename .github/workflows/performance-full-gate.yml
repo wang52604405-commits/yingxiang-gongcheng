@@ -10,52 +10,36 @@ concurrency:
 env:
   PYTHONUTF8: '1'
 jobs:
-  prepare:
+  source:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
-    outputs:
-      candidate: ${{ steps.candidate.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare isolated candidate
-        id: candidate
+      - name: Freeze exact source without modifying the candidate
         shell: bash
         run: |
-          if [ -f .diag/perf_patch.py ]; then
-            python .diag/perf_patch.py
-            rm .diag/perf_patch.py
-            python -c "from pathlib import Path; import gzip; p=next(Path('assets').glob('app-A*.js')); p.with_suffix('.js.gz').write_bytes(gzip.compress(p.read_bytes(),mtime=0))"
-            node --check assets/app-A20260910-2.92.js
-            git diff --check
-            git add app.py assets/app-A20260910-2.92.js assets/app-A20260910-2.92.js.gz tests .diag/perf_patch.py
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m '加快照片浏览与切换并完善连续操作保护'
-            git push origin HEAD:chatgpt/performance-full-20260914
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          test ! -f .diag/perf_patch.py
           mkdir -p evidence
-          git archive --format=zip --output=evidence/source.zip HEAD
           git rev-parse HEAD > evidence/source-sha.txt
+          git archive --format=zip --output=evidence/source.zip HEAD
       - uses: actions/upload-artifact@v4
         with:
           name: performance-candidate-source
           path: evidence
-          retention-days: 7
+          retention-days: 14
   round:
-    needs: prepare
+    needs: source
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     strategy:
       fail-fast: false
+      max-parallel: 5
       matrix:
-        round: [1]
+        round: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.candidate }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -70,19 +54,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dependencies failed' }
           python -m playwright install chromium
           if ($LASTEXITCODE -ne 0) { throw 'browser install failed' }
-      - name: Full regression and bounded browser end-to-end
+      - name: Full regression, actual browser interactions, exports and 16 PDFs
         shell: python
         run: |
-          import json,subprocess,sys
+          import hashlib,json,subprocess,sys
           from pathlib import Path
           out=Path('evidence');out.mkdir(exist_ok=True)
-          (out/'source-sha.txt').write_bytes(subprocess.check_output(['git','rev-parse','HEAD']))
+          sha=subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()
+          (out/'source-sha.txt').write_text(sha,encoding='utf-8')
+          paths=['app.py','tests/run_performance_browser.py','templates/index.html','templates/print.html']
+          paths += [str(p).replace('\\','/') for p in Path('assets').glob('app-A*')]
+          hashes={p:hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in paths}
+          (out/'source-hashes.json').write_text(json.dumps(hashes,sort_keys=True,indent=2),encoding='utf-8')
           results={}
           commands=[
-            ('python-tests',[sys.executable,'-u','-m','unittest','discover','-s','tests','-v'],180),
+            ('python-tests',[sys.executable,'-u','-m','unittest','discover','-s','tests','-v'],240),
             ('compile',[sys.executable,'-m','compileall','-q','app.py','tests','server'],60),
-            ('javascript',['node','--check','assets/app-A20260910-2.92.js'],60),
-            ('browser',[sys.executable,'-u','tests/run_performance_browser.py','--round','${{ matrix.round }}','--out-dir','evidence/browser'],240),
+            ('javascript',['node','--check',str(next(Path('assets').glob('app-A*.js')))],60),
+            ('browser',[sys.executable,'-u','tests/run_performance_browser.py','--round','${{ matrix.round }}','--out-dir','evidence/browser'],300),
           ]
           for name,cmd,timeout in commands:
             print('START',name,flush=True)
@@ -92,10 +81,14 @@ jobs:
             print('RESULT',name,results[name],flush=True)
             print((out/(name+'.log')).read_text(encoding='utf-8',errors='replace')[-12000:],flush=True)
           (out/'gate-results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
-          if any(code!=0 for code in results.values()):raise SystemExit(1)
+          if any(code!=0 for code in results.values()): raise SystemExit(1)
+          report=json.loads((out/'browser/report.json').read_text(encoding='utf-8'))
+          if report.get('status')!='passed' or len(report.get('print_variants',[]))!=16: raise SystemExit('Incomplete browser evidence')
+          if any(hashlib.sha256(Path(p).read_bytes()).hexdigest()!=digest for p,digest in hashes.items()): raise SystemExit('Candidate changed during validation')
+          if subprocess.check_output(['git','status','--porcelain','--untracked-files=no']).strip(): raise SystemExit('Tracked files changed during validation')
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: performance-round-${{ matrix.round }}
           path: evidence
-          retention-days: 7
+          retention-days: 14
