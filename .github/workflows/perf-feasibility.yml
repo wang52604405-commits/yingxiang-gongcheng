@@ -1,0 +1,77 @@
+name: 性能可行性隔离验证
+on:
+  push:
+    branches: [chatgpt/perf-feasibility-20260914]
+permissions:
+  contents: read
+concurrency:
+  group: perf-feasibility-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 29aef0c6beebf7cb3d75229c2eea92c21de4b9ed
+          persist-credentials: false
+      - name: Export isolated source and record exact base
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, subprocess, zipfile
+          from pathlib import Path
+          names = subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          manifest = {'base_sha': subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(), 'files': {}}
+          allowed_roots = {'templates','assets','tests','server','.github','website','miniprogram'}
+          allowed_exts = {'.py','.html','.js','.css','.gz','.txt','.spec','.iss','.yml','.yaml','.json','.ts','.vue','.csv','.xlsx','.png','.svg','.ico','.isl','.toml','.ini','.md'}
+          with zipfile.ZipFile('perf-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+              for name in names:
+                  if not name: continue
+                  p=Path(name)
+                  if not (len(p.parts)==1 or p.parts[0] in allowed_roots): continue
+                  if p.suffix not in allowed_exts and p.name not in {'.gitattributes','.gitignore'}: continue
+                  if p.is_symlink() or not p.is_file() or p.stat().st_size > 5000000: continue
+                  if p.suffix in {'.json','.ini'} and len(p.parts)==1: continue
+                  raw=p.read_bytes()
+                  z.writestr(name,raw)
+                  manifest['files'][name]=hashlib.sha256(raw).hexdigest()
+              z.writestr('PERF_SOURCE_MANIFEST.json',json.dumps(manifest,indent=2))
+          print('SOURCE_SNAPSHOT',manifest['base_sha'],'files=',len(manifest['files']))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-source-29aef0c
+          path: perf-source.zip
+          retention-days: 3
+  baseline-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 29aef0c6beebf7cb3d75229c2eea92c21de4b9ed
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
+      - name: Install existing test dependencies
+        run: python -m pip install -r requirements.txt -r server/requirements.txt
+      - name: Run unmodified baseline regression and preserve output
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -v 2>&1 | Tee-Object -FilePath perf-baseline-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-baseline-windows
+          path: perf-baseline-tests.log
+          retention-days: 3
