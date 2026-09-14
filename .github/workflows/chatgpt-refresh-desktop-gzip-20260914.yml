@@ -1,0 +1,39 @@
+name: ChatGPT refresh desktop gzip asset
+
+on:
+  push:
+    branches:
+      - chatgpt/process-photo-transfer-fix-20260914
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-gzip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Refresh versioned desktop JS gzip
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import gzip
+          import re
+          from pathlib import Path
+          html = Path('templates/index.html').read_text(encoding='utf-8')
+          match = re.search(r'<script\s+defer\s+src="/assets/(app-A[^"]+\.js)"></script>', html)
+          if not match:
+              raise SystemExit('versioned desktop JS asset not found')
+          source = Path('assets') / match.group(1)
+          target = Path(str(source) + '.gz')
+          target.write_bytes(gzip.compress(source.read_bytes(), compresslevel=9, mtime=0))
+          PY
+          rm -f .github/workflows/chatgpt-refresh-desktop-gzip-20260914.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/app-A*.js.gz .github/workflows/chatgpt-refresh-desktop-gzip-20260914.yml
+          git commit -m "fix: refresh desktop JS gzip after process move UI change [skip ci]"
+          git push origin HEAD:chatgpt/process-photo-transfer-fix-20260914
