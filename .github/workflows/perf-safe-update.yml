@@ -41,8 +41,12 @@ jobs:
       - name: Apply guarded performance changes
         shell: pwsh
         run: |
-          python .diag/apply_perf_safe.py
-          if ($LASTEXITCODE -ne 0) { throw 'guarded patch failed' }
+          if (-not (Select-String -Path app.py -Pattern 'def _numbering_snapshot' -Quiet)) {
+            python .diag/apply_perf_safe.py
+            if ($LASTEXITCODE -ne 0) { throw 'guarded patch failed' }
+          }
+          python -c "from pathlib import Path; import subprocess; Path('.diag/perf-base-app.py').write_bytes(subprocess.check_output(['git','show','893cedbfb81a6952e037d2a1c523af70e9fcdb36:app.py']))"
+          if ($LASTEXITCODE -ne 0) { throw 'baseline extraction failed' }
           Get-ChildItem assets/app-A*.js | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE -ne 0) { throw 'JS syntax failed' } }
           git diff --check
           if ($LASTEXITCODE -ne 0) { throw 'diff check failed' }
@@ -57,6 +61,9 @@ jobs:
       - name: Compare HTTP timings and all 16 print variants
         shell: pwsh
         run: |
+          # Match the real UI's independent page_size for one/two/four/custom.
+          python -c "from pathlib import Path; p=Path('.diag/verify_perf_http.py'); text=p.read_text(encoding='utf-8'); text=text.replace('&auto_fill=1&page_size=3&','&auto_fill=1&page_size={dict(one=1,two=2,four=4,custom=3)[style]}&'); p.write_text(text,encoding='utf-8',newline='\n')"
+          if ($LASTEXITCODE -ne 0) { throw 'print matrix setup failed' }
           python .diag/verify_perf_http.py *> perf-artifacts/http.log
           $code = $LASTEXITCODE
           Get-Content perf-artifacts/http.log -Tail 65
@@ -67,10 +74,13 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app.py assets/app-*.js assets/app-*.js.gz tests/test_z_batch_print_order.py tests/test_z_performance_edit.py
-          git commit -m '加快照片信息保存并保持原有操作方式'
-          if ($LASTEXITCODE -ne 0) { throw 'tested commit failed' }
-          git push origin HEAD:chatgpt/perf-safe-update-20260914
-          if ($LASTEXITCODE -ne 0) { throw 'tested branch push failed' }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 1) {
+            git commit -m '加快照片信息保存并保持原有操作方式'
+            if ($LASTEXITCODE -ne 0) { throw 'tested commit failed' }
+            git push origin HEAD:chatgpt/perf-safe-update-20260914
+            if ($LASTEXITCODE -ne 0) { throw 'tested branch push failed' }
+          } elseif ($LASTEXITCODE -ne 0) { throw 'staged diff failed' }
           git rev-parse HEAD | Set-Content perf-artifacts/tested-sha.txt
           python -c "from pathlib import Path; import zipfile; paths=['app.py','tests/test_z_batch_print_order.py','tests/test_z_performance_edit.py']+[str(p) for p in Path('assets').glob('app-A*.js*')]; z=zipfile.ZipFile('perf-artifacts/tested-files.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,p) for p in paths]; z.close()"
       - uses: actions/upload-artifact@v4
