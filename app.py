@@ -2491,6 +2491,57 @@ class AlbumManager:
             self._renumber_after_change(data["project_code"], data)
             return data
 
+    def delete_process(self, project_code, process_name):
+        """删除空工序，并清理文件已不存在的历史残留照片记录。"""
+        name = str(process_name or "").strip()
+        if not name:
+            raise ValueError("工序名称不能为空")
+        with self._project_write_lock(project_code):
+            data = self.get_project(project_code)
+            processes = [
+                str(item or "").strip()
+                for item in (data.get("processes") or [])
+                if str(item or "").strip()
+            ]
+            if name not in processes:
+                raise LookupError("工序不存在")
+
+            photos_dir = self._photos_dir(project_code)
+            kept = []
+            blockers = []
+            stale_removed = 0
+            for photo in list(data.get("photos") or []):
+                if str(photo.get("process_name") or "").strip() != name:
+                    kept.append(photo)
+                    continue
+                filename = Path(str(photo.get("filename") or "")).name
+                if filename and (photos_dir / filename).is_file():
+                    kept.append(photo)
+                    blockers.append(photo)
+                else:
+                    # 文件已经被删掉时，这条 metadata 只是历史残留；不能继续阻塞工序删除。
+                    stale_removed += 1
+
+            if stale_removed:
+                data["photos"] = kept
+
+            if blockers:
+                if stale_removed:
+                    self._renumber_after_change(project_code, data)
+                category_counts = {"施工": 0, "监理": 0}
+                for photo in blockers:
+                    label = "监理" if self._normalize_category(photo.get("category")) == "supervision" else "施工"
+                    category_counts[label] += 1
+                detail = "，".join(
+                    f"{label}{count}张" for label, count in category_counts.items() if count
+                )
+                raise ValueError(f"工序「{name}」下还有照片（{detail}），请先移走或删除后再删除工序")
+
+            processes.remove(name)
+            data["processes"] = processes
+            self._renumber_after_change(project_code, data)
+            return data, stale_removed
+
     def move_photo(self, source_project_code, photo_id, target_project_code, category="", target_process_name=""):
         """Move one photo to another unit without changing its permanent photo_uuid.
 
@@ -7927,24 +7978,22 @@ def api_rename_process(project_code, process_name):
 
 @app.route("/api/photos/<path:project_code>/processes/<path:process_name>", methods=["DELETE"])
 def api_delete_process(project_code, process_name):
-    """删除单元下的工序（仅允许删除没有照片的空工序）。"""
+    """删除空工序；自动清理文件已不存在、但仍残留在 metadata 中的照片记录。"""
     user, error = login_required_json()
     if error:
         return error
     try:
-        with manager._project_write_lock(project_code):
-            data = manager.get_project(project_code)
-            processes = data.get("processes") or []
-            name = str(process_name or "").strip()
-            if name not in processes:
-                return json_error("工序不存在", 404)
-            for photo in data.get("photos", []):
-                if str(photo.get("process_name") or "").strip() == name:
-                    return json_error(f"工序「{name}」下还有照片，请先移走再删除", 400)
-            processes.remove(name)
-            data["processes"] = processes
-            manager._renumber_after_change(project_code, data)
-        return jsonify({"ok": True, "processes": data["processes"], "photos": manager.get_photos(project_code)})
+        data, stale_removed = manager.delete_process(project_code, process_name)
+        return jsonify({
+            "ok": True,
+            "processes": data["processes"],
+            "photos": manager.get_photos(project_code),
+            "stale_removed": stale_removed,
+        })
+    except LookupError as exc:
+        return json_error(str(exc), 404)
+    except ValueError as exc:
+        return json_error(str(exc), 400)
     except Exception as exc:
         return json_error(str(exc), 500)
 
@@ -7952,7 +8001,7 @@ def api_delete_process(project_code, process_name):
 
 @app.route("/api/photos/<path:project_code>/<photo_id>/move", methods=["POST"])
 def api_move_photo(project_code, photo_id):
-    """跨单元移动照片；保留永久 UUID、题名、日期、原图备份和拍摄信息。"""
+    """跨单元或同一单元工序间移动照片；保留永久 UUID、题名、日期、原图备份和拍摄信息。"""
     user, error = login_required_json()
     if error:
         return error
