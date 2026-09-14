@@ -12,9 +12,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Export exact source for isolated work
         run: |
-          mkdir -p evidence
+          mkdir -p evidence/wheels
           git rev-parse HEAD > evidence/source-sha.txt
           git archive --format=zip --output=evidence/source.zip HEAD
+          python -m pip download --no-deps --only-binary=:all: -d evidence/wheels flask werkzeug blinker truststore==0.10.4 xlrd pystray python-xlib
       - uses: actions/upload-artifact@v4
         with:
           name: performance-full-source
