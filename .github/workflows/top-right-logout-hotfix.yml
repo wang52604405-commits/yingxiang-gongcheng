@@ -1,0 +1,144 @@
+name: 全账号右上角退出按钮
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".diag/top-right-logout-trigger.txt"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: top-right-logout-hotfix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    name: 写入全账号退出按钮
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: 修改桌面与局域网页面
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("templates/index.html")
+          text = path.read_text(encoding="utf-8-sig")
+
+          old_settings = '              <button class="settings-device-card" type="button" id="logoutBtn" style="display:none;"><strong>更换姓名</strong><span>切换本机操作人员</span></button>\n'
+          if text.count(old_settings) != 1:
+              raise SystemExit(f"settings logout target count={text.count(old_settings)}")
+          text = text.replace(old_settings, "", 1)
+
+          anchor = '        <div class="auth-box" id="authBox">\n'
+          top_logout = '        <button type="button" id="logoutBtn" class="top-tool-btn" style="display:none;" title="退出当前账号并返回登录页" aria-label="退出当前账号">退出</button>\n'
+          if text.count(anchor) != 1:
+              raise SystemExit(f"top authBox anchor count={text.count(anchor)}")
+          text = text.replace(anchor, top_logout + anchor, 1)
+
+          if text.count('id="logoutBtn"') != 1:
+              raise SystemExit("logoutBtn must exist exactly once")
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+          html = Path("templates/index.html").read_text(encoding="utf-8")
+          js = Path("assets/app-A20260910-2.92.js").read_text(encoding="utf-8-sig")
+          required = [
+              'id="logoutBtn" class="top-tool-btn"',
+              '退出当前账号并返回登录页',
+          ]
+          for item in required:
+              if item not in html:
+                  raise SystemExit(f"missing template marker: {item}")
+          for item in ['$("#logoutBtn").addEventListener("click"', '/api/cloud/logout', '/api/auth/logout']:
+              if item not in js:
+                  raise SystemExit(f"missing logout behavior: {item}")
+          print("logout UI and full account logout behavior verified")
+          PY
+          git diff --check
+
+      - name: 提交修复
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add templates/index.html
+          git commit -m "feat: add top-right logout for every account [skip ci]"
+          git push origin HEAD:main
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: 直接发布桌面更新包
+    needs: patch
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      HTTPS_PROXY: http://127.0.0.1:7897
+      HTTP_PROXY: http://127.0.0.1:7897
+      ALL_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+      UPDATE_NOTE: "所有账号右上角新增退出按钮；局域网访问同样可退出后重新登录"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.patch.outputs.commit_sha }}
+          fetch-depth: 1
+
+      - name: 准备新版本
+        shell: powershell
+        run: |
+          python prepare_release_version.py
+          if ($LASTEXITCODE -ne 0) { throw "release version preparation failed" }
+
+      - name: 准备发布凭据
+        shell: powershell
+        env:
+          SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
+          SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+        run: |
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "missing release secrets" }
+          $d = Join-Path $env:RUNNER_TEMP "album-logout-release-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Path $d -Force | Out-Null
+          $s = Join-Path $d "release_guard_private_key.pem"
+          $k = Join-Path $d "server_key"
+          [IO.File]::WriteAllBytes($s,[Convert]::FromBase64String($env:SIGN_KEY_B64))
+          [IO.File]::WriteAllBytes($k,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $d /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Add-Content $env:GITHUB_ENV "ALBUM_SIGN_KEY=$s"
+          Add-Content $env:GITHUB_ENV "ALBUM_SSH_KEY=$k"
+          Add-Content $env:GITHUB_ENV "ALBUM_CREDENTIAL_DIR=$d"
+
+      - name: 发布安装包到更新通道
+        shell: powershell
+        run: python publish_update.py
+
+      - name: 验证远端版本
+        shell: powershell
+        run: |
+          $json = curl.exe -fsSL --connect-timeout 10 --max-time 30 https://api.shuiliyingxiang.cn/update/version.json
+          if ($LASTEXITCODE -ne 0) { throw "version check failed" }
+          $obj = $json | ConvertFrom-Json
+          if ($obj.version -ne $env:ALBUM_RELEASE_VERSION) { throw "remote version mismatch: $($obj.version) != $env:ALBUM_RELEASE_VERSION" }
+          Write-Host "published_version=$($obj.version)"
+
+      - name: 清理凭据
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:ALBUM_CREDENTIAL_DIR -and (Test-Path $env:ALBUM_CREDENTIAL_DIR)) {
+            Remove-Item $env:ALBUM_CREDENTIAL_DIR -Recurse -Force
+          }
