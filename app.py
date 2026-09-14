@@ -2964,14 +2964,14 @@ class AlbumManager:
                 if self._normalize_category(photo.get("category")) != category or self._sequence_scope(data, photo, category) != target_scope:
                     raise ValueError("只能在同一类影像、同一工序内拖拽排序")
 
-        id_set = set(ordered_ids)
-        target_indexes = [index for index, photo in enumerate(photos) if str(photo.get("id") or "") in id_set]
-        if len(target_indexes) != len(ordered_ids):
-            raise ValueError("照片排序位置不完整")
+            id_set = set(ordered_ids)
+            target_indexes = [index for index, photo in enumerate(photos) if str(photo.get("id") or "") in id_set]
+            if len(target_indexes) != len(ordered_ids):
+                raise ValueError("照片排序位置不完整")
 
-        for index, photo in zip(target_indexes, ordered):
-            photos[index] = photo
-        self._write_metadata(data["project_code"], data)
+            for index, photo in zip(target_indexes, ordered):
+                photos[index] = photo
+            self._write_metadata(data["project_code"], data)
 
     def auto_sort_piles(self, project_code):
         """灌注桩单元：按桩号分组（每根桩三个工序连体），桩之间按施工完成时间排序，并重新编号。"""

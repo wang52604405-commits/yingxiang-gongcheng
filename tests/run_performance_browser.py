@@ -11,6 +11,8 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
 def main():
+    import faulthandler
+    faulthandler.dump_traceback_later(90, repeat=True)
     parser=argparse.ArgumentParser();parser.add_argument('--out-dir',required=True);parser.add_argument('--round',type=int,default=1)
     args=parser.parse_args();out=Path(args.out_dir).resolve();out.mkdir(parents=True,exist_ok=True)
     report={'round':args.round,'checks':[],'timings_ms':{},'print_variants':[],
@@ -124,8 +126,18 @@ def main():
                     assert page.locator('#photoSelectionCount').inner_text()=='已选 128 张';page.locator('#cancelPhotoSelectionBtn').click()
                     check('select-all/print include 150 photos; shift and keyboard work across batches')
                     old_order=page.evaluate('()=>activeGalleryPhotos().map(p=>p.photo_uuid)')
+                    drag_id=page.locator('#photoSectionsHost .photo').nth(130).get_attribute('data-photo-id')
+                    target_id=page.locator('#photoSectionsHost .photo').nth(129).get_attribute('data-photo-id')
+                    source=page.locator(f'#photoSectionsHost .photo[data-photo-id="{drag_id}"]')
+                    target=page.locator(f'#photoSectionsHost .photo[data-photo-id="{target_id}"]')
+                    source.scroll_into_view_if_needed()
+                    source.hover();bounds=target.bounding_box();assert bounds
+                    print('DRAG begin',drag_id,target_id,flush=True)
                     with page.expect_response(lambda r:'/reorder-list' in r.url and r.request.method=='POST'):
-                        page.locator('#photoSectionsHost .photo').nth(130).drag_to(page.locator('#photoSectionsHost .photo').nth(129),target_position={'x':5,'y':5})
+                        page.mouse.down();print('DRAG down',flush=True)
+                        page.mouse.move(bounds['x']+5,bounds['y']+5,steps=4);print('DRAG move1',flush=True)
+                        page.mouse.move(bounds['x']+6,bounds['y']+6);print('DRAG move2',flush=True)
+                        page.mouse.up();print('DRAG released',flush=True)
                     page.wait_for_function('(old)=>JSON.stringify(activeGalleryPhotos().map(p=>p.photo_uuid))!==JSON.stringify(old)',arg=old_order)
                     order=page.evaluate('()=>activeGalleryPhotos().map(p=>p.photo_uuid)');assert sorted(order)==sorted(old_order)
                     assert page.evaluate('()=>state.photos.filter(p=>p.category==="supervision").length')==6
@@ -176,6 +188,7 @@ def main():
                         assert panels.count()>0 and panels.first.is_visible()
                         page.screenshot(path=str(out/f'settings-{tab}.png'))
                     page.locator('#closeProjectInfoBtn').click();check('all seven settings tabs remain accessible in the existing theme (cloud display fixtures only)')
+                    print('PRINT matrix starting',flush=True)
                     pp=context.new_page();pp.on('pageerror',lambda e:errors.append(str(e)))
                     for layout in ('portrait','landscape'):
                         for style,count in [('one',1),('two',2),('four',4),('custom',5)]:

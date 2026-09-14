@@ -197,4 +197,14 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
         with self.assertRaises(ValueError):m.get_project('U1')
         self.assertEqual(path.read_text(encoding='utf-8'),'{broken-record')
 
+
+    def test_reorder_holds_unit_lock_until_durable_metadata_write(self):
+        self.seed('U1',4);m=self.manager;real=m._write_metadata
+        def guarded(code,data):
+            self.assertTrue(m._project_write_lock(code).locked())
+            return real(code,data)
+        with patch.object(m,'_write_metadata',side_effect=guarded):
+            m.reorder_photos('U1',['U1-SY004','U1-SY003','U1-SY002','U1-SY001'],category='construction')
+        self.assertEqual([p['photo_uuid'] for p in m.get_photos('U1')],['U1-uuid-3','U1-uuid-2','U1-uuid-1','U1-uuid-0'])
+
 if __name__=='__main__':unittest.main()

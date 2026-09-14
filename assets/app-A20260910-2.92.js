@@ -4466,15 +4466,19 @@ const $ = (selector) => document.querySelector(selector);
         showNotice("请先登录后再调整照片排序。", true);
         return;
       }
-      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/reorder`, {
+      const sourceCode = state.selectedCode;
+      const sourceContext = navigationContext();
+      const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/reorder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category, photo_id: photoId, direction })
       });
-      state.photos = data.photos || [];
-      renderPhotos();
+      if (state.selectedCode === sourceCode && navigationContext() === sourceContext) {
+        state.photos = data.photos || [];
+        renderPhotos();
+      }
       try {
-        await renumberCategory(category);
+        await renumberCategory(category, sourceCode, sourceContext);
       } catch (error) {
         showNotice("顺序已保存，但编号更新失败：" + error.message, true);
         return;
@@ -4492,15 +4496,19 @@ const $ = (selector) => document.querySelector(selector);
       const visible = new Set(visibleIds);
       const section = list.closest(".photo-section");
       const orderedIds = visibleIds.concat(photosForSection(category, section?.dataset.processName || "").map((photo) => String(photo.id)).filter((id) => !visible.has(id)));
-      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/reorder-list`, {
+      const sourceCode = state.selectedCode;
+      const sourceContext = navigationContext();
+      const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/reorder-list`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category, ordered_ids: orderedIds })
       });
-      state.photos = data.photos || [];
-      renderPhotos();
+      if (state.selectedCode === sourceCode && navigationContext() === sourceContext) {
+        state.photos = data.photos || [];
+        renderPhotos();
+      }
       try {
-        await renumberCategory(category);
+        await renumberCategory(category, sourceCode, sourceContext);
       } catch (error) {
         showNotice("排序已保存，但编号更新失败：" + error.message, true);
         return;
@@ -4508,12 +4516,13 @@ const $ = (selector) => document.querySelector(selector);
       showNotice("拖拽排序已保存，编号已自动更新。");
     }
 
-    async function renumberCategory(category) {
-      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/renumber`, {
+    async function renumberCategory(category, sourceCode = state.selectedCode, sourceContext = navigationContext()) {
+      const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/renumber`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category })
       });
+      if (state.selectedCode !== sourceCode || navigationContext() !== sourceContext) return;
       state.photos = data.photos || [];
       state.selectedPrintPhotos = {};
       renderPhotos();
