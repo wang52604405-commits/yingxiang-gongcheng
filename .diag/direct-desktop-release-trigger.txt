@@ -1,3 +1,4 @@
-trigger=2026-09-13T16:55:00+08:00
-release=A20260913-3.2
+trigger=2026-09-14T16:41:00+08:00
+release=auto-next
 mode=server-update-channel-only
+note=桌面端工序照片移动+空工序删除修复
