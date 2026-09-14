@@ -1,0 +1,4 @@
+trigger=2026-09-14T08:28:00+08:00
+scope=all-accounts
+ui=top-right-logout
+lan=true
