@@ -1045,8 +1045,8 @@ def write_numbering_rules(payload, persist=True):
     return rules
 
 
-def numbering_start(category):
-    rule = read_numbering_rules().get(category) or {}
+def numbering_start(category, rules=None):
+    rule = (read_numbering_rules() if rules is None else rules).get(category) or {}
     try:
         return max(1, int(rule.get("start", 1)))
     except (TypeError, ValueError):
@@ -1879,12 +1879,41 @@ class AlbumManager:
         process_code = self._process_code(data, process_name) if process_name else ""
         return (category, process_code)
 
-    def _archive_id_for_photo(self, data, photo, category, sequence):
+    def _numbering_snapshot(self):
+        """One immutable-by-convention settings snapshot per operation, never a global cache."""
+        settings = dict(read_engineering_settings())
+        settings["numbering_rules"] = settings.get("numbering_rules") or read_numbering_rules()
+        return settings
+
+    def _numbering_is_current(self, data, settings):
+        """Validate metadata only; edits must still repair legacy/gapped numbering.
+
+        No image stat, directory scan, rename or thumbnail generation is needed
+        when an ordinary unit already follows the current numbering policy.
+        """
+        counters = {}
+        for photo in data.get("photos", []):
+            category = self._normalize_category(photo.get("category"))
+            process_name = str(photo.get("process_name") or "").strip()
+            process_code = self._process_code(data, process_name) if process_name else ""
+            scope = (category, process_code)
+            index = counters.get(scope, numbering_start(category, settings["numbering_rules"]) - 1) + 1
+            counters[scope] = index
+            expected_id = self._archive_id_for_photo(data, photo, category, index, settings=settings)
+            filename = str(photo.get("filename") or "")
+            expected_name = self._photo_filename(category, expected_id, Path(filename).suffix.lower() or ".jpg", process_code)
+            if (str(photo.get("id") or "") != expected_id or filename != expected_name
+                    or photo.get("process_name", "") != process_name
+                    or photo.get("process_code", "") != process_code):
+                return False
+        return True
+
+    def _archive_id_for_photo(self, data, photo, category, sequence, settings=None):
         category = self._normalize_category(category)
         photo = photo or {}
         process_name = str(photo.get("process_name") or "").strip()
         process_code = self._process_code(data, process_name) if process_name else ""
-        settings = read_engineering_settings()
+        settings = self._numbering_snapshot() if settings is None else settings
         rules = settings.get("numbering_rules") or read_numbering_rules()
         rule = rules.get(category) or DEFAULT_NUMBERING_RULES[category]
         try:
@@ -1942,7 +1971,8 @@ class AlbumManager:
             restored += 1
         return restored
 
-    def _renumber_category(self, project_code, data, category):
+    def _renumber_category(self, project_code, data, category, settings=None):
+        settings = self._numbering_snapshot() if settings is None else settings
         category = self._normalize_category(category)
         photos_dir = self._photos_dir(project_code)
         # 先修复历史中断残留，避免在残留临时文件基础上继续改名
@@ -1953,7 +1983,7 @@ class AlbumManager:
         ]
         staged = []
         counters = {}
-        first_sequence = numbering_start(category)
+        first_sequence = numbering_start(category, settings["numbering_rules"])
         for photo in matching:
             process_name = str(photo.get("process_name") or "").strip()
             # 统一修正历史残留的 process_code：空工序名就是单元照片。
@@ -1966,7 +1996,7 @@ class AlbumManager:
             old_path = photos_dir / old_filename
             old_thumb = photos_dir / self._thumb_filename(old_filename)
             ext = Path(old_filename).suffix.lower() or ".jpg"
-            new_id = self._archive_id_for_photo(data, photo, category, index)
+            new_id = self._archive_id_for_photo(data, photo, category, index, settings=settings)
             scope_code = str(photo.get("process_code") or "").strip()
             new_filename = self._photo_filename(category, new_id, ext, scope_code)
             if new_filename == old_filename and str(photo.get("id") or "") == new_id:
@@ -2438,6 +2468,7 @@ class AlbumManager:
                 raise ValueError("照片编号不能为空")
             for photo in data.get("photos", []):
                 if str(photo.get("id") or "") == target_id:
+                    previous_process = str(photo.get("process_name") or "").strip()
                     if "title" in updates:
                         photo["title"] = str(updates.get("title") or "").strip()
                     if "photo_date" in updates:
@@ -2456,8 +2487,16 @@ class AlbumManager:
                         photo["orientation_label"] = PHOTO_ORIENTATION_LABELS[orientation]
                     if "rotation" in updates:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
-                    self._write_metadata(data["project_code"], data)
-                    self._renumber_after_change(project_code, data)
+                    # The browser sends process_name even when only a caption changed.
+                    # Keep pile sorting and all scope changes exactly as before. Ordinary
+                    # canonical units need just one durable metadata write, not a full
+                    # directory walk and two-category rename pass.
+                    settings = self._numbering_snapshot()
+                    scope_changed = previous_process != str(photo.get("process_name") or "").strip()
+                    if is_pile_unit(data) or scope_changed or not self._numbering_is_current(data, settings):
+                        self._renumber_after_change(project_code, data)
+                    else:
+                        self._write_metadata(data["project_code"], data)
                     return self._photo_item(data, photo)
             raise ValueError("照片不存在")
 
@@ -2831,8 +2870,9 @@ class AlbumManager:
                 ordered.extend(group)
             ordered.extend(unknowns)
         data["photos"] = ordered
+        settings = self._numbering_snapshot()
         for category in PHOTO_CATEGORIES:
-            self._renumber_category(project_code, data, category)
+            self._renumber_category(project_code, data, category, settings=settings)
         self._write_metadata(data["project_code"], data)
         self.invalidate_projects_cache()
 
@@ -2852,8 +2892,9 @@ class AlbumManager:
         if is_pile_unit(data):
             self._auto_sort_piles_locked(project_code, data)
         else:
+            settings = self._numbering_snapshot()
             for category in PHOTO_CATEGORIES:
-                self._renumber_category(project_code, data, category)
+                self._renumber_category(project_code, data, category, settings=settings)
             self._write_metadata(data["project_code"], data)
             self.invalidate_projects_cache()
 

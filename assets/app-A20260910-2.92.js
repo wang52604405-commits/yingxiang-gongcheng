@@ -4078,10 +4078,68 @@ const $ = (selector) => document.querySelector(selector);
       showNotice(`照片已移动到 ${targetLabel}${targetProcess ? ` / ${targetProcess}` : ""}。`);
     }
 
+    function applyPhotoEditResponse(data) {
+      // Keep the complete collection for search, select-all and printing.
+      // Preserve selection by permanent UUID if a scope/date edit renumbered IDs.
+      if (!Array.isArray(data.photos)) throw new Error("照片保存结果不完整，请刷新后核实。");
+      const oldPhotos = state.photos;
+      const oldGallery = activeGalleryPhotos();
+      const identity = (photo) => photo.photo_uuid || printSelectionKey(photo.category, photo.id);
+      const selected = new Set(oldPhotos.filter((photo) => state.selectedPrintPhotos[printSelectionKey(photo.category, photo.id)]).map(identity));
+      const host = $("#photoSectionsHost");
+      const list = host?.querySelector(".photos");
+      const oldRendered = Number(list?.dataset.rendered || 0);
+      const scroll = [];
+      for (let el = host; el; el = el.parentElement) scroll.push([el, el.scrollTop, el.scrollLeft]);
+      state.photos = data.photos;
+      if (state.selectedProject) state.selectedProject.photos = data.photos;
+      state.selectedPrintPhotos = {};
+      state.photos.forEach((photo) => {
+        if (selected.has(identity(photo))) state.selectedPrintPhotos[printSelectionKey(photo.category, photo.id)] = true;
+      });
+      const nextGallery = activeGalleryPhotos();
+      const nextByIdentity = new Map(state.photos.map((photo) => [identity(photo), photo]));
+      const sameScopes = oldPhotos.length === state.photos.length && oldPhotos.every((photo) => {
+        const next = nextByIdentity.get(identity(photo));
+        return next && normalizePhotoCategory(next.category) === normalizePhotoCategory(photo.category)
+          && String(next.process_name || "") === String(photo.process_name || "");
+      });
+      const unchangedOrder = sameScopes && oldGallery.length === nextGallery.length && oldGallery.every((photo, i) =>
+        identity(photo) === identity(nextGallery[i]) && photo.id === nextGallery[i].id);
+      if (list && unchangedOrder) {
+        // Replace changed visible cards only. Other thumbnails stay decoded and
+        // the scroll container is not rebuilt for a title/photographer edit.
+        const before = new Map(oldGallery.map((photo) => [identity(photo), photo]));
+        const cards = Array.from(list.querySelectorAll(".photo[data-photo-id]"));
+        cards.forEach((card, i) => {
+          const photo = nextGallery[i];
+          if (!photo || JSON.stringify(before.get(identity(photo))) === JSON.stringify(photo)) return;
+          const holder = document.createElement("div");
+          holder.innerHTML = photoCardHTML(photo, state.activePhotoCategory, photoSectionKey(state.activePhotoCategory, state.activeProcessName), state.photoSelectionMode, i);
+          card.replaceWith(holder.firstElementChild);
+        });
+        bindPhotoGalleryEvents(list);
+        if (!state.photoSelectionMode) initPhotoDragSort(host);
+        updatePhotoSelectionBar();
+      } else {
+        renderPhotos();
+        const section = host?.querySelector(".photo-section");
+        const nextList = section?.querySelector(".photos");
+        const target = Math.min(oldRendered, nextGallery.length);
+        while (nextList && Number(nextList.dataset.rendered || 0) < target) loadMorePhotos(section);
+      }
+      scroll.forEach(([el, top, left]) => { if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; } });
+    }
+
+    let photoEditSavePending = false;
     async function savePhotoEdit(event) {
       event.preventDefault();
-      if (!state.editingPhoto) return;
+      if (!state.editingPhoto || photoEditSavePending) return;
+      const requestedEditor = state.editingPhoto;
+      const requestedCode = state.selectedCode;
+      const requestedEngineering = state.activeEngineeringProjectId;
       if (!(await ensureAuthenticated("修改照片信息"))) return;
+      if (photoEditSavePending || state.editingPhoto !== requestedEditor || state.selectedCode !== requestedCode || state.activeEngineeringProjectId !== requestedEngineering) return;
       const title = $("#photoEditTitleInput").value.trim();
       const photoDate = $("#photoEditDateInput").value.trim();
       const photographer = $("#photoEditPhotographerInput").value.trim();
@@ -4099,16 +4157,27 @@ const $ = (selector) => document.querySelector(selector);
         showNotice("日期格式应为 YYYY-MM-DD。", true);
         return;
       }
-      const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/${encodeURIComponent(state.editingPhoto.photoId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description })
-      });
-      state.photos = data.photos || [];
-      closePhotoEdit();
-      renderPhotos();
-      await refreshAll();
-      showNotice("照片信息已修改。");
+      const sourceCode = state.selectedCode;
+      const sourceEngineering = state.activeEngineeringProjectId;
+      const editing = state.editingPhoto;
+      const submit = $("#photoEditForm button[type='submit']");
+      photoEditSavePending = true;
+      if (submit) submit.disabled = true;
+      try {
+        const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/${encodeURIComponent(editing.photoId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description })
+        });
+        // A late response must not overwrite a different unit/engineering context.
+        if (state.selectedCode !== sourceCode || state.activeEngineeringProjectId !== sourceEngineering) return;
+        applyPhotoEditResponse(data);
+        if (state.editingPhoto === editing) closePhotoEdit();
+        showNotice("照片信息已修改。");
+      } finally {
+        photoEditSavePending = false;
+        if (submit) submit.disabled = false;
+      }
     }
 
     function initPhotoForms() {
@@ -4308,51 +4377,42 @@ const $ = (selector) => document.querySelector(selector);
 
     function initPhotoDragSort(host) {
       let dragged = null;
-      host.querySelectorAll(".photo[draggable='true']").forEach((card) => {
-        card.addEventListener("dragstart", (event) => {
-          // 照片缩略图和标题都包在 button 里，必须允许从 button 上发起拖拽排序，
-          // 否则用户抓照片/标题拖不动，编号和缩略图自然不跟着走。
-          if (event.target.closest("input, select, textarea, label")) {
-            event.preventDefault();
-            return;
-          }
-          dragged = card;
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("text/plain", card.dataset.photoId || "");
-          setTimeout(() => card.classList.add("is-dragging-sort"), 0);
-        });
-        card.addEventListener("dragend", () => {
-          card.classList.remove("is-dragging-sort");
-          host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
-          dragged = null;
-        });
-      });
-
-      host.querySelectorAll(".photos").forEach((list) => {
-        list.addEventListener("dragover", (event) => {
-          if (!dragged || dragged.parentElement !== list) return;
-          event.preventDefault();
-          const target = event.target.closest(".photo");
-          if (!target || target === dragged || target.parentElement !== list) return;
-          host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
-          target.classList.add("is-drag-over");
-          const rect = target.getBoundingClientRect();
-          const targetCenterY = rect.top + rect.height / 2;
-          const targetCenterX = rect.left + rect.width / 2;
-          const insertAfter = event.clientY > targetCenterY || (Math.abs(event.clientY - targetCenterY) < rect.height / 3 && event.clientX > targetCenterX);
-          list.insertBefore(dragged, insertAfter ? target.nextSibling : target);
-        });
-        list.addEventListener("drop", (event) => {
-          if (!dragged || dragged.parentElement !== list) return;
-          event.preventDefault();
-          const category = dragged.dataset.category || list.querySelector(".photo[data-category]")?.dataset.category || "";
-          host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
-          saveDraggedPhotoOrder(list, category).catch((error) => {
-            showNotice(error.message, true);
-            renderPhotos();
-          });
-        });
-      });
+      host.ondragstart = (event) => {
+        const card = event.target.closest(".photo[draggable='true']");
+        if (!card || !host.contains(card) || state.photoSelectionMode) return;
+        if (event.target.closest("input, select, textarea, label")) { event.preventDefault(); return; }
+        dragged = card;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", card.dataset.photoId || "");
+        setTimeout(() => card.classList.add("is-dragging-sort"), 0);
+      };
+      host.ondragend = () => {
+        dragged?.classList.remove("is-dragging-sort");
+        host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
+        dragged = null;
+      };
+      host.ondragover = (event) => {
+        const list = event.target.closest(".photos");
+        if (!dragged || !list || dragged.parentElement !== list) return;
+        event.preventDefault();
+        const target = event.target.closest(".photo");
+        if (!target || target === dragged || target.parentElement !== list) return;
+        host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
+        target.classList.add("is-drag-over");
+        const rect = target.getBoundingClientRect();
+        const targetCenterY = rect.top + rect.height / 2;
+        const targetCenterX = rect.left + rect.width / 2;
+        const insertAfter = event.clientY > targetCenterY || (Math.abs(event.clientY - targetCenterY) < rect.height / 3 && event.clientX > targetCenterX);
+        list.insertBefore(dragged, insertAfter ? target.nextSibling : target);
+      };
+      host.ondrop = (event) => {
+        const list = event.target.closest(".photos");
+        if (!dragged || !list || dragged.parentElement !== list) return;
+        event.preventDefault();
+        const category = dragged.dataset.category || list.querySelector(".photo[data-category]")?.dataset.category || "";
+        host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
+        saveDraggedPhotoOrder(list, category).catch((error) => { showNotice(error.message, true); renderPhotos(); });
+      };
     }
 
     // 首屏冷启动加载动画：进度条跟随真实加载阶段推进；加载再快也保证至少显示 1.6 秒走完，页面数据全部显示才消失
