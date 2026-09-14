@@ -4539,55 +4539,91 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function initPhotoDragSort(host) {
-      let dragged = null;
-      let dropTarget = null;
-      let dropAfter = false;
+      // Internal pointer sorting avoids native OS image drag conflicts. A click
+      // remains a click; only a deliberate mouse movement starts sorting.
+      let candidate = null, dragging = false, dropTarget = null, dropAfter = false;
+      let suppressClick = false, scrollFrame = 0, scrollBox = null;
+      let lastPoint = { x: 0, y: 0 };
+      const previousSelect = host.style.userSelect;
       const clearMarks = () => host.querySelectorAll(".photo.is-drag-over").forEach((item) => item.classList.remove("is-drag-over"));
-      host.ondragstart = (event) => {
-        const card = event.target.closest(".photo[draggable='true']");
-        if (!card || !host.contains(card) || state.photoSelectionMode) return;
-        if (event.target.closest("input, select, textarea, label")) { event.preventDefault(); return; }
-        dragged = card;
-        dropTarget = null;
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", card.dataset.photoId || "");
-        setTimeout(() => { if (dragged === card) card.classList.add("is-dragging-sort"); }, 0);
+      const reset = () => {
+        cancelAnimationFrame(scrollFrame); scrollFrame = 0;
+        if (candidate) {
+          candidate.card.classList.remove("is-dragging-sort");
+          try { if (candidate.card.hasPointerCapture(candidate.pointerId)) candidate.card.releasePointerCapture(candidate.pointerId); } catch (_) {}
+        }
+        clearMarks(); host.style.userSelect = previousSelect;
+        candidate = null; dragging = false; dropTarget = null;
       };
-      host.ondragend = () => {
-        dragged?.classList.remove("is-dragging-sort");
-        clearMarks();
-        dragged = null;
-        dropTarget = null;
-      };
-      host.ondragover = (event) => {
-        const list = event.target.closest(".photos");
-        if (!dragged || !list || dragged.parentElement !== list) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        const target = event.target.closest(".photo");
-        if (!target || target === dragged || target.parentElement !== list) return;
-        clearMarks();
-        target.classList.add("is-drag-over");
+      const markTarget = (x, y) => {
+        if (!candidate) return;
+        const target = document.elementFromPoint(x, y)?.closest(".photo");
+        if (!target || target === candidate.card || target.parentElement !== candidate.card.parentElement) { clearMarks(); dropTarget = null; return; }
+        clearMarks(); target.classList.add("is-drag-over");
         const rect = target.getBoundingClientRect();
-        dropAfter = event.clientY > rect.top + rect.height / 2 || (Math.abs(event.clientY - rect.top - rect.height / 2) < rect.height / 3 && event.clientX > rect.left + rect.width / 2);
+        dropAfter = y > rect.top + rect.height / 2 || (Math.abs(y - rect.top - rect.height / 2) < rect.height / 3 && x > rect.left + rect.width / 2);
         dropTarget = target;
-        // Moving the native drag source here can cancel Chromium's drag session,
-        // leaving a reordered DOM but no drop/save. Keep it in place until drop.
       };
-      host.ondrop = (event) => {
-        const list = event.target.closest(".photos");
-        const card = dragged;
-        const target = dropTarget;
-        if (!card || !list || card.parentElement !== list || !target || target.parentElement !== list || target === card) return;
-        event.preventDefault();
-        const category = card.dataset.category || list.querySelector(".photo[data-category]")?.dataset.category || "";
-        card.classList.remove("is-dragging-sort");
-        clearMarks();
-        list.insertBefore(card, dropAfter ? target.nextSibling : target);
-        dragged = null;
-        dropTarget = null;
-        saveDraggedPhotoOrder(list, category).catch((error) => { showNotice(error.message, true); renderPhotos(); });
+      const scrollOnEdge = () => {
+        if (!dragging || !candidate || !scrollBox) return;
+        const r = scrollBox === document.scrollingElement ? { top: 0, bottom: innerHeight } : scrollBox.getBoundingClientRect();
+        const top = Math.max(0, r.top), bottom = Math.min(innerHeight, r.bottom);
+        const dy = lastPoint.y < top + 36 ? -12 : (lastPoint.y > bottom - 36 ? 12 : 0);
+        if (dy) { scrollBox.scrollTop += dy; markTarget(lastPoint.x, lastPoint.y); }
+        scrollFrame = requestAnimationFrame(scrollOnEdge);
       };
+      if (host._photoDragClickGuard) host.removeEventListener("click", host._photoDragClickGuard, true);
+      host._photoDragClickGuard = (event) => {
+        if (!suppressClick) return;
+        suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
+      };
+      host.addEventListener("click", host._photoDragClickGuard, true);
+      host.ondragstart = (event) => { if (event.target.closest(".photo[draggable='true']")) event.preventDefault(); };
+      host.ondragover = null; host.ondrop = null; host.ondragend = null;
+      host.onpointerdown = (event) => {
+        if (event.pointerType !== "mouse" || event.button !== 0 || state.photoSelectionMode || host.dataset.sortSaving === "1") return;
+        if (event.target.closest("input, select, textarea, label")) return;
+        const card = event.target.closest(".photo[draggable='true']");
+        if (!card || !host.contains(card)) return;
+        candidate = { card, pointerId: event.pointerId, x: event.clientX, y: event.clientY, context: navigationContext(), code: state.selectedCode };
+      };
+      host.onpointermove = (event) => {
+        if (!candidate || event.pointerId !== candidate.pointerId) return;
+        if (candidate.context !== navigationContext() || candidate.code !== state.selectedCode || !candidate.card.isConnected) { reset(); return; }
+        if (!dragging) {
+          if (Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) < 6) return;
+          dragging = true; candidate.card.classList.add("is-dragging-sort");
+          host.style.userSelect = "none"; candidate.card.setPointerCapture(event.pointerId);
+        }
+        event.preventDefault(); lastPoint = { x: event.clientX, y: event.clientY };
+        markTarget(lastPoint.x, lastPoint.y);
+        if (!scrollFrame) {
+          scrollBox = host;
+          while (scrollBox && !(scrollBox.scrollHeight > scrollBox.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scrollBox).overflowY))) scrollBox = scrollBox.parentElement;
+          scrollBox = scrollBox || document.scrollingElement;
+          scrollFrame = requestAnimationFrame(scrollOnEdge);
+        }
+      };
+      host.onpointerup = (event) => {
+        if (!candidate || event.pointerId !== candidate.pointerId) return;
+        const current = candidate, target = dropTarget, after = dropAfter, didDrag = dragging;
+        const list = current.card.parentElement;
+        reset();
+        if (!didDrag) return;
+        event.preventDefault(); suppressClick = true;
+        setTimeout(() => { suppressClick = false; }, 0);
+        if (!target || !list || target.parentElement !== list || current.code !== state.selectedCode || current.context !== navigationContext()) return;
+        list.insertBefore(current.card, after ? target.nextSibling : target);
+        host.dataset.sortSaving = "1";
+        saveDraggedPhotoOrder(list, current.card.dataset.category || state.activePhotoCategory)
+          .catch((error) => {
+            showNotice(error.message, true);
+            if (current.code === state.selectedCode && current.context === navigationContext()) renderPhotos();
+          })
+          .finally(() => { delete host.dataset.sortSaving; });
+      };
+      host.onpointercancel = reset;
+      host.onkeydown = (event) => { if (event.key === "Escape" && candidate) { event.preventDefault(); reset(); } };
     }
 
     // 首屏冷启动加载动画：进度条跟随真实加载阶段推进；加载再快也保证至少显示 1.6 秒走完，页面数据全部显示才消失

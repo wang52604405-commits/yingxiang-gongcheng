@@ -179,8 +179,26 @@ def main():
                     deleted=page.evaluate('()=>activeGalleryPhotos().filter(p=>state.selectedPrintPhotos[printSelectionKey(p.category,p.id)]).map(p=>p.photo_uuid)');before=[p['photo_uuid'] for p in m.get_photos('U-MAIN')]
                     page.locator('#deleteSelectedCurrentPhotosBtn').click();page.wait_for_function('()=>!state.photoSelectionMode')
                     assert set(before)-{p['photo_uuid'] for p in m.get_photos('U-MAIN')}==set(deleted);check('bulk-delete removes exactly selected UUIDs after renumbering')
+                    import zipfile, xml.etree.ElementTree as ET
+                    current=m.get_photos('U-MAIN')
+                    page.locator('#unitMoreMenuBtn').click()
+                    with page.expect_download() as download:page.locator('#exportZipBtn').click()
+                    package=out/'unit-export.zip';download.value.save_as(package)
+                    with zipfile.ZipFile(package) as archive:
+                        assert archive.testzip() is None
+                        metadata=json.loads(archive.read('metadata.json'))
+                        assert {p['photo_uuid'] for p in metadata['photos']}=={p['photo_uuid'] for p in current}
+                        for photo in current:assert 'photos/'+photo['filename'] in archive.namelist()
+                    if not page.locator('#unitMoreMenu.open').count():page.locator('#unitMoreMenuBtn').click()
+                    with page.expect_download() as download:page.locator('#exportUnitStatsBtn').click()
+                    stats=out/'unit-statistics.xlsx';download.value.save_as(stats)
+                    with zipfile.ZipFile(stats) as archive:
+                        sheet=ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+                        rows=sheet.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}sheetData/{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row')
+                        assert len(rows)==len(current)+1,(len(rows),len(current))
+                    page.keyboard.press('Escape');check('real unit ZIP and statistics downloads contain every retained photo')
                     def delay(route):time.sleep(.25);route.continue_()
-                    page.route('**/api/photos/U-MAIN',delay);page.evaluate('()=>{loadProject("U-MAIN");openOverview();}');page.wait_for_timeout(500)
+                    page.route('**/api/photos/U-MAIN',delay);page.evaluate('()=>{loadProject("U-MAIN");if(!document.querySelector("#galleryUploadBtn").disabled)throw new Error("Loading view exposes wrong-unit action");openOverview();}');page.wait_for_timeout(500)
                     assert page.evaluate('()=>state.viewMode')=='overview';page.unroute('**/api/photos/U-MAIN',delay);check('late responses cannot override navigation intent')
                     page.locator('#settingsMenuBtn').click();page.locator('#projectInfoModal.open').wait_for()
                     for tab in ('info','division','members','upload','print','account','device'):
@@ -213,6 +231,10 @@ def main():
                             if p['photo_uuid'] in before_hash:
                                 assert hashlib.sha256((m._originals_dir(code)/p['original_backup']).read_bytes()).hexdigest()==before_hash[p['photo_uuid']]
                     assert not errors,errors;check('all retained originals unchanged; no uncaught browser errors')
+                    page.locator('#logoutBtn').click()
+                    page.wait_for_function('()=>!state.auth.user')
+                    assert context.request.get(origin+'/api/units?part_key=invalid').status==401
+                    page.screenshot(path=str(out/'logged-out.png'));check('logout ends the real local session and protected operations reject it')
                     report.update(status='passed',browser=browser.version,viewport={'width':w,'height':h},uncaught_errors=errors)
                 except Exception:
                     report.update(status='failed',error=traceback.format_exc(),uncaught_errors=errors)
