@@ -4,20 +4,98 @@ on:
     branches: [chatgpt/performance-full-20260914]
 permissions:
   contents: read
+concurrency:
+  group: performance-full-isolated
+  cancel-in-progress: true
+env:
+  PYTHONUTF8: '1'
 jobs:
-  source:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      candidate: ${{ steps.candidate.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
-      - name: Export exact source for isolated work
+      - name: Prepare guarded candidate on isolated branch only
+        id: candidate
+        shell: bash
         run: |
-          mkdir -p evidence/wheels
-          git rev-parse HEAD > evidence/source-sha.txt
+          if [ -f .diag/apply_backend.py ]; then
+            python .diag/apply_backend.py
+            python .diag/apply_frontend.py
+            python .diag/apply_safety.py
+            python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          expected={'app.py':'998677dfd6d0b692de849ece0384b9e3cc083243ee633f4048499158572a6e0b','assets/app-A20260910-2.92.js':'8e1e5b0f59409bf5c389a8b30fea40443f1514553a03b83419cdc48d58527470'}
+          for name,wanted in expected.items():
+              got=hashlib.sha256(Path(name).read_bytes()).hexdigest()
+              print(name,got)
+              assert got==wanted, 'candidate differs from locally tested source: '+name
+          PY
+            rm -f .diag/perf-chunk-*.txt .diag/performance-full-01.b64 .diag/apply_backend.py .diag/apply_frontend.py .diag/apply_safety.py
+            node --check assets/app-A20260910-2.92.js
+            git diff --check
+            git add app.py assets/app-A20260910-2.92.js assets/app-A20260910-2.92.js.gz tests .diag
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m '加快照片浏览与切换并保持照片操作完整'
+            git push origin HEAD:chatgpt/performance-full-20260914
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p evidence
           git archive --format=zip --output=evidence/source.zip HEAD
-          python -m pip download --no-deps --only-binary=:all: -d evidence/wheels flask werkzeug blinker truststore==0.10.4 xlrd pystray python-xlib
+          git rev-parse HEAD > evidence/source-sha.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: performance-full-source
+          name: performance-candidate-source
           path: evidence
-          retention-days: 3
+          retention-days: 7
+  round:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.candidate }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - name: Install isolated validation dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt -r server/requirements.txt playwright pymupdf
+          if ($LASTEXITCODE -ne 0) { throw 'dependencies failed' }
+          python -m playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'browser install failed' }
+      - name: Full regression and browser end-to-end
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path evidence -Force | Out-Null
+          git rev-parse HEAD | Set-Content evidence/source-sha.txt
+          python -m unittest discover -s tests -v *> evidence/python-tests.log
+          if ($LASTEXITCODE -ne 0) { Get-Content evidence/python-tests.log -Tail 100; throw 'full regression failed' }
+          python -m compileall -q app.py tests server
+          if ($LASTEXITCODE -ne 0) { throw 'compile failed' }
+          node --check assets/app-A20260910-2.92.js
+          if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax failed' }
+          python tests/run_performance_browser.py --round ${{ matrix.round }} --out-dir evidence/browser *> evidence/browser.log
+          if ($LASTEXITCODE -ne 0) { Get-Content evidence/browser.log -Tail 100; throw 'browser validation failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-round-${{ matrix.round }}
+          path: evidence
+          retention-days: 7
