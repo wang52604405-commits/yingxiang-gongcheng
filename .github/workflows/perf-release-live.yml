@@ -1,0 +1,51 @@
+name: 性能更新上线只读核验
+on:
+  push:
+    branches: [chatgpt/perf-release-check-20260914]
+    paths: [.github/workflows/perf-release-live.yml]
+permissions: {}
+jobs:
+  verify-live:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 3
+    env:
+      PYTHONUTF8: '1'
+      HTTP_PROXY: http://127.0.0.1:7897
+      HTTPS_PROXY: http://127.0.0.1:7897
+      NO_PROXY: 127.0.0.1,localhost
+    steps:
+      - name: Read installed application and update manifest without touching data
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $install = [IO.Path]::GetFullPath('C:\Users\Administrator\AppData\Local\工程影像管理平台').TrimEnd([char[]]'\/')
+          $listeners = @(Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+          if (-not $listeners) { throw '5088 is not listening' }
+          foreach ($processId in $listeners) {
+            $proc = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$processId)
+            $full = [IO.Path]::GetFullPath([string]$proc.ExecutablePath)
+            $dir = [IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/')
+            if ([IO.Path]::GetFileName($full) -ne 'album_server.exe' -or -not [string]::Equals($dir,$install,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected listener; no changes made' }
+          }
+          @'
+          import hashlib, json, re, urllib.request
+          expected_version = 'A20260914-4.0'
+          expected_js_sha = '57e4339ddd5c8e0b6f5cde3d81247818e715545c69a9d85e7b1e7944e8561836'
+          base = 'http://127.0.0.1:5088'
+          def read(url):
+              req = urllib.request.Request(url, headers={'Accept-Encoding':'identity','Cache-Control':'no-cache'})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  if response.status != 200: raise RuntimeError(f'HTTP {response.status}')
+                  return response.read()
+          html = read(base+'/').decode('utf-8')
+          asset = '/assets/app-'+expected_version+'.js'
+          assert asset in html, 'Installed HTML is not the expected release'
+          js = read(base+asset)
+          assert hashlib.sha256(js).hexdigest() == expected_js_sha, 'Installed JavaScript differs from tested commit'
+          manifest = json.loads(read('https://api.shuiliyingxiang.cn/update/version.json'))
+          assert manifest.get('version') == expected_version, 'Update channel version mismatch'
+          assert int(manifest.get('size') or 0) > 0 and re.fullmatch('[a-f0-9]{64}', manifest.get('sha256','')), 'Installer integrity metadata missing'
+          assert manifest.get('mandatory') is False and manifest.get('manual_update_only') is True, 'Update behavior changed'
+          print(json.dumps({'status':'passed','installed_version':expected_version,'installed_js_equals_tested_commit':True,'update_version':manifest['version'],'installer_bytes':manifest['size'],'installer_sha256':manifest['sha256'],'update_note':manifest.get('note'),'mode':'read-only; no photo/metadata writes; no production account login'},ensure_ascii=True))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Live verification failed' }
