@@ -16,8 +16,7 @@ jobs:
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
-      ALBUM_RELEASE_VERSION: A20260913-3.2
-      UPDATE_NOTE: "修复项目管理员桌面端完整操作权限"
+      UPDATE_NOTE: "桌面端新增照片在工序之间移动，并修复删除照片后空工序仍无法删除的问题"
     steps:
       - uses: actions/checkout@v7
       - name: 准备版本
@@ -45,7 +44,7 @@ jobs:
         run: python publish_update.py
       - name: 验证远端版本
         shell: powershell
-        run: python -c "import json,urllib.request; d=json.loads(urllib.request.urlopen('https://api.shuiliyingxiang.cn/update/version.json',timeout=15).read().decode()); print(d); assert d.get('version')=='A20260913-3.2'"
+        run: python -c "import json,os,urllib.request; d=json.loads(urllib.request.urlopen('https://api.shuiliyingxiang.cn/update/version.json',timeout=15).read().decode()); print(d); assert d.get('version')==os.environ['ALBUM_RELEASE_VERSION']"
       - name: 清理凭据
         if: always()
         shell: powershell
