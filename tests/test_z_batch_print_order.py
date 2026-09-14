@@ -11,6 +11,7 @@ import io
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class BatchPrintOrderTest(unittest.TestCase):
@@ -24,6 +25,13 @@ class BatchPrintOrderTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
+
+    def setUp(self):
+        # These tests assert MEMBER batch ordering, not free-plan eligibility.
+        # This scoped test double never changes production authorization rules.
+        member = patch.object(self.appmod, "is_member_user", return_value=True)
+        member.start()
+        self.addCleanup(member.stop)
 
     @staticmethod
     def _jpg(name):
