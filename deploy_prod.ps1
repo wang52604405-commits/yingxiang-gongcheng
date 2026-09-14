@@ -37,6 +37,22 @@ function Test-IsInstalledAppProcess($process) {
     }
 }
 
+function Stop-InstalledAppProcesses {
+    # The tray launcher may remain alive even after its listener exited.
+    # Revalidate each PID, creation time and exact install path before stop.
+    $installed = @(Get-CimInstance Win32_Process -ErrorAction Stop |
+        Where-Object { Test-IsInstalledAppProcess $_ })
+    foreach ($candidate in $installed) {
+        $live = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$candidate.ProcessId) -ErrorAction Stop
+        if (-not $live) { continue }
+        if (-not (Test-IsInstalledAppProcess $live) -or $live.CreationDate -ne $candidate.CreationDate) {
+            throw "Application process identity changed; update stopped without touching it."
+        }
+        Write-Host "    Closing verified installed process PID=$($live.ProcessId) Name=$($live.Name)"
+        Stop-Process -Id ([int]$live.ProcessId) -Force -ErrorAction Stop
+    }
+}
+
 function Get-SafeProcessCommandLine($process) {
     try {
         $commandLine = [string]$process.CommandLine
@@ -289,6 +305,7 @@ for ($i = 0; $i -lt 30; $i++) {
     $alive = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { Test-IsInstalledAppProcess $_ })
     if (-not $alive) { break }
+    Stop-InstalledAppProcesses
     Start-Sleep -Seconds 1
 }
 if ($alive) {
