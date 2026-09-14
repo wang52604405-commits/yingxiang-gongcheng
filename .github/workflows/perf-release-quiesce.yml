@@ -1,0 +1,40 @@
+name: 本次更新残留进程处理
+on:
+  push:
+    branches: [chatgpt/perf-release-check-20260914]
+    paths: [.github/workflows/perf-release-quiesce.yml]
+permissions: {}
+jobs:
+  quiesce:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 3
+    steps:
+      - name: Stop only exact installed application processes
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $install = [IO.Path]::GetFullPath('C:\Users\Administrator\AppData\Local\工程影像管理平台').TrimEnd([char[]]'\/')
+          $names = @('工程影像管理平台.exe','album_server.exe')
+          function IsExactInstalled($proc) {
+            try {
+              if (-not $proc.ExecutablePath) { return $false }
+              $full = [IO.Path]::GetFullPath([string]$proc.ExecutablePath)
+              $dir = [IO.Path]::GetDirectoryName($full).TrimEnd([char[]]'\/')
+              return (($names -contains [IO.Path]::GetFileName($full)) -and [string]::Equals($dir,$install,[StringComparison]::OrdinalIgnoreCase))
+            } catch { return $false }
+          }
+          $owned = @(Get-CimInstance Win32_Process | Where-Object { IsExactInstalled $_ })
+          foreach ($item in $owned) {
+            # Re-read the PID immediately before stop; never stop by global name/port.
+            $current = Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$item.ProcessId) -ErrorAction SilentlyContinue
+            if (-not $current) { continue }
+            if (-not (IsExactInstalled $current) -or $current.CreationDate -ne $item.CreationDate) { throw 'Process identity changed; refusing stop' }
+            Write-Host ('Verified installed process: PID=' + $current.ProcessId + ' Name=' + $current.Name)
+            Stop-Process -Id ([int]$current.ProcessId) -Force -ErrorAction Stop
+          }
+          Start-Sleep -Seconds 2
+          $remaining = @(Get-CimInstance Win32_Process | Where-Object { IsExactInstalled $_ })
+          if ($remaining) { throw 'Installed application processes still running; no further action taken' }
+          $listeners = @(Get-NetTCPConnection -LocalPort 5088 -State Listen -ErrorAction SilentlyContinue)
+          if ($listeners) { throw 'Port remains occupied; foreign listeners were not touched' }
+          Write-Host 'EXACT_INSTALLED_PROCESS_QUIESCED; PORT_FREE; NO_FILES_CHANGED'
