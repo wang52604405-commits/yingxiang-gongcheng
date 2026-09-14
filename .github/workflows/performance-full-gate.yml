@@ -1,0 +1,22 @@
+name: 性能优化五轮验收
+on:
+  push:
+    branches: [chatgpt/performance-full-20260914]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Export exact source for isolated work
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          git archive --format=zip --output=evidence/source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: performance-full-source
+          path: evidence
+          retention-days: 3
