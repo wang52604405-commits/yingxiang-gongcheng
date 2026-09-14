@@ -853,7 +853,7 @@
                 <button class="secondary" type="button" id="viewOriginalPhotoBtn">查看原图备份</button>
                 <button class="secondary" type="button" id="restoreOriginalPhotoBtn">恢复原图</button>
                 <button class="secondary" type="button" id="optimizePhotoBtn">重新优化</button>
-                <button class="secondary photo-move-open" type="button" id="movePhotoBtn">移动到其它单元</button>
+                <button class="secondary photo-move-open" type="button" id="movePhotoBtn">移动到工序/单元</button>
               </div>
               <div class="photo-edit-actions">
                 <button class="secondary" type="button" id="cancelPhotoEditBtn">取消</button>
@@ -1081,13 +1081,13 @@
     <section class="machine-id-modal photo-move-modal" role="dialog" aria-modal="true" aria-labelledby="photoMoveTitle">
       <div class="upload-choice-head">
         <div>
-          <h3 id="photoMoveTitle">移动照片到其它单元</h3>
-          <p>永久照片 UUID、题名、日期和原图备份都会保留；目标单元会按自身规则重新编号。</p>
+          <h3 id="photoMoveTitle">移动照片到工序或其它单元</h3>
+          <p>同一单元可在工序之间直接传递；跨单元移动时永久照片 UUID、题名、日期和原图备份都会保留，并按目标单元规则重新编号。</p>
         </div>
         <button class="ghost" type="button" id="closePhotoMoveBtn">关闭</button>
       </div>
       <div class="photo-move-form">
-        <label>搜索目标单元<input id="photoMoveSearchInput" type="search" placeholder="输入单元编号或名称"></label>
+        <label>搜索单元<input id="photoMoveSearchInput" type="search" placeholder="输入单元编号或名称"></label>
         <label>目标单元<select id="photoMoveTargetSelect" class="orientation-select" size="7"></select></label>
         <label>目标工序<select id="photoMoveProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
         <div id="photoMoveSummary" class="photo-move-summary">请选择目标单元。</div>

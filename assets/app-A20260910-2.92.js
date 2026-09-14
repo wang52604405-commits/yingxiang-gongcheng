@@ -4032,7 +4032,11 @@ const $ = (selector) => document.querySelector(selector);
       if (!photo || !state.selectedCode) return showNotice("请先打开要移动的照片。", true);
       if (!(await ensureAuthenticated("移动照片"))) return;
       const data = await apiJson("/api/projects?slim=1");
-      state.moveTargets = (data.projects || []).filter((project) => projectCode(project) && projectCode(project) !== state.selectedCode);
+      const allTargets = (data.projects || []).filter((project) => projectCode(project));
+      state.moveTargets = [
+        ...allTargets.filter((project) => projectCode(project) === state.selectedCode),
+        ...allTargets.filter((project) => projectCode(project) !== state.selectedCode)
+      ];
       $("#photoMoveSearchInput").value = "";
       await renderPhotoMoveTargets();
       $("#photoMoveModal").classList.add("open");
@@ -4047,7 +4051,11 @@ const $ = (selector) => document.querySelector(selector);
       const sourceCode = state.selectedCode;
       const targetCode = $("#photoMoveTargetSelect")?.value || "";
       const targetProcess = $("#photoMoveProcessSelect")?.value || "";
+      const sourceProcess = String(photo.process_name || "").trim();
       if (!targetCode) return showNotice("请选择目标单元。", true);
+      if (targetCode === sourceCode && targetProcess === sourceProcess) {
+        return showNotice("照片已经在当前工序，无需移动。", true);
+      }
       const targetProject = (state.moveTargets || []).find((project) => projectCode(project) === targetCode);
       const targetLabel = `${projectDisplayCode(targetProject || {}) || targetCode} · ${projectName(targetProject || {}) || "未命名单元"}`;
       if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : "\n归属：单元照片"}？`)) return;
