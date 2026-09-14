@@ -105,7 +105,7 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
         def read():
             for _ in range(40):
                 try:
-                    raw=json.loads(m._metadata_path('U1').read_text(encoding='utf-8'));self.assertEqual(len(raw['photos']),24)
+                    raw=m.get_project('U1');self.assertEqual(len(raw['photos']),24)
                 except Exception as e:errors.append(str(e))
         def write():
             for i in range(12):m.update_photo('U1','U1-SY001',description=f'记录{i}')
@@ -170,5 +170,31 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
         with patch.object(self.app.os,'replace',side_effect=PermissionError('persistent lock')) as replace:
             with self.assertRaises(PermissionError):m._write_metadata('U1',d)
         self.assertEqual(replace.call_count,6);self.assertEqual(m._metadata_path('U1').read_bytes(),old)
+
+
+    def test_transient_reader_conflict_returns_full_records_not_empty_defaults(self):
+        self.seed('U1',24);m=self.manager;m.invalidate_projects_cache()
+        path=m._metadata_path('U1');real=Path.open;attempts=[]
+        def busy(p,*args,**kwargs):
+            if p==path:
+                attempts.append(1)
+                if len(attempts)<3:raise PermissionError('Windows reader conflict')
+            return real(p,*args,**kwargs)
+        with patch.object(Path,'open',busy):data=m.get_project('U1')
+        self.assertEqual(len(data['photos']),24);self.assertEqual(len(attempts),3)
+
+    def test_unreadable_or_corrupt_metadata_never_turns_into_empty_collection(self):
+        self.seed('U1',24);m=self.manager;m.invalidate_projects_cache()
+        path=m._metadata_path('U1');before=path.read_bytes();real=Path.open;attempts=[]
+        def busy(p,*args,**kwargs):
+            if p==path:
+                attempts.append(1);raise PermissionError('persistent denial')
+            return real(p,*args,**kwargs)
+        with patch.object(Path,'open',busy):
+            with self.assertRaises(PermissionError):m.get_project('U1')
+        self.assertEqual(len(attempts),6);self.assertEqual(path.read_bytes(),before)
+        path.write_text('{broken-record',encoding='utf-8');m.invalidate_projects_cache()
+        with self.assertRaises(ValueError):m.get_project('U1')
+        self.assertEqual(path.read_text(encoding='utf-8'),'{broken-record')
 
 if __name__=='__main__':unittest.main()

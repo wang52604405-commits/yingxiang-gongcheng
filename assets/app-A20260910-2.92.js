@@ -3054,6 +3054,7 @@ const $ = (selector) => document.querySelector(selector);
       setView("part");
       try {
         if (!cached) await loadPartPage(part, 1);
+        else await revalidatePart(part);
       } catch (error) {
         part.loading = false;
         part.loadError = error.message || "分部单元加载失败";
@@ -3064,13 +3065,24 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
-    async function loadPartPage(part, page = 1) {
+    async function revalidatePart(part) {
+      const context = navigationContext();
+      const revision = await apiJson("/api/revision");
+      if (!revision.authenticated || state.selectedPart !== part || state.viewMode !== "part" || navigationContext() !== context) return;
+      if (Number(revision.revision || 0) !== Number(part.loadedRevision || 0)) {
+        state.revision = Number(revision.revision || 0);
+        await loadPartPage(part, 1, { silent: true });
+        scheduleSummaryRefresh();
+      }
+    }
+
+    async function loadPartPage(part, page = 1, options = {}) {
       if (!part?.partKey) { renderPart(); return; }
       const context = navigationContext();
       const revision = state.revision;
       const requestKey = `${context}::${revision}`;
       if (part.pendingKey === requestKey && part.pendingLoad) return part.pendingLoad;
-      part.loading = true;
+      part.loading = !(options.silent && part.projects?.length);
       part.loadError = "";
       if (state.selectedPart === part) renderPart();
       part.pendingKey = requestKey;
@@ -5450,6 +5462,7 @@ const $ = (selector) => document.querySelector(selector);
       if (state.selectedPart) {
         renderPart();
         setView("part");
+        revalidatePart(state.selectedPart).catch((error) => showNotice(error.message, true));
       } else {
         openOverview("construction");
       }

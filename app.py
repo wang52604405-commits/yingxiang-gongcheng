@@ -1460,19 +1460,28 @@ class AlbumManager:
             if signature is not None and cached is not None and cached[0] == signature:
                 self._metadata_cache.move_to_end(key)
                 return copy.deepcopy(cached[1])
-        if not path.exists():
-            return {
-                "project_code": self._safe_code(project_code),
-                "project_name": self._safe_code(project_code),
-                "keywords": "",
-                "source_fields": {},
-                "photos": [],
-            }
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            data = {}
+        for attempt in range(6):
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                break
+            except PermissionError:
+                # Atomic replacement on Windows can briefly deny a new reader.
+                # A busy existing file is never an empty/new photo collection.
+                if attempt == 5:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+            except FileNotFoundError:
+                if signature is not None:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+                    continue
+                return {"project_code": key, "project_name": key, "keywords": "", "source_fields": {}, "photos": []}
+            except json.JSONDecodeError as exc:
+                raise ValueError("单元资料记录无法解析，已保留原文件，请核查或从备份恢复") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("photos", []), list):
+            raise ValueError("单元资料记录格式异常，已保留原文件")
         data.setdefault("project_code", self._safe_code(project_code))
         data.setdefault("project_name", data["project_code"])
         data.setdefault("keywords", "")

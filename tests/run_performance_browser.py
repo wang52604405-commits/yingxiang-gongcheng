@@ -65,6 +65,10 @@ def main():
                     if not url.startswith(origin):return route.abort()
                     if '/api/cloud/check-update' in url:return route.fulfill(json={'ok':True,'has_update':False})
                     if '/api/cloud/status' in url:return route.fulfill(json={'ok':True,'logged_in':False,'project_ownership':{'state':'logged_out'}})
+                    if '/api/cloud/project-members' in url:return route.fulfill(json={'ok':True,'members':[],'membership':{'role':'owner'}})
+                    if '/api/cloud/project-invites' in url:return route.fulfill(json={'ok':True,'invites':[]})
+                    if '/api/cloud/product-config' in url:return route.fulfill(json={'ok':True,'product':{}})
+                    if '/api/cloud/invite-status' in url:return route.fulfill(json={'ok':True,'logged_in':False})
                     return route.continue_()
                 context.route('**/*',routes)
                 response=context.request.post(origin+'/api/auth/login',data={'username':'隔离验收员'});assert response.status==200,response.text()
@@ -92,6 +96,12 @@ def main():
                     nreq=unit_requests();page.locator('[data-unit-code="U-MAIN"]').click();ready('U-MAIN')
                     page.locator('#backPartBtn').click();page.wait_for_function('()=>state.viewMode==="part"');assert unit_requests()==nreq
                     check('return to unchanged part reuses all cached units')
+                    page.locator('[data-unit-code="U-MAIN"]').click();ready('U-MAIN')
+                    m.copy_construction_to_supervision('U-DEST')
+                    page.locator('#backPartBtn').click()
+                    page.wait_for_function('()=>state.selectedPart.projects.find(p=>p.project_code==="U-DEST")?.photo_count===4')
+                    page.wait_for_timeout(450)
+                    check('cached return revalidates another client mutation without hiding the list')
                     page.locator('[data-unit-code="U-MAIN"]').click();ready('U-MAIN')
                     assert page.locator('#unitGalleryCount').inner_text()=='150 张';assert page.evaluate('()=>state.photos.length')==164
                     assert page.locator('#photoSectionsHost .photo').count()<=72;page.screenshot(path=str(out/'gallery-first.png'))
@@ -135,7 +145,7 @@ def main():
                     assert len(m.get_photos('U-MAIN'))==n and page.locator('[data-gallery-process="基坑开挖"]').count()==1
                     check('occupied process deletion is rejected safely')
                     page.locator('[data-gallery-process=""]').click();page.locator('#galleryUploadBtn').click();page.locator('#uploadModalFiles').set_input_files(str(sample))
-                    page.locator('#uploadModalForm input[type=date]').fill('2026-09-14');page.locator('#uploadModalForm button[type=submit]').click()
+                    page.locator('#uploadModalForm summary').click();page.locator('#uploadModalForm input[type=date]').fill('2026-09-14');page.locator('#uploadModalForm button[type=submit]').click()
                     page.wait_for_function('(n)=>state.photos.length===n',arg=n+1,timeout=30000)
                     if page.locator('#uploadChoiceModal.open').count():page.locator('#closeUploadChoiceBtn').click()
                     check('real file-input upload saves files and records before completion')
@@ -158,6 +168,14 @@ def main():
                     def delay(route):time.sleep(.25);route.continue_()
                     page.route('**/api/photos/U-MAIN',delay);page.evaluate('()=>{loadProject("U-MAIN");openOverview();}');page.wait_for_timeout(500)
                     assert page.evaluate('()=>state.viewMode')=='overview';page.unroute('**/api/photos/U-MAIN',delay);check('late responses cannot override navigation intent')
+                    page.locator('#settingsMenuBtn').click();page.locator('#projectInfoModal.open').wait_for()
+                    for tab in ('info','division','members','upload','print','account','device'):
+                        page.locator(f'[data-project-settings-tab="{tab}"]').click()
+                        assert page.locator(f'[data-project-settings-tab="{tab}"].active').count()==1
+                        panels=page.locator('[data-project-settings-panel].active')
+                        assert panels.count()>0 and panels.first.is_visible()
+                        page.screenshot(path=str(out/f'settings-{tab}.png'))
+                    page.locator('#closeProjectInfoBtn').click();check('all seven settings tabs remain accessible in the existing theme (cloud display fixtures only)')
                     pp=context.new_page();pp.on('pageerror',lambda e:errors.append(str(e)))
                     for layout in ('portrait','landscape'):
                         for style,count in [('one',1),('two',2),('four',4),('custom',5)]:
