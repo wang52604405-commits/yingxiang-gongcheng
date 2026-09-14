@@ -1,0 +1,81 @@
+name: 照片操作性能修复验证
+on:
+  push:
+    branches: [chatgpt/perf-safe-update-20260914]
+    paths:
+      - .github/workflows/perf-safe-update.yml
+      - .diag/apply_perf_safe.py
+      - .diag/verify_perf_http.py
+      - tests/test_z_performance_edit.py
+permissions:
+  contents: write
+concurrency:
+  group: perf-safe-update-validation
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            server/requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt -r server/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw 'dependency installation failed' }
+      - name: Apply guarded performance changes
+        shell: pwsh
+        run: |
+          python .diag/apply_perf_safe.py
+          if ($LASTEXITCODE -ne 0) { throw 'guarded patch failed' }
+          Get-ChildItem assets/app-A*.js | ForEach-Object { node --check $_.FullName; if ($LASTEXITCODE -ne 0) { throw 'JS syntax failed' } }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'diff check failed' }
+      - name: Complete unchanged-function and performance regression
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory perf-artifacts -Force | Out-Null
+          python -m unittest discover -s tests -v *> perf-artifacts/unittest.log
+          $code = $LASTEXITCODE
+          Get-Content perf-artifacts/unittest.log -Tail 32
+          if ($code -ne 0) { throw "unit tests failed $code" }
+      - name: Compare HTTP timings and all 16 print variants
+        shell: pwsh
+        run: |
+          python .diag/verify_perf_http.py *> perf-artifacts/http.log
+          $code = $LASTEXITCODE
+          Get-Content perf-artifacts/http.log -Tail 65
+          if ($code -ne 0) { throw "HTTP and print comparison failed $code" }
+      - name: Record tested application changes only
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py assets/app-*.js assets/app-*.js.gz tests/test_z_batch_print_order.py tests/test_z_performance_edit.py
+          git commit -m '加快照片信息保存并保持原有操作方式'
+          if ($LASTEXITCODE -ne 0) { throw 'tested commit failed' }
+          git push origin HEAD:chatgpt/perf-safe-update-20260914
+          if ($LASTEXITCODE -ne 0) { throw 'tested branch push failed' }
+          git rev-parse HEAD | Set-Content perf-artifacts/tested-sha.txt
+          python -c "from pathlib import Path; import zipfile; paths=['app.py','tests/test_z_batch_print_order.py','tests/test_z_performance_edit.py']+[str(p) for p in Path('assets').glob('app-A*.js*')]; z=zipfile.ZipFile('perf-artifacts/tested-files.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,p) for p in paths]; z.close()"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-safe-update-evidence
+          path: perf-artifacts/
+          retention-days: 7
