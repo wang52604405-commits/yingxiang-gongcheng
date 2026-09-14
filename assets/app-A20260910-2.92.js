@@ -1044,6 +1044,7 @@ const $ = (selector) => document.querySelector(selector);
       try {
         response = await fetch(url, options);
       } catch (error) {
+        if (error.name === "AbortError") throw error;
         if (url !== "/api/client-error") {
           reportClientError(error.message || "网络请求失败", { url, method: options?.method || "GET" }, error.stack || "", "warning");
         }
@@ -2991,7 +2992,19 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
+    let unitLoadSequence = 0;
+    let unitLoadController = null;
+    function navigationContext() {
+      return `${state.activeEngineeringProjectId}::${state.auth.user?.id || ""}::${state.auth.user?.username || ""}`;
+    }
+    function cancelUnitLoad() {
+      unitLoadSequence += 1;
+      unitLoadController?.abort();
+      unitLoadController = null;
+    }
+
     function setView(mode) {
+      if (mode !== "unit") cancelUnitLoad();
       state.viewMode = mode;
       document.body.classList.toggle("is-unit-view", mode === "unit");
       $("#overviewView").style.display = mode === "overview" ? "" : "none";
@@ -3034,12 +3047,13 @@ const $ = (selector) => document.querySelector(selector);
       state.expanded.add(part.parent?.key || "");
       renderTree();
       renderOtherImagesTree();
-      part.projects = [];
-      part.loading = true;
+      const cached = part.loadedContext === navigationContext() && part.loadedRevision === state.revision;
+      if (!cached) part.projects = [];
+      part.loading = !cached;
       renderPart();
       setView("part");
       try {
-        await loadPartPage(part, 1);
+        if (!cached) await loadPartPage(part, 1);
       } catch (error) {
         part.loading = false;
         part.loadError = error.message || "分部单元加载失败";
@@ -3051,24 +3065,39 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function loadPartPage(part, page = 1) {
-      if (!part?.partKey) {
-        renderPart();
-        return;
-      }
+      if (!part?.partKey) { renderPart(); return; }
+      const context = navigationContext();
+      const revision = state.revision;
+      const requestKey = `${context}::${revision}`;
+      if (part.pendingKey === requestKey && part.pendingLoad) return part.pendingLoad;
       part.loading = true;
       part.loadError = "";
-      renderPart();
-      const data = await apiJson(`/api/units?part_key=${encodeURIComponent(part.partKey)}&page=1&page_size=10000`);
-      if (state.selectedPart !== part) return;
-      part.projects = data.projects || [];
-      part.currentPage = Number(data.page || 1);
-      part.totalPages = Number(data.pages || 1);
-      part.unitCount = Number(data.total || part.unitCount || 0);
-      part.loading = false;
-      part.projects.forEach((project) => {
-        if (!state.projects.some((item) => projectCode(item) === projectCode(project))) state.projects.push(project);
-      });
-      renderPart();
+      if (state.selectedPart === part) renderPart();
+      part.pendingKey = requestKey;
+      const pending = (async () => {
+        try {
+          // Retain complete metadata: search/filters/selectors must not be truncated.
+          const data = await apiJson(`/api/units?part_key=${encodeURIComponent(part.partKey)}&page=1&page_size=10000`);
+          if (navigationContext() !== context || part.pendingKey !== requestKey) return;
+          part.projects = data.projects || [];
+          part.currentPage = Number(data.page || 1);
+          part.totalPages = Number(data.pages || 1);
+          part.unitCount = Number(data.total || part.projects.length);
+          part.loadedContext = context;
+          part.loadedRevision = revision;
+          const byCode = new Map(state.projects.map((item) => [projectCode(item), item]));
+          part.projects.forEach((project) => byCode.set(projectCode(project), project));
+          state.projects = Array.from(byCode.values());
+        } finally {
+          if (part.pendingKey === requestKey) {
+            part.loading = false;
+            part.pendingLoad = null;
+            if (state.selectedPart === part && navigationContext() === context) renderPart();
+          }
+        }
+      })();
+      part.pendingLoad = pending;
+      return pending;
     }
 
     function renderPart() {
@@ -3126,7 +3155,27 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function loadProject(code, tab = "detail") {
-      const data = await apiJson(`/api/photos/${encodeURIComponent(code)}`);
+      cancelUnitLoad();
+      const ticket = unitLoadSequence;
+      const context = navigationContext();
+      const controller = new AbortController();
+      unitLoadController = controller;
+      const summary = state.projects.find((item) => projectCode(item) === code);
+      state.selectedCode = "";
+      state.selectedProject = null;
+      state.photos = [];
+      $("#unitTitle").textContent = summary ? projectName(summary) : "单元工程";
+      $("#unitSub").textContent = `${code} · 正在读取照片`;
+      $("#unitBreadcrumbs").textContent = "";
+      $("#photoSectionsHost").innerHTML = '<div class="first-load-skeleton" role="status" aria-label="正在读取照片"><span></span><span></span><span></span><span></span></div>';
+      $("#unitProcessTabs").innerHTML = "";
+      ["#unitConstructionCount", "#unitSupervisionCount"].forEach((selector) => { if ($(selector)) $(selector).textContent = "0"; });
+      if ($("#unitGalleryCount")) $("#unitGalleryCount").textContent = "正在读取";
+      if ($("#photoSelectionBar")) $("#photoSelectionBar").hidden = true;
+      setView("unit");
+      try {
+        const data = await apiJson(`/api/photos/${encodeURIComponent(code)}`, { signal: controller.signal });
+        if (ticket !== unitLoadSequence || navigationContext() !== context || state.viewMode !== "unit") return;
       state.selectedProject = data.project;
       state.selectedCode = projectCode(data.project);
       setRouteUnitCode(state.selectedCode);
@@ -3154,6 +3203,14 @@ const $ = (selector) => document.querySelector(selector);
         const category = state.pendingUploadCategory;
         state.pendingUploadCategory = "";
         focusUploadCategory(category);
+      }
+      } catch (error) {
+        if (error.name === "AbortError" || ticket !== unitLoadSequence || navigationContext() !== context) return;
+        $("#photoSectionsHost").innerHTML = `<div class="empty">加载失败：${escapeHtml(error.message)} <button type="button" class="secondary mini" data-retry-unit>重新加载</button></div>`;
+        $("[data-retry-unit]")?.addEventListener("click", () => loadProject(code, tab));
+        showNotice(error.message, true);
+      } finally {
+        if (ticket === unitLoadSequence) unitLoadController = null;
       }
     }
 
@@ -3190,13 +3247,18 @@ const $ = (selector) => document.querySelector(selector);
       if (!nextName) return showNotice("工序名称不能为空。", true);
       if (nextName === processName) return;
       const currentCode = state.selectedCode;
-      await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, {
+      const context = navigationContext();
+      const data = await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: nextName })
       });
+      if (state.selectedCode !== currentCode || navigationContext() !== context) return;
+      state.selectedProject.processes = data.processes || [];
       if (state.activeProcessName === processName) state.activeProcessName = nextName;
-      await loadProject(currentCode, "detail");
+      applyPhotoEditResponse(data);
+      renderPhotos();
+      scheduleSummaryRefresh();
       showNotice(`工序已重命名为“${nextName}”。`);
     }
 
@@ -3209,9 +3271,14 @@ const $ = (selector) => document.querySelector(selector);
         : `确定删除空工序“${processName}”吗？`;
       if (!window.confirm(hint)) return;
       const currentCode = state.selectedCode;
-      await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, { method: "DELETE" });
+      const context = navigationContext();
+      const data = await apiJson(`/api/photos/${encodeURIComponent(currentCode)}/processes/${encodeURIComponent(processName)}`, { method: "DELETE" });
+      if (state.selectedCode !== currentCode || navigationContext() !== context) return;
+      state.selectedProject.processes = data.processes || [];
       if (state.activeProcessName === processName) state.activeProcessName = "";
-      await loadProject(currentCode, "detail");
+      applyPhotoEditResponse(data);
+      renderPhotos();
+      scheduleSummaryRefresh();
       showNotice(`工序“${processName}”已删除。`);
     }
 
@@ -3232,16 +3299,20 @@ const $ = (selector) => document.querySelector(selector);
       clearPhotoSelection(false);
       closeAddProcessModal();
       renderPhotos();
-      await refreshAll();
+      scheduleSummaryRefresh();
       showNotice(`工序「${name}」已添加，照片编号已按两级规则更新。`);
     }
 
     // 列表缩略图占位：缩略图未生成时显示灰色占位，绝不回退加载原图
     const THUMB_PLACEHOLDER = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="100%" height="100%" fill="#eef2f1"/><text x="50%" y="50%" fill="#9aa5a1" font-size="16" text-anchor="middle" dominant-baseline="middle">图片加载中</text></svg>');
 
-    // 照片列表分批渲染：每批 120 张，滚动到底自动加载下一批，避免一次性渲染上千节点
-    const PHOTOS_BATCH = 120;
+    // Only DOM is batched. Complete photo metadata remains available to selection/printing.
+    const PHOTOS_BATCH = 24;
     let photoLazyObserver = null;
+    let photoLazyFrame = 0;
+    function scheduleLazyPhotoLoad() {
+      if (!photoLazyFrame) photoLazyFrame = requestAnimationFrame(() => { photoLazyFrame = 0; setupLazyPhotoLoad(); });
+    }
 
     function photoCardHTML(photo, key, sectionKey, isSelectMode, index = 0) {
       const orientation = normalizePhotoOrientation(photo.orientation);
@@ -3299,30 +3370,39 @@ const $ = (selector) => document.querySelector(selector);
       listEl.insertAdjacentHTML("beforeend", next.map((photo, index) => photoCardHTML(photo, key, sectionKey, isSelectMode, rendered + index)).join(""));
       listEl.dataset.rendered = String(rendered + next.length);
       bindPhotoGalleryEvents(listEl);
+      scheduleLazyPhotoLoad();
     }
 
     function setupLazyPhotoLoad() {
-      if (photoLazyObserver) {
-        photoLazyObserver.disconnect();
-        photoLazyObserver = null;
-      }
+      photoLazyObserver?.disconnect();
+      photoLazyObserver = null;
+      if (state.viewMode !== "unit") return;
       document.querySelectorAll("#photoSectionsHost .photo-section").forEach((sectionEl) => {
         const listEl = sectionEl.querySelector(".photos");
-        const key = sectionEl.dataset.category;
-        const groupName = sectionEl.dataset.processName || "";
-        const total = photosForSection(key, groupName).length;
-        const rendered = parseInt(listEl?.dataset.rendered || "0", 10);
-        if (rendered < total) {
-          photoLazyObserver = photoLazyObserver || new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-              if (entry.isIntersecting) {
-                const sec = entry.target.closest(".photo-section");
-                if (sec) loadMorePhotos(sec);
-              }
-            });
-          }, { rootMargin: "500px 0px" });
-          photoLazyObserver.observe(listEl);
+        const total = photosForSection(sectionEl.dataset.category, sectionEl.dataset.processName || "").length;
+        const rendered = Number(listEl?.dataset.rendered || 0);
+        let sentinel = sectionEl.querySelector("[data-photo-sentinel]");
+        if (rendered >= total) { sentinel?.remove(); return; }
+        if (!sentinel) {
+          sentinel = document.createElement("div");
+          sentinel.dataset.photoSentinel = "";
+          sentinel.setAttribute("aria-hidden", "true");
+          sentinel.style.cssText = "height:1px;pointer-events:none;";
+          sectionEl.appendChild(sentinel);
         }
+        if (!("IntersectionObserver" in window)) {
+          while (Number(listEl.dataset.rendered || 0) < total) loadMorePhotos(sectionEl);
+          sentinel.remove();
+          return;
+        }
+        photoLazyObserver = photoLazyObserver || new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting || !entry.target.isConnected || state.viewMode !== "unit") return;
+            const section = entry.target.closest(".photo-section");
+            if (section) loadMorePhotos(section);
+          });
+        }, { rootMargin: "400px 0px" });
+        photoLazyObserver.observe(sentinel);
       });
     }
 
@@ -3408,6 +3488,10 @@ const $ = (selector) => document.querySelector(selector);
       const processName = state.activeProcessName || "";
       const sectionKey = photoSectionKey(category, processName);
       const photos = photosForSection(category, processName);
+      const renderScope = `${navigationContext()}::${state.selectedCode}::${sectionKey}`;
+      const oldRendered = host.dataset.renderScope === renderScope ? Number(host.querySelector(".photos")?.dataset.rendered || 0) : 0;
+      const renderLimit = Math.min(photos.length, Math.max(PHOTOS_BATCH, oldRendered));
+      host.dataset.renderScope = renderScope;
       const categoryLabel = category === "supervision" ? "监理" : "施工";
       const scopeLabel = processName || "单元照片";
 
@@ -3449,8 +3533,8 @@ const $ = (selector) => document.querySelector(selector);
             <div><h3 class="photo-section-title">${escapeHtml(categoryLabel)} · ${escapeHtml(scopeLabel)}</h3><p>当前只显示这一组照片，切换上方标签可查看其它分类。</p></div>
             ${category === "supervision" ? `<button class="secondary" type="button" data-use-construction data-process-name="${escapeHtml(processName)}">复制同组施工照片</button>` : ""}
           </div>
-          <div class="photos" data-rendered="${Math.min(photos.length, PHOTOS_BATCH)}">
-            ${photos.length ? photos.slice(0, PHOTOS_BATCH).map((photo, index) => photoCardHTML(photo, category, sectionKey, state.photoSelectionMode, index)).join("") : `<div class="empty gallery-empty"><strong>这里还没有照片</strong><span>点击“上传到当前”即可直接归档到 ${escapeHtml(categoryLabel)} / ${escapeHtml(scopeLabel)}。</span></div>`}
+          <div class="photos" data-rendered="${renderLimit}">
+            ${photos.length ? photos.slice(0, renderLimit).map((photo, index) => photoCardHTML(photo, category, sectionKey, state.photoSelectionMode, index)).join("") : `<div class="empty gallery-empty"><strong>这里还没有照片</strong><span>点击“上传到当前”即可直接归档到 ${escapeHtml(categoryLabel)} / ${escapeHtml(scopeLabel)}。</span></div>`}
           </div>
         </section>`;
 
@@ -3995,21 +4079,30 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
+    let photoMoveProcessSequence = 0;
+    let photoMovePending = false;
     async function refreshPhotoMoveProcesses() {
+      const sequence = ++photoMoveProcessSequence;
       const targetCode = $("#photoMoveTargetSelect")?.value || "";
       const processSelect = $("#photoMoveProcessSelect");
       const summary = $("#photoMoveSummary");
+      const confirm = $("#confirmPhotoMoveBtn");
+      if (confirm) confirm.disabled = true;
+      if (processSelect) processSelect.disabled = true;
       if (!targetCode) {
         if (processSelect) processSelect.innerHTML = '<option value="">单元照片</option>';
         if (summary) summary.textContent = "请选择目标单元。";
         return;
       }
       const data = await apiJson(`/api/photos/${encodeURIComponent(targetCode)}`);
+      if (sequence !== photoMoveProcessSequence || $("#photoMoveTargetSelect")?.value !== targetCode) return;
       const project = data.project || {};
       const processes = Array.isArray(project.processes) ? project.processes : [];
       if (processSelect) {
         processSelect.innerHTML = ['<option value="">单元照片</option>', ...processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)].join("");
       }
+      if (processSelect) processSelect.disabled = false;
+      if (confirm) confirm.disabled = photoMovePending;
       if (summary) {
         summary.textContent = `从 ${projectDisplayCode(state.selectedProject || {}) || state.selectedCode} 移动到 ${projectDisplayCode(project) || targetCode} · ${projectName(project) || "未命名单元"}`;
       }
@@ -4046,8 +4139,9 @@ const $ = (selector) => document.querySelector(selector);
 
     async function confirmPhotoMove() {
       const photo = currentEditingPhoto();
-      if (!photo || !state.selectedCode) return;
+      if (!photo || !state.selectedCode || photoMovePending || $("#photoMoveProcessSelect")?.disabled) return;
       if (!(await ensureAuthenticated("移动照片"))) return;
+      if (photoMovePending || currentEditingPhoto() !== photo) return;
       const sourceCode = state.selectedCode;
       const targetCode = $("#photoMoveTargetSelect")?.value || "";
       const targetProcess = $("#photoMoveProcessSelect")?.value || "";
@@ -4059,6 +4153,10 @@ const $ = (selector) => document.querySelector(selector);
       const targetProject = (state.moveTargets || []).find((project) => projectCode(project) === targetCode);
       const targetLabel = `${projectDisplayCode(targetProject || {}) || targetCode} · ${projectName(targetProject || {}) || "未命名单元"}`;
       if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : "\n归属：单元照片"}？`)) return;
+      const context = navigationContext();
+      photoMovePending = true;
+      $("#confirmPhotoMoveBtn").disabled = true;
+      try {
       await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/${encodeURIComponent(photo.id)}/move`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4068,6 +4166,7 @@ const $ = (selector) => document.querySelector(selector);
           target_process_name: targetProcess
         })
       });
+      if (state.selectedCode !== sourceCode || navigationContext() !== context) return;
       closePhotoMoveModal();
       closePhotoEdit();
       await loadProject(sourceCode, "detail");
@@ -4076,6 +4175,10 @@ const $ = (selector) => document.querySelector(selector);
         await loadPartPage(state.selectedPart, 1);
       }
       showNotice(`照片已移动到 ${targetLabel}${targetProcess ? ` / ${targetProcess}` : ""}。`);
+      } finally {
+        photoMovePending = false;
+        $("#confirmPhotoMoveBtn").disabled = Boolean($("#photoMoveProcessSelect")?.disabled);
+      }
     }
 
     function applyPhotoEditResponse(data) {
@@ -4240,11 +4343,10 @@ const $ = (selector) => document.querySelector(selector);
       if (shiftKey && state.photoSelectionAnchor >= 0) {
         const start = Math.min(state.photoSelectionAnchor, currentIndex);
         const end = Math.max(state.photoSelectionAnchor, currentIndex);
+        activeGalleryPhotos().slice(start, end + 1).forEach((photo) => setPhotoSelected(category, photo.id, next));
         card.closest(".photos")?.querySelectorAll(".photo[data-photo-index]").forEach((item) => {
           const index = Number(item.dataset.photoIndex || 0);
-          if (index < start || index > end) return;
-          setPhotoSelected(item.dataset.category, item.dataset.photoId, next);
-          syncPhotoCardSelection(item, next);
+          if (index >= start && index <= end) syncPhotoCardSelection(item, next);
         });
       } else {
         setPhotoSelected(category, photoId, next);
@@ -4260,11 +4362,13 @@ const $ = (selector) => document.querySelector(selector);
       const processName = processParts.join("::");
       return photosForSection(category, processName)
         .filter((photo) => state.selectedPrintPhotos[printSelectionKey(category, photo.id)])
-        .map((photo) => ({ category, photoId: String(photo.id || "") }))
+        .map((photo) => ({ category, photoId: String(photo.id || ""), photoUuid: String(photo.photo_uuid || "") }))
         .filter((item) => item.photoId);
     }
 
+    let bulkDeletePending = false;
     async function deleteSelectedPhotos(sectionKey) {
+      if (bulkDeletePending) return;
       const selected = selectedPhotosForSection(sectionKey);
       if (!selected.length) {
         showNotice("请先选择要删除的照片。", true);
@@ -4281,21 +4385,46 @@ const $ = (selector) => document.querySelector(selector);
         showNotice("请输入删除安全密码。", true);
         return;
       }
+      const sourceCode = state.selectedCode;
+      const sourceContext = navigationContext();
       let latestPhotos = state.photos;
-      for (const item of selected) {
-        const data = await apiJson(`/api/delete-photo/${encodeURIComponent(state.selectedCode)}/${encodeURIComponent(item.photoId)}`, {
+      // Older imports may lack UUID: delete backwards to avoid renumbered IDs.
+      const ordered = [...selected].reverse();
+      bulkDeletePending = true;
+      let completed = 0;
+      const deleteButton = $("#deleteSelectedCurrentPhotosBtn");
+      if (deleteButton) deleteButton.disabled = true;
+      try {
+      for (const item of ordered) {
+        if (state.selectedCode !== sourceCode || navigationContext() !== sourceContext) throw new Error("当前工程或单元已切换，已停止剩余删除。");
+        const current = item.photoUuid ? latestPhotos.find((photo) => String(photo.photo_uuid || "") === item.photoUuid) : latestPhotos.find((photo) => String(photo.id) === item.photoId && normalizePhotoCategory(photo.category) === item.category);
+        if (!current) throw new Error("待删除照片已发生变化，请刷新后重新选择。");
+        const data = await apiJson(`/api/delete-photo/${encodeURIComponent(sourceCode)}/${encodeURIComponent(current.id)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category: item.category, safety_password: safetyPassword })
+          body: JSON.stringify({ category: item.category, safety_password: safetyPassword, photo_uuid: item.photoUuid })
         });
+        if (!data.deleted) throw new Error("照片未删除，请刷新后核实，避免误删其它照片。");
         latestPhotos = data.photos || latestPhotos;
-        delete state.selectedPrintPhotos[printSelectionKey(item.category, item.photoId)];
+        completed += 1;
       }
+      if (state.selectedCode !== sourceCode || navigationContext() !== sourceContext) return;
       state.photos = latestPhotos || [];
       clearPhotoSelection(false);
       renderPhotos();
-      await refreshAll();
+      scheduleSummaryRefresh();
       showNotice(`已删除 ${selected.length} 张照片。`);
+      } catch (error) {
+        if (state.selectedCode === sourceCode && navigationContext() === sourceContext && completed) {
+          applyPhotoEditResponse({ photos: latestPhotos });
+          renderPhotos();
+          scheduleSummaryRefresh();
+        }
+        throw new Error(`${completed ? `已删除 ${completed} 张；` : ""}${error.message || "删除未完成，请刷新核实。"}`);
+      } finally {
+        bulkDeletePending = false;
+        updatePhotoSelectionBar();
+      }
     }
 
     async function deletePhoto(category, photoId) {
@@ -4316,7 +4445,7 @@ const $ = (selector) => document.querySelector(selector);
       });
       state.photos = data.photos || [];
       renderPhotos();
-      await refreshAll();
+      scheduleSummaryRefresh();
       showNotice("照片已删除，编号已自动更新。");
     }
 
@@ -4347,7 +4476,10 @@ const $ = (selector) => document.querySelector(selector);
         renderPhotos();
         return;
       }
-      const orderedIds = Array.from(list.querySelectorAll(".photo[data-photo-id]")).map((item) => item.dataset.photoId).filter(Boolean);
+      const visibleIds = Array.from(list.querySelectorAll(".photo[data-photo-id]")).map((item) => item.dataset.photoId).filter(Boolean);
+      const visible = new Set(visibleIds);
+      const section = list.closest(".photo-section");
+      const orderedIds = visibleIds.concat(photosForSection(category, section?.dataset.processName || "").map((photo) => String(photo.id)).filter((id) => !visible.has(id)));
       const data = await apiJson(`/api/photos/${encodeURIComponent(state.selectedCode)}/reorder-list`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4452,8 +4584,10 @@ const $ = (selector) => document.querySelector(selector);
 
     async function loadBootstrap(options = {}) {
       const skipOtherImages = Boolean(options.skipOtherImages);
-      bootStart();
+      const context = navigationContext();
+      if (!options.silent) bootStart();
       const data = await apiJson("/api/bootstrap");
+      if (options.silent && context !== navigationContext()) return;
       state.auth.user = data.user || null;
       renderAuth();
       if (!state.auth.user) {
@@ -4463,7 +4597,7 @@ const $ = (selector) => document.querySelector(selector);
         return;
       }
       // 已登录：进入工作台才显示加载进度
-      bootShow();
+      if (!options.silent) bootShow();
       bootProgress(8);
       state.revision = Number(data.revision || 0);
       if (data.app_version && $("#appVersionBadge")) $("#appVersionBadge").textContent = "v" + data.app_version.replace(/^A\d{8}-/, "");
@@ -4526,6 +4660,19 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
+    let summaryRefreshTimer = 0;
+    let summaryRefreshPending = null;
+    function scheduleSummaryRefresh() {
+      clearTimeout(summaryRefreshTimer);
+      const context = navigationContext();
+      summaryRefreshTimer = setTimeout(async () => {
+        if (context !== navigationContext()) return;
+        if (summaryRefreshPending) { scheduleSummaryRefresh(); return; }
+        summaryRefreshPending = loadBootstrap({ silent: true, skipOtherImages: true });
+        try { await summaryRefreshPending; } catch (error) { showNotice("统计刷新失败，可点击刷新重试。", true); }
+        finally { summaryRefreshPending = null; }
+      }, 250);
+    }
     async function refreshAll(options = {}) {
       return loadBootstrap(options);
     }

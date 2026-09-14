@@ -143,7 +143,9 @@ class PerformanceFrontendContractTest(unittest.TestCase):
         edit=js.split('async function savePhotoEdit(event) {',1)[1].split('function initPhotoForms()',1)[0]
         self.assertNotIn('refreshAll(',edit); self.assertIn('applyPhotoEditResponse(data)',edit)
         self.assertIn('state.activeEngineeringProjectId !== sourceEngineering',edit)
-        self.assertIn('const PHOTOS_BATCH = 120',js)
+        self.assertIn('const PHOTOS_BATCH = 24',js)
+        self.assertIn('data-photo-sentinel',js)
+        self.assertIn('visibleIds.concat',js)
         self.assertIn('page_size=10000',js)
         self.assertIn('host.ondragstart',js)
         self.assertIn('if (!Array.isArray(data.photos))',js)
