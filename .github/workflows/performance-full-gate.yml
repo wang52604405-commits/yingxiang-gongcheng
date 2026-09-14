@@ -47,7 +47,7 @@ jobs:
   round:
     needs: prepare
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -70,24 +70,29 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'dependencies failed' }
           python -m playwright install chromium
           if ($LASTEXITCODE -ne 0) { throw 'browser install failed' }
-      - name: Full regression and browser end-to-end
-        shell: pwsh
+      - name: Full regression and bounded browser end-to-end
+        shell: python
         run: |
-          New-Item -ItemType Directory -Path evidence -Force | Out-Null
-          git rev-parse HEAD | Set-Content evidence/source-sha.txt
-          python -m unittest discover -s tests -v *> evidence/python-tests.log
-          $testsCode=$LASTEXITCODE
-          python -m compileall -q app.py tests server
-          $compileCode=$LASTEXITCODE
-          node --check assets/app-A20260910-2.92.js
-          $jsCode=$LASTEXITCODE
-          python tests/run_performance_browser.py --round ${{ matrix.round }} --out-dir evidence/browser *> evidence/browser.log
-          $browserCode=$LASTEXITCODE
-          if ($testsCode -ne 0 -or $compileCode -ne 0 -or $jsCode -ne 0 -or $browserCode -ne 0) {
-            Get-Content evidence/python-tests.log -Tail 65
-            Get-Content evidence/browser.log -Tail 75
-            throw "validation failed: python=$testsCode compile=$compileCode js=$jsCode browser=$browserCode"
-          }
+          import json,subprocess,sys
+          from pathlib import Path
+          out=Path('evidence');out.mkdir(exist_ok=True)
+          (out/'source-sha.txt').write_bytes(subprocess.check_output(['git','rev-parse','HEAD']))
+          results={}
+          commands=[
+            ('python-tests',[sys.executable,'-u','-m','unittest','discover','-s','tests','-v'],180),
+            ('compile',[sys.executable,'-m','compileall','-q','app.py','tests','server'],60),
+            ('javascript',['node','--check','assets/app-A20260910-2.92.js'],60),
+            ('browser',[sys.executable,'-u','tests/run_performance_browser.py','--round','${{ matrix.round }}','--out-dir','evidence/browser'],240),
+          ]
+          for name,cmd,timeout in commands:
+            print('START',name,flush=True)
+            with (out/(name+'.log')).open('wb') as log:
+              try: results[name]=subprocess.run(cmd,stdout=log,stderr=subprocess.STDOUT,timeout=timeout).returncode
+              except subprocess.TimeoutExpired: results[name]='timeout'
+            print('RESULT',name,results[name],flush=True)
+            print((out/(name+'.log')).read_text(encoding='utf-8',errors='replace')[-12000:],flush=True)
+          (out/'gate-results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
+          if any(code!=0 for code in results.values()):raise SystemExit(1)
       - uses: actions/upload-artifact@v4
         if: always()
         with:
