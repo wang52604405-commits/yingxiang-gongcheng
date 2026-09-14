@@ -1,0 +1,68 @@
+name: 安装退出流程隔离验证
+on:
+  push:
+    branches: [chatgpt/perf-install-exit-20260914]
+    paths: [.github/workflows/perf-install-exit.yml]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v7
+        with: {python-version: '3.12'}
+      - name: Apply exact process exit correction
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path('deploy_prod.ps1'); t=p.read_text(encoding='utf-8-sig')
+          anchor='function Get-SafeProcessCommandLine($process) {'
+          helper='''function Stop-InstalledAppProcesses {
+              # The tray launcher may remain alive even after its listener exited.
+              # Revalidate each PID, creation time and exact install path before stop.
+              $installed = @(Get-CimInstance Win32_Process -ErrorAction Stop |
+                  Where-Object { Test-IsInstalledAppProcess $_ })
+              foreach ($candidate in $installed) {
+                  $live = Get-CimInstance Win32_Process -Filter ("ProcessId=" + [int]$candidate.ProcessId) -ErrorAction Stop
+                  if (-not $live) { continue }
+                  if (-not (Test-IsInstalledAppProcess $live) -or $live.CreationDate -ne $candidate.CreationDate) {
+                      throw "Application process identity changed; update stopped without touching it."
+                  }
+                  Write-Host "    Closing verified installed process PID=$($live.ProcessId) Name=$($live.Name)"
+                  Stop-Process -Id ([int]$live.ProcessId) -Force -ErrorAction Stop
+              }
+          }
+
+          '''
+          assert t.count(anchor)==1
+          t=t.replace(anchor,helper+anchor,1)
+          # Stop non-listening launcher processes too, not only the port owner.
+          anchor2='    if (-not $alive) { break }\n    Start-Sleep -Seconds 1\n'
+          assert t.count(anchor2)==1
+          t=t.replace(anchor2,'    if (-not $alive) { break }\n    Stop-InstalledAppProcesses\n    Start-Sleep -Seconds 1\n',1)
+          p.write_text(t,encoding='utf-8-sig',newline='\n')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'Guarded patch failed' }
+      - name: Exercise guards without accessing real processes
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_deploy_installed_exit.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Process safety regression failed' }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { throw 'Diff check failed' }
+      - name: Preserve validated script and test
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy_prod.ps1 tests/test_deploy_installed_exit.py
+          git commit -m '修复更新时旧程序未退出造成的等待'
+          if ($LASTEXITCODE -ne 0) { throw 'Commit failed' }
+          git push origin HEAD:chatgpt/perf-install-exit-20260914
+          if ($LASTEXITCODE -ne 0) { throw 'Push failed' }
