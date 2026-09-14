@@ -152,4 +152,23 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
         self.assertEqual(len(recovery),1);self.assertEqual((recovery[0].parent/'photo.jpg').read_bytes(),raw)
         self.assertEqual(json.loads(recovery[0].read_text(encoding='utf-8'))['photo_uuid'],photo['photo_uuid'])
 
+
+    def test_transient_windows_lock_retries_without_removing_previous_record(self):
+        self.seed('U1',2);m=self.manager;old=m._metadata_path('U1').read_bytes();d=m.get_project('U1');d['photos'][0]['title']='重试成功'
+        real=self.app.os.replace;calls=[]
+        def busy(src,dst):
+            calls.append(1)
+            if len(calls)<3:
+                self.assertEqual(m._metadata_path('U1').read_bytes(),old)
+                raise PermissionError('transient Windows handle')
+            return real(src,dst)
+        with patch.object(self.app.os,'replace',side_effect=busy):m._write_metadata('U1',d)
+        self.assertEqual(len(calls),3);self.assertEqual(m.get_project('U1')['photos'][0]['title'],'重试成功')
+
+    def test_permanent_windows_lock_is_bounded_and_keeps_previous_record(self):
+        self.seed('U1',2);m=self.manager;old=m._metadata_path('U1').read_bytes();d=m.get_project('U1');d['photos'][0]['title']='不得保存'
+        with patch.object(self.app.os,'replace',side_effect=PermissionError('persistent lock')) as replace:
+            with self.assertRaises(PermissionError):m._write_metadata('U1',d)
+        self.assertEqual(replace.call_count,6);self.assertEqual(m._metadata_path('U1').read_bytes(),old)
+
 if __name__=='__main__':unittest.main()

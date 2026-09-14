@@ -1509,7 +1509,17 @@ class AlbumManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(temporary, destination)
+            # Windows readers/antivirus can briefly hold a non-delete-shared
+            # handle. Retry only access conflicts, with a small bounded delay;
+            # never remove the previous file or claim success after failure.
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, destination)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
         finally:
             temporary.unlink(missing_ok=True)
         self.invalidate_projects_cache(project_code)

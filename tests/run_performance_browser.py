@@ -95,7 +95,15 @@ def main():
                     page.locator('[data-unit-code="U-MAIN"]').click();ready('U-MAIN')
                     assert page.locator('#unitGalleryCount').inner_text()=='150 张';assert page.evaluate('()=>state.photos.length')==164
                     assert page.locator('#photoSectionsHost .photo').count()<=72;page.screenshot(path=str(out/'gallery-first.png'))
-                    check('DOM batches while complete 164 records remain available');load_all();assert page.locator('#photoSectionsHost .photo').count()==150
+                    check('DOM batches while complete 164 records remain available')
+                    page.locator('#gallerySelectBtn').click();page.locator('#selectAllCurrentPhotosBtn').click()
+                    assert page.locator('#photoSelectionCount').inner_text()=='已选 150 张'
+                    assert page.locator('#photoSectionsHost .photo').count()<150
+                    page.locator('#printSelectedPhotosBtn').click();page.locator('#printSetupModal.open').wait_for()
+                    assert len(page.evaluate('()=>new URL(state.printSourceUrl,location.origin).searchParams.get("ids").split(",")'))==150
+                    page.locator('#closePrintSetupBtn').click();page.locator('#cancelPhotoSelectionBtn').click()
+                    check('select-all and print include not-yet-rendered photos')
+                    load_all();assert page.locator('#photoSectionsHost .photo').count()==150
                     check('scrolling loads the last photo after more than five batches')
                     page.locator('#gallerySelectBtn').click();page.locator('#selectAllCurrentPhotosBtn').click();assert page.locator('#photoSelectionCount').inner_text()=='已选 150 张'
                     page.locator('#printSelectedPhotosBtn').click();page.locator('#printSetupModal.open').wait_for()
