@@ -3166,6 +3166,13 @@ const $ = (selector) => document.querySelector(selector);
       });
     }
 
+    function setUnitLoadingState(busy) {
+      $("#unitView")?.setAttribute("aria-busy", busy ? "true" : "false");
+      ["#galleryUploadBtn", "#unitPrintCurrentBtn", "#addProcessBtn", "#unitMoreMenuBtn", "#unitCategoryConstructionBtn", "#unitCategorySupervisionBtn"].forEach((selector) => { if ($(selector)) $(selector).disabled = busy; });
+      if ($("#gallerySelectBtn")) $("#gallerySelectBtn").disabled = busy || !activeGalleryPhotos().length;
+      if (busy) { $("#unitMoreMenu")?.classList.remove("open"); $("#unitMoreMenuBtn")?.setAttribute("aria-expanded", "false"); }
+    }
+
     async function loadProject(code, tab = "detail") {
       cancelUnitLoad();
       const ticket = unitLoadSequence;
@@ -3185,6 +3192,7 @@ const $ = (selector) => document.querySelector(selector);
       if ($("#unitGalleryCount")) $("#unitGalleryCount").textContent = "正在读取";
       if ($("#photoSelectionBar")) $("#photoSelectionBar").hidden = true;
       setView("unit");
+      setUnitLoadingState(true);
       try {
         const data = await apiJson(`/api/photos/${encodeURIComponent(code)}`, { signal: controller.signal });
         if (ticket !== unitLoadSequence || navigationContext() !== context || state.viewMode !== "unit") return;
@@ -3199,6 +3207,7 @@ const $ = (selector) => document.querySelector(selector);
       state.activeProcessName = "";
       state.photoSelectionMode = false;
       state.photoSelectionAnchor = -1;
+      setUnitLoadingState(false);
       renderUnit();
       setView("unit");
       renderOtherImagesTree();
@@ -4020,13 +4029,17 @@ const $ = (selector) => document.querySelector(selector);
         showNotice("请先选择单元工程。", true);
         return;
       }
-      if (!(await ensureAuthenticated("修改照片信息"))) return;
-      const photo = state.photos.find((item) => normalizePhotoCategory(item.category) === normalizePhotoCategory(category) && String(item.id || "") === String(photoId || ""));
+      const context = navigationContext();
+      const code = state.selectedCode;
+      const original = state.photos.find((item) => normalizePhotoCategory(item.category) === normalizePhotoCategory(category) && String(item.id || "") === String(photoId || ""));
+      if (!original || !(await ensureAuthenticated("修改照片信息"))) return;
+      if (context !== navigationContext() || code !== state.selectedCode) return;
+      const photo = original.photo_uuid ? state.photos.find((item) => item.photo_uuid === original.photo_uuid) : original;
       if (!photo) {
         showNotice("未找到要修改的照片。", true);
         return;
       }
-      state.editingPhoto = { category: normalizePhotoCategory(category), photoId: String(photoId || "") };
+      state.editingPhoto = { category: normalizePhotoCategory(category), photoId: String(photo.id || ""), photoUuid: String(photo.photo_uuid || "") };
       $("#photoEditTitleInput").value = photo.title || "";
       $("#photoEditDateInput").value = displayPhotoDate(photo) || "";
       $("#photoEditPhotographerInput").value = photo.photographer || "";
@@ -4055,7 +4068,9 @@ const $ = (selector) => document.querySelector(selector);
 
     function currentEditingPhoto() {
       if (!state.editingPhoto) return null;
-      return state.photos.find((item) => String(item.id || "") === state.editingPhoto.photoId) || null;
+      return state.photos.find((item) => state.editingPhoto.photoUuid
+        ? String(item.photo_uuid || "") === state.editingPhoto.photoUuid
+        : (normalizePhotoCategory(item.category) === state.editingPhoto.category && String(item.id || "") === state.editingPhoto.photoId)) || null;
     }
 
     function viewOriginalPhoto() {
@@ -4258,7 +4273,8 @@ const $ = (selector) => document.querySelector(selector);
       const title = $("#photoEditTitleInput").value.trim();
       const photoDate = $("#photoEditDateInput").value.trim();
       const photographer = $("#photoEditPhotographerInput").value.trim();
-      const currentPhoto = state.photos.find((item) => normalizePhotoCategory(item.category) === state.editingPhoto.category && String(item.id || "") === state.editingPhoto.photoId);
+      const currentPhoto = currentEditingPhoto();
+      if (!currentPhoto) return showNotice("照片已发生变化，请关闭后重新选择。", true);
       const processName = $("#photoEditProcessInput") ? $("#photoEditProcessInput").value : (currentPhoto?.process_name || "");
       const processCode = "";
       const orientation = normalizePhotoOrientation(currentPhoto?.orientation);
@@ -4282,7 +4298,7 @@ const $ = (selector) => document.querySelector(selector);
         const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/${encodeURIComponent(editing.photoId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description })
+          body: JSON.stringify({ photo_uuid: editing.photoUuid, title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description })
         });
         // A late response must not overwrite a different unit/engineering context.
         if (state.selectedCode !== sourceCode || state.activeEngineeringProjectId !== sourceEngineering) return;
@@ -4501,17 +4517,11 @@ const $ = (selector) => document.querySelector(selector);
       const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/reorder-list`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category, ordered_ids: orderedIds })
+        body: JSON.stringify({ category, ordered_ids: orderedIds, renumber: true })
       });
       if (state.selectedCode === sourceCode && navigationContext() === sourceContext) {
         state.photos = data.photos || [];
         renderPhotos();
-      }
-      try {
-        await renumberCategory(category, sourceCode, sourceContext);
-      } catch (error) {
-        showNotice("排序已保存，但编号更新失败：" + error.message, true);
-        return;
       }
       showNotice("拖拽排序已保存，编号已自动更新。");
     }

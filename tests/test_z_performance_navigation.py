@@ -263,4 +263,20 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
         self.assertNotEqual(before[0]['photo_uuid'],after[0]['photo_uuid'])
         self.assertNotEqual(before[0]['thumb_url'],after[0]['thumb_url'])
 
+
+    def test_atomic_drag_response_has_final_numbering_before_next_edit(self):
+        self.seed('U1',4);m=self.manager;expected=self.distinct_original_hashes('U1')
+        m.reorder_photos('U1',['U1-SY004','U1-SY003','U1-SY002','U1-SY001'],category='construction',renumber=True)
+        photos=m.get_photos('U1')
+        self.assertEqual([p['id'] for p in photos],['U1-SY001','U1-SY002','U1-SY003','U1-SY004'])
+        self.assertEqual(photos[0]['photo_uuid'],'U1-uuid-3')
+        m.update_photo('U1','U1-SY004',photo_uuid='U1-uuid-3',title='准确更新')
+        self.assertEqual(next(p for p in m.get_photos('U1') if p['photo_uuid']=='U1-uuid-3')['title'],'准确更新')
+        self.assert_original_hashes('U1',expected)
+
+    def test_unknown_edit_uuid_never_falls_back_to_another_display_id(self):
+        self.seed('U1',2);m=self.manager;before=m._metadata_path('U1').read_bytes()
+        with self.assertRaises(ValueError):m.update_photo('U1','U1-SY001',photo_uuid='already-gone',title='不得写入')
+        self.assertEqual(m._metadata_path('U1').read_bytes(),before)
+
 if __name__=='__main__':unittest.main()

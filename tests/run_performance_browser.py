@@ -147,7 +147,7 @@ def main():
                     selected_uuid=page.evaluate('()=>currentEditingPhoto().photo_uuid');page.locator('#photoEditTitleInput').fill('已核对的现场记录');page.locator('#photoEditDescriptionInput').fill('五轮验收保存说明')
                     t=time.perf_counter();page.locator('#photoEditForm button[type=submit]').click();page.locator('#photoEditModal.open').wait_for(state='hidden')
                     report['timings_ms']['edit_roundtrip']=(time.perf_counter()-t)*1000
-                    assert page.evaluate('(id)=>state.photos.find(p=>p.photo_uuid===id).title',selected_uuid)=='已核对的现场记录';assert page.locator('#photoSectionsHost .photo').count()>130
+                    assert page.evaluate('(id)=>state.photos.find(p=>p.photo_uuid===id).title',selected_uuid)=='已核对的现场记录', {'uuid':selected_uuid,'records':page.evaluate('()=>state.photos.map(p=>({uuid:p.photo_uuid,id:p.id,title:p.title})).slice(125,135)')};assert page.locator('#photoSectionsHost .photo').count()>130
                     check('late-photo save preserves rendered extent and exact text')
                     page.locator('#unitCategorySupervisionBtn').click();assert page.locator('#unitGalleryCount').inner_text()=='6 张'
                     page.locator('#unitCategoryConstructionBtn').click();page.locator('[data-gallery-process="开挖"]').click();assert page.locator('#unitGalleryCount').inner_text()=='8 张'

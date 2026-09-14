@@ -2622,8 +2622,10 @@ class AlbumManager:
             target_id = str(photo_id or "").strip()
             if not target_id:
                 raise ValueError("照片编号不能为空")
+            requested_uuid = str(updates.get("photo_uuid") or "").strip()
             for photo in data.get("photos", []):
-                if str(photo.get("id") or "") == target_id:
+                matches = (str(photo.get("photo_uuid") or "") == requested_uuid) if requested_uuid else (str(photo.get("id") or "") == target_id)
+                if matches:
                     previous_process = str(photo.get("process_name") or "").strip()
                     if "title" in updates:
                         photo["title"] = str(updates.get("title") or "").strip()
@@ -2990,7 +2992,7 @@ class AlbumManager:
             self._write_metadata(data["project_code"], data)
             return self._photo_item(data, target)
 
-    def reorder_photos(self, project_code, ordered_ids, category=""):
+    def reorder_photos(self, project_code, ordered_ids, category="", renumber=False):
         with self._project_write_lock(project_code):
             data = self.get_project(project_code)
             photos = data.get("photos", [])
@@ -3016,6 +3018,8 @@ class AlbumManager:
 
             for index, photo in zip(target_indexes, ordered):
                 photos[index] = photo
+            if renumber:
+                self._renumber_category(project_code, data, category)
             self._write_metadata(data["project_code"], data)
 
     def auto_sort_piles(self, project_code):
@@ -8273,6 +8277,7 @@ def api_update_photo(project_code, photo_id):
         if not photo_date:
             return json_error("请填写照片日期", 400)
         updates = {
+            "photo_uuid": str(data.get("photo_uuid") or "").strip(),
             "title": data.get("title", ""),
             "photo_date": photo_date,
             "photographer": data.get("photographer", ""),
@@ -8450,7 +8455,7 @@ def api_reorder_photos(project_code):
         ordered_ids = payload.get("ordered_ids", [])
         if isinstance(ordered_ids, str):
             ordered_ids = [item.strip() for item in ordered_ids.split(",") if item.strip()]
-        manager.reorder_photos(project_code, ordered_ids, category=payload.get("category", ""))
+        manager.reorder_photos(project_code, ordered_ids, category=payload.get("category", ""), renumber=payload.get("renumber") is True)
         return jsonify({"ok": True, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc), 404)
