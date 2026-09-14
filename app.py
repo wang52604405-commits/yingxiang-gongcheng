@@ -1912,7 +1912,10 @@ class AlbumManager:
         version = ""
         try:
             original_path = self._photos_dir(data["project_code"]) / item["filename"]
-            version = str(int(original_path.stat().st_mtime))
+            stamp = original_path.stat()
+            # Same-second renumbering may reuse a filename for another UUID.
+            identity = f"{item.get('photo_uuid', '')}:{stamp.st_mtime_ns}:{stamp.st_size}:{stamp.st_ino}"
+            version = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
         except OSError:
             version = ""
         query = f"?v={version}" if version else ""
@@ -2046,87 +2049,129 @@ class AlbumManager:
         return restored
 
     def _renumber_category(self, project_code, data, category, settings=None):
+        """Move images AND originals through a disjoint namespace before publishing.
+
+        Original backup names can form cycles when a photo changes process. Never
+        overwrite an occupied destination, and persist metadata before discarding
+        the recovery map. Caller holds the unit write lock throughout.
+        """
         settings = self._numbering_snapshot() if settings is None else settings
         category = self._normalize_category(category)
         photos_dir = self._photos_dir(project_code)
-        # 先修复历史中断残留，避免在残留临时文件基础上继续改名
         self._repair_renumber_leftovers(project_code)
-        matching = [
-            photo for photo in data.get("photos", [])
-            if self._normalize_category(photo.get("category")) == category
-        ]
-        staged = []
-        counters = {}
+        counters, plans, moves = {}, [], []
         first_sequence = numbering_start(category, settings["numbering_rules"])
-        for photo in matching:
-            process_name = str(photo.get("process_name") or "").strip()
-            # 统一修正历史残留的 process_code：空工序名就是单元照片。
-            photo["process_name"] = process_name
-            photo["process_code"] = self._process_code(data, process_name) if process_name else ""
-            scope = self._sequence_scope(data, photo, category)
-            counters[scope] = counters.get(scope, first_sequence - 1) + 1
-            index = counters[scope]
-            old_filename = photo.get("filename", "")
-            old_path = photos_dir / old_filename
-            old_thumb = photos_dir / self._thumb_filename(old_filename)
-            ext = Path(old_filename).suffix.lower() or ".jpg"
-            new_id = self._archive_id_for_photo(data, photo, category, index, settings=settings)
-            scope_code = str(photo.get("process_code") or "").strip()
-            new_filename = self._photo_filename(category, new_id, ext, scope_code)
-            if new_filename == old_filename and str(photo.get("id") or "") == new_id:
-                # 顺序未变，无需重命名（刷新自动归位时避免无谓的文件搬移）
+        for photo in data.get("photos", []):
+            if self._normalize_category(photo.get("category")) != category:
                 continue
-            new_thumb = photos_dir / self._thumb_filename(new_filename)
-            temp_path = photos_dir / f".renumber-{index}-{new_filename}"
-            if old_path.exists():
-                old_path.rename(temp_path)
-                staged.append((photo, old_filename, temp_path, photos_dir / new_filename, new_id, new_filename))
-            else:
-                staged.append((photo, old_filename, None, photos_dir / new_filename, new_id, new_filename))
-            # 清掉旧缩略图；目标缩略图如有残留也删掉，避免显示成旧照片
-            if old_thumb.exists():
-                try:
-                    old_thumb.unlink()
-                except OSError:
-                    pass
-            if new_thumb.exists():
-                try:
-                    new_thumb.unlink()
-                except OSError:
-                    pass
-
-        for photo, old_filename, temp_path, new_path, new_id, new_filename in staged:
+            before = dict(photo)
+            process_name = str(photo.get("process_name") or "").strip()
+            process_code = self._process_code(data, process_name) if process_name else ""
+            candidate = {**photo, "process_name": process_name, "process_code": process_code}
+            scope = (category, process_code)
+            index = counters.get(scope, first_sequence - 1) + 1
+            counters[scope] = index
+            new_id = self._archive_id_for_photo(data, candidate, category, index, settings=settings)
+            old_name = str(photo.get("filename") or "")
+            new_name = self._photo_filename(category, new_id, Path(old_name).suffix.lower() or ".jpg", process_code)
+            normalized = {"id": new_id, "filename": new_name, "category": category,
+                          "category_label": PHOTO_CATEGORY_LABELS[category],
+                          "process_name": process_name, "process_code": process_code}
+            if new_name == old_name and str(photo.get("id") or "") == new_id:
+                photo.update(normalized)
+                continue
+            plan = {"photo": photo, "before": before, "after": normalized}
+            plans.append(plan)
+            old_image, new_image = photos_dir / Path(old_name).name, photos_dir / new_name
+            if old_image.is_file() and old_image != new_image:
+                moves.append({"old": old_image, "new": new_image})
             old_backup_name = str(photo.get("original_backup") or "")
-            try:
-                if temp_path and temp_path.exists():
-                    if new_path.exists():
-                        new_path.unlink()
-                    temp_path.rename(new_path)
-                if old_backup_name:
-                    old_backup = self._original_path(project_code, old_backup_name)
-                    new_backup = self._original_path(project_code, new_filename)
-                    if old_backup.exists() and old_backup != new_backup:
-                        new_backup.parent.mkdir(parents=True, exist_ok=True)
-                        if new_backup.exists():
-                            new_backup.unlink()
-                        old_backup.rename(new_backup)
-                    photo["original_backup"] = new_filename
-                self._ensure_thumbnail(project_code, new_filename)
-            except OSError:
-                # 中断保护：把临时文件恢复回记录引用的旧名，保证记录与文件一致，
-                # 不遗留 .renumber-* 临时文件，也不影响已成功完成的其它照片。
-                if temp_path and temp_path.exists() and old_filename:
-                    old_path = photos_dir / old_filename
+            if old_backup_name:
+                old_backup = self._original_path(project_code, old_backup_name)
+                new_backup = self._original_path(project_code, new_name)
+                if old_backup.is_file():
+                    normalized["original_backup"] = new_name
+                    if old_backup != new_backup:
+                        moves.append({"old": old_backup, "new": new_backup})
+        if not plans:
+            return
+        sources = [item["old"] for item in moves]
+        destinations = [item["new"] for item in moves]
+        if len(set(sources)) != len(sources) or len(set(destinations)) != len(destinations):
+            raise ValueError("照片或原图备份引用重复，已停止重编号，未覆盖任何文件")
+        for target in destinations:
+            if target.exists() and target not in sources:
+                raise ValueError("重编号目标存在未归属文件，已停止操作并保留原文件")
+        stage_root = self._project_dir(project_code) / "_renumber_staging" / uuid.uuid4().hex
+        stage_root.mkdir(parents=True, exist_ok=False)
+        for index, item in enumerate(moves):
+            item["stage"] = stage_root / f"stage-{index}{item['old'].suffix}"
+            item["rollback"] = stage_root / f"rollback-{index}{item['old'].suffix}"
+            item["current"] = item["old"]
+        (stage_root / "recovery.json").write_text(json.dumps({
+            "project_code": project_code,
+            "moves": [{key: str(item[key]) for key in ("old", "new", "stage", "rollback")} for item in moves],
+            "records": [{"before": item["before"], "after": item["after"]} for item in plans],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        def rename_preserving(source, target):
+            for attempt in range(6):
+                try:
+                    if target.exists():
+                        raise FileExistsError(f"目标文件已存在，拒绝覆盖：{target}")
+                    source.rename(target)
+                    return
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+
+        try:
+            for item in moves:
+                rename_preserving(item["old"], item["stage"])
+                item["current"] = item["stage"]
+            for item in moves:
+                rename_preserving(item["stage"], item["new"])
+                item["current"] = item["new"]
+            for item in plans:
+                item["photo"].update(item["after"])
+            self._write_metadata(project_code, data)
+        except Exception as exc:
+            rollback_errors = []
+            for item in moves:
+                if item["current"] == item["old"]:
+                    continue
+                try:
+                    rename_preserving(item["current"], item["rollback"])
+                    item["current"] = item["rollback"]
+                except Exception as problem:
+                    rollback_errors.append(str(problem))
+            for item in moves:
+                if item["current"] == item["old"]:
+                    continue
+                try:
+                    rename_preserving(item["current"], item["old"])
+                    item["current"] = item["old"]
+                except Exception as problem:
+                    rollback_errors.append(str(problem))
+            for item in plans:
+                item["photo"].clear()
+                item["photo"].update(item["before"])
+            self.invalidate_projects_cache(project_code)
+            if not rollback_errors:
+                shutil.rmtree(stage_root, ignore_errors=True)
+            detail = f"；恢复文件保留在 {stage_root}" if rollback_errors else "；文件已恢复至操作前"
+            raise RuntimeError(f"重编号未完成：{exc}{detail}") from exc
+        else:
+            shutil.rmtree(stage_root, ignore_errors=True)
+            for item in plans:
+                for name in (item["before"].get("filename", ""), item["after"]["filename"]):
                     try:
-                        if not old_path.exists():
-                            temp_path.rename(old_path)
+                        (photos_dir / self._thumb_filename(name)).unlink(missing_ok=True)
                     except OSError:
                         pass
-                continue
-            photo["id"] = new_id
-            photo["category"] = category
-            photo["category_label"] = PHOTO_CATEGORY_LABELS[category]
-            photo["filename"] = new_filename
+            for item in plans:
+                self._ensure_thumbnail(project_code, item["after"]["filename"])
 
     def create_project(self, project_code, project_name=None, keywords="", source_fields=None, project_order=None):
         original_code = self._safe_code(project_code)

@@ -207,4 +207,60 @@ class UnitSnapshotPerformanceTest(unittest.TestCase):
             m.reorder_photos('U1',['U1-SY004','U1-SY003','U1-SY002','U1-SY001'],category='construction')
         self.assertEqual([p['photo_uuid'] for p in m.get_photos('U1')],['U1-uuid-3','U1-uuid-2','U1-uuid-1','U1-uuid-0'])
 
+
+    def distinct_original_hashes(self,code):
+        from PIL import Image
+        m=self.manager;records=m.get_project(code)['photos'];hashes={}
+        for i,photo in enumerate(records):
+            buf=io.BytesIO();Image.new('RGB',(64,48),((i*19)%255,(i*31)%255,(i*43)%255)).save(buf,'JPEG')
+            raw=buf.getvalue();(m._photos_dir(code)/photo['filename']).write_bytes(raw)
+            (m._originals_dir(code)/photo['original_backup']).write_bytes(raw)
+            hashes[photo['photo_uuid']]=hashlib.sha256(raw).hexdigest()
+        m.invalidate_projects_cache(code)
+        return hashes
+
+    def assert_original_hashes(self,code,expected):
+        for photo in self.manager.get_photos(code):
+            if photo['photo_uuid'] in expected:
+                original=self.manager._originals_dir(code)/photo['original_backup']
+                self.assertTrue(original.is_file(),photo)
+                self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),expected[photo['photo_uuid']])
+
+    def test_process_move_with_occupied_original_names_preserves_every_original(self):
+        self.seed('U1',14);self.seed('U2',2);m=self.manager;expected=self.distinct_original_hashes('U1')
+        data=m.get_project('U1')
+        for photo in data['photos'][7:]:photo.update(process_name='开挖',process_code='GY001')
+        m._renumber_after_change('U1',data);self.assert_original_hashes('U1',expected)
+        photo=m.get_photos('U1')[0];permanent=photo['photo_uuid']
+        m.move_photo('U1',photo['id'],'U1',target_process_name='开挖')
+        self.assert_original_hashes('U1',expected)
+        moved=next(p for p in m.get_photos('U1') if p['photo_uuid']==permanent)
+        m.move_photo('U1',moved['id'],'U2',target_process_name='验收')
+        self.assert_original_hashes('U1',expected);self.assert_original_hashes('U2',expected)
+
+    def test_cyclic_reorder_preserves_distinct_image_and_backup_bytes(self):
+        self.seed('U1',8);m=self.manager;expected=self.distinct_original_hashes('U1')
+        data=m.get_project('U1');data['photos']=list(reversed(data['photos']))
+        m._renumber_after_change('U1',data);self.assert_original_hashes('U1',expected)
+        for photo in m.get_photos('U1'):
+            self.assertEqual(hashlib.sha256((m._photos_dir('U1')/photo['filename']).read_bytes()).hexdigest(),expected[photo['photo_uuid']])
+
+    def test_renumber_metadata_failure_restores_all_images_and_backups(self):
+        self.seed('U1',8);m=self.manager;expected=self.distinct_original_hashes('U1')
+        before=m._metadata_path('U1').read_bytes();data=m.get_project('U1');data['photos']=list(reversed(data['photos']))
+        with patch.object(m,'_write_metadata',side_effect=OSError('failed metadata save')):
+            with self.assertRaises(RuntimeError):m._renumber_category('U1',data,'construction')
+        self.assertEqual(m._metadata_path('U1').read_bytes(),before);self.assert_original_hashes('U1',expected)
+        for photo in m.get_photos('U1'):
+            self.assertEqual(hashlib.sha256((m._photos_dir('U1')/photo['filename']).read_bytes()).hexdigest(),expected[photo['photo_uuid']])
+
+    def test_thumbnail_revision_changes_when_same_timestamp_name_is_reused(self):
+        self.seed('U1',2);m=self.manager;data=m.get_project('U1')
+        for photo in data['photos']:os.utime(m._photos_dir('U1')/photo['filename'],ns=(1700000000000000000,1700000000000000000))
+        m.invalidate_projects_cache('U1');before=m.get_photos('U1')
+        data['photos'].reverse();m._renumber_after_change('U1',data);after=m.get_photos('U1')
+        self.assertEqual(before[0]['filename'],after[0]['filename'])
+        self.assertNotEqual(before[0]['photo_uuid'],after[0]['photo_uuid'])
+        self.assertNotEqual(before[0]['thumb_url'],after[0]['thumb_url'])
+
 if __name__=='__main__':unittest.main()
