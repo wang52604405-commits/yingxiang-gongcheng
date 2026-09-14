@@ -1,4 +1,6 @@
 import csv
+import copy
+from collections import OrderedDict
 import gzip
 import hashlib
 import io
@@ -1249,6 +1251,10 @@ class AlbumManager:
         self._photos_cache = {}
         self._part_units_cache = {}
         self._revision = 1
+        self._cache_lock = threading.RLock()
+        self._metadata_cache = OrderedDict()
+        self._unit_summaries = {}
+        self._legacy_checked = {}
         self._write_locks = {}
         self._write_locks_guard = threading.Lock()
 
@@ -1261,12 +1267,38 @@ class AlbumManager:
                 lock = self._write_locks[key] = threading.Lock()
             return lock
 
-    def invalidate_projects_cache(self):
-        self._projects_cache = {}
-        self._hierarchy_cache = {}
-        self._photos_cache = {}
-        self._part_units_cache = {}
-        self._revision += 1
+    def invalidate_projects_cache(self, project_code=None):
+        """Invalidate derived totals, retaining unrelated immutable unit snapshots.
+
+        Account/project switches and external bulk changes still use a full clear.
+        Cache entries never replace the existing engineering ownership check.
+        """
+        with self._cache_lock:
+            self._projects_cache = {}
+            self._hierarchy_cache = {}
+            self._part_units_cache = {}
+            if project_code is None:
+                self._photos_cache = {}
+                self._metadata_cache.clear()
+                self._unit_summaries.clear()
+                self._legacy_checked.clear()
+            else:
+                code = self._safe_code(project_code)
+                self._metadata_cache.pop(code, None)
+                self._unit_summaries.pop(code, None)
+                for cache in (self._photos_cache, self._legacy_checked):
+                    for key in list(cache):
+                        if (isinstance(key, tuple) and key[-1] == code) or key == code:
+                            cache.pop(key, None)
+            self._revision += 1
+
+    @staticmethod
+    def _metadata_signature(path):
+        try:
+            stat = path.stat()
+            return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        except OSError:
+            return None
 
     def revision(self):
         return self._revision
@@ -1421,19 +1453,35 @@ class AlbumManager:
 
     def _read_metadata(self, project_code):
         path = self._metadata_path(project_code)
-        if not path.exists():
-            return {
-                "project_code": self._safe_code(project_code),
-                "project_name": self._safe_code(project_code),
-                "keywords": "",
-                "source_fields": {},
-                "photos": [],
-            }
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            data = {}
+        key = self._safe_code(project_code)
+        signature = self._metadata_signature(path)
+        with self._cache_lock:
+            cached = self._metadata_cache.get(key)
+            if signature is not None and cached is not None and cached[0] == signature:
+                self._metadata_cache.move_to_end(key)
+                return copy.deepcopy(cached[1])
+        for attempt in range(6):
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                break
+            except PermissionError:
+                # Atomic replacement on Windows can briefly deny a new reader.
+                # A busy existing file is never an empty/new photo collection.
+                if attempt == 5:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+            except FileNotFoundError:
+                if signature is not None:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+                    continue
+                return {"project_code": key, "project_name": key, "keywords": "", "source_fields": {}, "photos": []}
+            except json.JSONDecodeError as exc:
+                raise ValueError("单元资料记录无法解析，已保留原文件，请核查或从备份恢复") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("photos", []), list):
+            raise ValueError("单元资料记录格式异常，已保留原文件")
         data.setdefault("project_code", self._safe_code(project_code))
         data.setdefault("project_name", data["project_code"])
         data.setdefault("keywords", "")
@@ -1449,15 +1497,41 @@ class AlbumManager:
             if isinstance(photo, dict):
                 photo.setdefault("process_name", "")
                 photo.setdefault("process_code", "")
+        # Check again after reading: do not label a concurrently replaced file with
+        # the old snapshot's fingerprint. Always return a caller-owned mutable copy.
+        if signature is not None and signature == self._metadata_signature(path) and signature[1] <= 4 * 1024 * 1024:
+            with self._cache_lock:
+                self._metadata_cache[key] = (signature, copy.deepcopy(data))
+                self._metadata_cache.move_to_end(key)
+                while len(self._metadata_cache) > 16:
+                    self._metadata_cache.popitem(last=False)
         return data
 
     def _write_metadata(self, project_code, data):
         project_dir = self._project_dir(project_code)
         project_dir.mkdir(parents=True, exist_ok=True)
         self._photos_dir(project_code).mkdir(parents=True, exist_ok=True)
-        with self._metadata_path(project_code).open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        self.invalidate_projects_cache()
+        destination = self._metadata_path(project_code)
+        temporary = destination.with_name(f".metadata-{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            # Windows readers/antivirus can briefly hold a non-delete-shared
+            # handle. Retry only access conflicts, with a small bounded delay;
+            # never remove the previous file or claim success after failure.
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, destination)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.invalidate_projects_cache(project_code)
 
     def _photo_url(self, project_code, filename):
         return f"/photos/{self._safe_code(project_code)}/{filename}"
@@ -1838,7 +1912,10 @@ class AlbumManager:
         version = ""
         try:
             original_path = self._photos_dir(data["project_code"]) / item["filename"]
-            version = str(int(original_path.stat().st_mtime))
+            stamp = original_path.stat()
+            # Same-second renumbering may reuse a filename for another UUID.
+            identity = f"{item.get('photo_uuid', '')}:{stamp.st_mtime_ns}:{stamp.st_size}:{stamp.st_ino}"
+            version = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
         except OSError:
             version = ""
         query = f"?v={version}" if version else ""
@@ -1972,87 +2049,129 @@ class AlbumManager:
         return restored
 
     def _renumber_category(self, project_code, data, category, settings=None):
+        """Move images AND originals through a disjoint namespace before publishing.
+
+        Original backup names can form cycles when a photo changes process. Never
+        overwrite an occupied destination, and persist metadata before discarding
+        the recovery map. Caller holds the unit write lock throughout.
+        """
         settings = self._numbering_snapshot() if settings is None else settings
         category = self._normalize_category(category)
         photos_dir = self._photos_dir(project_code)
-        # 先修复历史中断残留，避免在残留临时文件基础上继续改名
         self._repair_renumber_leftovers(project_code)
-        matching = [
-            photo for photo in data.get("photos", [])
-            if self._normalize_category(photo.get("category")) == category
-        ]
-        staged = []
-        counters = {}
+        counters, plans, moves = {}, [], []
         first_sequence = numbering_start(category, settings["numbering_rules"])
-        for photo in matching:
-            process_name = str(photo.get("process_name") or "").strip()
-            # 统一修正历史残留的 process_code：空工序名就是单元照片。
-            photo["process_name"] = process_name
-            photo["process_code"] = self._process_code(data, process_name) if process_name else ""
-            scope = self._sequence_scope(data, photo, category)
-            counters[scope] = counters.get(scope, first_sequence - 1) + 1
-            index = counters[scope]
-            old_filename = photo.get("filename", "")
-            old_path = photos_dir / old_filename
-            old_thumb = photos_dir / self._thumb_filename(old_filename)
-            ext = Path(old_filename).suffix.lower() or ".jpg"
-            new_id = self._archive_id_for_photo(data, photo, category, index, settings=settings)
-            scope_code = str(photo.get("process_code") or "").strip()
-            new_filename = self._photo_filename(category, new_id, ext, scope_code)
-            if new_filename == old_filename and str(photo.get("id") or "") == new_id:
-                # 顺序未变，无需重命名（刷新自动归位时避免无谓的文件搬移）
+        for photo in data.get("photos", []):
+            if self._normalize_category(photo.get("category")) != category:
                 continue
-            new_thumb = photos_dir / self._thumb_filename(new_filename)
-            temp_path = photos_dir / f".renumber-{index}-{new_filename}"
-            if old_path.exists():
-                old_path.rename(temp_path)
-                staged.append((photo, old_filename, temp_path, photos_dir / new_filename, new_id, new_filename))
-            else:
-                staged.append((photo, old_filename, None, photos_dir / new_filename, new_id, new_filename))
-            # 清掉旧缩略图；目标缩略图如有残留也删掉，避免显示成旧照片
-            if old_thumb.exists():
-                try:
-                    old_thumb.unlink()
-                except OSError:
-                    pass
-            if new_thumb.exists():
-                try:
-                    new_thumb.unlink()
-                except OSError:
-                    pass
-
-        for photo, old_filename, temp_path, new_path, new_id, new_filename in staged:
+            before = dict(photo)
+            process_name = str(photo.get("process_name") or "").strip()
+            process_code = self._process_code(data, process_name) if process_name else ""
+            candidate = {**photo, "process_name": process_name, "process_code": process_code}
+            scope = (category, process_code)
+            index = counters.get(scope, first_sequence - 1) + 1
+            counters[scope] = index
+            new_id = self._archive_id_for_photo(data, candidate, category, index, settings=settings)
+            old_name = str(photo.get("filename") or "")
+            new_name = self._photo_filename(category, new_id, Path(old_name).suffix.lower() or ".jpg", process_code)
+            normalized = {"id": new_id, "filename": new_name, "category": category,
+                          "category_label": PHOTO_CATEGORY_LABELS[category],
+                          "process_name": process_name, "process_code": process_code}
+            if new_name == old_name and str(photo.get("id") or "") == new_id:
+                photo.update(normalized)
+                continue
+            plan = {"photo": photo, "before": before, "after": normalized}
+            plans.append(plan)
+            old_image, new_image = photos_dir / Path(old_name).name, photos_dir / new_name
+            if old_image.is_file() and old_image != new_image:
+                moves.append({"old": old_image, "new": new_image})
             old_backup_name = str(photo.get("original_backup") or "")
-            try:
-                if temp_path and temp_path.exists():
-                    if new_path.exists():
-                        new_path.unlink()
-                    temp_path.rename(new_path)
-                if old_backup_name:
-                    old_backup = self._original_path(project_code, old_backup_name)
-                    new_backup = self._original_path(project_code, new_filename)
-                    if old_backup.exists() and old_backup != new_backup:
-                        new_backup.parent.mkdir(parents=True, exist_ok=True)
-                        if new_backup.exists():
-                            new_backup.unlink()
-                        old_backup.rename(new_backup)
-                    photo["original_backup"] = new_filename
-                self._ensure_thumbnail(project_code, new_filename)
-            except OSError:
-                # 中断保护：把临时文件恢复回记录引用的旧名，保证记录与文件一致，
-                # 不遗留 .renumber-* 临时文件，也不影响已成功完成的其它照片。
-                if temp_path and temp_path.exists() and old_filename:
-                    old_path = photos_dir / old_filename
+            if old_backup_name:
+                old_backup = self._original_path(project_code, old_backup_name)
+                new_backup = self._original_path(project_code, new_name)
+                if old_backup.is_file():
+                    normalized["original_backup"] = new_name
+                    if old_backup != new_backup:
+                        moves.append({"old": old_backup, "new": new_backup})
+        if not plans:
+            return
+        sources = [item["old"] for item in moves]
+        destinations = [item["new"] for item in moves]
+        if len(set(sources)) != len(sources) or len(set(destinations)) != len(destinations):
+            raise ValueError("照片或原图备份引用重复，已停止重编号，未覆盖任何文件")
+        for target in destinations:
+            if target.exists() and target not in sources:
+                raise ValueError("重编号目标存在未归属文件，已停止操作并保留原文件")
+        stage_root = self._project_dir(project_code) / "_renumber_staging" / uuid.uuid4().hex
+        stage_root.mkdir(parents=True, exist_ok=False)
+        for index, item in enumerate(moves):
+            item["stage"] = stage_root / f"stage-{index}{item['old'].suffix}"
+            item["rollback"] = stage_root / f"rollback-{index}{item['old'].suffix}"
+            item["current"] = item["old"]
+        (stage_root / "recovery.json").write_text(json.dumps({
+            "project_code": project_code,
+            "moves": [{key: str(item[key]) for key in ("old", "new", "stage", "rollback")} for item in moves],
+            "records": [{"before": item["before"], "after": item["after"]} for item in plans],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        def rename_preserving(source, target):
+            for attempt in range(6):
+                try:
+                    if target.exists():
+                        raise FileExistsError(f"目标文件已存在，拒绝覆盖：{target}")
+                    source.rename(target)
+                    return
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+
+        try:
+            for item in moves:
+                rename_preserving(item["old"], item["stage"])
+                item["current"] = item["stage"]
+            for item in moves:
+                rename_preserving(item["stage"], item["new"])
+                item["current"] = item["new"]
+            for item in plans:
+                item["photo"].update(item["after"])
+            self._write_metadata(project_code, data)
+        except Exception as exc:
+            rollback_errors = []
+            for item in moves:
+                if item["current"] == item["old"]:
+                    continue
+                try:
+                    rename_preserving(item["current"], item["rollback"])
+                    item["current"] = item["rollback"]
+                except Exception as problem:
+                    rollback_errors.append(str(problem))
+            for item in moves:
+                if item["current"] == item["old"]:
+                    continue
+                try:
+                    rename_preserving(item["current"], item["old"])
+                    item["current"] = item["old"]
+                except Exception as problem:
+                    rollback_errors.append(str(problem))
+            for item in plans:
+                item["photo"].clear()
+                item["photo"].update(item["before"])
+            self.invalidate_projects_cache(project_code)
+            if not rollback_errors:
+                shutil.rmtree(stage_root, ignore_errors=True)
+            detail = f"；恢复文件保留在 {stage_root}" if rollback_errors else "；文件已恢复至操作前"
+            raise RuntimeError(f"重编号未完成：{exc}{detail}") from exc
+        else:
+            shutil.rmtree(stage_root, ignore_errors=True)
+            for item in plans:
+                for name in (item["before"].get("filename", ""), item["after"]["filename"]):
                     try:
-                        if not old_path.exists():
-                            temp_path.rename(old_path)
+                        (photos_dir / self._thumb_filename(name)).unlink(missing_ok=True)
                     except OSError:
                         pass
-                continue
-            photo["id"] = new_id
-            photo["category"] = category
-            photo["category_label"] = PHOTO_CATEGORY_LABELS[category]
-            photo["filename"] = new_filename
+            for item in plans:
+                self._ensure_thumbnail(project_code, item["after"]["filename"])
 
     def create_project(self, project_code, project_name=None, keywords="", source_fields=None, project_order=None):
         original_code = self._safe_code(project_code)
@@ -2099,7 +2218,9 @@ class AlbumManager:
         return data
 
     def list_projects(self, query="", include_other=False):
-        cache_key = (active_engineering_project_id(), str(query or ""), bool(include_other))
+        engineering_id = active_engineering_project_id()
+        revision = self._revision
+        cache_key = (engineering_id, str(query or ""), bool(include_other))
         if cache_key in self._projects_cache:
             return self._projects_cache[cache_key]
         projects = []
@@ -2109,40 +2230,57 @@ class AlbumManager:
                 continue
             if project_dir.name.startswith("_"):
                 continue
-            try:
-                data = self._read_metadata(project_dir.name)
-            except Exception:
+            signature = self._metadata_signature(project_dir / "metadata.json")
+            with self._cache_lock:
+                cached = self._unit_summaries.get(project_dir.name)
+            if signature is not None and cached is not None and cached[0] == signature:
+                membership, item = cached[1], copy.deepcopy(cached[2])
+            else:
+                try:
+                    data = self._read_metadata(project_dir.name)
+                except Exception:
+                    continue
+                membership = {
+                    "engineering_project_id": data.get("engineering_project_id", ""),
+                    "source_fields": {"工程项目ID": (data.get("source_fields") or {}).get("工程项目ID", "")},
+                }
+                source_fields = data.get("source_fields", {})
+                is_other_image = bool(source_fields.get(OTHER_IMAGE_MARKER))
+                photos = data.get("photos", [])
+                construction_photo_count = sum(1 for photo in photos if photo.get("category") != "supervision")
+                supervision_photo_count = sum(1 for photo in photos if photo.get("category") == "supervision")
+                item = {
+                    "project_code": data.get("project_code", project_dir.name),
+                    "display_project_code": data.get("display_project_code") or source_fields.get("单元工程编码") or data.get("project_code", project_dir.name),
+                    "project_name": data.get("project_name", project_dir.name),
+                    "keywords": data.get("keywords", ""),
+                    "photo_count": len(photos),
+                    "construction_photo_count": construction_photo_count,
+                    "supervision_photo_count": supervision_photo_count,
+                    "latest_upload": photos[-1].get("upload_time", "") if photos else "",
+                    "source_fields": source_fields,
+                    "standard_unit_name": data.get("standard_unit_name", ""),
+                    "division_type": data.get("division_type", "unit"),
+                    "processes": data.get("processes", []),
+                    "project_order": data.get("project_order"),
+                    "is_other_image": is_other_image,
+                }
+                if signature is not None and signature == self._metadata_signature(project_dir / "metadata.json"):
+                    with self._cache_lock:
+                        self._unit_summaries[project_dir.name] = (signature, membership, copy.deepcopy(item))
+            if not project_matches_engineering(membership, engineering_id):
                 continue
-            if not project_matches_engineering(data):
+            if item["is_other_image"] and not include_other:
                 continue
-            source_fields = data.get("source_fields", {})
-            is_other_image = bool(source_fields.get(OTHER_IMAGE_MARKER))
-            if is_other_image and not include_other:
-                continue
-            photos = data.get("photos", [])
-            construction_photo_count = sum(1 for photo in photos if photo.get("category") != "supervision")
-            supervision_photo_count = sum(1 for photo in photos if photo.get("category") == "supervision")
-            item = {
-                "project_code": data.get("project_code", project_dir.name),
-                "display_project_code": data.get("display_project_code") or source_fields.get("单元工程编码") or data.get("project_code", project_dir.name),
-                "project_name": data.get("project_name", project_dir.name),
-                "keywords": data.get("keywords", ""),
-                "photo_count": len(photos),
-                "construction_photo_count": construction_photo_count,
-                "supervision_photo_count": supervision_photo_count,
-                "latest_upload": photos[-1].get("upload_time", "") if photos else "",
-                "source_fields": source_fields,
-                "standard_unit_name": data.get("standard_unit_name", ""),
-                "division_type": data.get("division_type", "unit"),
-                "processes": data.get("processes", []),
-                "project_order": data.get("project_order"),
-                "is_other_image": is_other_image,
-            }
             haystack = json.dumps(item, ensure_ascii=False).lower()
             if not query_text or query_text in haystack:
                 projects.append(item)
         result = sorted(projects, key=self._project_sort_key)
-        self._projects_cache[cache_key] = result
+        if revision == self._revision:
+            with self._cache_lock:
+                if len(self._projects_cache) >= 32:
+                    self._projects_cache.clear()
+                self._projects_cache[cache_key] = result
         return result
 
     def _project_sort_key(self, item):
@@ -2164,18 +2302,27 @@ class AlbumManager:
         return data
 
     def get_photos(self, project_code):
-        key = self._safe_code(project_code)
-        path = self._metadata_path(key)
-        try:
-            mtime = path.stat().st_mtime_ns
-        except OSError:
-            mtime = None
-        cached = self._photos_cache.get(key)
-        if cached is not None and cached[0] == mtime:
-            return cached[1]
-        data = self.get_project(key)
+        code = self._safe_code(project_code)
+        engineering_id = active_engineering_project_id()
+        key = (engineering_id, code)
+        path = self._metadata_path(code)
+        signature = self._metadata_signature(path)
+        with self._cache_lock:
+            cached = self._photos_cache.get(key)
+        if signature is not None and cached is not None and cached[0] == signature:
+            if not project_matches_engineering(cached[2], engineering_id):
+                raise FileNotFoundError("项目不属于当前工程")
+            return copy.deepcopy(cached[1])
+        data = self.get_project(code)
+        if not project_matches_engineering(data, engineering_id):
+            raise FileNotFoundError("项目不属于当前工程")
         items = [self._photo_item(data, photo) for photo in data.get("photos", [])]
-        self._photos_cache[key] = (mtime, items)
+        membership = {"engineering_project_id": data.get("engineering_project_id", ""), "source_fields": data.get("source_fields", {})}
+        if signature is not None and signature == self._metadata_signature(path):
+            with self._cache_lock:
+                if len(self._photos_cache) >= 16:
+                    self._photos_cache.clear()
+                self._photos_cache[key] = (signature, copy.deepcopy(items), membership)
         return items
 
     def repair_legacy_process_photo_scopes(self, project_code):
@@ -2186,7 +2333,14 @@ class AlbumManager:
 
         修复仅重编号和安全改名，不删除照片、不改变题名或拍摄信息。
         """
+        cache_key = (active_engineering_project_id(), self._safe_code(project_code))
+        path = self._metadata_path(project_code)
         with self._project_write_lock(project_code):
+            signature = self._metadata_signature(path)
+            with self._cache_lock:
+                checked = self._legacy_checked.get(cache_key)
+            if signature is not None and checked == signature:
+                return 0
             data = self.get_project(project_code)
             needs_repair = False
             has_processes = bool(data.get("processes") or [])
@@ -2211,11 +2365,13 @@ class AlbumManager:
                 ):
                     needs_repair = True
             if not needs_repair:
+                if signature is not None and signature == self._metadata_signature(path):
+                    with self._cache_lock:
+                        self._legacy_checked[cache_key] = signature
                 return 0
             for category in PHOTO_CATEGORIES:
                 self._renumber_category(project_code, data, category)
             self._write_metadata(data["project_code"], data)
-            self.invalidate_projects_cache()
             return 1
 
     def optimize_existing_photo(self, project_code, photo_id):
@@ -2466,8 +2622,10 @@ class AlbumManager:
             target_id = str(photo_id or "").strip()
             if not target_id:
                 raise ValueError("照片编号不能为空")
+            requested_uuid = str(updates.get("photo_uuid") or "").strip()
             for photo in data.get("photos", []):
-                if str(photo.get("id") or "") == target_id:
+                matches = (str(photo.get("photo_uuid") or "") == requested_uuid) if requested_uuid else (str(photo.get("id") or "") == target_id)
+                if matches:
                     previous_process = str(photo.get("process_name") or "").strip()
                     if "title" in updates:
                         photo["title"] = str(updates.get("title") or "").strip()
@@ -2479,6 +2637,8 @@ class AlbumManager:
                         photo["description"] = str(updates.get("description") or "").strip()
                     if "process_name" in updates:
                         new_process_name = str(updates.get("process_name") or "").strip()
+                        if new_process_name and new_process_name not in (data.get("processes") or []):
+                            raise ValueError("目标工序不存在，请重新选择")
                         photo["process_name"] = new_process_name
                         photo["process_code"] = self._process_code(data, new_process_name) if new_process_name else ""
                     if "orientation" in updates:
@@ -2625,6 +2785,8 @@ class AlbumManager:
                     raise ValueError("照片不存在")
 
                 photo_uuid = str(source_photo.get("photo_uuid") or "").strip() or uuid.uuid4().hex
+                if any(str(item.get("photo_uuid") or "") == photo_uuid for item in target.get("photos", [])):
+                    raise ValueError("目标单元已存在同一照片，请刷新后核实")
                 source_photo["photo_uuid"] = photo_uuid
                 source_filename = str(source_photo.get("filename") or "").strip()
                 source_path = self._photos_dir(source_code) / source_filename
@@ -2643,6 +2805,12 @@ class AlbumManager:
                 dest_backup_temp_path = None
                 original_source = dict(source_photo)
                 rollback_errors = []
+                cleanup_safe = False
+                # Preserve a local recovery map with the staged image if rollback fails.
+                (stage_root / "recovery.json").write_text(json.dumps({
+                    "source_code": source_code, "target_code": target_code,
+                    "photo_uuid": photo_uuid, "source_photo": original_source,
+                }, ensure_ascii=False, indent=2), encoding="utf-8")
 
                 try:
                     # Stage the only source copy first. This frees the old filename so
@@ -2692,7 +2860,9 @@ class AlbumManager:
                     target.setdefault("photos", []).append(moved)
                     target_added = True
                     self._renumber_after_change(target_code, target)
-                    return self._photo_item(target, moved)
+                    result = self._photo_item(target, moved)
+                    cleanup_safe = True
+                    return result
                 except Exception as exc:
                     # If the target already owns the staged record, first move that
                     # file out of its numbering namespace, then compact the target.
@@ -2751,12 +2921,37 @@ class AlbumManager:
                         except Exception as rollback_exc:
                             rollback_errors.append(f"源单元回滚失败：{rollback_exc}")
 
+                    else:
+                        # Failure can happen after staging the image but before the
+                        # metadata pop. Restore staged files even in that early window.
+                        try:
+                            if stage_photo.is_file() and not source_path.exists():
+                                shutil.copy2(stage_photo, source_path)
+                            if stage_thumb and stage_thumb.is_file():
+                                shutil.copy2(stage_thumb, self._photos_dir(source_code) / self._thumb_filename(source_filename))
+                            backup_name = str(original_source.get("original_backup") or "")
+                            if backup_name and stage_backup and stage_backup.is_file():
+                                shutil.copy2(stage_backup, self._originals_dir(source_code) / backup_name)
+                        except Exception as rollback_exc:
+                            rollback_errors.append(f"源文件恢复失败：{rollback_exc}")
+                    if not rollback_errors:
+                        try:
+                            restored_data = self.get_project(source_code)
+                            restored_photo = next(item for item in restored_data.get("photos", []) if str(item.get("photo_uuid") or "") == photo_uuid)
+                            restored_path = self._photos_dir(source_code) / restored_photo["filename"]
+                            if stage_photo.is_file() and restored_path.is_file():
+                                cleanup_safe = hashlib.sha256(stage_photo.read_bytes()).digest() == hashlib.sha256(restored_path.read_bytes()).digest()
+                            if not cleanup_safe:
+                                rollback_errors.append("恢复校验未通过，已保留暂存原图")
+                        except Exception as rollback_exc:
+                            rollback_errors.append(f"恢复校验失败：{rollback_exc}")
                     message = f"照片移动失败：{exc}"
                     if rollback_errors:
-                        message += "；" + "；".join(rollback_errors)
+                        message += "；" + "；".join(rollback_errors) + f"；恢复文件保留在 {stage_root}"
                     raise RuntimeError(message) from exc
                 finally:
-                    shutil.rmtree(stage_root, ignore_errors=True)
+                    if cleanup_safe:
+                        shutil.rmtree(stage_root, ignore_errors=True)
 
     def reorder_photo(self, project_code, photo_id, direction="up", category=""):
         with self._project_write_lock(project_code):
@@ -2797,7 +2992,7 @@ class AlbumManager:
             self._write_metadata(data["project_code"], data)
             return self._photo_item(data, target)
 
-    def reorder_photos(self, project_code, ordered_ids, category=""):
+    def reorder_photos(self, project_code, ordered_ids, category="", renumber=False):
         with self._project_write_lock(project_code):
             data = self.get_project(project_code)
             photos = data.get("photos", [])
@@ -2816,14 +3011,16 @@ class AlbumManager:
                 if self._normalize_category(photo.get("category")) != category or self._sequence_scope(data, photo, category) != target_scope:
                     raise ValueError("只能在同一类影像、同一工序内拖拽排序")
 
-        id_set = set(ordered_ids)
-        target_indexes = [index for index, photo in enumerate(photos) if str(photo.get("id") or "") in id_set]
-        if len(target_indexes) != len(ordered_ids):
-            raise ValueError("照片排序位置不完整")
+            id_set = set(ordered_ids)
+            target_indexes = [index for index, photo in enumerate(photos) if str(photo.get("id") or "") in id_set]
+            if len(target_indexes) != len(ordered_ids):
+                raise ValueError("照片排序位置不完整")
 
-        for index, photo in zip(target_indexes, ordered):
-            photos[index] = photo
-        self._write_metadata(data["project_code"], data)
+            for index, photo in zip(target_indexes, ordered):
+                photos[index] = photo
+            if renumber:
+                self._renumber_category(project_code, data, category)
+            self._write_metadata(data["project_code"], data)
 
     def auto_sort_piles(self, project_code):
         """灌注桩单元：按桩号分组（每根桩三个工序连体），桩之间按施工完成时间排序，并重新编号。"""
@@ -2874,7 +3071,6 @@ class AlbumManager:
         for category in PHOTO_CATEGORIES:
             self._renumber_category(project_code, data, category, settings=settings)
         self._write_metadata(data["project_code"], data)
-        self.invalidate_projects_cache()
 
     def _ensure_pile_sorted(self, project_code, data):
         """照片变更后统一钩子：若为灌注桩单元则按桩号连体排序并重新编号。须在已持有写锁时调用。"""
@@ -2896,7 +3092,6 @@ class AlbumManager:
             for category in PHOTO_CATEGORIES:
                 self._renumber_category(project_code, data, category, settings=settings)
             self._write_metadata(data["project_code"], data)
-            self.invalidate_projects_cache()
 
     def renumber_current_engineering_projects(self):
         """保存编号规则后，立即重排当前工程全部单元的已有照片。"""
@@ -8082,6 +8277,7 @@ def api_update_photo(project_code, photo_id):
         if not photo_date:
             return json_error("请填写照片日期", 400)
         updates = {
+            "photo_uuid": str(data.get("photo_uuid") or "").strip(),
             "title": data.get("title", ""),
             "photo_date": photo_date,
             "photographer": data.get("photographer", ""),
@@ -8259,7 +8455,7 @@ def api_reorder_photos(project_code):
         ordered_ids = payload.get("ordered_ids", [])
         if isinstance(ordered_ids, str):
             ordered_ids = [item.strip() for item in ordered_ids.split(",") if item.strip()]
-        manager.reorder_photos(project_code, ordered_ids, category=payload.get("category", ""))
+        manager.reorder_photos(project_code, ordered_ids, category=payload.get("category", ""), renumber=payload.get("renumber") is True)
         return jsonify({"ok": True, "photos": manager.get_photos(project_code)})
     except Exception as exc:
         return json_error(str(exc), 404)
@@ -8672,6 +8868,7 @@ def delete_photo(project_code, photo_id):
         payload = request.get_json(silent=True) or request.form
         ensure_engineering_delete_password(payload.get("safety_password", ""))
         category = manager._normalize_category(payload.get("category", "construction"))
+        requested_uuid = str(payload.get("photo_uuid") or "").strip()
         delete_event = {}
         with manager._project_write_lock(project_code):
             data = manager.get_project(project_code)
@@ -8680,7 +8877,8 @@ def delete_photo(project_code, photo_id):
             deleted = False
             for photo in data.get("photos", []):
                 photo_category = manager._normalize_category(photo.get("category"))
-                if photo.get("id") == photo_id and photo_category == category:
+                matches = (str(photo.get("photo_uuid") or "") == requested_uuid) if requested_uuid else (photo.get("id") == photo_id)
+                if matches and photo_category == category:
                     delete_event = {
                         "photo_uuid": str(photo.get("photo_uuid") or "").strip(),
                         "local_project_code": str(project_code or "").strip(),
