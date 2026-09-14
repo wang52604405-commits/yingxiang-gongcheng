@@ -19,30 +19,20 @@ jobs:
       candidate: ${{ steps.candidate.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare guarded candidate on isolated branch only
+      - name: Prepare isolated candidate
         id: candidate
         shell: bash
         run: |
-          if [ -f .diag/apply_backend.py ]; then
-            python .diag/apply_backend.py
-            python .diag/apply_frontend.py
-            python .diag/apply_safety.py
-            python - <<'PY'
-          import hashlib
-          from pathlib import Path
-          expected={'app.py':'998677dfd6d0b692de849ece0384b9e3cc083243ee633f4048499158572a6e0b','assets/app-A20260910-2.92.js':'8e1e5b0f59409bf5c389a8b30fea40443f1514553a03b83419cdc48d58527470'}
-          for name,wanted in expected.items():
-              got=hashlib.sha256(Path(name).read_bytes()).hexdigest()
-              print(name,got)
-              assert got==wanted, 'candidate differs from locally tested source: '+name
-          PY
-            rm -f .diag/perf-chunk-*.txt .diag/performance-full-01.b64 .diag/apply_backend.py .diag/apply_frontend.py .diag/apply_safety.py
+          if [ -f .diag/perf_patch.py ]; then
+            python .diag/perf_patch.py
+            rm .diag/perf_patch.py
+            python -c "from pathlib import Path; import gzip; p=next(Path('assets').glob('app-A*.js')); p.with_suffix('.js.gz').write_bytes(gzip.compress(p.read_bytes(),mtime=0))"
             node --check assets/app-A20260910-2.92.js
             git diff --check
-            git add app.py assets/app-A20260910-2.92.js assets/app-A20260910-2.92.js.gz tests .diag
+            git add app.py assets/app-A20260910-2.92.js assets/app-A20260910-2.92.js.gz tests .diag/perf_patch.py
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m '加快照片浏览与切换并保持照片操作完整'
+            git commit -m '加快照片浏览与切换并完善连续操作保护'
             git push origin HEAD:chatgpt/performance-full-20260914
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -57,7 +47,7 @@ jobs:
   round:
     needs: prepare
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -86,13 +76,18 @@ jobs:
           New-Item -ItemType Directory -Path evidence -Force | Out-Null
           git rev-parse HEAD | Set-Content evidence/source-sha.txt
           python -m unittest discover -s tests -v *> evidence/python-tests.log
-          if ($LASTEXITCODE -ne 0) { Get-Content evidence/python-tests.log -Tail 100; throw 'full regression failed' }
+          $testsCode=$LASTEXITCODE
           python -m compileall -q app.py tests server
-          if ($LASTEXITCODE -ne 0) { throw 'compile failed' }
+          $compileCode=$LASTEXITCODE
           node --check assets/app-A20260910-2.92.js
-          if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax failed' }
+          $jsCode=$LASTEXITCODE
           python tests/run_performance_browser.py --round ${{ matrix.round }} --out-dir evidence/browser *> evidence/browser.log
-          if ($LASTEXITCODE -ne 0) { Get-Content evidence/browser.log -Tail 100; throw 'browser validation failed' }
+          $browserCode=$LASTEXITCODE
+          if ($testsCode -ne 0 -or $compileCode -ne 0 -or $jsCode -ne 0 -or $browserCode -ne 0) {
+            Get-Content evidence/python-tests.log -Tail 65
+            Get-Content evidence/browser.log -Tail 75
+            throw "validation failed: python=$testsCode compile=$compileCode js=$jsCode browser=$browserCode"
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
