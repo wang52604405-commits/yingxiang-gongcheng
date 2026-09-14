@@ -130,14 +130,34 @@ def main():
                     target_id=page.locator('#photoSectionsHost .photo').nth(129).get_attribute('data-photo-id')
                     source=page.locator(f'#photoSectionsHost .photo[data-photo-id="{drag_id}"]')
                     target=page.locator(f'#photoSectionsHost .photo[data-photo-id="{target_id}"]')
-                    source.scroll_into_view_if_needed()
-                    source.hover();bounds=target.bounding_box();assert bounds
-                    print('DRAG begin',drag_id,target_id,flush=True)
+                    source.scroll_into_view_if_needed();source.hover()
+                    # A card's bounding-box corner can be behind a clipped scroll area
+                    # or fixed toolbar in a small viewport. Drop on its actually visible
+                    # upper-left region, and prove hit-testing reaches that very card.
+                    # No synthetic drag event, bypassed handler or weakened save assertion.
+                    drop=target.evaluate('''el=>{
+                        const r=el.getBoundingClientRect();
+                        let left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(innerWidth,r.right),bottom=Math.min(innerHeight,r.bottom);
+                        for(let p=el.parentElement;p;p=p.parentElement){
+                            const s=getComputedStyle(p),b=p.getBoundingClientRect();
+                            if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right);}
+                            if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}
+                        }
+                        const bar=document.querySelector('.topbar');
+                        if(bar)top=Math.max(top,bar.getBoundingClientRect().bottom);
+                        const x=left+8,y=top+8;
+                        return {x,y,left,top,right,bottom,midY:r.top+r.height/2,
+                          hit:document.elementFromPoint(x,y)?.closest('.photo')?.dataset.photoId||''};
+                    }''')
+                    report['drag_drop_geometry']=drop
+                    assert drop['x']<drop['right']-2 and drop['y']<min(drop['bottom']-2,drop['midY']),drop
+                    assert drop['hit']==target_id,drop
+                    print('DRAG begin',drag_id,target_id,drop,flush=True)
                     old_dom_ids=page.evaluate('()=>Array.from(document.querySelectorAll("#photoSectionsHost .photo")).map(p=>p.dataset.photoId)')
                     with page.expect_response(lambda r:'/reorder-list' in r.url and r.request.method=='POST'):
                         page.mouse.down();print('DRAG down',flush=True)
-                        page.mouse.move(bounds['x']+5,bounds['y']+5,steps=4);print('DRAG move1',flush=True)
-                        page.mouse.move(bounds['x']+6,bounds['y']+6);print('DRAG move2',flush=True)
+                        page.mouse.move(drop['x'],drop['y'],steps=4);print('DRAG move1',flush=True)
+                        page.mouse.move(drop['x']+1,drop['y']+1);print('DRAG move2',flush=True)
                         assert page.evaluate('()=>Array.from(document.querySelectorAll("#photoSectionsHost .photo")).map(p=>p.dataset.photoId)')==old_dom_ids, 'dragover must not silently rearrange unsaved cards'
                         page.mouse.up();print('DRAG released',flush=True)
                     page.wait_for_function('(old)=>JSON.stringify(activeGalleryPhotos().map(p=>p.photo_uuid))!==JSON.stringify(old)',arg=old_order)
