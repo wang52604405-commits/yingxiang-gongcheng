@@ -133,10 +133,12 @@ def main():
                     source.scroll_into_view_if_needed()
                     source.hover();bounds=target.bounding_box();assert bounds
                     print('DRAG begin',drag_id,target_id,flush=True)
+                    old_dom_ids=page.evaluate('()=>Array.from(document.querySelectorAll("#photoSectionsHost .photo")).map(p=>p.dataset.photoId)')
                     with page.expect_response(lambda r:'/reorder-list' in r.url and r.request.method=='POST'):
                         page.mouse.down();print('DRAG down',flush=True)
                         page.mouse.move(bounds['x']+5,bounds['y']+5,steps=4);print('DRAG move1',flush=True)
                         page.mouse.move(bounds['x']+6,bounds['y']+6);print('DRAG move2',flush=True)
+                        assert page.evaluate('()=>Array.from(document.querySelectorAll("#photoSectionsHost .photo")).map(p=>p.dataset.photoId)')==old_dom_ids, 'dragover must not silently rearrange unsaved cards'
                         page.mouse.up();print('DRAG released',flush=True)
                     page.wait_for_function('(old)=>JSON.stringify(activeGalleryPhotos().map(p=>p.photo_uuid))!==JSON.stringify(old)',arg=old_order)
                     order=page.evaluate('()=>activeGalleryPhotos().map(p=>p.photo_uuid)');assert sorted(order)==sorted(old_order)
