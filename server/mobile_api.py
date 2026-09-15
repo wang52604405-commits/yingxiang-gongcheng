@@ -5703,15 +5703,120 @@ def register_mobile_api(
             existing_archive_machine = _machine_id(
                 existing["desktop_machine_id"] if existing else ""
             )
+            retargeted_pending_count = 0
             if (
                 existing_archive_machine
                 and existing_archive_machine != desktop_machine_id
             ):
-                raise ApiProblem(
-                    "project_archive_machine_conflict",
-                    "该工程已绑定另一台归档电脑，请先在原电脑解除绑定",
-                    409,
+                # A replacement/second bound desktop may safely take over a real named
+                # project only when there is undelivered mobile work for the old archive
+                # machine and the new desktop proves it has the same current project tree.
+                # Imported or deleted photos are never replayed.
+                pending_rows = conn.execute(
+                    "SELECT id, scope, assignment_json FROM cloud_photos "
+                    "WHERE project_owner_account_id = ? AND project_id = ? "
+                    "AND source = 'mobile' AND status = 'desktop_pending' "
+                    "AND deleted_at = '' AND target_machine_id = ? ORDER BY id",
+                    (current["id"], project_id, existing_archive_machine),
+                ).fetchall()
+                existing_project_code = _safe_text(
+                    existing["project_code"] if existing else "", 100
                 )
+                incoming_units = {
+                    str(node.get("node_code") or "").strip()
+                    for node in nodes
+                    if node.get("scope") == "engineering"
+                    and node.get("node_type") == "unit"
+                }
+                incoming_processes = {
+                    (
+                        str(node.get("parent_code") or "").strip(),
+                        str(node.get("name") or "").strip(),
+                    )
+                    for node in nodes
+                    if node.get("scope") == "engineering"
+                    and node.get("node_type") == "process"
+                }
+                incoming_other_nodes = {
+                    str(node.get("node_code") or "").strip()
+                    for node in nodes
+                    if node.get("scope") == "other"
+                }
+                takeover_allowed = bool(
+                    project_id != "default"
+                    and existing_project_code
+                    and existing_project_code == project_code
+                    and pending_rows
+                )
+                if takeover_allowed:
+                    for pending in pending_rows:
+                        assignment = _json(pending["assignment_json"], {})
+                        if pending["scope"] == "engineering":
+                            unit_code = _safe_text(assignment.get("unit_code"), 160)
+                            process_name = _safe_text(assignment.get("process_name"), 160)
+                            if not unit_code or unit_code not in incoming_units:
+                                takeover_allowed = False
+                                break
+                            if process_name and (unit_code, process_name) not in incoming_processes:
+                                takeover_allowed = False
+                                break
+                        elif pending["scope"] == "other":
+                            other_code = _safe_text(assignment.get("other_node_code"), 160)
+                            if not other_code or other_code not in incoming_other_nodes:
+                                takeover_allowed = False
+                                break
+                        else:
+                            takeover_allowed = False
+                            break
+                if not takeover_allowed:
+                    raise ApiProblem(
+                        "project_archive_machine_conflict",
+                        "该工程已绑定另一台归档电脑；只有新电脑持有同一完整工程且服务器存在待归档照片时才可安全接管",
+                        409,
+                    )
+
+                takeover_timestamp = now()
+                # Retarget every not-yet-imported mobile object for this project, including
+                # an upload that was already in flight when the desktop changed.  The
+                # already-imported/deleted rows stay frozen on their original machine.
+                conn.execute(
+                    "UPDATE cloud_photos SET target_machine_id = ?, updated_at = ? "
+                    "WHERE project_owner_account_id = ? AND project_id = ? "
+                    "AND source = 'mobile' AND deleted_at = '' "
+                    "AND status <> 'desktop_imported' AND target_machine_id = ?",
+                    (
+                        desktop_machine_id,
+                        takeover_timestamp,
+                        current["id"],
+                        project_id,
+                        existing_archive_machine,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE mobile_batches SET target_machine_id = ?, updated_at = ? "
+                    "WHERE project_owner_account_id = ? AND project_id = ? "
+                    "AND status <> 'desktop_imported' AND target_machine_id = ?",
+                    (
+                        desktop_machine_id,
+                        takeover_timestamp,
+                        current["id"],
+                        project_id,
+                        existing_archive_machine,
+                    ),
+                )
+                conn.execute(
+                    "UPDATE mobile_upload_sessions SET target_machine_id = ?, updated_at = ? "
+                    "WHERE project_owner_account_id = ? AND project_id = ? "
+                    "AND status IN ('active', 'finalizing') AND target_machine_id = ?",
+                    (
+                        desktop_machine_id,
+                        takeover_timestamp,
+                        current["id"],
+                        project_id,
+                        existing_archive_machine,
+                    ),
+                )
+                retargeted_pending_count = len(pending_rows)
             deletion_hash = str(data.get("deletion_password_hash") or "")
             if deletion_hash:
                 if not re.fullmatch(r"(?:scrypt:32768:8:1|pbkdf2:sha256:(?:[1-9][0-9]{0,5}|1000000))\$[A-Za-z0-9]{1,64}\$[a-f0-9]{64,128}", deletion_hash):
@@ -5924,6 +6029,7 @@ def register_mobile_api(
                     "process_count": sum(1 for node in nodes if node["node_type"] == "process"),
                     "other_node_count": sum(1 for node in nodes if node["scope"] == "other"),
                     "requirement_count": requirement_count,
+                    "retargeted_pending_count": retargeted_pending_count,
                 }
             )
         finally:

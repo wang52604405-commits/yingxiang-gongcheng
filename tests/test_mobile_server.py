@@ -5048,5 +5048,100 @@ class MobileServerContractTest(unittest.TestCase):
             conn=self.db.connect();conn.execute("UPDATE licenses SET active=1 WHERE account_id=?",(owner,));conn.commit();conn.close()
 
 
+    def test_pending_mobile_photos_follow_verified_project_takeover(self):
+        project_id = "takeover-" + uuid.uuid4().hex[:12]
+        self._snapshot(
+            self.token_a,
+            "归档电脑接管测试工程",
+            project_id=project_id,
+            revision=100,
+        )
+
+        imported_batch = self._create_batch(self.token_a, project_id=project_id)
+        imported_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            imported_batch,
+            imported_uuid,
+            self._jpeg((45, 75, 105)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{imported_batch}/commit",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+        acked = self.client.post(
+            f"/api/desktop/v1/photos/{imported_uuid}/ack",
+            json={
+                "local_project_code": "LOCAL-IMPORTED",
+                "local_photo_id": "IMPORTED-SY001",
+                "desktop_machine_id": "MACHINE-A",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(acked.status_code, 200, acked.get_json())
+
+        pending_batch = self._create_batch(self.token_a, project_id=project_id)
+        pending_uuid = str(uuid.uuid4())
+        uploaded = self._upload(
+            self.token_a,
+            pending_batch,
+            pending_uuid,
+            self._jpeg((55, 85, 115)),
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+        committed = self.client.post(
+            f"/api/mobile/v1/batches/{pending_batch}/commit",
+            headers=self._headers(self.token_a),
+        )
+        self.assertEqual(committed.status_code, 200, committed.get_json())
+
+        switched = self._snapshot(
+            self.token_a,
+            "归档电脑接管测试工程",
+            project_id=project_id,
+            desktop_machine_id="MACHINE-A-ALT",
+            revision=101,
+        )
+        self.assertEqual(switched.status_code, 200, switched.get_json())
+        self.assertEqual(switched.get_json()["retargeted_pending_count"], 1)
+
+        conn = self.db.connect()
+        try:
+            imported = conn.execute(
+                "SELECT status,target_machine_id FROM cloud_photos WHERE photo_uuid=?",
+                (imported_uuid,),
+            ).fetchone()
+            pending = conn.execute(
+                "SELECT status,target_machine_id FROM cloud_photos WHERE photo_uuid=?",
+                (pending_uuid,),
+            ).fetchone()
+            batch = conn.execute(
+                "SELECT status,target_machine_id FROM mobile_batches WHERE id=?",
+                (pending_batch,),
+            ).fetchone()
+            self.assertEqual(imported["status"], "desktop_imported")
+            self.assertEqual(imported["target_machine_id"], "MACHINE-A")
+            self.assertEqual(pending["status"], "desktop_pending")
+            self.assertEqual(pending["target_machine_id"], "MACHINE-A-ALT")
+            self.assertEqual(batch["target_machine_id"], "MACHINE-A-ALT")
+        finally:
+            conn.close()
+
+        alt = self.client.get(
+            "/api/desktop/v1/inbox?desktop_machine_id=MACHINE-A-ALT&limit=100",
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(alt.status_code, 200, alt.get_json())
+        self.assertIn(pending_uuid, {item["photo_uuid"] for item in alt.get_json()["items"]})
+        old = self.client.get(
+            "/api/desktop/v1/inbox?desktop_machine_id=MACHINE-A&limit=100",
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(old.status_code, 200, old.get_json())
+        self.assertNotIn(pending_uuid, {item["photo_uuid"] for item in old.get_json()["items"]})
+
+
 if __name__ == "__main__":
     unittest.main()
