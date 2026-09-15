@@ -1,4 +1,4 @@
-name: 云端手机照片只读追查
+name: 云端手机照片全账号只读核对
 on:
   push:
     branches:
@@ -14,50 +14,18 @@ jobs:
     env:
       SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
     steps:
-      - name: Read imported mobile photo history only
+      - name: Read production mobile state without writes
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:SSH_KEY_B64) { throw 'missing ssh diagnostic credential' }
-          $dir = Join-Path $env:RUNNER_TEMP ('wechat-history-' + $env:GITHUB_RUN_ID)
+          $dir = Join-Path $env:RUNNER_TEMP ('mobile-global-' + $env:GITHUB_RUN_ID)
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
           $key = Join-Path $dir 'server_key'
           [IO.File]::WriteAllBytes($key,[Convert]::FromBase64String($env:SSH_KEY_B64))
           icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-          $py = @'
-import os,sqlite3,subprocess,hashlib,json
-from pathlib import Path
-pid=subprocess.check_output(['systemctl','show','--property=MainPID','--value','album-auth'],text=True).strip()
-env={}
-for item in Path(f'/proc/{pid}/environ').read_bytes().split(b'\0'):
-    k,sep,v=item.partition(b'=')
-    if sep: env[k.decode('utf-8','surrogateescape')]=v.decode('utf-8','surrogateescape')
-cwd=Path(os.readlink(f'/proc/{pid}/cwd'))
-db=Path(env.get('ALBUM_SERVER_DB') or (Path(env['ALBUM_SERVER_DATA'])/'server.db' if env.get('ALBUM_SERVER_DATA') else cwd/'data'/'server.db'))
-if not db.is_absolute(): db=cwd/db
-db=db.resolve()
-con=sqlite3.connect(f'file:{db}?mode=ro',uri=True); con.row_factory=sqlite3.Row
-h=lambda v: hashlib.sha256(str(v or '').encode()).hexdigest()[:12] if v else ''
-ids=(1290,1291,1292,1293,1320,1321)
-q='SELECT id,batch_id,photo_uuid,status,local_project_code,local_photo_id,created_at,updated_at,desktop_imported_at,deleted_at,deleted_by_machine_id,deleted_by_account_id,error_code,error_message,target_machine_id FROM cloud_photos WHERE id IN (%s) ORDER BY id' % ','.join('?'*len(ids))
-photos=[]
-for r in con.execute(q,ids).fetchall():
-    d=dict(r); d['photo_uuid_hash']=h(d.pop('photo_uuid')); d['target_machine_id']=h(d.get('target_machine_id')); d['deleted_by_machine_id']=h(d.get('deleted_by_machine_id')); photos.append(d)
-print('tracked_photos='+json.dumps(photos,ensure_ascii=True))
-# Print photo change history for these UUIDs without exposing UUIDs/payload wholesale.
-uuids=[r['photo_uuid'] for r in con.execute('SELECT photo_uuid FROM cloud_photos WHERE id IN (%s)' % ','.join('?'*len(ids)),ids).fetchall()]
-changes=[]
-if uuids:
-    qq='SELECT id,photo_uuid,action,payload_json,actor_account_id,created_at FROM mobile_photo_changes WHERE photo_uuid IN (%s) ORDER BY id' % ','.join('?'*len(uuids))
-    for r in con.execute(qq,uuids).fetchall():
-        p={}
-        try: p=json.loads(r['payload_json'] or '{}')
-        except Exception: pass
-        changes.append({'id':r['id'],'uuid_hash':h(r['photo_uuid']),'action':r['action'],'actor_account_id':r['actor_account_id'],'created_at':r['created_at'],'payload_keys':sorted(p.keys()),'local_project_code':p.get('local_project_code'),'local_photo_id':p.get('local_photo_id')})
-print('changes='+json.dumps(changes,ensure_ascii=True))
-'@
-          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($py))
-          $cmd="import base64;exec(base64.b64decode('$encoded'))"
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 "python3 -c `"$cmd`""
+          $encoded = 'CmltcG9ydCBvcywgc3FsaXRlMywgc3VicHJvY2VzcywgaGFzaGxpYiwganNvbgpmcm9tIHBhdGhsaWIgaW1wb3J0IFBhdGgKcGlkPXN1YnByb2Nlc3MuY2hlY2tfb3V0cHV0KFsnc3lzdGVtY3RsJywnc2hvdycsJy0tcHJvcGVydHk9TWFpblBJRCcsJy0tdmFsdWUnLCdhbGJ1bS1hdXRoJ10sdGV4dD1UcnVlKS5zdHJpcCgpCmlmIG5vdCBwaWQgb3IgcGlkPT0nMCc6IHJhaXNlIFN5c3RlbUV4aXQoJ2FsYnVtLWF1dGggbm90IHJ1bm5pbmcnKQplbnY9e30KZm9yIGl0ZW0gaW4gUGF0aChmJy9wcm9jL3twaWR9L2Vudmlyb24nKS5yZWFkX2J5dGVzKCkuc3BsaXQoYidcMCcpOgogICAgayxzZXAsdj1pdGVtLnBhcnRpdGlvbihiJz0nKQogICAgaWYgc2VwOiBlbnZbay5kZWNvZGUoJ3V0Zi04Jywnc3Vycm9nYXRlZXNjYXBlJyldPXYuZGVjb2RlKCd1dGYtOCcsJ3N1cnJvZ2F0ZWVzY2FwZScpCmN3ZD1QYXRoKG9zLnJlYWRsaW5rKGYnL3Byb2Mve3BpZH0vY3dkJykpCmRiPVBhdGgoZW52LmdldCgnQUxCVU1fU0VSVkVSX0RCJykgb3IgKFBhdGgoZW52WydBTEJVTV9TRVJWRVJfREFUQSddKS8nc2VydmVyLmRiJyBpZiBlbnYuZ2V0KCdBTEJVTV9TRVJWRVJfREFUQScpIGVsc2UgY3dkLydkYXRhJy8nc2VydmVyLmRiJykpCmlmIG5vdCBkYi5pc19hYnNvbHV0ZSgpOiBkYj1jd2QvZGIKZGI9ZGIucmVzb2x2ZSgpCmNvbj1zcWxpdGUzLmNvbm5lY3QoZidmaWxlOntkYn0/bW9kZT1ybycsdXJpPVRydWUpOyBjb24ucm93X2ZhY3Rvcnk9c3FsaXRlMy5Sb3cKaD1sYW1iZGEgdjogaGFzaGxpYi5zaGEyNTYoc3RyKHYgb3IgJycpLmVuY29kZSgpKS5oZXhkaWdlc3QoKVs6MTJdIGlmIHYgZWxzZSAnJwpzdW1tYXJ5PVtdCmZvciByIGluIGNvbi5leGVjdXRlKCIiIgpTRUxFQ1QgcHJvamVjdF9vd25lcl9hY2NvdW50X2lkIG93bmVyX2lkLCBzdGF0dXMsIENPVU5UKCopIG4sCiAgICAgICBTVU0oQ0FTRSBXSEVOIGRlbGV0ZWRfYXQ8PicnIFRIRU4gMSBFTFNFIDAgRU5EKSBkZWxldGVkX24sCiAgICAgICBNSU4oY3JlYXRlZF9hdCkgZmlyc3RfYXQsIE1BWChjcmVhdGVkX2F0KSBsYXN0X2F0LCBNQVgodXBkYXRlZF9hdCkgbGFzdF91cGRhdGUKRlJPTSBjbG91ZF9waG90b3MKV0hFUkUgc291cmNlPSdtb2JpbGUnCkdST1VQIEJZIHByb2plY3Rfb3duZXJfYWNjb3VudF9pZCxzdGF0dXMK T1JERVIgQlkgcHJvamVjdF9vd25lcl9hY2NvdW50X2lkLHN0YXR1cwoiIiIucmVwbGFjZSgnXG4gT1JERVInLCdcbk9SREVSJykpOgogICAgc3VtbWFyeS5hcHBlbmQoZGljdChyKSkKcHJpbnQoJ0dMT0JBTD0nK2pzb24uZHVtcHMoc3VtbWFyeSxlbnN1cmVfYXNjaWk9VHJ1ZSkpCm1hY2hpbmVzPVtdCmZvciByIGluIGNvbi5leGVjdXRlKCIiIgpTRUxFQ1QgcHJvamVjdF9vd25lcl9hY2NvdW50X2lkIG93bmVyX2lkLCB0YXJnZXRfbWFjaGluZV9pZCwgQ09VTlQoKikgbiwKICAgICAgIFNVTShDQVNFIFdIRU4gc3RhdHVzPSdkZXNrdG9wX2ltcG9ydGVkJyBUSEVOIDEgRUxTRSAwIEVORCkgaW1wb3J0ZWRfbiwKICAgICAgIFNVTShDQVNFIFdIRU4gZGVsZXRlZF9hdDw+JycgVEhFTiAxIEVMU0UgMCBFTkQpIGRlbGV0ZWRfbiwKICAgICAgIE1BWCh1cGRhdGVkX2F0KSBsYXN0X3VwZGF0ZQpGUk9NIGNsb3VkX3Bob3RvcwpXSEVSRSBzb3VyY2U9J21vYmlsZScKR1JPVVAgQlkgcHJvamVjdF9vd25lcl9hY2NvdW50X2lkLHRhcmdldF9tYWNoaW5lX2lkCk9SREVSIEJZIG4gREVTQwpMSU1JVCA1MAoiIiIpOgogICAgZD1kaWN0KHIpOyBkWyd0YXJnZXRfbWFjaGluZV9oYXNoJ109aChkLnBvcCgndGFyZ2V0X21hY2hpbmVfaWQnKSk7IG1hY2hpbmVzLmFwcGVuZChkKQpwcmludCgnTUFDSElORVM9Jytqc29uLmR1bXBzKG1hY2hpbmVzLGVuc3VyZV9hc2NpaT1UcnVlKSkKdHJhY2tlZD1bXQpmb3IgciBpbiBjb24uZXhlY3V0ZSgiIiIKU0VMRUNUIGlkLGJhdGNoX2lkLHBob3RvX3V1aWQsc3RhdHVzLGxvY2FsX3Byb2plY3RfY29kZSxsb2NhbF9waG90b19pZCxjcmVhdGVkX2F0LHVwZGF0ZWRfYXQsCiAgICAgICBkZXNrdG9wX2ltcG9ydGVkX2F0LGRlbGV0ZWRfYXQsZGVsZXRlZF9ieV9tYWNoaW5lX2lkLGRlbGV0ZWRfYnlfYWNjb3VudF9pZCxlcnJvcl9jb2RlLGVycm9yX21lc3NhZ2UsCiAgICAgICB0YXJnZXRfbWFjaGluZV9pZCxvcmlnaW5hbF9jbGVhbnVwX3N0YXR1cyxvcmlnaW5hbF9kZWxldGVkX2F0LHByZXZpZXdfc3RvcmFnZV9rZXksb3JpZ2luYWxfc3RvcmFnZV9rZXksc3RvcmFnZV9rZXkKRlJPTSBjbG91ZF9waG90b3MKV0hFUkUgc291cmNlPSdtb2JpbGUnIEFORCBwcm9qZWN0X293bmVyX2FjY291bnRfaWQ9MQpPUkRFUiBCWSBpZCBERVNDIExJTUlUIDIwCiIiIyk6CiAgICBkPWRpY3QocikKICAgIGRbJ3V1aWRfaGFzaCddPWgoZC5wb3AoJ3Bob3RvX3V1aWQnKSkKICAgIGRbJ3RhcmdldF9tYWNoaW5lX2hhc2gnXT1oKGQucG9wKCd0YXJnZXRfbWFjaGluZV9pZCcpKQogICAgZFsnZGVsZXRlZF9ieV9tYWNoaW5lX2hhc2gnXT1oKGQucG9wKCdkZWxldGVkX2J5X21hY2hpbmVfaWQnKSkKICAgIGRbaGFzX3ByZXZpZXddPWJvb2woZC5wb3AoJ3ByZXZpZXdfc3RvcmFnZV9rZXknKSkKICAgIGRbaGFzX29yaWdpbmFsX3N0b3JhZ2Vfa2V5J109Ym9vbChkLnBvcCgnb3JpZ2luYWxfc3RvcmFnZV9rZXknKSkKICAgIGRbaGFzX3N0b3JhZ2Vfa2V5J109Ym9vbChkLnBvcCgnc3RvcmFnZV9rZXknKSkKICAgIHRyYWNrZWQuYXBwZW5kKGQpCnByaW50KCdBQ0NPVU5UMT0nK2pzb24uZHVtcHModHJhY2tlZCxlbnN1cmVfYXNjaWk9VHJ1ZSkpCmNoYW5nZXM9W10KZm9yIHIgaW4gY29uLmV4ZWN1dGUoIiIiClNFTEVDVCBjLmlkLGMucGhvdG9fdXVpZCxjLmFjdGlvbixjLmFjdG9yX2FjY291bnRfaWQsYy5jcmVhdGVkX2F0LGMucGF5bG9hZF9qc29uCkZST00gbW9iaWxlX3Bob3RvX2NoYW5nZXMgYwpKT0lOIGNsb3VkX3Bob3RvcyBwIE9OIHAucGhvdG9fdXVpZD1jLnBob3RvX3V1aWQKV0hFUkUgcC5zb3VyY2U9J21vYmlsZScgQU5EIHAucHJvamVjdF9vd25lcl9hY2NvdW50X2lkPTEKT1JERVIgQlkgYy5pZCBERVNDIExJTUlUIDEwMAoiIiIpOgogICAgZD1kaWN0KHIpCiAgICB0cnk6IHBheWxvYWQ9anNvbi5sb2FkcyhkLnBvcCgncGF5bG9hZF9qc29uJykgb3IgJ3t9JykKICAgIGV4Y2VwdCBFeGNlcHRpb246IHBheWxvYWQ9e30KICAgIGNoYW5nZXMuYXBwZW5kKHsnaWQnOmRbJ2lkJ10sJ3V1aWRfaGFzaCc6aChkWydwaG90b191dWlkJ10pLCdhY3Rpb24nOmRbJ2FjdGlvbiddLCdhY3Rvcl9hY2NvdW50X2lkJzpkWydhY3Rvcl9hY2NvdW50X2lkJ10sCiAgICAgICAgICAgICAgICAgICAgJ2NyZWF0ZWRfYXQnOmRbJ2NyZWF0ZWRfYXQnXSwicGF5bG9hZF9rZXlzJzpzb3J0ZWQocGF5bG9hZC5rZXlzKCkpLAogICAgICAgICAgICAgICAgICAgICdsb2NhbF9wcm9qZWN0X2NvZGUnOnBheWxvYWQuZ2V0KCdsb2NhbF9wcm9qZWN0X2NvZGUnKSwibG9jYWxfcGhvdG9faWQnOnBheWxvYWQuZ2V0KCdsb2NhbF9waG90b19pZCl9KQpwcmludCgnQ0hBTkdFUz0nK2pzb24uZHVtcHMoY2hhbmdlcyxlbnN1cmVfYXNjaWk9VHJ1ZSkpCg=='
+          $code = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
+          $code | ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 'python3 -'
           if ($LASTEXITCODE -ne 0) { throw "readonly server query failed: $LASTEXITCODE" }
           Remove-Item -LiteralPath $dir -Recurse -Force
