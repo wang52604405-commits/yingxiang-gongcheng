@@ -1,0 +1,79 @@
+name: 手机照片归档位置只读核查
+on:
+  push:
+    branches: [chatgpt/wechat-desktop-sync-20260915]
+    paths: [.github/workflows/wechat-photo-location.yml]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: '116423697ce6f5a60ee70d2d695e7b87d364ccc9'
+          path: wechat-location
+          persist-credentials: false
+      - name: Read receipt positions without altering originals, cursors or account login
+        shell: python
+        run: |
+          import os,sys,json,hashlib,urllib.request,urllib.error,urllib.parse,http.cookiejar
+          from pathlib import Path
+          sys.path.insert(0,str(Path('wechat-location').resolve()))
+          import cloud_client,licensing
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*a,**k): return None
+          jar=http.cookiejar.CookieJar()
+          opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(jar),NoRedirect())
+          def req(url,token='',body=None):
+              headers={'Authorization':'Bearer '+token} if token else {}
+              if body is not None: headers['Content-Type']='application/json'
+              try:
+                  with opener.open(urllib.request.Request(url,headers=headers,data=json.dumps(body).encode() if body is not None else None),timeout=15) as r: return r.status,json.loads(r.read())
+              except urllib.error.HTTPError as exc:
+                  try: b=json.loads(exc.read())
+                  except Exception: b={}
+                  return exc.code,{'ok':False,'code':b.get('code'),'error':str(b.get('error') or '')[:160]}
+              except Exception as exc: return 0,{'ok':False,'error':type(exc).__name__}
+          def emit(k,v): print(k+'='+json.dumps(v,ensure_ascii=True),flush=True)
+          def read(p):
+              try: return json.loads(p.read_text(encoding='utf-8-sig'))
+              except Exception: return {}
+          root=Path('D:/工程影像资料')
+          account=read(root/'cloud_account.json')
+          if not account: account=read(Path(os.environ['LOCALAPPDATA'])/'工程影像管理平台'/'data'/'cloud_account.json')
+          status,_=req('http://127.0.0.1:5088/api/auth/login',body={'username':'同步核查','remember':False})
+          if status==200:
+              status,b= req('http://127.0.0.1:5088/api/mobile-sync/status')
+              last=b.get('last_result') or {}
+              emit('running_sync',{'http':status,'running':b.get('running'),'last_ok':last.get('ok'),'stage':last.get('stage'),'code':last.get('code'),'error':last.get('error'),'inbox':last.get('inbox'),'ownership':b.get('project_ownership'),'ack_pending':b.get('ack_pending_count')})
+          local=[]
+          for p in (root/'albums').glob('*/metadata.json'):
+              if p.is_symlink() or p.parent.is_symlink(): continue
+              d=read(p); f=d.get('source_fields') or {}
+              for photo in d.get('photos') or []:
+                  if photo.get('mobile_original_received') or photo.get('mobile_classification_pending'):
+                      name=str(photo.get('filename') or '')
+                      local.append({'uuid_hash':hashlib.sha256(str(photo.get('photo_uuid')).encode()).hexdigest()[:12],'unit':d.get('project_code'),'name':d.get('project_name'),'process':photo.get('process_name'),'category':photo.get('category'),'title':photo.get('title'),'id':photo.get('id'),'file_exists':Path(name).name==name and (p.parent/'photos'/name).is_file(),'unclassified':bool(f.get('_mobile_unclassified')),'review_reason':photo.get('mobile_review_reason')})
+          emit('local_mobile_photos',local[:30]);emit('local_mobile_count',len(local))
+          token=cloud_client._dpapi_unprotect(str(account.get('token_protected') or ''))
+          base=str(account.get('server') or cloud_client.DEFAULT_SERVER_URL).rstrip('/')
+          if base!='https://api.shuiliyingxiang.cn': raise SystemExit('Unexpected cloud origin')
+          if token:
+              status,b=req(base+'/api/mobile/v1/projects',token)
+              projects=b.get('projects') or []
+              emit('cloud_projects',{'http':status,'ok':b.get('ok'),'count':len(projects),'projects':[{'id':p.get('project_id'),'ref':p.get('project_ref'),'name':p.get('project_name')} for p in projects]})
+              def brief(p):
+                  a=p.get('archive') or {}
+                  return {'uuid_hash':hashlib.sha256(str(p.get('photo_uuid')).encode()).hexdigest()[:12],'cursor':p.get('cursor'),'source':p.get('source'),'status':p.get('status'),'unit':p.get('unit_code'),'process':p.get('process_name'),'category':p.get('category'),'title':p.get('title'),'manual_review':p.get('manual_review_required'),'review_reason':p.get('review_reason'),'created_at':p.get('created_at'),'updated_at':p.get('updated_at'),'imported_at':p.get('desktop_imported_at'),'local_unit':p.get('local_project_code'),'target_matches':a.get('target_machine_id')==licensing.machine_id(),'error':p.get('error')}
+              for project in projects[:10]:
+                  ref=project.get('project_ref') or project.get('project_id')
+                  status,b=req(base+'/api/mobile/v1/photos?'+urllib.parse.urlencode({'project_id':ref,'limit':100}),token)
+                  photos=b.get('photos') or []
+                  emit('recent_cloud_photos',{'project':ref,'http':status,'ok':b.get('ok'),'total':b.get('total'),'mobile':[brief(p) for p in photos if p.get('source')=='mobile'][:20]})
+              status,b=req(base+'/api/mobile/v1/batches?limit=100',token)
+              emit('cloud_batches',{'http':status,'ok':b.get('ok'),'next_cursor':b.get('next_cursor'),'batches':[{'id':x.get('id'),'project':x.get('project_ref'),'status':x.get('status'),'target_matches':x.get('target_machine_id')==licensing.machine_id(),'photos':[brief(p) for p in x.get('photos',[])][-8:]} for x in (b.get('batches') or [])][-15:]})
+          emit('location_check_complete',True)
