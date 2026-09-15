@@ -1,0 +1,49 @@
+name: 桌面端手机照片落盘只读核对
+on:
+  push:
+    branches: [chatgpt/wechat-local-import-check-20260915]
+    paths: [.github/workflows/local-mobile-import-readonly.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - name: Scan local metadata without modifying data
+        shell: python
+        run: |
+          import json,hashlib,os
+          from pathlib import Path
+          roots=[Path('D:/工程影像资料'),Path(os.environ.get('LOCALAPPDATA',''))/'工程影像管理平台']
+          seen=set(); rows=[]
+          for root in roots:
+              if not root.exists(): continue
+              for p in root.rglob('metadata.json'):
+                  key=str(p.resolve()).lower()
+                  if key in seen: continue
+                  seen.add(key)
+                  try: doc=json.loads(p.read_text(encoding='utf-8-sig'))
+                  except Exception: continue
+                  photos=doc.get('photos') or []
+                  mobile=[]
+                  for ph in photos:
+                      if not isinstance(ph,dict): continue
+                      text=json.dumps(ph,ensure_ascii=False).lower()
+                      if any(x in text for x in ['mobile','wechat','微信','desktop_imported','client_captured_at']) or str(doc.get('project_code','')).startswith('MOBILE-WAIT'):
+                          mobile.append({
+                              'uuid_hash':hashlib.sha256(str(ph.get('photo_uuid') or '').encode()).hexdigest()[:12],
+                              'id':ph.get('id'),'title':ph.get('title'),'photo_date':ph.get('photo_date'),
+                              'process_name':ph.get('process_name'),'filename':ph.get('filename'),
+                              'file_exists':bool(ph.get('filename') and (p.parent/'photos'/str(ph.get('filename'))).exists()),
+                              'source':ph.get('source'),'uploaded_by':ph.get('uploaded_by'),'capture_source':ph.get('capture_source'),
+                          })
+                  if mobile or str(doc.get('project_code','')).startswith('MOBILE-WAIT') or str(doc.get('display_project_code','')).startswith('MOBILE-WAIT'):
+                      rows.append({
+                          'metadata':str(p),'project_code':doc.get('project_code'),'display_project_code':doc.get('display_project_code'),
+                          'project_name':doc.get('project_name'),'photo_count':len(photos),'mobile_like':mobile[-20:]
+                      })
+          print('LOCAL_MOBILE_ROWS='+json.dumps(rows,ensure_ascii=True))
+          print('LOCAL_MOBILE_PROJECTS='+str(len(rows)))
