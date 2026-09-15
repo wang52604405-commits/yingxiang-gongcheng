@@ -1,0 +1,27 @@
+name: 目标电脑标识只读映射诊断
+on:
+  push:
+    branches:
+      - chatgpt/migrate-owner40-pending-to-2ed2-20260915
+    paths:
+      - tools/find_machine_alias_readonly.py
+      - .github/workflows/find-machine-alias.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Find machine alias on production server without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/server_key"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$key"
+          chmod 600 "$key"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$key" root@47.95.221.66 'python3 -' < tools/find_machine_alias_readonly.py
+          rm -f "$key"
