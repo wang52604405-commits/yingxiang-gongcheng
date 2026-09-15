@@ -1,0 +1,45 @@
+name: 微信开发者工具只读检查
+on:
+  push:
+    branches:
+      - chatgpt/wechat-desktop-sync-20260915
+    paths:
+      - .github/workflows/wechat-devtools-installed-readonly.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    steps:
+      - name: Locate WeChat DevTools CLI without changing login state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $roots = @(
+            'C:\Program Files (x86)\Tencent',
+            'C:\Program Files\Tencent',
+            (Join-Path $env:LOCALAPPDATA '微信开发者工具'),
+            (Join-Path $env:LOCALAPPDATA 'Programs')
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+          $found = @()
+          foreach ($root in $roots) {
+            $found += Get-ChildItem -LiteralPath $root -Filter 'cli.bat' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 -ExpandProperty FullName
+            $found += Get-ChildItem -LiteralPath $root -Filter 'cli.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 -ExpandProperty FullName
+          }
+          $found = @($found | Select-Object -Unique)
+          Write-Host ('cli_count=' + $found.Count)
+          foreach ($path in $found) {
+            Write-Host ('cli=' + $path)
+            $dir = Split-Path -Parent $path
+            $project = Get-ChildItem -LiteralPath $dir -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 8 -ExpandProperty Name
+            Write-Host ('nearby_exe=' + ($project -join '|'))
+          }
+          $uninstall = @(
+            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          Get-ItemProperty $uninstall -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '微信.*开发|WeChat.*Dev|wechat.*dev' } |
+            ForEach-Object { Write-Host ('installed=' + $_.DisplayName + '|' + $_.InstallLocation + '|' + $_.DisplayVersion) }
