@@ -162,7 +162,7 @@ sudo python validate_mobile_migration.py \
 迁移副本只用来证明旧库可安全增量升级，不安装进 staging；隔离联调使用新建的
 空测试数据库和一次性测试账号，避免真实账号资料进入测试服务。
 
-`main` 分支推送后，自托管 GitHub Actions 会从加密 Secrets 向 Runner 临时目录注入发布凭据，运行测试与发布契约检查，再把服务端上传到独立灰度目录；任务结束即清理临时凭据。`deploy_auth.py` 在替换线上代码前通过 SQLite backup API 生成一致性备份，并调用 `validate_mobile_migration.py` 只在第二份副本上验证迁移、旧表行数和完整性；验证副本用完即清，稳定备份继续保留。验证失败时不会替换线上代码。验证通过后安装 `album-auth-mobile-v1.conf` drop-in：加载受限的 `/etc/album-auth/mobile.env`，并把 gunicorn 收敛为单 worker、4 线程，原账号与邮件密钥不变。重启后同时检查旧接口、移动接口、nginx 和备案 HTTPS 域名；失败时精确恢复上一版代码与配置，并再次验证回滚结果。
+`main` 分支推送后，自托管 GitHub Actions 会从加密 Secrets 向 Runner 临时目录注入发布凭据，运行测试与发布契约检查，再把服务端上传到独立灰度目录；任务结束即清理临时凭据。`deploy_auth.py` 在替换线上代码前通过 SQLite backup API 生成一致性备份，并调用 `validate_mobile_migration.py` 只在第二份副本上验证迁移、旧表行数和完整性；验证副本用完即清，稳定备份按保留上限滚动清理（`backups/` 与 `releases/` 各只保留最近 2 个 `deploy-*` 快照，每日数据库备份目录 `backups/database/` 不受影响）。部署前还会确认系统盘可用空间不低于 3 GB，不足时先清理最旧快照，仍不足则直接拒绝部署——磁盘写满会让 SQLite 无法写 WAL，进而使所有读库接口返回 500。验证失败时不会替换线上代码。验证通过后安装 `album-auth-mobile-v1.conf` drop-in：加载受限的 `/etc/album-auth/mobile.env`，并把 gunicorn 收敛为单 worker、4 线程，原账号与邮件密钥不变。重启后同时检查旧接口、移动接口、nginx 和备案 HTTPS 域名；失败时精确恢复上一版代码与配置，并再次验证回滚结果。
 
 ## 安全要点
 

@@ -93,6 +93,69 @@ class ServerDeployContractTest(unittest.TestCase):
             self.assertIsNone(deploy_auth.require_mobile_environment())
         remote_check.assert_called_once_with(expected_command, check=False)
 
+    def test_deploy_prunes_old_snapshots_and_never_touches_daily_backups(self):
+        deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        self.assertIn("BACKUP_RETAIN_COUNT = 2", deployer)
+
+        empty = SimpleNamespace(returncode=0, stdout="prune_done\n", stderr="")
+        with patch.object(deploy_auth, "ssh", return_value=empty) as remote:
+            deploy_auth.prune_remote_snapshots()
+        script = remote.call_args[0][0]
+
+        self.assertIn(
+            "for root in /opt/album-auth/backups /opt/album-auth/releases", script
+        )
+        self.assertIn("-name 'deploy-*'", script)
+        # 每日数据库备份目录不在清理范围内。
+        self.assertNotIn("backups/database", script)
+
+    def test_prune_remote_snapshots_reports_only_removed_deploy_dirs(self):
+        output = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "已清理 /opt/album-auth/backups/deploy-20260809-005530\n"
+                "prune_done\n"
+            ),
+            stderr="",
+        )
+        with patch.object(deploy_auth, "ssh", return_value=output) as remote:
+            removed = deploy_auth.prune_remote_snapshots()
+
+        self.assertEqual(
+            removed, ["已清理 /opt/album-auth/backups/deploy-20260809-005530"]
+        )
+        script = remote.call_args[0][0]
+        self.assertIn("head -n -2", script)
+        self.assertNotIn("backups/database", script)
+
+    def test_deploy_refuses_to_start_when_free_space_is_below_the_guard(self):
+        too_low = SimpleNamespace(returncode=0, stdout="1024\n", stderr="")
+        with patch.object(deploy_auth, "ssh", return_value=too_low):
+            with self.assertRaises(SystemExit) as context:
+                deploy_auth.require_free_space()
+        self.assertIn("可用空间", str(context.exception))
+
+        unknown = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(deploy_auth, "ssh", return_value=unknown):
+            with self.assertRaises(SystemExit):
+                deploy_auth.require_free_space()
+
+        healthy_kb = 8 * 1024 * 1024
+        healthy = SimpleNamespace(returncode=0, stdout=f"{healthy_kb}\n", stderr="")
+        with patch.object(deploy_auth, "ssh", return_value=healthy):
+            self.assertEqual(deploy_auth.require_free_space(), healthy_kb)
+
+    def test_prune_and_space_guard_run_after_the_wechat_preflight(self):
+        deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        preflight_call = deployer.index("    require_mobile_environment()")
+        prune_call = deployer.index("= prune_remote_snapshots()")
+        guard_call = deployer.index("free_kb = require_free_space()")
+        first_remote_write = deployer.index('    ssh(f"mkdir -p')
+
+        self.assertLess(preflight_call, prune_call)
+        self.assertLess(prune_call, guard_call)
+        self.assertLess(guard_call, first_remote_write)
+
     def test_github_deploy_checks_the_whole_push_for_server_changes(self):
         workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
             encoding="utf-8"

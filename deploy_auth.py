@@ -33,6 +33,12 @@ SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
 REMOTE_SERVER_DIR = "/opt/album-auth/server"
 REMOTE_PYTHON = "/opt/album-auth/venv/bin/python"
 SERVICE_NAME = "album-auth"
+# 每次部署都会在 backups/ 和 releases/ 下留一份完整快照（代码 + 线上库副本）。
+# 没有上限时它们会持续堆积并写满系统盘：SQLite 无法写 WAL，所有读库接口都会
+# 以 500 失败。2026-09-15 的线上故障就是这样发生的。因此部署前后都强制清理最旧
+# 的部署快照，并在系统盘可用空间低于安全下限时直接拒绝部署。
+BACKUP_RETAIN_COUNT = 2
+MIN_FREE_SPACE_KB = 3 * 1024 * 1024
 # 线上遗留的 no-control-socket.conf 会按字典序在数字前缀之后加载。
 # 使用 zz 前缀才能保证移动端要求的单 worker/gthread 配置最终生效。
 DROPIN_TARGET = "/etc/systemd/system/album-auth.service.d/zz-mobile-v1.conf"
@@ -226,6 +232,49 @@ def ssh_python(source: str, *args: str, check=True):
     return ssh(command, check=check)
 
 
+def prune_remote_snapshots(keep: int = BACKUP_RETAIN_COUNT) -> list[str]:
+    """只保留最近 keep 个部署快照，返回被清理的目录列表。
+
+    每日数据库备份目录 backups/database/ 以及非 deploy-* 的人工快照一律不动。
+    """
+    script = (
+        "for root in /opt/album-auth/backups /opt/album-auth/releases; do "
+        "find \"$root\" -maxdepth 1 -mindepth 1 -type d -name 'deploy-*' -printf '%f\\n' "
+        f"| sort | head -n -{keep} "
+        "| while IFS= read -r name; do "
+        "if rm -rf -- \"$root/$name\"; then echo \"已清理 $root/$name\"; fi; "
+        "done; "
+        "done; echo prune_done"
+    )
+    result = ssh(script, check=False)
+    return [
+        line.strip()
+        for line in (result.stdout or "").splitlines()
+        if line.strip().startswith("已清理")
+    ]
+
+
+def remote_free_space_kb() -> int:
+    """读取服务器系统盘可用空间（KB）；无法确认时返回 -1。"""
+    output = ssh("df -Pk / | awk 'NR==2 {print $4}'", check=False).stdout or ""
+    value = output.strip()
+    return int(value) if value.isdigit() else -1
+
+
+def require_free_space() -> int:
+    """确认系统盘留有余量，否则宁可停止部署也不把磁盘写满。"""
+    free_kb = remote_free_space_kb()
+    if free_kb < 0:
+        raise SystemExit("无法读取服务器系统盘可用空间，停止部署以免写满磁盘。")
+    if free_kb < MIN_FREE_SPACE_KB:
+        raise SystemExit(
+            f"服务器系统盘可用空间仅 {free_kb / 1024 / 1024:.2f} GB，"
+            f"低于安全下限 {MIN_FREE_SPACE_KB / 1024 / 1024:.0f} GB；"
+            "已清理最旧的部署快照仍不足，请先人工清理磁盘再部署。"
+        )
+    return free_kb
+
+
 def require_mobile_environment() -> None:
     """在任何生产写操作前确认正式微信配置存在，但绝不读取或回显值。"""
     env_path = shlex.quote(MOBILE_ENV_PATH)
@@ -302,6 +351,14 @@ def main() -> int:
     # 此处之前仅做本地文件检查；以下远程检查也是只读。任何 mkdir、备份、
     # 依赖安装、服务或 nginx 变更都必须等微信密钥文件通过检查后才能发生。
     require_mobile_environment()
+
+    # 先按保留上限清理历史部署快照，再确认系统盘余量；空间不足时宁可停下，
+    # 也不要在写满的磁盘上继续部署（写满会让 SQLite 与整个 API 一起失效）。
+    pruned_before = prune_remote_snapshots()
+    if pruned_before:
+        print(f"  + 已清理 {len(pruned_before)} 个最旧的部署快照")
+    free_kb = require_free_space()
+    print(f"  + 部署前系统盘可用空间 {free_kb / 1024 / 1024:.2f} GB")
 
     stamp = ssh("date +%Y%m%d-%H%M%S").stdout.strip()
     release_root = f"/opt/album-auth/releases/deploy-{stamp}"
@@ -485,6 +542,13 @@ def main() -> int:
         f"  部署成功：backup={backup} database_backup={live_db_backup} "
         f"{public_detail}"
     )
+    # 本次部署刚写入一份新快照，这里再收敛一次，保证长期只保留最近两个。
+    pruned_after = prune_remote_snapshots()
+    if pruned_after:
+        print(f"  + 已清理 {len(pruned_after)} 个历史部署快照")
+    free_after_kb = remote_free_space_kb()
+    if free_after_kb >= 0:
+        print(f"  + 部署后系统盘可用空间 {free_after_kb / 1024 / 1024:.2f} GB")
     print("[9/9] 授权中心部署完成")
     return 0
 
