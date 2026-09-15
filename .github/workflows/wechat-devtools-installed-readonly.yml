@@ -11,35 +11,31 @@ jobs:
   inspect:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 5
+    env:
+      PYTHONUTF8: '1'
     steps:
       - name: Locate WeChat DevTools CLI without changing login state
-        shell: powershell
+        shell: python
         run: |
-          $ErrorActionPreference = 'Continue'
-          $roots = @(
-            'C:\Program Files (x86)\Tencent',
-            'C:\Program Files\Tencent',
-            (Join-Path $env:LOCALAPPDATA '微信开发者工具'),
-            (Join-Path $env:LOCALAPPDATA 'Programs')
-          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-          $found = @()
-          foreach ($root in $roots) {
-            $found += Get-ChildItem -LiteralPath $root -Filter 'cli.bat' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 -ExpandProperty FullName
-            $found += Get-ChildItem -LiteralPath $root -Filter 'cli.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10 -ExpandProperty FullName
-          }
-          $found = @($found | Select-Object -Unique)
-          Write-Host ('cli_count=' + $found.Count)
-          foreach ($path in $found) {
-            Write-Host ('cli=' + $path)
-            $dir = Split-Path -Parent $path
-            $project = Get-ChildItem -LiteralPath $dir -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 8 -ExpandProperty Name
-            Write-Host ('nearby_exe=' + ($project -join '|'))
-          }
-          $uninstall = @(
-            'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
-          )
-          Get-ItemProperty $uninstall -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match '微信.*开发|WeChat.*Dev|wechat.*dev' } |
-            ForEach-Object { Write-Host ('installed=' + $_.DisplayName + '|' + $_.InstallLocation + '|' + $_.DisplayVersion) }
+          import os
+          from pathlib import Path
+          roots = [
+              Path(r'C:\Program Files (x86)\Tencent'),
+              Path(r'C:\Program Files\Tencent'),
+              Path(os.environ.get('LOCALAPPDATA','')) / '微信开发者工具',
+              Path(os.environ.get('LOCALAPPDATA','')) / 'Programs',
+          ]
+          found=[]
+          for root in roots:
+              if not root.is_dir():
+                  continue
+              try:
+                  for name in ('cli.bat','cli.exe'):
+                      for p in root.rglob(name):
+                          if p.is_file(): found.append(str(p))
+              except OSError:
+                  pass
+          found=list(dict.fromkeys(found))
+          print('cli_count='+str(len(found)))
+          for p in found[:20]: print('cli='+p)
+          print('localappdata='+os.environ.get('LOCALAPPDATA',''))
