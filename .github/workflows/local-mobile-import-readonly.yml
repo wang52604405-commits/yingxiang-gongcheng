@@ -1,4 +1,4 @@
-name: 桌面端手机照片落盘只读核对
+name: 016单元照片消失只读追查
 on:
   push:
     branches: [chatgpt/wechat-local-import-check-20260915]
@@ -12,27 +12,40 @@ jobs:
     env:
       PYTHONUTF8: '1'
     steps:
-      - name: Inspect exact local units without modifying data
+      - name: Inspect unit files and backups without modifying data
         shell: python
         run: |
-          import json,os
+          import json,hashlib,os
           from pathlib import Path
           root=Path('D:/工程影像资料/albums')
-          targets=['YNLQ-2024-SG-1-02-016','YNLQ-2024-SG-1-02-046','MOBILE-WAIT-aa2e8f95f863753f']
-          for code in targets:
-              p=root/code/'metadata.json'
-              if not p.is_file():
-                  print('UNIT='+json.dumps({'code':code,'exists':False},ensure_ascii=True)); continue
-              doc=json.loads(p.read_text(encoding='utf-8-sig'))
-              rows=[]
-              for ph in doc.get('photos') or []:
-                  title=str(ph.get('title') or '')
-                  if code=='YNLQ-2024-SG-1-02-016' or '塌落度' in title or code.startswith('MOBILE-WAIT'):
-                      rows.append({
-                        'id':ph.get('id'),'title':title,'photo_date':ph.get('photo_date'),
-                        'category':ph.get('category'),'process_name':ph.get('process_name'),
-                        'filename':ph.get('filename'),'file_exists':bool(ph.get('filename') and (p.parent/'photos'/str(ph.get('filename'))).is_file()),
-                        'uploaded_by':ph.get('uploaded_by'),'capture_source':ph.get('capture_source'),
-                        'photographer':ph.get('photographer')
-                      })
-              print('UNIT='+json.dumps({'code':code,'exists':True,'project_name':doc.get('project_name'),'photo_count':len(doc.get('photos') or []),'rows':rows},ensure_ascii=True))
+          code='YNLQ-2024-SG-1-02-016'
+          d=root/code
+          meta=d/'metadata.json'
+          def stamp(p):
+              try:
+                  s=p.stat(); return {'size':s.st_size,'mtime_ns':s.st_mtime_ns,'mtime':__import__('datetime').datetime.fromtimestamp(s.st_mtime).isoformat(timespec='seconds')}
+              except Exception: return None
+          print('META='+json.dumps({'path':str(meta),'stat':stamp(meta)},ensure_ascii=True))
+          photos=d/'photos'
+          files=[]
+          if photos.is_dir():
+              for p in sorted(photos.iterdir(),key=lambda x:x.stat().st_mtime if x.exists() else 0):
+                  if p.is_file(): files.append({'name':p.name,'stat':stamp(p),'sha12':hashlib.sha256(p.read_bytes()).hexdigest()[:12]})
+          print('FILES='+json.dumps(files,ensure_ascii=True))
+          backups=[]
+          for base in [d/'_mobile_sync_backups',d/'backups',d/'_backup',root/'mobile-sync-backups']:
+              if not base.exists(): continue
+              for p in sorted(base.rglob('*.json')):
+                  try:
+                      doc=json.loads(p.read_text(encoding='utf-8-sig'))
+                  except Exception: continue
+                  if str(doc.get('project_code') or doc.get('display_project_code') or '') not in {code,''} and code not in p.name: continue
+                  ph=doc.get('photos') or []
+                  backups.append({'path':str(p),'stat':stamp(p),'photo_count':len(ph),'uuids':[hashlib.sha256(str(x.get('photo_uuid') or '').encode()).hexdigest()[:12] for x in ph if isinstance(x,dict) and x.get('photo_uuid')][:20],'names':[x.get('filename') for x in ph if isinstance(x,dict)][:20]})
+          print('BACKUPS='+json.dumps(backups,ensure_ascii=True))
+          # also report temp/renumber leftovers in the unit
+          leftovers=[]
+          for p in d.rglob('*'):
+              if p.is_file() and p.name!='metadata.json' and p.parent!=photos and 'backup' not in str(p.parent).lower():
+                  leftovers.append({'path':str(p),'stat':stamp(p)})
+          print('LEFTOVERS='+json.dumps(leftovers[:100],ensure_ascii=True))
