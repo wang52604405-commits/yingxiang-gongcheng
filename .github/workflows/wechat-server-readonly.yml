@@ -1,4 +1,4 @@
-name: 云端手机批次只读诊断
+name: 云端手机照片只读追查
 on:
   push:
     branches:
@@ -14,18 +14,50 @@ jobs:
     env:
       SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
     steps:
-      - name: Read production mobile batch states only
+      - name: Read imported mobile photo history only
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:SSH_KEY_B64) { throw 'missing ssh diagnostic credential' }
-          $dir = Join-Path $env:RUNNER_TEMP ('wechat-db-read-' + $env:GITHUB_RUN_ID)
+          $dir = Join-Path $env:RUNNER_TEMP ('wechat-history-' + $env:GITHUB_RUN_ID)
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
           $key = Join-Path $dir 'server_key'
           [IO.File]::WriteAllBytes($key,[Convert]::FromBase64String($env:SSH_KEY_B64))
           icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-          $encoded = 'aW1wb3J0IG9zLHNxbGl0ZTMsc3VicHJvY2VzcyxoYXNobGliLGpzb24KZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnBpZD1zdWJwcm9jZXNzLmNoZWNrX291dHB1dChbJ3N5c3RlbWN0bCcsJ3Nob3cnLCctLXByb3BlcnR5PU1haW5QSUQnLCctLXZhbHVlJywnYWxidW0tYXV0aCddLHRleHQ9VHJ1ZSkuc3RyaXAoKQppZiBub3QgcGlkIG9yIHBpZD09JzAnOiByYWlzZSBTeXN0ZW1FeGl0KCdhbGJ1bS1hdXRoIG5vdCBydW5uaW5nJykKZW52PXt9CmZvciBpdGVtIGluIFBhdGgoZicvcHJvYy97cGlkfS9lbnZpcm9uJykucmVhZF9ieXRlcygpLnNwbGl0KGInXFwwJyk6CiAgICBrLHNlcCx2PWl0ZW0ucGFydGl0aW9uKGInPScpCiAgICBpZiBzZXA6IGVudltrLmRlY29kZSgndXRmLTgnLCdzdXJyb2dhdGVlc2NhcGUnKV09di5kZWNvZGUoJ3V0Zi04Jywnc3Vycm9nYXRlZXNjYXBlJykKY3dkPVBhdGgob3MucmVhZGxpbmsoZicvcHJvYy97cGlkfS9jd2QnKSkKZGI9UGF0aChlbnYuZ2V0KCdBTEJVTV9TRVJWRVJfREInKSBvciAoUGF0aChlbnZbJ0FMQlVNX1NFUlZFUl9EQVRBJ10pLydzZXJ2ZXIuZGInIGlmIGVudi5nZXQoJ0FMQlVNX1NFUlZFUl9EQVRBJykgZWxzZSBjd2QvJ2RhdGEnLydzZXJ2ZXIuZGInKSkKaWYgbm90IGRiLmlzX2Fic29sdXRlKCk6IGRiPWN3ZC9kYgpkYj1kYi5yZXNvbHZlKCkKY29uPXNxbGl0ZTMuY29ubmVjdChmJ2ZpbGU6e2RifT9tb2RlPXJvJyx1cmk9VHJ1ZSk7IGNvbi5yb3dfZmFjdG9yeT1zcWxpdGUzLlJvdwpoPWxhbWJkYSB2OiBoYXNobGliLnNoYTI1NihzdHIodiBvciAnJykuZW5jb2RlKCkpLmhleGRpZ2VzdCgpWzoxMl0gaWYgdiBlbHNlICcnCnByb2plY3Q9Y29uLmV4ZWN1dGUoIlNFTEVDVCBhY2NvdW50X2lkLHByb2plY3RfaWQsYWN0aXZlLHJldmlzaW9uLGRlc2t0b3BfbWFjaGluZV9pZCx1cGRhdGVkX2F0IEZST00gY2xvdWRfZW5naW5lZXJpbmdfcHJvamVjdHMgV0hFUkUgYWNjb3VudF9pZD0xIEFORCBwcm9qZWN0X2lkPSdkZWZhdWx0JyIpLmZldGNob25lKCkKcD1kaWN0KHByb2plY3QpIGlmIHByb2plY3QgZWxzZSB7fQppZiBwOiBwWydkZXNrdG9wX21hY2hpbmVfaWQnXT1oKHBbJ2Rlc2t0b3BfbWFjaGluZV9pZCddKQpwcmludCgncHJvamVjdD0nK2pzb24uZHVtcHMocCxlbnN1cmVfYXNjaWk9VHJ1ZSkpCnJvd3M9Y29uLmV4ZWN1dGUoIlNFTEVDVCBpZCxhY2NvdW50X2lkLHByb2plY3Rfb3duZXJfYWNjb3VudF9pZCxwcm9qZWN0X2lkLHN0YXR1cyx0YXJnZXRfbWFjaGluZV9pZCxjcmVhdGVkX2F0LHVwZGF0ZWRfYXQsY29tbWl0dGVkX2F0LGVycm9yX2NvZGUgRlJPTSBtb2JpbGVfYmF0Y2hlcyBXSEVSRSAoYWNjb3VudF9pZD0xIE9SIHByb2plY3Rfb3duZXJfYWNjb3VudF9pZD0xKSBBTkQgcHJvamVjdF9pZD0nZGVmYXVsdCcgT1JERVIgQlkgaWQgREVTQyBMSU1JVCAyMCIpLmZldGNoYWxsKCkKcHJpbnQoJ2JhdGNoZXM9Jytqc29uLmR1bXBzKFt7KipkaWN0KHIpLCd0YXJnZXRfbWFjaGluZV9pZCc6aChyWyd0YXJnZXRfbWFjaGluZV9pZCddKX0gZm9yIHIgaW4gcm93c10sZW5zdXJlX2FzY2lpPVRydWUpKQpwaG90b3M9Y29uLmV4ZWN1dGUoIlNFTEVDVCBpZCxiYXRjaF9pZCxzb3VyY2Usc3RhdHVzLHRhcmdldF9tYWNoaW5lX2lkLGNyZWF0ZWRfYXQsdXBkYXRlZF9hdCxkZXNrdG9wX2ltcG9ydGVkX2F0LGxvY2FsX3Byb2plY3RfY29kZSxlcnJvcl9jb2RlIEZST00gY2xvdWRfcGhvdG9zIFdIRVJFIHByb2plY3Rfb3duZXJfYWNjb3VudF9pZD0xIEFORCBwcm9qZWN0X2lkPSdkZWZhdWx0JyBBTkQgc291cmNlPSdtb2JpbGUnIE9SREVSIEJZIGlkIERFU0MgTElNSVQgMzAiKS5mZXRjaGFsbCgpCnByaW50KCdwaG90b3M9Jytqc29uLmR1bXBzKFt7KipkaWN0KHIpLCd0YXJnZXRfbWFjaGluZV9pZCc6aChyWyd0YXJnZXRfbWFjaGluZV9pZCddKX0gZm9yIHIgaW4gcGhvdG9zXSxlbnN1cmVfYXNjaWk9VHJ1ZSkpCnByaW50KCdzdGF0dXNfY291bnRzPScranNvbi5kdW1wcyhbZGljdChyKSBmb3IgciBpbiBjb24uZXhlY3V0ZSgiU0VMRUNUIHN0YXR1cyxDT1VOVCgqKSBuIEZST00gY2xvdWRfcGhvdG9zIFdIRVJFIHByb2plY3Rfb3duZXJfYWNjb3VudF9pZD0xIEFORCBwcm9qZWN0X2lkPSdkZWZhdWx0JyBBTkQgc291cmNlPSdtb2JpbGUnIEdST1VQIEJZIHN0YXR1cyBPUkRFUiBCWSBzdGF0dXMiKV0sZW5zdXJlX2FzY2lpPVRydWUpKQo='
-          $code = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))
-          $code | ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 'python3 -'
+          $py = @'
+import os,sqlite3,subprocess,hashlib,json
+from pathlib import Path
+pid=subprocess.check_output(['systemctl','show','--property=MainPID','--value','album-auth'],text=True).strip()
+env={}
+for item in Path(f'/proc/{pid}/environ').read_bytes().split(b'\0'):
+    k,sep,v=item.partition(b'=')
+    if sep: env[k.decode('utf-8','surrogateescape')]=v.decode('utf-8','surrogateescape')
+cwd=Path(os.readlink(f'/proc/{pid}/cwd'))
+db=Path(env.get('ALBUM_SERVER_DB') or (Path(env['ALBUM_SERVER_DATA'])/'server.db' if env.get('ALBUM_SERVER_DATA') else cwd/'data'/'server.db'))
+if not db.is_absolute(): db=cwd/db
+db=db.resolve()
+con=sqlite3.connect(f'file:{db}?mode=ro',uri=True); con.row_factory=sqlite3.Row
+h=lambda v: hashlib.sha256(str(v or '').encode()).hexdigest()[:12] if v else ''
+ids=(1290,1291,1292,1293,1320,1321)
+q='SELECT id,batch_id,photo_uuid,status,local_project_code,local_photo_id,created_at,updated_at,desktop_imported_at,deleted_at,deleted_by_machine_id,deleted_by_account_id,error_code,error_message,target_machine_id FROM cloud_photos WHERE id IN (%s) ORDER BY id' % ','.join('?'*len(ids))
+photos=[]
+for r in con.execute(q,ids).fetchall():
+    d=dict(r); d['photo_uuid_hash']=h(d.pop('photo_uuid')); d['target_machine_id']=h(d.get('target_machine_id')); d['deleted_by_machine_id']=h(d.get('deleted_by_machine_id')); photos.append(d)
+print('tracked_photos='+json.dumps(photos,ensure_ascii=True))
+# Print photo change history for these UUIDs without exposing UUIDs/payload wholesale.
+uuids=[r['photo_uuid'] for r in con.execute('SELECT photo_uuid FROM cloud_photos WHERE id IN (%s)' % ','.join('?'*len(ids)),ids).fetchall()]
+changes=[]
+if uuids:
+    qq='SELECT id,photo_uuid,action,payload_json,actor_account_id,created_at FROM mobile_photo_changes WHERE photo_uuid IN (%s) ORDER BY id' % ','.join('?'*len(uuids))
+    for r in con.execute(qq,uuids).fetchall():
+        p={}
+        try: p=json.loads(r['payload_json'] or '{}')
+        except Exception: pass
+        changes.append({'id':r['id'],'uuid_hash':h(r['photo_uuid']),'action':r['action'],'actor_account_id':r['actor_account_id'],'created_at':r['created_at'],'payload_keys':sorted(p.keys()),'local_project_code':p.get('local_project_code'),'local_photo_id':p.get('local_photo_id')})
+print('changes='+json.dumps(changes,ensure_ascii=True))
+'@
+          $encoded=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($py))
+          $cmd="import base64;exec(base64.b64decode('$encoded'))"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 "python3 -c `"$cmd`""
           if ($LASTEXITCODE -ne 0) { throw "readonly server query failed: $LASTEXITCODE" }
           Remove-Item -LiteralPath $dir -Recurse -Force
