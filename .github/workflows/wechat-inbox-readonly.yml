@@ -1,0 +1,77 @@
+name: 手机上传接收只读诊断
+on:
+  push:
+    branches: [chatgpt/wechat-desktop-sync-20260915]
+    paths: [.github/workflows/wechat-inbox-readonly.yml]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: '116423697ce6f5a60ee70d2d695e7b87d364ccc9'
+          path: wechat-readonly
+          persist-credentials: false
+      - name: Read saved scope and cloud inbox without ACK or any write
+        shell: python
+        run: |
+          import os,sys,json,hashlib,collections,urllib.request,urllib.parse,urllib.error
+          from pathlib import Path
+          sys.path.insert(0,str(Path('wechat-readonly').resolve()))
+          import cloud_client, licensing
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+          def get(url,token=''):
+              headers={'Authorization':'Bearer '+token} if token else {}
+              try:
+                  with opener.open(urllib.request.Request(url,headers=headers),timeout=15) as response:
+                      return response.status,json.loads(response.read())
+              except urllib.error.HTTPError as exc:
+                  try: body=json.loads(exc.read())
+                  except Exception: body={}
+                  return exc.code,{'ok':False,'code':body.get('code'),'error':str(body.get('error') or body.get('message') or '')[:180]}
+              except Exception as exc: return 0,{'ok':False,'error':type(exc).__name__}
+          def read(path):
+              try: return json.loads(path.read_text(encoding='utf-8-sig'))
+              except Exception: return {}
+          def emit(name,value): print(name+'='+json.dumps(value,ensure_ascii=True),flush=True)
+          http,boot=get('http://127.0.0.1:5088/api/bootstrap')
+          emit('desktop',{'http':http,'version':boot.get('app_version'),'revision':boot.get('revision')})
+          data=Path('D:/工程影像资料');install=Path(os.environ['LOCALAPPDATA'])/'工程影像管理平台'
+          roots=[data,data/'data',install,install/'data']
+          docs={}
+          for root in roots:
+              for name in ['cloud_account.json','engineering_projects.json','mobile_sync_state.json']:
+                  if (root/name).is_file() and name not in docs: docs[name]=(root/name,read(root/name))
+          emit('found',list(docs))
+          account=docs.get('cloud_account.json',(None,{}))[1]
+          projectdoc=docs.get('engineering_projects.json',(None,{}))[1]
+          state=docs.get('mobile_sync_state.json',(None,{}))[1]
+          projects=projectdoc.get('projects',[]) if isinstance(projectdoc,dict) else []
+          active_id=projectdoc.get('active_id')
+          project=next((p for p in projects if p.get('id')==active_id),{})
+          emit('account',{'present':bool(account),'account_id':account.get('account_id'),'sync_credential_saved':bool(account.get('desktop_sync_token_protected'))})
+          emit('active_project',{'id':active_id,'name':project.get('project_name') or project.get('name'),'owner_matches':str(account.get('account_id'))==str(project.get('cloud_owner_id')),'project_ref':project.get('cloud_project_ref')})
+          scopes=state.get('scopes') or {}
+          scope=scopes.get(state.get('active_identity'),{})
+          emit('sync',{'active_identity_project':str(state.get('active_identity') or '').rsplit('|',1)[-1],'cursor':scope.get('inbox_cursor'),'snapshot_synced_at':scope.get('snapshot_synced_at'),'snapshot_revision':scope.get('snapshot_revision'),'project_ref':scope.get('project_ref'),'ack_pending':len(scope.get('ack_pending') or {}),'delete_pending':len(scope.get('delete_pending') or {}),'backfill_inventory':scope.get('backfill_inventory')})
+          token=cloud_client._dpapi_unprotect(str(account.get('desktop_sync_token_protected') or ''))
+          emit('credential_readable',bool(token))
+          base=str(account.get('server') or cloud_client.DEFAULT_SERVER_URL).rstrip('/')
+          if base!='https://api.shuiliyingxiang.cn': raise SystemExit('Unexpected cloud origin; no credentials sent')
+          if token:
+              machine=licensing.machine_id()
+              for label,cursor in [('inbox_current',scope.get('inbox_cursor','')),('inbox_from_start','')]:
+                  url=base+'/api/desktop/v1/inbox?'+urllib.parse.urlencode({'cursor':cursor,'limit':100,'desktop_machine_id':machine})
+                  status,body=get(url,token);items=body.get('items') or []
+                  emit(label,{'http':status,'ok':body.get('ok'),'code':body.get('code'),'error':body.get('error'),'count':len(items),'next_cursor':body.get('next_cursor'),'projects':dict(collections.Counter(str(p.get('local_project_id') or p.get('project_id')) for p in items)),'samples':[{'uuid_hash':hashlib.sha256(str(p.get('photo_uuid')).encode()).hexdigest()[:12],'cursor':p.get('cursor'),'local_project_id':p.get('local_project_id'),'project_ref':p.get('project_ref'),'unit_code':p.get('unit_code'),'process_name':p.get('process_name'),'status':p.get('status'),'target_matches':p.get('target_machine_id')==machine} for p in items[:6]]})
+              cursor=(scope.get('photo_change_cursors') or {}).get(str(active_id),0)
+              status,body=get(base+'/api/desktop/v1/photo-changes?'+urllib.parse.urlencode({'project_id':active_id,'cursor':cursor,'desktop_machine_id':machine}),token)
+              emit('changes',{'http':status,'ok':body.get('ok'),'code':body.get('code'),'error':body.get('error'),'count':len(body.get('changes') or []),'cursor':cursor})
+          emit('readonly_complete',True)
