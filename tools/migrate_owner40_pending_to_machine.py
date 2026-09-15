@@ -6,7 +6,9 @@ from pathlib import Path
 
 ACCOUNT_ID = 40
 PROJECT_ID = "FN2023GC0046"
-TARGET_MACHINE_ID = "2ED2E5FE-E887-4094-A095-EEB3B0B4D16D".upper()
+# 用户提供的 GUID 不是服务器授权表中的 machine_id；服务器今天新绑定的
+# 归档电脑为下面这个 HDYX 机器号，且旧工程仍绑定在上一台电脑。
+TARGET_MACHINE_ID = "HDYX-D3AE-10AF-BFEC-183E"
 
 pid = subprocess.check_output(
     ["systemctl", "show", "--property=MainPID", "--value", "album-auth"],
@@ -46,7 +48,7 @@ print("BOUND_MACHINES=" + repr([dict(row) for row in bound]))
 machine = conn.execute(
     "SELECT id, account_id, machine_id, active, bound_at, last_seen FROM machines "
     "WHERE account_id=? AND UPPER(machine_id)=?",
-    (ACCOUNT_ID, TARGET_MACHINE_ID),
+    (ACCOUNT_ID, TARGET_MACHINE_ID.upper()),
 ).fetchone()
 if not machine:
     conn.close()
@@ -143,13 +145,13 @@ except Exception:
 pending_target = conn.execute(
     "SELECT COUNT(*) FROM cloud_photos WHERE project_owner_account_id=? AND project_id=? "
     "AND source='mobile' AND status='desktop_pending' AND deleted_at='' AND UPPER(target_machine_id)=?",
-    (ACCOUNT_ID, PROJECT_ID, TARGET_MACHINE_ID),
+    (ACCOUNT_ID, PROJECT_ID, TARGET_MACHINE_ID.upper()),
 ).fetchone()[0]
 
 pending_other = conn.execute(
     "SELECT COUNT(*) FROM cloud_photos WHERE project_owner_account_id=? AND project_id=? "
     "AND source='mobile' AND status='desktop_pending' AND deleted_at='' AND UPPER(target_machine_id)<>?",
-    (ACCOUNT_ID, PROJECT_ID, TARGET_MACHINE_ID),
+    (ACCOUNT_ID, PROJECT_ID, TARGET_MACHINE_ID.upper()),
 ).fetchone()[0]
 
 imported_after = conn.execute(
