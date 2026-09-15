@@ -1,0 +1,31 @@
+name: 客服手机照片迁移到新归档电脑
+on:
+  push:
+    branches:
+      - chatgpt/migrate-owner40-pending-to-2ed2-20260915
+    paths:
+      - tools/migrate_owner40_pending_to_machine.py
+      - .github/workflows/migrate-owner40-pending.yml
+permissions:
+  contents: read
+jobs:
+  migrate:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 10
+    env:
+      SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Migrate pending photos on production server
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:SSH_KEY_B64) { throw 'missing ssh credential' }
+          $dir = Join-Path $env:RUNNER_TEMP ('owner40-migrate-' + $env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $key = Join-Path $dir 'server_key'
+          [IO.File]::WriteAllBytes($key,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          Get-Content -LiteralPath 'tools/migrate_owner40_pending_to_machine.py' -Raw -Encoding UTF8 | ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 'python3 -'
+          if ($LASTEXITCODE -ne 0) { throw "migration failed: $LASTEXITCODE" }
+          Remove-Item -LiteralPath $dir -Recurse -Force
