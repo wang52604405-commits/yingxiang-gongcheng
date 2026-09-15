@@ -1,0 +1,27 @@
+name: 客服照片同步结果只读核对
+on:
+  push:
+    branches:
+      - chatgpt/migrate-owner40-pending-to-2ed2-20260915
+    paths:
+      - tools/verify_owner40_sync_state.py
+      - .github/workflows/verify-owner40-sync.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify production sync state
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/server_key"
+          printf '%s' "$SSH_KEY_B64" | base64 -d > "$key"
+          chmod 600 "$key"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i "$key" root@47.95.221.66 'python3 -' < tools/verify_owner40_sync_state.py
+          rm -f "$key"
