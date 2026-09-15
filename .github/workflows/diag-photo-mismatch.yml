@@ -1,0 +1,20 @@
+name: 照片串图只读诊断
+on:
+  push:
+    branches:
+      - chatgpt/fix-photo-thumb-original-mismatch-20260915
+    paths:
+      - tools/diag_photo_mismatch_readonly.py
+      - .github/workflows/diag-photo-mismatch.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Inspect local photo mismatch without writes
+        run: python tools/diag_photo_mismatch_readonly.py
