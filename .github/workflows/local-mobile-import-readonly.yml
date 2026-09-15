@@ -12,38 +12,27 @@ jobs:
     env:
       PYTHONUTF8: '1'
     steps:
-      - name: Scan local metadata without modifying data
+      - name: Inspect exact local units without modifying data
         shell: python
         run: |
-          import json,hashlib,os
+          import json,os
           from pathlib import Path
-          roots=[Path('D:/工程影像资料'),Path(os.environ.get('LOCALAPPDATA',''))/'工程影像管理平台']
-          seen=set(); rows=[]
-          for root in roots:
-              if not root.exists(): continue
-              for p in root.rglob('metadata.json'):
-                  key=str(p.resolve()).lower()
-                  if key in seen: continue
-                  seen.add(key)
-                  try: doc=json.loads(p.read_text(encoding='utf-8-sig'))
-                  except Exception: continue
-                  photos=doc.get('photos') or []
-                  mobile=[]
-                  for ph in photos:
-                      if not isinstance(ph,dict): continue
-                      text=json.dumps(ph,ensure_ascii=False).lower()
-                      if any(x in text for x in ['mobile','wechat','微信','desktop_imported','client_captured_at']) or str(doc.get('project_code','')).startswith('MOBILE-WAIT'):
-                          mobile.append({
-                              'uuid_hash':hashlib.sha256(str(ph.get('photo_uuid') or '').encode()).hexdigest()[:12],
-                              'id':ph.get('id'),'title':ph.get('title'),'photo_date':ph.get('photo_date'),
-                              'process_name':ph.get('process_name'),'filename':ph.get('filename'),
-                              'file_exists':bool(ph.get('filename') and (p.parent/'photos'/str(ph.get('filename'))).exists()),
-                              'source':ph.get('source'),'uploaded_by':ph.get('uploaded_by'),'capture_source':ph.get('capture_source'),
-                          })
-                  if mobile or str(doc.get('project_code','')).startswith('MOBILE-WAIT') or str(doc.get('display_project_code','')).startswith('MOBILE-WAIT'):
+          root=Path('D:/工程影像资料/albums')
+          targets=['YNLQ-2024-SG-1-02-016','YNLQ-2024-SG-1-02-046','MOBILE-WAIT-aa2e8f95f863753f']
+          for code in targets:
+              p=root/code/'metadata.json'
+              if not p.is_file():
+                  print('UNIT='+json.dumps({'code':code,'exists':False},ensure_ascii=True)); continue
+              doc=json.loads(p.read_text(encoding='utf-8-sig'))
+              rows=[]
+              for ph in doc.get('photos') or []:
+                  title=str(ph.get('title') or '')
+                  if code=='YNLQ-2024-SG-1-02-016' or '塌落度' in title or code.startswith('MOBILE-WAIT'):
                       rows.append({
-                          'metadata':str(p),'project_code':doc.get('project_code'),'display_project_code':doc.get('display_project_code'),
-                          'project_name':doc.get('project_name'),'photo_count':len(photos),'mobile_like':mobile[-20:]
+                        'id':ph.get('id'),'title':title,'photo_date':ph.get('photo_date'),
+                        'category':ph.get('category'),'process_name':ph.get('process_name'),
+                        'filename':ph.get('filename'),'file_exists':bool(ph.get('filename') and (p.parent/'photos'/str(ph.get('filename'))).is_file()),
+                        'uploaded_by':ph.get('uploaded_by'),'capture_source':ph.get('capture_source'),
+                        'photographer':ph.get('photographer')
                       })
-          print('LOCAL_MOBILE_ROWS='+json.dumps(rows,ensure_ascii=True))
-          print('LOCAL_MOBILE_PROJECTS='+str(len(rows)))
+              print('UNIT='+json.dumps({'code':code,'exists':True,'project_name':doc.get('project_name'),'photo_count':len(doc.get('photos') or []),'rows':rows},ensure_ascii=True))
