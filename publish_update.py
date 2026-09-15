@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import shlex
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,13 @@ PUBLIC_UPDATE_BASE = os.environ.get(
 ).rstrip("/")
 
 INSTALLER = build_all.INSTALLER  # 客户可发送安装包-Win10/发给客户/安装程序.exe
+
+# 每次发布都会把上一版安装包另存为 <名称>.bak-<版本>，每个约 90MB。没有上限时
+# 它们会一直堆积并写满系统盘：磁盘写满会让 SQLite 无法写 WAL，进而使整个线上
+# API 返回 500（2026-09-15 的事故就是这样发生的）。因此发布前后都把旧备份收敛
+# 到最近 INSTALLER_BACKUP_RETAIN 个；正式安装包、version.json 和官网下载副本
+# 都不在清理范围内。
+INSTALLER_BACKUP_RETAIN = 2
 
 SSH_OPTIONS = [
     "-o", "BatchMode=yes",
@@ -137,6 +145,21 @@ def backup_remote_installer() -> str:
         return backup
     ssh_cmd(["cp", old, backup])
     return backup
+
+
+def prune_installer_backups(keep: int = INSTALLER_BACKUP_RETAIN) -> list[str]:
+    """只保留最近 keep 个旧安装包备份，返回被删除的文件名。"""
+    script = (
+        f"cd {REMOTE_UPDATES} || exit 0; "
+        f"ls -1t {REMOTE_EXE_NAME}.bak-* 2>/dev/null | tail -n +{keep + 1} | "
+        'while IFS= read -r name; do rm -f -- "$name" && echo "已清理 $name"; done'
+    )
+    result = ssh_cmd(["bash", "-lc", shlex.quote(script)], check=False)
+    return [
+        line.strip()
+        for line in (result.stdout or "").splitlines()
+        if line.strip().startswith("已清理")
+    ]
 
 
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
@@ -264,6 +287,11 @@ def main() -> int:
         print(f"[ERR] 安装程序未生成: {INSTALLER}")
         return 1
 
+    # 先收敛旧安装包备份再备份本版：这一版上传要额外 90MB，磁盘紧张时先腾地方。
+    pruned_before = prune_installer_backups()
+    if pruned_before:
+        print(f"[清理] 已删除 {len(pruned_before)} 个旧安装包备份")
+
     # 上传前备份旧版
     backup = backup_remote_installer()
     if backup:
@@ -277,6 +305,10 @@ def main() -> int:
     write_remote_version(new_ver, note)
 
     verify_remote()
+    # 本版刚写入一份新备份，这里再收敛一次，保证长期只保留最近几个。
+    pruned_after = prune_installer_backups()
+    if pruned_after:
+        print(f"[清理] 已删除 {len(pruned_after)} 个旧安装包备份")
     print("\n[完成] 新版本已发布。客户启动时将自动提示更新。")
     return 0
 

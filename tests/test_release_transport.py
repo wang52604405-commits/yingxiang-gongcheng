@@ -69,6 +69,36 @@ class ReleaseTransportTest(unittest.TestCase):
         self.assertLess(upload.index("remote_hash ="), upload.index('ssh_cmd(["mv"'))
         self.assertIn('f"{REMOTE_UPDATES}/.{REMOTE_EXE_NAME}.uploading"', upload)
 
+    def test_installer_backups_are_pruned_to_a_fixed_retention(self):
+        output = subprocess.CompletedProcess(
+            ["ssh"], 0, "已清理 album-installer.exe.bak-A20260905-2.88\n", ""
+        )
+        with patch.object(publish_update, "ssh_cmd", return_value=output) as remote:
+            removed = publish_update.prune_installer_backups()
+
+        self.assertEqual(removed, ["已清理 album-installer.exe.bak-A20260905-2.88"])
+        script = remote.call_args.args[0][2]
+        # 保留 2 个：从第 3 行开始删。
+        self.assertIn("tail -n +3", script)
+        self.assertIn("album-installer.exe.bak-*", script)
+        # 正式安装包与 version.json 绝不在清理范围内。
+        self.assertNotIn("version.json", script)
+        self.assertNotIn("rm -f -- album-installer.exe ", script)
+
+    def test_publish_prunes_installer_backups_around_the_new_release(self):
+        source = Path(__file__).resolve().parents[1] / "publish_update.py"
+        text = source.read_text(encoding="utf-8")
+        self.assertIn("INSTALLER_BACKUP_RETAIN = 2", text)
+        main_body = text[text.index("def main() -> int:"):]
+        self.assertLess(
+            main_body.index("prune_installer_backups()"),
+            main_body.index("backup_remote_installer()"),
+        )
+        self.assertLess(
+            main_body.index("verify_remote()"),
+            main_body.rindex("prune_installer_backups()"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
