@@ -37,14 +37,22 @@ db_path = db_path.resolve()
 conn = sqlite3.connect(db_path)
 conn.row_factory = sqlite3.Row
 
+bound = conn.execute(
+    "SELECT id, machine_id, active, bound_at, last_seen FROM machines WHERE account_id=? ORDER BY id",
+    (ACCOUNT_ID,),
+).fetchall()
+print("BOUND_MACHINES=" + repr([dict(row) for row in bound]))
+
 machine = conn.execute(
     "SELECT id, account_id, machine_id, active, bound_at, last_seen FROM machines "
     "WHERE account_id=? AND UPPER(machine_id)=?",
     (ACCOUNT_ID, TARGET_MACHINE_ID),
 ).fetchone()
 if not machine:
+    conn.close()
     raise SystemExit("ABORT: target machine is not bound to account 40")
 if not int(machine["active"] or 0):
+    conn.close()
     raise SystemExit("ABORT: target machine is bound but inactive")
 
 project = conn.execute(
@@ -53,6 +61,7 @@ project = conn.execute(
     (ACCOUNT_ID, PROJECT_ID),
 ).fetchone()
 if not project or not int(project["active"] or 0):
+    conn.close()
     raise SystemExit("ABORT: target project is missing or inactive")
 
 before_pending = conn.execute(
