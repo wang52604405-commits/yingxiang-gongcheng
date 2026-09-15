@@ -1,0 +1,52 @@
+name: 云端手机批次只读诊断
+on:
+  push:
+    branches: [chatgpt/wechat-desktop-sync-20260915]
+    paths: [.github/workflows/wechat-server-readonly.yml]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: [self-hosted, windows, x64]
+    timeout-minutes: 5
+    env:
+      SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
+    steps:
+      - name: Read production mobile batch states only
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:SSH_KEY_B64) { throw 'missing ssh diagnostic credential' }
+          $dir = Join-Path $env:RUNNER_TEMP ('wechat-db-read-' + $env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $key = Join-Path $dir 'server_key'
+          [IO.File]::WriteAllBytes($key,[Convert]::FromBase64String($env:SSH_KEY_B64))
+          icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+          $remote = @'
+import os,sqlite3,subprocess,hashlib,json
+from pathlib import Path
+pid=subprocess.check_output(['systemctl','show','--property=MainPID','--value','album-auth'],text=True).strip()
+if not pid or pid=='0': raise SystemExit('album-auth not running')
+env={}
+for item in Path(f'/proc/{pid}/environ').read_bytes().split(b'\0'):
+    k,sep,v=item.partition(b'=')
+    if sep: env[k.decode('utf-8','surrogateescape')]=v.decode('utf-8','surrogateescape')
+cwd=Path(os.readlink(f'/proc/{pid}/cwd'))
+db=Path(env.get('ALBUM_SERVER_DB') or (Path(env['ALBUM_SERVER_DATA'])/'server.db' if env.get('ALBUM_SERVER_DATA') else cwd/'data'/'server.db'))
+if not db.is_absolute(): db=cwd/db
+db=db.resolve()
+con=sqlite3.connect(f'file:{db}?mode=ro',uri=True); con.row_factory=sqlite3.Row
+h=lambda v: hashlib.sha256(str(v or '').encode()).hexdigest()[:12] if v else ''
+project=con.execute("SELECT account_id,project_id,active,revision,desktop_machine_id,updated_at FROM cloud_engineering_projects WHERE account_id=1 AND project_id='default'").fetchone()
+print('project='+json.dumps(dict(project) | {'desktop_machine_id':h(project['desktop_machine_id'])} if project else {},ensure_ascii=True))
+rows=con.execute("SELECT id,account_id,project_owner_account_id,project_id,status,target_machine_id,created_at,updated_at,committed_at,error_code FROM mobile_batches WHERE (account_id=1 OR project_owner_account_id=1) AND project_id='default' ORDER BY id DESC LIMIT 20").fetchall()
+print('batches='+json.dumps([{**dict(r),'target_machine_id':h(r['target_machine_id'])} for r in rows],ensure_ascii=True))
+photos=con.execute("SELECT id,batch_id,source,status,target_machine_id,created_at,updated_at,desktop_imported_at,local_project_code,error_code FROM cloud_photos WHERE project_owner_account_id=1 AND project_id='default' AND source='mobile' ORDER BY id DESC LIMIT 30").fetchall()
+print('photos='+json.dumps([{**dict(r),'target_machine_id':h(r['target_machine_id'])} for r in photos],ensure_ascii=True))
+print('status_counts='+json.dumps([dict(r) for r in con.execute("SELECT status,COUNT(*) n FROM cloud_photos WHERE project_owner_account_id=1 AND project_id='default' AND source='mobile' GROUP BY status ORDER BY status")],ensure_ascii=True))
+'@
+          $script = Join-Path $dir 'read.py'
+          [IO.File]::WriteAllText($script,$remote,[Text.UTF8Encoding]::new($false))
+          Get-Content -LiteralPath $script -Raw -Encoding UTF8 | ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -i $key root@47.95.221.66 'python3 -'
+          if ($LASTEXITCODE -ne 0) { throw "readonly server query failed: $LASTEXITCODE" }
+          Remove-Item -LiteralPath $dir -Recurse -Force
