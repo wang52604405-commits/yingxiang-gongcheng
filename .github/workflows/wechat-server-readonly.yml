@@ -15,7 +15,7 @@ jobs:
       SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
     steps:
       - uses: actions/checkout@v7
-      - name: Read production mobile state without writes
+      - name: Read customer pending queue and desktop heartbeat without writes
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
