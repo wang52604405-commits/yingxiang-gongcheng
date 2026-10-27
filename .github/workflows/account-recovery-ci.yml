@@ -1,0 +1,41 @@
+name: 账号找回与注销专项验证
+on:
+  push:
+    branches: [chatgpt/account-recovery-20261027]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Export exact source for isolated review
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path review-output -Force | Out-Null
+          git rev-parse HEAD | Out-File review-output/source-sha.txt -Encoding utf8
+          git archive --format=zip --output=review-output/source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source export failed' }
+      - name: Read public production version without changing data
+        shell: python
+        run: |
+          import json, urllib.request
+          from pathlib import Path
+          result = {}
+          for name, url in [('version', 'https://api.shuiliyingxiang.cn/update/version.json'), ('health', 'https://api.shuiliyingxiang.cn/api/product-config')]:
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as r:
+                      raw = r.read(100000).decode('utf-8')
+                      obj = json.loads(raw)
+                      result[name] = {k: obj[k] for k in ('version', 'note', 'sha256', 'size', 'ok') if k in obj}
+                      result[name]['http_status'] = r.status
+              except Exception as e:
+                  result[name] = {'error': str(e)[:250]}
+          Path('review-output/production-version.json').write_text(json.dumps(result, ensure_ascii=True, indent=2), encoding='utf-8')
+          print(json.dumps(result, ensure_ascii=True))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: account-recovery-source
+          path: review-output/
+          retention-days: 3
