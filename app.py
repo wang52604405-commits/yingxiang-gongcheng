@@ -3,6 +3,7 @@ import copy
 from collections import OrderedDict
 import gzip
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -66,7 +67,8 @@ CLOUD_THUMB_CACHE_DIR = DATA_DIR / "cloud_thumbs"
 OTHER_IMAGES_TEMPLATE_DIR = Path(os.environ.get("ALBUM_OTHER_IMAGES_TEMPLATE_DIR", r"E:\龙泉缓洪工程施工照片")).expanduser()
 LEGACY_ALBUMS_DIR = BASE_DIR / "albums"
 LEGACY_USERS_PATH = BASE_DIR / "users.json"
-LEGACY_DELETE_SAFETY_PASSWORD = "114405"
+# 历史工程删除口令黑名单只保留不可逆指纹，仓库里不再存放明文。
+LEGACY_DELETE_SAFETY_PASSWORD_SHA256 = "332c00d373a835412ac28763b0e8f274d8e76132ad759822f8546b0cf1fba4a9"
 DEFAULT_ENGINEERING_PROJECT_ID = "default"
 OTHER_IMAGE_MARKER = "_other_image"
 SHARE_POINTS_PER_PERSON = 5
@@ -1168,12 +1170,13 @@ def auth_me():
 
 
 def lan_access_config():
-    """局域网访问控制：数据目录 lan_access.json 中配置；未配置则返回空（不限制）。
+    """局域网访问控制：数据目录 lan_access.json。
 
     支持两种格式：
-      {"password": "xxx"}            仅密码
-      {"username": "xxx", "password": "xxx"}   账号+密码
-    本机访问（127.0.0.1）始终免登录，仅局域网请求校验。
+      {"password": "..."}            仅密码
+      {"username": "...", "password": "..."}   账号+密码
+    未配置口令时不再对局域网放行：非本机的写操作和媒体访问会被拒绝。
+    本机 loopback 仍可登录、完成首次配置；口令配置后，局域网登录仍按原规则校验。
     """
     try:
         path = DATA_DIR / "lan_access.json"
@@ -1187,11 +1190,20 @@ def lan_access_config():
     return {"username": "", "password": ""}
 
 
+def _non_local_without_lan_password():
+    """未配置局域网口令，且当前请求不是本机 loopback。"""
+    if is_local_setup_request():
+        return False
+    return not str(lan_access_config().get("password") or "").strip()
+
+
 def _require_lan_password(payload):
-    """局域网请求需校验访问账号+密码；本机或未配置时直接放行。"""
+    """局域网登录需校验访问口令。未配置时仅本机可登录，其他电脑拒绝。"""
     cfg = lan_access_config()
-    if not cfg["password"] or is_local_setup_request():
+    if is_local_setup_request():
         return
+    if not str(cfg.get("password") or "").strip():
+        raise ValueError("局域网尚未设置访问口令，请先在运行软件的电脑上完成设置")
     supplied_user = str(payload.get("username") or "").strip()
     supplied_pwd = str(payload.get("password") or "").strip()
     if cfg["username"]:
@@ -1202,6 +1214,16 @@ def _require_lan_password(payload):
         # 仅密码模式
         if supplied_pwd != cfg["password"]:
             raise ValueError("局域网访问密码错误，请联系管理员")
+
+
+@app.before_request
+def _lan_open_door_guard():
+    """未配置局域网口令时，拒绝非本机写操作。媒体接口在路由内再校验登录。"""
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if not _non_local_without_lan_password():
+        return None
+    return json_error("局域网尚未设置访问口令，请先在运行软件的电脑上完成设置", 403)
 
 
 @app.route("/api/auth/register", methods=["POST"])
@@ -5483,7 +5505,7 @@ def read_engineering_projects():
             project["settings_updated_at"] = str(item.get("settings_updated_at") or "").strip()
         stored_hash = str(item.get("delete_password_hash") or "").strip()
         legacy_password = str(item.get("delete_password") or "").strip()
-        if not stored_hash and legacy_password and legacy_password != LEGACY_DELETE_SAFETY_PASSWORD:
+        if not stored_hash and legacy_password and not is_legacy_blocked_delete_password(legacy_password):
             stored_hash = generate_password_hash(legacy_password)
             migrated = True
         if legacy_password:
@@ -5684,11 +5706,27 @@ def ensure_engineering_delete_password(value):
         raise ValueError("当前工程删除密码错误")
 
 
+def delete_password_fingerprint(password):
+    return hashlib.sha256(str(password or "").encode("utf-8")).hexdigest()
+
+
+def is_legacy_blocked_delete_password(password):
+    """黑名单只比对 sha256 指纹，调用方不需要、也不应保存明文。"""
+    candidate = str(password or "")
+    if not candidate:
+        return False
+    digest = delete_password_fingerprint(candidate)
+    expected = str(LEGACY_DELETE_SAFETY_PASSWORD_SHA256 or "").strip().lower()
+    if len(digest) != len(expected) or not expected:
+        return False
+    return hmac.compare_digest(digest, expected)
+
+
 def validate_engineering_delete_password(value):
     password = str(value or "").strip()
     if len(password) < 6 or len(password) > 32:
         raise ValueError("工程删除密码需为 6~32 位")
-    if password == LEGACY_DELETE_SAFETY_PASSWORD or len(set(password)) < 3:
+    if is_legacy_blocked_delete_password(password) or len(set(password)) < 3:
         raise ValueError("工程删除密码过于简单，请换一个不易猜到的密码")
     return password
 
@@ -7634,9 +7672,9 @@ def api_restore_original_photo(project_code, photo_id):
 
 @app.route("/originals/<path:project_code>/<photo_id>")
 def original_photo_file(project_code, photo_id):
-    user, error = login_required_json()
-    if error:
-        return error
+    denied = _media_access_error()
+    if denied:
+        return denied
     try:
         data = manager.get_project(project_code)
         photo = next((item for item in data.get("photos", []) if str(item.get("id")) == str(photo_id)), None)
@@ -8508,6 +8546,16 @@ def api_reorder_photos(project_code):
         return json_error(str(exc), 404)
 
 
+def _media_access_error():
+    """原图、缩略图、永久原图都要有登录会话。未设局域网口令时非本机再拒绝一次。"""
+    _user, error = login_required_json()
+    if error:
+        return error
+    if _non_local_without_lan_password():
+        return json_error("局域网尚未设置访问口令，请先在运行软件的电脑上完成设置", 401)
+    return None
+
+
 def _safe_media_name(filename):
     """取文件名基名并拒绝路径分隔符，保留中文等非 ASCII 字符。
 
@@ -8525,6 +8573,9 @@ def photo_file(project_code, filename):
     safe_name = _safe_media_name(filename)
     if not safe_name:
         return "not found", 404
+    denied = _media_access_error()
+    if denied:
+        return denied
     resp = send_from_directory(manager._photos_dir(project_code), safe_name)
     if safe_name.endswith(".webp"):
         resp.mimetype = "image/webp"
@@ -8537,6 +8588,9 @@ def thumb_file(project_code, filename):
     safe_name = _safe_media_name(filename)
     if not safe_name:
         return "not found", 404
+    denied = _media_access_error()
+    if denied:
+        return denied
     if not safe_name.startswith(manager.THUMB_SUFFIX):
         safe_name = manager._thumb_filename(safe_name)
     # 即使缩略图已经存在，也必须核对源文件签名；SY001 等显示编号会被复用。

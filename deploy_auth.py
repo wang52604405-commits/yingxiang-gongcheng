@@ -29,7 +29,9 @@ SSH_KEY = Path(os.environ.get(
     "ALBUM_SSH_KEY",
     REPO / "服务器访问-工程影像管理平台" / "server_key",
 ))
-SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
+# 不再内置公网地址。未设置环境变量时只留占位，真正连服务器前会拒绝。
+SERVER_HOST_EXAMPLE = "root@YOUR_SERVER_IP"
+SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", SERVER_HOST_EXAMPLE).strip() or SERVER_HOST_EXAMPLE
 REMOTE_SERVER_DIR = "/opt/album-auth/server"
 REMOTE_PYTHON = "/opt/album-auth/venv/bin/python"
 SERVICE_NAME = "album-auth"
@@ -143,6 +145,17 @@ os.chmod(target, 0o600)
 print(f"SQLite 在线备份完成：{source} -> {target}")
 """
 
+def require_configured_server_host() -> str:
+    """部署目标必须来自 ALBUM_SERVER_HOST，占位示例不能拿去连公网。"""
+    host = (SERVER_HOST or "").strip()
+    if not host or host == SERVER_HOST_EXAMPLE or "YOUR_SERVER" in host.upper():
+        raise SystemExit(
+            "缺少可用的 ALBUM_SERVER_HOST。请设置为实际地址，例如 root@YOUR_SERVER_IP。"
+            "部署脚本不再内置公网服务器地址。"
+        )
+    return host
+
+
 def run(cmd, check=True):
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if check and result.returncode != 0:
@@ -152,6 +165,7 @@ def run(cmd, check=True):
 
 def scp_file(source: Path, destination: str, *, attempts: int = 3):
     """上传单个文件；网络闪断时限时重试，避免发布任务无限挂起。"""
+    require_configured_server_host()
     command = [
         "scp",
         "-q",
@@ -211,6 +225,7 @@ def build_release_archive(target: Path, validator_source: Path) -> list[str]:
 
 def ssh(cmd_str: str, check=True):
     """执行单条 ssh 命令（单行，避免 Windows 换行问题）。"""
+    require_configured_server_host()
     result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-i", str(SSH_KEY),
          SERVER_HOST, cmd_str],
@@ -338,6 +353,7 @@ def production_health(*, include_https: bool = False) -> tuple[bool, str]:
 
 
 def main() -> int:
+    require_configured_server_host()
     if not SSH_KEY.exists():
         print(f"[ERR] 缺 SSH 私钥: {SSH_KEY}")
         return 1
