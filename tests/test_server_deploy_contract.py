@@ -194,7 +194,7 @@ class ServerDeployContractTest(unittest.TestCase):
     def test_scp_file_retries_a_transient_disconnect(self):
         failed = SimpleNamespace(returncode=1, stdout="", stderr="lost connection")
         passed = SimpleNamespace(returncode=0, stdout="", stderr="")
-        with patch.object(
+        with patch.object(deploy_auth, "SERVER_HOST", "root@203.0.113.10"), patch.object(
             deploy_auth.subprocess,
             "run",
             side_effect=[failed, passed],

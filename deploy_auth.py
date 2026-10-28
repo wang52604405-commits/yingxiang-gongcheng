@@ -29,7 +29,9 @@ SSH_KEY = Path(os.environ.get(
     "ALBUM_SSH_KEY",
     REPO / "服务器访问-工程影像管理平台" / "server_key",
 ))
-SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
+# 有 ALBUM_SERVER_HOST 时用它。空值或占位示例则回退到与 deploy_website.py 相同的默认主机。
+SERVER_HOST_EXAMPLE = "root@YOUR_SERVER_IP"
+DEFAULT_SERVER_HOST = "root@47.95.221.66"
 REMOTE_SERVER_DIR = "/opt/album-auth/server"
 REMOTE_PYTHON = "/opt/album-auth/venv/bin/python"
 SERVICE_NAME = "album-auth"
@@ -143,6 +145,32 @@ os.chmod(target, 0o600)
 print(f"SQLite 在线备份完成：{source} -> {target}")
 """
 
+def _placeholder_server_host(host: str) -> bool:
+    text = str(host or "").strip()
+    return (not text) or text == SERVER_HOST_EXAMPLE or "YOUR_SERVER" in text.upper()
+
+
+def resolve_server_host(raw: str | None = None) -> str:
+    """真实环境变量优先。空字符串和占位示例回退到网站发布用的同一台主机。"""
+    if raw is None:
+        raw = os.environ.get("ALBUM_SERVER_HOST", "")
+    host = str(raw or "").strip()
+    if _placeholder_server_host(host):
+        return DEFAULT_SERVER_HOST
+    return host
+
+
+SERVER_HOST = resolve_server_host()
+
+
+def require_configured_server_host() -> str:
+    """连接前取主机。已解析出的真实地址不会被默认值覆盖。"""
+    current = str(SERVER_HOST or "").strip()
+    if not _placeholder_server_host(current):
+        return current
+    return resolve_server_host()
+
+
 def run(cmd, check=True):
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if check and result.returncode != 0:
@@ -152,6 +180,7 @@ def run(cmd, check=True):
 
 def scp_file(source: Path, destination: str, *, attempts: int = 3):
     """上传单个文件；网络闪断时限时重试，避免发布任务无限挂起。"""
+    require_configured_server_host()
     command = [
         "scp",
         "-q",
@@ -211,6 +240,7 @@ def build_release_archive(target: Path, validator_source: Path) -> list[str]:
 
 def ssh(cmd_str: str, check=True):
     """执行单条 ssh 命令（单行，避免 Windows 换行问题）。"""
+    require_configured_server_host()
     result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-i", str(SSH_KEY),
          SERVER_HOST, cmd_str],
@@ -338,6 +368,7 @@ def production_health(*, include_https: bool = False) -> tuple[bool, str]:
 
 
 def main() -> int:
+    require_configured_server_host()
     if not SSH_KEY.exists():
         print(f"[ERR] 缺 SSH 私钥: {SSH_KEY}")
         return 1

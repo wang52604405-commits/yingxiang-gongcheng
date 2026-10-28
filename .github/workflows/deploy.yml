@@ -67,6 +67,7 @@ jobs:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     env:
+      ALBUM_SERVER_HOST: ${{ secrets.ALBUM_SERVER_HOST }}
       HTTPS_PROXY: http://127.0.0.1:7897
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
@@ -165,6 +166,7 @@ jobs:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 30
     env:
+      ALBUM_SERVER_HOST: ${{ secrets.ALBUM_SERVER_HOST }}
       HTTPS_PROXY: http://127.0.0.1:7897
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897
@@ -264,6 +266,7 @@ jobs:
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 15
     env:
+      ALBUM_SERVER_HOST: ${{ secrets.ALBUM_SERVER_HOST }}
       HTTPS_PROXY: http://127.0.0.1:7897
       HTTP_PROXY: http://127.0.0.1:7897
       ALL_PROXY: http://127.0.0.1:7897

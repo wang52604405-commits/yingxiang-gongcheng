@@ -32,7 +32,13 @@ SSH_KEY = Path(os.environ.get(
     "ALBUM_SSH_KEY",
     build_all.USE / "服务器访问-工程影像管理平台" / "server_key",
 ))
-SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", "root@47.95.221.66")
+# 有 ALBUM_SERVER_HOST 时用它。Actions 没配 Secret 时变量是空字符串，仍用原来的默认主机。
+_configured_host = os.environ.get("ALBUM_SERVER_HOST", "").strip()
+SERVER_HOST = (
+    "root@47.95.221.66"
+    if not _configured_host or "YOUR_SERVER" in _configured_host.upper()
+    else _configured_host
+)
 REMOTE_UPDATES = "/var/www/updates"
 # 官网下载目录与自动更新通道使用同一份正式安装包，避免下载页落后于软件更新。
 REMOTE_SITE_DOWNLOAD = "/var/www/shuiliyingxiang/download"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -266,12 +267,15 @@ class DesktopSecurityContractTest(unittest.TestCase):
 
             base = {"project_name": "测试工程", "project_code": "TEST-001"}
             self.assertEqual(self.client.post("/api/project-info", json=base).status_code, 400)
-            self.assertEqual(
-                self.client.post(
-                    "/api/project-info", json={**base, "delete_password": "114405"}
-                ).status_code,
-                400,
-            )
+            blocked = "Blocked9182"
+            blocked_digest = hashlib.sha256(blocked.encode("utf-8")).hexdigest()
+            with patch.object(self.desktop, "LEGACY_DELETE_SAFETY_PASSWORD_SHA256", blocked_digest):
+                self.assertEqual(
+                    self.client.post(
+                        "/api/project-info", json={**base, "delete_password": blocked}
+                    ).status_code,
+                    400,
+                )
             password = "Delete7286"
             saved = self.client.post(
                 "/api/project-info", json={**base, "delete_password": password}

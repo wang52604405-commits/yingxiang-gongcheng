@@ -2,7 +2,7 @@
 """邮件发送模块：用 QQ 邮箱 SMTP 发送验证码邮件。
 
 配置（环境变量）：
-  ALBUM_MAIL_USER  发件邮箱（如 544711855@qq.com）
+  ALBUM_MAIL_USER  发件邮箱（如 you@example.com）
   ALBUM_MAIL_PASS  授权码（QQ 邮箱设置里开启 SMTP 后生成的 16 位授权码，非登录密码）
   ALBUM_MAIL_HOST  默认 smtp.qq.com，一般不用改
   ALBUM_MAIL_PORT  默认 465（SSL）

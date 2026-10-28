@@ -157,6 +157,8 @@ jobs:
 
       - name: 部署授权中心
         shell: powershell
+        env:
+          ALBUM_SERVER_HOST: ${{ secrets.ALBUM_SERVER_HOST }}
         run: python deploy_auth.py
 
       - name: 验证后台开关默认关闭

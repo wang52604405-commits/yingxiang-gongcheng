@@ -25,6 +25,9 @@ installer_payload/
 *.7z
 *.exe
 
+# 本机运行配置（可能含真实数据目录，勿提交；格式见 album_config.example.json）
+album_config.json
+
 # 数据与备份（大文件）
 models/
 mem0_store/

@@ -1,0 +1,7 @@
+{
+  "configured_at": "",
+  "host": "127.0.0.1",
+  "port": 5088,
+  "portable_data_dir": "data",
+  "start_script": "start_album.bat"
+}
