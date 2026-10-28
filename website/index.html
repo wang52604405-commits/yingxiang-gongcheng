@@ -1,75 +1,217 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="工程影像管理平台覆盖水利、房建、市政、电力四大专业，支持微信现场采集、自动归档、快速检索、打印和资料导出。">
-  <title>工程影像管理平台 · 四大专业工程影像，一套系统管到底</title>
-  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工程影像管理平台 · 现场影像采集与归档</title>
+<meta name="description" content="工程影像管理平台覆盖水利、房建、市政、电力四大专业，支持微信现场采集、电脑归档、检索、打印和资料导出。">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-  <nav class="site-nav" aria-label="主导航"><div class="container nav-inner">
-    <a class="brand" href="index.html"><span class="brand-mark">影</span><span>工程影像管理平台</span></a>
-    <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false"><span></span></button>
-    <div class="nav-links"><a class="active" href="index.html">首页</a><a href="product.html">产品介绍</a><a href="usage.html">使用说明</a><a href="contact.html">联系我们</a><a class="nav-miniapp" href="#mini-program">微信小程序</a><a class="nav-cta" href="download.html">下载软件</a></div>
-  </div></nav>
-
-  <main>
-    <header class="hero"><div class="container hero-grid">
-      <div class="hero-copy-block" data-reveal>
-        <div class="eyebrow">工程现场影像一体化管理</div>
-        <h1>四大专业工程影像，<span>一套系统管到底</span></h1>
-        <p class="hero-copy">水利、房建、市政、电力都能用。现场微信拍，电脑自动归，按工程和工序快速查，需要时直接打印成册或打包交付。</p>
-        <div class="hero-actions"><a class="btn btn-primary btn-lg" href="download.html">下载 Windows 版</a><a class="btn btn-quiet btn-lg" href="#mini-program">微信扫码用小程序 ↓</a><a class="btn btn-quiet btn-lg" href="product.html">看看能做什么 →</a></div>
-        <p class="hero-note">保留原图 · 本机归档 · 手机电脑同步 · 不改变现有工程资料</p>
-        <div class="profession-pills" aria-label="支持专业"><span class="profession-pill is-water"><i></i>水利工程</span><span class="profession-pill is-building"><i></i>房屋建筑</span><span class="profession-pill is-municipal"><i></i>市政工程</span><span class="profession-pill is-power"><i></i>电力工程</span></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="nav-shell">
+    <nav class="nav" aria-label="主导航">
+      <a class="logo" href="index.html"><span class="logo-mark">影</span><span>工程影像</span></a>
+      <div class="nav-links">
+        <a href="index.html">首页</a>
+        <a href="product.html">产品</a>
+        <a href="usage.html">使用说明</a>
+        <a href="contact.html">联系</a>
+        <a href="#mini-program">微信小程序</a>
       </div>
-      <div class="product-visual" data-reveal>
-        <div class="visual-glow"></div>
-        <div class="desktop-frame"><div class="frame-bar"><i></i><i></i><i></i><span>桌面端 · 工程工作台</span></div><img src="assets/ui_main.png" alt="工程影像管理平台桌面端真实界面"></div>
-        <div class="phone-frame"><img src="assets/mini-capture.png" alt="工程影像微信小程序现场采集界面"></div>
-        <div class="floating-proof"><b>原</b><span>微信拍摄原图<br>自动回传电脑</span></div>
+      <a class="cta nav-download" href="download.html">下载</a>
+      <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false"><span></span></button>
+    </nav>
+  </div>
+
+  <main class="wrap page-shell">
+    <section class="hero">
+      <div class="spotlight" aria-hidden="true">
+        <svg viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <g filter="url(#spBlur)"><ellipse cx="280" cy="120" rx="320" ry="220" fill="url(#spGrad)" fill-opacity="0.55"/></g>
+          <defs>
+            <radialGradient id="spGrad" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(280 120) rotate(90) scale(220 320)">
+              <stop stop-color="#7dd3fc"/><stop offset="0.45" stop-color="#7dd3fc" stop-opacity="0.25"/><stop offset="1" stop-color="#7dd3fc" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="spBlur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="48"/></filter>
+          </defs>
+        </svg>
       </div>
-    </div></header>
-
-    <section class="utility-strip"><div class="container utility-grid">
-      <div class="utility-item"><span class="utility-icon">拍</span><strong>现场拍</strong><span>微信小程序直接采集</span></div>
-      <div class="utility-item"><span class="utility-icon">归</span><strong>自动归</strong><span>按单元、类别、工序整理</span></div>
-      <div class="utility-item"><span class="utility-icon">查</span><strong>快速查</strong><span>名称、编号、时间随时找</span></div>
-      <div class="utility-item"><span class="utility-icon">出</span><strong>一键出</strong><span>打印、XLSX、ZIP 都清楚</span></div>
-    </div></section>
-
-    <section class="section"><div class="container">
-      <div class="section-heading is-centered" data-reveal><div class="eyebrow">四大专业</div><h2>不是换一张封面，而是每个专业都有自己的采集逻辑</h2><p>从项目类型到必拍清单，再到现场归档层级，按真实业务组织影像。</p></div>
-      <div class="profession-grid">
-        <article class="profession-card is-water" data-reveal><div class="profession-card-top"><span class="profession-symbol">水</span><span class="tag">WATER</span></div><h3>水利工程</h3><p>围绕单位、分部、单元三级项目划分，兼顾施工与监理影像。</p><ul class="clean-list"><li>项目划分导入与单元归档</li><li>施工 / 监理分类管理</li><li>工序照片与自动编号</li></ul></article>
-        <article class="profession-card is-building" data-reveal><div class="profession-card-top"><span class="profession-symbol">建</span><span class="tag">BUILDING</span></div><h3>房屋建筑</h3><p>覆盖住宅和公共建筑，从基础、主体到装饰安装全过程留痕。</p><ul class="clean-list"><li>住宅与公共建筑采集清单</li><li>隐蔽、验收和材料见证</li><li>楼栋、楼层与部位检索</li></ul></article>
-        <article class="profession-card is-municipal" data-reveal><div class="profession-card-top"><span class="profession-symbol">市</span><span class="tag">MUNICIPAL</span></div><h3>市政工程</h3><p>面向线性和节点工程，方便按道路、区段、构筑物连续归档。</p><ul class="clean-list"><li>道路、桥梁、给排水</li><li>管廊、照明与交通设施</li><li>桩号、区段和节点定位</li></ul></article>
-        <article class="profession-card is-power" data-reveal><div class="profession-card-top"><span class="profession-symbol">电</span><span class="tag">POWER</span></div><h3>电力工程</h3><p>适配站、线、缆和新能源场景，关键设备与施工节点不漏拍。</p><ul class="clean-list"><li>变电站、输电与配电</li><li>电缆、风电与光伏</li><li>设备安装和关键节点见证</li></ul></article>
+      <div class="hero-copy">
+        <div class="eyebrow">工程现场影像</div>
+        <h1 class="headline">
+          <span class="word"><span>现场影像</span></span>
+          <span class="word"><span>采集</span></span>
+          <span class="word"><span>与</span></span>
+          <span class="word accent"><span>归档</span></span>
+        </h1>
+        <p class="lede">水利、房建、市政、电力都能用。现场用微信拍，电脑按工程和工序归档，需要时再打印或打包交付。</p>
+        <div class="hero-actions">
+          <a class="cta cta-lg" href="/download/工程影像管理平台-安装程序.exe">下载 Windows 版</a>
+          <a class="cta cta-ghost cta-lg" href="download.html">查看下载说明</a>
+        </div>
+        <p class="hero-meta">适用于 Windows 10 / 11<span class="published-version" data-published-version></span></p>
       </div>
-    </div></section>
-
-    <section class="section section-muted"><div class="container">
-      <div class="section-heading" data-reveal><div class="eyebrow">更顺的上传流程</div><h2>先看清归到哪里，再点开始上传</h2><p>全局上传和单元上传使用同一面板，照片不会因为入口不同而传错位置。</p></div>
-      <div class="workflow-grid"><article class="workflow-card" data-reveal><h3>确认工程与单元</h3><p>当前单元自动预填，也可以搜索名称、编号或缩略词重新选择。</p></article><article class="workflow-card" data-reveal><h3>选择类别与工序</h3><p>施工、监理、单元照片和具体工序一眼确认。</p></article><article class="workflow-card" data-reveal><h3>添加照片队列</h3><p>选择、拖放或粘贴都只进入队列，不会偷偷提交。</p></article><article class="workflow-card" data-reveal><h3>逐张上传反馈</h3><p>成功、失败、进度和重试逐张可见，归档更放心。</p></article></div>
-    </div></section>
-
-    <section class="section"><div class="container">
-      <div class="section-heading" data-reveal><div class="eyebrow">一套完整工具</div><h2>从原图进来，到资料出去，中间少做重复劳动</h2></div>
-      <div class="bento">
-        <article class="bento-card is-wide" data-reveal><span class="bento-kicker">自动编号</span><h3>照片编号跟着单元和工序走</h3><p>新增、删除、调整顺序后按规则更新，同时保留照片 UUID 和账号归属边界。</p><div class="number-showcase"><span>UX-001-SYDY001</span><span>UX-001-GY001-SYGX001</span><span>UX-001-JYDY001</span></div></article>
-        <article class="bento-card is-tall" data-reveal><span class="bento-kicker">专业必拍清单</span><h3>现场知道该拍什么</h3><p>按工程专业和类型提示必拍、条件必拍和推荐影像，避免回头补拍。</p><div class="check-stack"><span>关键工序</span><span>隐蔽验收</span><span>材料见证</span><span>成品外观</span><span>安全与临时设施</span></div></article>
-        <article class="bento-card" data-reveal><span class="bento-kicker">原图与同步</span><h3>手机采集，电脑留底</h3><p>小程序上传原图，电脑自动同步并在本机资料目录长期归档。</p></article>
-        <article class="bento-card" data-reveal><span class="bento-kicker">打印与交付</span><h3>当前、所选、批量都明确</h3><p>打印当前图库或明确选中的照片，也可导出 XLSX 统计和 ZIP 资料包。</p></article>
+      <div class="stage" id="stage">
+        <div class="stage-inner">
+          <div class="device device-desk">
+            <img src="assets/shot_edge_main.png" alt="工程影像管理平台桌面端总览" width="1400" height="900">
+            <div class="glow-edge"></div>
+          </div>
+          <div class="device device-phone">
+            <img src="assets/mini-capture.png" alt="微信小程序现场采集" width="400" height="780">
+            <div class="glow-edge"></div>
+          </div>
+        </div>
       </div>
-    </div></section>
+    </section>
 
-    <section class="section section-dark"><div class="container device-section">
-      <div class="device-copy" data-reveal><div class="eyebrow">桌面端＋微信小程序</div><h2>办公室和现场，用的是同一套工程数据</h2><p>现场人员不用搬文件，办公室也不用等 U 盘。每张照片都能回到正确工程、单元和类别。</p><ul class="device-points"><li>微信现场拍摄与原图回传</li><li>未上传队列可继续重试</li><li>电脑图库、打印和资料包统一管理</li></ul><figure id="mini-program" class="mini-program-site-code"><img src="assets/miniprogram_qr.png" alt="工程影像微信小程序码，微信扫码进入现场采集端" width="430" height="430"><figcaption>微信扫码进入现场采集端</figcaption></figure></div>
-      <div class="device-gallery" data-reveal><div class="desktop-frame"><div class="frame-bar"><i></i><i></i><i></i><span>单元图库</span></div><img src="assets/ui_unit.png" alt="桌面端单元图库"></div><div class="phone-frame"><img src="assets/mini-library.png" alt="微信小程序影像库"></div></div>
-    </div></section>
+    <section class="section" id="disciplines">
+      <div class="section-label">四大专业</div>
+      <div class="section-head">
+        <h2>每个专业，按自己的现场来归档</h2>
+        <p>点击卡片查看对应专业。卡片里的现场照片会轮流显示，鼠标放上去会暂停。</p>
+      </div>
+      <div class="prof-grid">
+        <a class="prof-card water" href="product.html#prof-water">
+          <div class="prof-media">
+            <div class="slide active"><img src="assets/field_01.jpg" alt="水利现场" loading="lazy"></div>
+            <div class="slide"><img src="assets/field_02.jpg" alt="水利施工" loading="lazy"></div>
+            <div class="slide"><img src="assets/field_03.jpg" alt="水利结构节点" loading="lazy"></div>
+          </div>
+          <div class="prof-wash"></div>
+          <div class="prof-dots"><span class="on"></span><span></span><span></span></div>
+          <div class="prof-body">
+            <div class="prof-tag">01 · 水利</div>
+            <h3>水利工程</h3>
+            <p>河道、闸室、泵站。单元结构和施工影像对应起来。</p>
+          </div>
+        </a>
+        <a class="prof-card build" href="product.html#prof-build">
+          <div class="prof-media">
+            <div class="slide active"><img src="assets/field_04.jpg" alt="房建现场" loading="lazy"></div>
+            <div class="slide"><img src="assets/field_05.jpg" alt="主体结构" loading="lazy"></div>
+            <div class="slide"><img src="assets/ui_unit.png" alt="单元工程目录" loading="lazy"></div>
+          </div>
+          <div class="prof-wash"></div>
+          <div class="prof-dots"><span class="on"></span><span></span><span></span></div>
+          <div class="prof-body">
+            <div class="prof-tag">02 · 房建</div>
+            <h3>房屋建筑</h3>
+            <p>主体、机电。按分部工程归集现场取证。</p>
+          </div>
+        </a>
+        <a class="prof-card muni" href="product.html#prof-muni">
+          <div class="prof-media">
+            <div class="slide active"><img src="assets/field_07.jpg" alt="市政现场" loading="lazy"></div>
+            <div class="slide"><img src="assets/field_08.jpg" alt="道路管网" loading="lazy"></div>
+            <div class="slide"><img src="assets/poster-list.png" alt="影像库界面" loading="lazy"></div>
+          </div>
+          <div class="prof-wash"></div>
+          <div class="prof-dots"><span class="on"></span><span></span><span></span></div>
+          <div class="prof-body">
+            <div class="prof-tag">03 · 市政</div>
+            <h3>市政工程</h3>
+            <p>道路、桥梁、管网。施工和监理影像分开留存。</p>
+          </div>
+        </a>
+        <a class="prof-card power" href="product.html#prof-power">
+          <div class="prof-media">
+            <div class="slide active"><img src="assets/field_10.jpg" alt="电力现场" loading="lazy"></div>
+            <div class="slide"><img src="assets/field_11.jpg" alt="电缆与光伏" loading="lazy"></div>
+            <div class="slide"><img src="assets/poster-print.png" alt="打印交付" loading="lazy"></div>
+          </div>
+          <div class="prof-wash"></div>
+          <div class="prof-dots"><span class="on"></span><span></span><span></span></div>
+          <div class="prof-body">
+            <div class="prof-tag">04 · 电力</div>
+            <h3>电力工程</h3>
+            <p>电缆、光伏。隐蔽工程的关键节点一次拍清。</p>
+          </div>
+        </a>
+      </div>
+    </section>
 
-    <section class="cta-band"><div class="container"><div class="cta-card" data-reveal><div><h2>把工程照片真正变成可用资料</h2><p>先下载体验，现有工程和照片无需迁移。</p></div><a class="btn btn-primary btn-lg" href="download.html">下载最新正式版</a></div></div></section>
+    <section class="section" style="padding-top:0">
+      <div class="section-label">核心能力</div>
+      <div class="util-grid">
+        <div class="util-card"><h3>上传与队列</h3><p>全局或单元上传。水印能给出候选，对不上的照片进待分类，确认后再入库。</p></div>
+        <div class="util-card"><h3>检索查找</h3><p>按工程、单元、工序、题名、拍摄者和日期查找。</p></div>
+        <div class="util-card"><h3>打印方案</h3><p>单元内可打印当前图库或勾选照片。跨单元批量打印需要开通会员。</p></div>
+        <div class="util-card"><h3>导出交付</h3><p>照片统计表、单元压缩包和工程资料包都可以导出。</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="product-strip" style="padding-top:0">
+      <div class="strip">
+        <div class="strip-head">
+          <div class="section-label" style="margin-bottom:14px">桌面端</div>
+          <h2>工程结构就是档案目录</h2>
+          <p>从单位工程到分部、单元，每张现场照片都挂在对应位置上。</p>
+        </div>
+        <div class="strip-stage">
+          <div class="strip-mock">
+            <img src="assets/shot_edge_main.png" alt="工程影像总览" width="1400" height="900" loading="lazy">
+          </div>
+        </div>
+      </div>
+      <div class="shot-row" style="margin-top:16px">
+        <a href="product.html"><img src="assets/ui_photos.png" alt="影像库" loading="lazy"></a>
+        <a href="product.html"><img src="assets/poster-unit.png" alt="上传归档" loading="lazy"></a>
+        <a href="product.html"><img src="assets/ui_print.png" alt="打印导出" loading="lazy"></a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="mini-block">
+        <div>
+          <div class="eyebrow">现场采集</div>
+          <h2 id="mini-program-title" style="font-size:clamp(26px,3vw,34px);letter-spacing:-0.03em;margin-bottom:12px">微信小程序</h2>
+          <p style="color:var(--muted);line-height:1.65;max-width:42ch;margin-bottom:18px">电脑上建好工程并绑定云账号后，现场人员用同一账号打开小程序。照片先留在手机队列里，网络恢复后再上传。别的账号看不到这个工程。</p>
+          <figure id="mini-program" class="mini-program-site-code qr-box">
+            <img src="assets/miniprogram_qr.png" alt="工程影像微信小程序码，微信扫码进入现场采集端" width="430" height="430">
+            <figcaption style="color:#5c6b73;font-size:12px;margin-top:8px">微信扫码进入现场采集端</figcaption>
+          </figure>
+        </div>
+        <div class="mini-phones">
+          <div class="phone-frame"><img src="assets/mini-home.png" alt="小程序首页" loading="lazy"></div>
+          <div class="phone-frame"><img src="assets/mini-capture.png" alt="拍摄水印" loading="lazy"></div>
+          <div class="phone-frame"><img src="assets/mini-pending.png" alt="待上传队列" loading="lazy"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <div>
+        <h2>先下载，再按使用说明建第一个工程</h2>
+        <p>安装包、Word 教程和小程序码都在下载页。</p>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a class="cta cta-lg" href="/download/工程影像管理平台-安装程序.exe">下载 Windows 版</a>
+        <a class="cta cta-ghost cta-lg" href="usage.html">使用说明</a>
+      </div>
+    </section>
   </main>
-  <footer class="site-footer"><div class="container"><div class="footer-grid"><div><div class="footer-brand"><span class="brand-mark">影</span>工程影像管理平台</div><p class="footer-copy">面向水利、房建、市政、电力的工程现场影像采集、归档、检索与交付工具。</p></div><div class="footer-links"><a href="product.html">产品介绍</a><a href="usage.html">使用说明</a><a href="download.html">软件下载</a><a href="contact.html">联系我们</a></div></div><div class="copyright">© 2026 工程影像管理平台</div></div></footer>
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand"><span class="logo-mark">影</span>工程影像管理平台</div>
+          <p class="footer-copy">面向水利、房建、市政、电力的工程现场影像采集、归档、检索与交付工具。</p>
+        </div>
+        <div class="footer-links">
+          <a href="index.html">首页</a>
+          <a href="product.html">产品介绍</a>
+          <a href="usage.html">使用说明</a>
+          <a href="download.html">软件下载</a>
+          <a href="contact.html">联系我们</a>
+        </div>
+      </div>
+      <div class="copyright">© 2026 工程影像管理平台</div>
+    </div>
+  </footer>
   <script src="assets/site.js" defer></script>
-</body></html>
+</body>
+</html>

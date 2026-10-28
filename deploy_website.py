@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """Safely validate and deploy the static marketing website.
 
-The server's download/ directory is deliberately excluded from both promotion
-and rollback. Existing installers and tutorials therefore remain untouched.
+The server's download/ directory is excluded from the page bundle and from
+rollback, so the published installer is never replaced or deleted here.
+The Word tutorial is copied into that directory on its own.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -36,6 +39,9 @@ SERVER_HOST = (
     else _configured_host
 )
 REMOTE_ROOT = "/var/www/shuiliyingxiang"
+TUTORIAL_NAME = "工程影像管理平台-使用教程.docx"
+INSTALLER_NAME = "工程影像管理平台-安装程序.exe"
+VERSION_SLOT = '<span class="published-version" data-published-version></span>'
 
 
 class _AssetParser(HTMLParser):
@@ -74,12 +80,19 @@ def validate_site(site: Path = SITE) -> None:
     for profession in ("水利", "房建", "市政", "电力"):
         if profession not in all_text:
             raise SystemExit(f"宣传网站未体现专业：{profession}")
-    if "/download/工程影像管理平台-安装程序.exe" not in all_text:
+    if f"/download/{INSTALLER_NAME}" not in all_text:
         raise SystemExit("宣传网站安装包地址发生变化")
+    tutorial = site / "tutorial" / TUTORIAL_NAME
+    if not tutorial.is_file() or tutorial.stat().st_size < 1000:
+        raise SystemExit("宣传网站缺少使用教程文件")
+    if f"/download/{TUTORIAL_NAME}" not in all_text:
+        raise SystemExit("宣传网站使用教程地址发生变化")
     if re.search(r"aos|vanilla-tilt|data-tilt", all_text, re.IGNORECASE):
         raise SystemExit("页面仍引用过量滚动或倾斜动画")
     if "assets/site.js" not in all_text or "nav-toggle" not in all_text:
         raise SystemExit("宣传网站缺少移动导航")
+    if "300 张" in all_text or "自动检查更新" in all_text:
+        raise SystemExit("宣传网站仍写着过期的免费张数或自动更新")
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -105,6 +118,52 @@ def _ssh(command: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _published_version() -> str:
+    """Read the installer version customers can actually download."""
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "-fsSL",
+                "--max-time",
+                "12",
+                "https://api.shuiliyingxiang.cn/update/version.json",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode:
+        return ""
+    try:
+        version = str(json.loads(result.stdout).get("version") or "")
+    except (TypeError, ValueError):
+        return ""
+    if re.fullmatch(r"A\d{8}-\d+\.\d+", version):
+        return version
+    return ""
+
+
+def _stamp_published_version(site: Path) -> str:
+    version = _published_version()
+    replacement = VERSION_SLOT
+    if version:
+        replacement = (
+            '<span class="published-version" data-published-version>'
+            f" · 版本 {version}</span>"
+        )
+    for name in PAGES:
+        page = site / name
+        page.write_text(
+            page.read_text(encoding="utf-8").replace(VERSION_SLOT, replacement),
+            encoding="utf-8",
+        )
+    return version
+
+
 def deploy() -> None:
     validate_site()
     if not SSH_KEY.is_file():
@@ -116,9 +175,16 @@ def deploy() -> None:
     remote_backup = f"/var/backups/shuiliyingxiang/pre-site-{timestamp}"
 
     with tempfile.TemporaryDirectory(prefix="album-site-release-") as temp_dir:
+        staged_site = Path(temp_dir) / "site"
+        shutil.copytree(SITE, staged_site)
+        version = _stamp_published_version(staged_site)
+        if version:
+            print(f"已写入当前安装包版本：{version}")
+        else:
+            print("没有读到安装包版本，页面只保留 Windows 说明")
         archive = Path(temp_dir) / "website.tar.gz"
         with tarfile.open(archive, "w:gz") as bundle:
-            for item in SITE.iterdir():
+            for item in staged_site.iterdir():
                 if item.name == "download":
                     continue
                 bundle.add(item, arcname=item.name)
@@ -142,6 +208,11 @@ def deploy() -> None:
     stage = shlex.quote(remote_stage)
     backup = shlex.quote(remote_backup)
     pages = " ".join(shlex.quote(name) for name in PAGES)
+    tutorial_stage = shlex.quote(f"{remote_stage}/tutorial/{TUTORIAL_NAME}")
+    tutorial_dest = shlex.quote(f"{REMOTE_ROOT}/download/{TUTORIAL_NAME}")
+    installer_dest = shlex.quote(f"{REMOTE_ROOT}/download/{INSTALLER_NAME}")
+    download_dir = shlex.quote(f"{REMOTE_ROOT}/download")
+    tutorial_public = shlex.quote(f"{REMOTE_ROOT}/tutorial")
     remote_script = (
         "set -eu; "
         f"mkdir -p {stage} {backup}; tar -xzf {archive_q} -C {stage}; "
@@ -157,6 +228,13 @@ def deploy() -> None:
         f"chown -R www-data:www-data {root}/assets "
         + " ".join(f"{root}/{name}" for name in PAGES)
         + f" {root}/site-content.json; "
+        f"test -s {tutorial_stage}; "
+        f"mkdir -p {download_dir}; "
+        f"cp -a {tutorial_stage} {tutorial_dest}; "
+        f"chown www-data:www-data {tutorial_dest}; "
+        f"rm -rf {tutorial_public}; "
+        f"test -s {installer_dest}; "
+        f"test -s {tutorial_dest}; "
         "curl -fsSL --max-time 15 -H 'Host: shuiliyingxiang.cn' "
         "http://127.0.0.1/ | grep -q '四大专业'; "
         "trap - ERR; "

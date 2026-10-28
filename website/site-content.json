@@ -2,6 +2,22 @@
   "site_name": "工程影像管理平台",
   "brand_line": "水利、房建、市政、电力四大专业工程影像工具",
   "download_url": "/download/工程影像管理平台-安装程序.exe",
+  "tutorial_url": "/download/工程影像管理平台-使用教程.docx",
+  "tutorial_source": "tutorial/工程影像管理平台-使用教程.docx",
+  "register_url": "https://shuiliyingxiang.cn/member#register",
+  "in_app_register_path": "/license",
+  "version_source": "https://api.shuiliyingxiang.cn/update/version.json",
+  "product_config_source": "https://api.shuiliyingxiang.cn/api/product-config",
+  "product": {
+    "free_photo_limit": 1000,
+    "monthly_price": 39,
+    "lifetime_price": 399,
+    "price_label": "原价",
+    "free_batch_print_enabled": false,
+    "mini_program_free_upload_limit": 500,
+    "mini_program_project_limit": { "free": 1, "monthly": 2, "lifetime": 3 },
+    "update_mode": "manual_download_install"
+  },
   "mini_program": {
     "name": "工程影像微信小程序",
     "description": "现场拍照、分类归档、待上传管理和云同步",
