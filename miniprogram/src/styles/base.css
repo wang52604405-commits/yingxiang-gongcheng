@@ -362,6 +362,8 @@ textarea.input:focus {
   line-height: 1.55;
 }
 
+.empty-action { margin-top: 18rpx; }
+
 .loading-layer {
   position: fixed;
   z-index: 80;

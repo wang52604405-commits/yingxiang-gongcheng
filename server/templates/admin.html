@@ -17,6 +17,7 @@
     #loginBox{max-width:440px;margin:64px auto;padding:32px}.brand{margin-bottom:24px}.brand .logo{margin-bottom:16px}#loginBox input{width:100%}#loginBox h1{font-size:24px!important}.error-message{max-width:440px;overflow-wrap:anywhere}.error-meta{color:var(--muted);font-size:13px;margin-top:8px}.error-guidance{padding:16px;border-left:3px solid var(--accent);background:var(--panel2);margin:16px 0}details summary{cursor:pointer;color:var(--accent);padding:8px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);padding:16px;border-radius:8px;font:13px/1.7 Consolas,monospace;max-height:320px;overflow:auto}dialog{border:1px solid var(--line);border-radius:16px;padding:32px;background:white;color:var(--text);width:min(640px,calc(100vw - 32px));max-height:90vh;overflow:auto}dialog::backdrop{background:rgba(15,35,29,.4)}dialog h2{margin:0 0 16px}dialog .toolbar{justify-content:flex-end}dialog textarea{width:100%}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.detail-grid dt{color:var(--muted);font-size:14px}.detail-grid dd{margin:4px 0 0;overflow-wrap:anywhere}
     @media(max-width:850px){.wrap{padding:16px}.stats{grid-template-columns:1fr 1fr}.admin-grid{grid-template-columns:1fr 1fr}.topbar{flex-wrap:wrap}.card{padding:16px}.toolbar input{min-width:0;width:100%}.toolbar label{flex:1}.tabs{overflow-x:auto}.tabs .btn{white-space:nowrap}}@media(max-width:520px){.admin-grid,.detail-grid{grid-template-columns:1fr}.stat{padding:16px}.toolbar{align-items:stretch;flex-direction:column}.toolbar label,.toolbar input,.toolbar select{width:100%}dialog{padding:24px 16px}.hint{display:block;margin-left:0}.topbar .spacer{display:none}}
     .toolbar label input{margin-bottom:0}#loginBox>input{margin:8px 0 16px}.toolbar label:first-child:has(#accountSearch){flex:1;max-width:480px}#accountSearch{width:100%}
+    .passline{display:flex;gap:8px;align-items:center;margin:8px 0 16px}.passline input{flex:1;margin:0!important}
 </style>
   <style>
     .overview-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}.overview-head h2{margin:0;font-size:24px}.overview-grid{display:grid;grid-template-columns:2fr 1fr;gap:24px}.overview-grid .card{margin:0}.metric-note{font-size:14px;color:var(--muted);margin-top:8px}.trend{display:flex;gap:8px;align-items:end;height:240px;overflow-x:auto;padding:24px 0 8px}.trend-day{flex:1;min-width:32px;display:flex;flex-direction:column;align-items:center;justify-content:end;height:100%;font-size:12px}.trend-bar{width:65%;background:var(--accent);border-radius:4px 4px 0 0;min-height:2px}.trend-day.missing{color:var(--muted)}.trend-day.missing .trend-bar{background:var(--line)}.channel-row{display:flex;justify-content:space-between;padding:16px 0;border-bottom:1px solid var(--line)}.recent-row{display:flex;justify-content:space-between;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}.recent-row:last-child{border-bottom:0}.overview-foot{margin:24px 0}.status-note{max-width:240px;overflow-wrap:anywhere;font-size:13px;color:var(--muted)}
@@ -33,7 +34,8 @@
         <p class="muted" style="margin:6px 0 0;">仅管理员可登录</p>
       </div>
       <label for="loginUser">管理员账号</label><input id="loginUser" placeholder="管理员账号" autocomplete="username">
-      <label for="loginPass">登录密码</label><input id="loginPass" type="password" placeholder="密码" autocomplete="current-password">
+      <label for="loginPass">登录密码</label>
+      <div class="passline"><input id="loginPass" type="password" placeholder="密码" autocomplete="current-password"><button type="button" id="loginTogglePass" class="btn sm">显示</button></div>
       <button id="loginBtn" class="btn primary" style="width:100%">登录</button>
       <div id="loginNotice" class="notice"></div>
     </div>
@@ -217,25 +219,36 @@
       }
       if(!data || typeof data !== "object")throw new Error(`服务返回内容异常（HTTP ${resp.status}），请稍后重试。`);
       if (!resp.ok || data.ok === false) {
-        reportError(data.error || `请求失败(${resp.status})`, { url, method: options.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
+        if (!(resp.status === 401 && url === "/api/login")) {
+          reportError(data.error || `请求失败(${resp.status})`, { url, method: options.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
+        }
         throw new Error(data.error || `请求失败(${resp.status})`);
       }
       return data;
     }
 
     $("#loginBtn").addEventListener("click", async () => {
+      const username = $("#loginUser").value.trim();
+      const password = $("#loginPass").value;
+      if (!username || !password) { notice($("#loginNotice"), "请填写管理员账号和密码", true); return; }
+      const button = $("#loginBtn");
+      button.disabled = true;
+      button.textContent = "登录中…";
       try {
         const data = await api("/api/login", {
           method: "POST",
-          body: JSON.stringify({ username: $("#loginUser").value.trim(), password: $("#loginPass").value })
+          body: JSON.stringify({ username, password })
         });
-        if (data.account.role !== "admin") throw new Error("该账号不是管理员");
+        if (data.account.role !== "admin") throw new Error("这个账号不是管理员");
         $("#loginPass").value = "";
         token = data.token;
         localStorage.setItem("album_admin_token", token);
         enterAdmin(data.account);
       } catch (e) {
         notice($("#loginNotice"), e.message, true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "登录";
       }
     });
 
@@ -612,7 +625,13 @@
       activeTab=button.dataset.tab; ["overview","accounts","errors","settings"].forEach(name=>$("#"+name+"Panel").hidden=name!==activeTab);
       document.querySelectorAll("[data-tab]").forEach(tab=>tab.setAttribute("aria-selected",String(tab.dataset.tab===activeTab)));
     }));
-    $("#loginPass").addEventListener("keydown",event=>{if(event.key==='Enter')$("#loginBtn").click();});
+    ["#loginUser", "#loginPass"].forEach((id) => $(id).addEventListener("keydown", event => { if (event.key === "Enter") $("#loginBtn").click(); }));
+    $("#loginTogglePass").addEventListener("click", () => {
+      const input = $("#loginPass");
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      $("#loginTogglePass").textContent = show ? "隐藏" : "显示";
+    });
 
     function escapeHtml(v) {
       return String(v == null ? "" : v).replace(/[&<>"']/g, c => (

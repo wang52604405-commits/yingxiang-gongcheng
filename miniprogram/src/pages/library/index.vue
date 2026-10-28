@@ -9,6 +9,7 @@ import UiIcon from '@/components/UiIcon.vue'
 import StablePhotoImage from '@/components/StablePhotoImage.vue'
 import { mobileApi } from '@/api/mobile'
 import { queueRuntime } from '@/services/queue-runtime'
+import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
 import { createPhotoLibrary } from '@/services/photo-library'
@@ -179,6 +180,8 @@ onReachBottom(() => { void loadPhotos(false) })
     <view v-if="!loading && !error && !photos.length" class="empty-state">
       <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
       <text class="empty-title">这里还没有影像</text>
+      <text class="empty-copy">{{ selectionStorage.hasProject() ? '拍一张，或等电脑把照片同步过来。' : '先选择或加入工程，再查看影像。' }}</text>
+      <button class="primary-button pressable empty-action" @tap="selectionStorage.hasProject() ? launchCapture() : uniApi.navigateTo({ url: '/pages/project/select' })">{{ selectionStorage.hasProject() ? '去拍照' : '选择工程' }}</button>
     </view>
     <!-- #ifdef H5 -->
     <H5TabBar :selected="1" :badge="queueRuntime.pendingCount.value" />

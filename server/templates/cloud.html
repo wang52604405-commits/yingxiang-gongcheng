@@ -465,8 +465,9 @@
       $("#detailBox").style.display = "none";
       $("#logoutBtn").style.display = "inline-block";
       $("#whoami").textContent = "当前账号：" + username;
-      const data = await api("/api/cloud/projects");
       const grid = $("#projectGrid");
+      grid.innerHTML = '<div class="card muted">正在读取项目…</div>';
+      const data = await api("/api/cloud/projects");
       grid.innerHTML = "";
       if (!data.ok) {
         grid.innerHTML = '<div class="card muted">' + esc(data.error || "项目暂时加载不了，请稍后重试") + "</div>";
@@ -501,6 +502,7 @@
       if (thumbPager.total && thumbPager.offset >= thumbPager.total) return;
       thumbPager.loading = true;
       setMoreLabel("正在加载…", false);
+      if (!thumbPager.offset) $("#thumbGrid").innerHTML = '<div class="card muted" id="thumbLoading">正在加载预览…</div>';
       const data = await api("/api/cloud/thumbs?project_id=" + encodeURIComponent(thumbPager.id) + "&limit=" + THUMB_PAGE + "&offset=" + thumbPager.offset);
       const grid = $("#thumbGrid");
       thumbPager.loading = false;
@@ -509,6 +511,7 @@
         setMoreLabel("加载更多预览", true);
         return;
       }
+      $("#thumbLoading")?.remove();
       const thumbs = data.thumbs || [];
       if (!thumbs.length && !thumbPager.offset) {
         grid.innerHTML = '<div class="card muted">这个项目还没有预览图。</div>';

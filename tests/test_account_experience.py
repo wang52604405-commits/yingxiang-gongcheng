@@ -194,6 +194,19 @@ class AccountExperienceTest(unittest.TestCase):
         self.assertIn("请填写账号和密码", desktop_js)
         mini = (root / "miniprogram" / "src" / "pages" / "auth" / "bind.vue").read_text(encoding="utf-8")
         self.assertIn("重新发送", mini)
+        desktop_js = next((root / "assets").glob("app-A*.js")).read_text(encoding="utf-8")
+        self.assertIn("正在读取最近上传", desktop_js)
+        self.assertIn("去导入项目划分", desktop_js)
+        self.assertIn("没有符合当前搜索或筛选的单元", desktop_js)
+        cloud = (root / "server" / "templates" / "cloud.html").read_text(encoding="utf-8")
+        self.assertIn("正在读取项目", cloud)
+        self.assertIn("正在加载预览", cloud)
+        admin = (root / "server" / "templates" / "admin.html").read_text(encoding="utf-8")
+        self.assertIn("请填写管理员账号和密码", admin)
+        self.assertIn('["#loginUser", "#loginPass"]', admin)
+        home = (root / "miniprogram" / "src" / "pages" / "home" / "index.vue").read_text(encoding="utf-8")
+        self.assertIn("正在读取最近影像", home)
+        self.assertIn("选择或加入工程", home)
 
 
 if __name__ == "__main__":

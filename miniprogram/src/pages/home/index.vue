@@ -13,6 +13,7 @@ import { bootstrapState, loadBootstrap } from '@/stores/bootstrap'
 import { selectionStorage } from '@/stores/selection'
 import type { CloudPhoto, ProjectSummary } from '@/types/domain'
 import { shortTime } from '@/utils/format'
+import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { STATUS_LABELS } from '@/services/photo-state'
 import { countTodayCaptures, visibleLocalHomePhotos } from '@/services/home-photo-visibility'
@@ -77,6 +78,7 @@ function prepareMotion() {
   void nextTick(() => setTimeout(() => { motionReady.value = true }, 24))
 }
 function openProject() { uni.navigateTo({ url: '/pages/project/select' }) }
+function startCapture() { void launchCapture() }
 function openApplications() {
   if (!project.value?.id || !canManageProjectMembers(project.value)) return
   uni.navigateTo({ url: '/pages/project/applications' })
@@ -140,7 +142,13 @@ watch(() => sessionState.ready, (ready) => { if (ready && sessionState.account) 
         <view class="recent-copy"><text class="recent-title">{{ photo.title }}</text><text class="recent-meta">{{ photo.draft.assignment?.unit_name || photo.draft.assignment?.other_node_name || '待匹配' }}</text></view><text class="status-chip">{{ STATUS_LABELS[photo.status] }}</text>
       </button>
     </view>
-    <view v-else class="empty-state compact motion-block motion-4"><view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view><text class="empty-title">还没有工程影像</text></view>
+    <view v-else-if="loading" class="empty-state compact motion-block motion-4"><text class="empty-title">正在读取最近影像</text></view>
+    <view v-else class="empty-state compact motion-block motion-4">
+      <view class="empty-symbol"><UiIcon name="gallery" :size="27" /></view>
+      <text class="empty-title">还没有工程影像</text>
+      <text class="empty-copy">选择工程后可以拍照，电脑同步的照片也会出现在这里。</text>
+      <button class="primary-button pressable empty-action" @tap="selectionStorage.hasProject() ? startCapture() : openProject()">{{ selectionStorage.hasProject() ? '去拍照' : '选择或加入工程' }}</button>
+    </view>
     <!-- #ifdef H5 --><H5TabBar :selected="0" :badge="queueRuntime.pendingCount.value" /><!-- #endif -->
   </view>
 </template>
