@@ -2165,8 +2165,15 @@ const $ = (selector) => document.querySelector(selector);
       const passwordInput = $("#gatePassword");
       const username = usernameInput.value.trim();
       const password = passwordInput.value;
+      if (!username || !password) {
+        showNotice("请填写账号和密码", true);
+        return;
+      }
       // 登录前先记住，失败也保留账号
       saveLoginCredentials(username, password);
+      const button = $("#gateLoginBtn");
+      if (button) button.disabled = true;
+      try {
       const data = await apiJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2178,6 +2185,9 @@ const $ = (selector) => document.querySelector(selector);
       showNotice("已进入软件");
       // 登录成功后重新加载工作台数据并显示加载进度
       await loadBootstrap().catch((error) => showNotice(error.message, true));
+      } finally {
+        if (button) button.disabled = false;
+      }
     }
 
     async function submitProjectStaffEntry() {
@@ -5253,13 +5263,20 @@ const $ = (selector) => document.querySelector(selector);
         if (button) button.disabled = false;
       }
     });
-    ["gateUsername"].forEach((id) => {
-      $(`#${id}`).addEventListener("keydown", (event) => {
+    ["gateUsername", "gatePassword"].forEach((id) => {
+      $(`#${id}`)?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
           submitAuth("/api/cloud/login").catch((error) => showNotice(error.message, true));
         }
       });
+    });
+    $("#gateTogglePass")?.addEventListener("click", () => {
+      const input = $("#gatePassword");
+      if (!input) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      $("#gateTogglePass").textContent = show ? "隐藏" : "显示";
     });
     $("#logoutBtn").addEventListener("click", async () => {
       try { await apiJson("/api/cloud/logout", { method: "POST" }); } catch (error) {}

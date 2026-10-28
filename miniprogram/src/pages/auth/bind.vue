@@ -63,7 +63,12 @@ onShow(() => {
   const pending = peekPendingInvite()
   if (pending && pending !== inviteCode.value) { inviteCode.value = pending; inviteMode.value = true }
 })
-onUnload(cancelWechatJoin)
+const recoveryWait = ref(0)
+let recoveryTimer = 0
+onUnload(() => {
+  cancelWechatJoin()
+  clearInterval(recoveryTimer)
+})
 
 function resetError(): void {
   formError.value = ''
@@ -89,12 +94,18 @@ function backFromForgot(): void {
 }
 
 async function sendRecoveryCode(): Promise<void> {
-  if (pendingAction.value) return
+  if (pendingAction.value || recoveryWait.value > 0) return
   resetError()
   pendingAction.value = 'recovery-code'
   try {
     const result = await sendPasswordRecoveryCode(forgotAccount.value)
-    forgotHint.value = '验证码已发送到 ' + (result.email || '账号绑定邮箱') + '，请在有效期内填写'
+    forgotHint.value = '验证码已发到 ' + (result.email || '账号绑定邮箱') + '，10 分钟内填写'
+    recoveryWait.value = 60
+    clearInterval(recoveryTimer)
+    recoveryTimer = setInterval(() => {
+      recoveryWait.value -= 1
+      if (recoveryWait.value <= 0) clearInterval(recoveryTimer)
+    }, 1000) as unknown as number
   } catch (error) {
     formError.value = error instanceof Error ? error.message : '发送验证码失败'
   } finally {
@@ -217,8 +228,8 @@ function backToAccount(): void {
           <input v-model="forgotAccount" class="input" placeholder="输入原注册账号" :disabled="Boolean(pendingAction)" @input="resetError" />
           <text class="field-label">邮箱验证码</text>
           <input v-model="forgotCode" class="input" type="number" maxlength="6" placeholder="请输入6位验证码" :disabled="Boolean(pendingAction)" @input="resetError" />
-          <button class="secondary-button pressable quick-button" :disabled="Boolean(pendingAction)" @tap="sendRecoveryCode">
-            {{ pendingAction === 'recovery-code' ? '发送中…' : '发送邮箱验证码' }}
+          <button class="secondary-button pressable quick-button" :disabled="Boolean(pendingAction) || recoveryWait > 0" @tap="sendRecoveryCode">
+            {{ pendingAction === 'recovery-code' ? '发送中…' : recoveryWait > 0 ? `重新发送 ${recoveryWait}s` : '发送邮箱验证码' }}
           </button>
           <text v-if="forgotHint" class="auth-hint">{{ forgotHint }}</text>
           <text class="field-label">新登录密码</text>

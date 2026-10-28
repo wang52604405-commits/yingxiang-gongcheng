@@ -5,122 +5,246 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像云预览</title>
   <style>
+    :root {
+      --bg: #eef3f8;
+      --card: #ffffff;
+      --ink: #172033;
+      --muted: #5c6b80;
+      --line: #d7e0ea;
+      --accent: #0b6bcb;
+      --accent-dark: #084f96;
+      --soft: #f5f8fb;
+      --ok-bg: #e7f6ee;
+      --ok-ink: #0d7a45;
+      --err-bg: #fdecea;
+      --err-ink: #b42318;
+      --shadow: 0 18px 50px rgba(23, 32, 51, .08);
+    }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; background: #0f1720; color: #e8f0f7;
-      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(900px 420px at 10% -10%, rgba(11, 107, 203, .16), transparent 60%),
+        radial-gradient(700px 360px at 100% 0%, rgba(15, 159, 110, .1), transparent 55%),
+        var(--bg);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
     }
+    button, input { font: inherit; }
     .topbar {
-      display: flex; align-items: center; gap: 12px; padding: 14px 22px;
-      background: #151f2b; border-bottom: 1px solid #22303f;
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 22px; background: rgba(255,255,255,.88);
+      border-bottom: 1px solid var(--line); backdrop-filter: blur(10px);
     }
-    .brand { font-size: 18px; font-weight: 700; color: #fff; }
-    .brand small { color: #7d93a8; font-weight: 400; margin-left: 8px; }
+    .brand { font-size: 17px; font-weight: 760; }
+    .brand small { display: block; margin-top: 2px; color: var(--muted); font-weight: 500; font-size: 12px; }
     .spacer { flex: 1; }
     .btn {
-      padding: 8px 16px; border: 0; border-radius: 6px; cursor: pointer;
-      background: #1f8bd6; color: #fff; font: inherit; font-weight: 700;
-      transition: transform 140ms cubic-bezier(.23,1,.32,1), background-color 160ms ease;
+      min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px;
+      background: var(--accent); color: #fff; font-weight: 700; cursor: pointer;
     }
-    .btn:active { transform: scale(.97); }
-    .btn.ghost { background: #243340; color: #dce7f0; }
+    .btn:hover { background: var(--accent-dark); }
+    .btn:disabled { opacity: .6; cursor: default; }
+    .btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+    .btn.block { width: 100%; }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
-    .card {
-      background: #172230; border: 1px solid #22303f; border-radius: 10px;
-      padding: 20px; margin-bottom: 16px;
+    .auth-stage {
+      max-width: 920px; margin: 28px auto 40px; padding: 0 16px;
+      display: grid; grid-template-columns: minmax(240px, 1fr) minmax(320px, 460px);
+      gap: 28px; align-items: start;
     }
+    .intro h1 { margin: 8px 0 10px; font-size: 34px; line-height: 1.2; letter-spacing: -.4px; }
+    .eyebrow { margin: 0; color: var(--accent); font-size: 13px; font-weight: 760; letter-spacing: .08em; }
+    .lead { margin: 0; color: var(--muted); line-height: 1.7; }
+    .fineprint { margin-top: 18px; color: var(--muted); font-size: 13px; }
+    .fineprint summary { cursor: pointer; }
+    .panel {
+      background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+      box-shadow: var(--shadow); padding: 18px;
+    }
+    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; background: var(--soft); border-radius: 12px; }
+    .modes button {
+      min-height: 40px; border: 0; border-radius: 9px; background: transparent;
+      color: var(--muted); font-weight: 700; cursor: pointer;
+    }
+    .modes button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(23,32,51,.08); }
+    .pane { padding-top: 16px; }
+    .pane h2 { margin: 0 0 6px; font-size: 22px; }
+    label { display: block; margin: 12px 0 6px; font-size: 13px; font-weight: 700; }
+    .optional { color: var(--muted); font-weight: 600; }
     input {
-      padding: 9px 12px; border: 1px solid #2c3c4d; border-radius: 6px;
-      background: #101a26; color: #e8f0f7; font: inherit; width: 100%; margin-bottom: 10px;
+      width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--line);
+      border-radius: 10px; background: #fff; color: var(--ink); font-size: 16px;
     }
-    .notice { padding: 10px 12px; border-radius: 6px; margin: 10px 0; display: none; }
+    input:focus { outline: 3px solid rgba(11,107,203,.18); border-color: var(--accent); }
+    .passline { display: flex; gap: 8px; align-items: center; }
+    .passline input { flex: 1; }
+    .text-btn { border: 0; background: transparent; color: var(--accent); font-weight: 700; cursor: pointer; padding: 8px; }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .hint.ok { color: var(--ok-ink); }
+    .advanced { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: var(--soft); }
+    .advanced summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+    .notice { display: none; margin-top: 12px; padding: 11px 12px; border-radius: 10px; font-size: 13px; line-height: 1.6; }
     .notice.show { display: block; }
-    .notice.err { background: #3a1a18; color: #ffb4ad; border: 1px solid #5c2a26; }
-    .notice.ok { background: #123a2a; color: #a5f0c9; border: 1px solid #1f5c44; }
+    .notice.err { background: var(--err-bg); color: var(--err-ink); }
+    .notice.ok { background: var(--ok-bg); color: var(--ok-ink); }
+    .success-box { padding: 8px 0 4px; }
+    .code-row { display: flex; gap: 8px; align-items: end; }
+    .code-row input { flex: 1; }
+    .code-row .btn { flex: 0 0 auto; }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px; margin-bottom: 14px;
+    }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
     .tile {
-      background: #172230; border: 1px solid #22303f; border-radius: 8px;
-      padding: 10px; cursor: pointer; transition: border-color .15s;
+      background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px; cursor: pointer;
     }
-    @media (hover:hover) and (pointer:fine) { .tile:hover { border-color: #2f8fdb; } }
-    .tile img { width: 100%; height: 150px; object-fit: cover; border-radius: 5px; background: #101a26; }
-    .tile .name { margin-top: 8px; font-size: 12px; color: #aabccd; line-height: 1.4; word-break: break-all; }
-    .tile .code { font-size: 11px; color: #6f8599; font-family: Consolas, monospace; }
-    .tile .count { font-size: 11px; color: #7d93a8; margin-top: 2px; }
-    .back { display: inline-block; color: #7fc3ef; cursor: pointer; margin-bottom: 12px; }
-    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-    .thumb-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: 6px; background: #101a26; }
-    .muted { color: #7d93a8; font-size: 13px; }
-    #loginBox { max-width: 380px; margin: 70px auto; }
-    .link { color: #7fc3ef; cursor: pointer; font-size: 13px; }
-    .price-line { color: #ffd479; font-size: 13px; }
-    @media (prefers-reduced-motion:reduce) { .btn { transition:background-color 120ms ease; } .btn:active { transform:none; } }
+    .tile .name { margin-top: 8px; font-size: 14px; line-height: 1.4; word-break: break-all; }
+    .tile .code { font-size: 12px; color: var(--accent); font-family: Consolas, monospace; }
+    .tile .count { margin-top: 4px; font-size: 12px; color: var(--muted); }
+    .back { display: inline-block; color: var(--accent); cursor: pointer; margin-bottom: 12px; font-weight: 700; }
+    .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+    .thumb-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: 10px; background: var(--soft); }
+    .muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .more { display: block; margin: 16px auto 0; }
+    @media (max-width: 800px) {
+      .auth-stage { grid-template-columns: 1fr; margin-top: 16px; gap: 14px; }
+      .intro h1 { font-size: 28px; }
+      .topbar { align-items: flex-start; }
+    }
+    @media (hover:hover) and (pointer:fine) { .tile:hover { border-color: var(--accent); } }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">工程影像云预览<small>缩略图 + 编号（仅远程查看）</small></div>
+    <div class="brand">工程影像云预览<small>只看自己的项目预览</small></div>
     <div class="spacer"></div>
-    <button class="btn ghost" id="logoutBtn" style="display:none">退出登录</button>
+    <button class="btn ghost" id="logoutBtn" type="button" style="display:none">退出登录</button>
   </div>
 
-  <!-- 登录 / 注册 -->
-  <div id="loginBox" class="card">
-    <h2 style="margin-top:0">云预览登录</h2>
-    <p class="muted">在外面（公网）登录后可查看自己项目的可辨认缩略图和编号。<br>电脑端既有照片仍只同步缩略图；手机原图仅短期中转到绑定电脑，电脑确认归档后服务器删除原图，云端长期只保留不超过 100KB 的预览。</p>
-    <input id="user" placeholder="账号（手机号 / QQ / 邮箱）" autocomplete="username">
-    <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
-    <button class="btn" id="loginBtn" style="width:100%">登录</button>
-    <div class="notice" id="loginNotice"></div>
-    <p class="muted" style="margin-top:14px">没有账号？<span class="link" id="showReg">注册一个</span>　<span class="link" id="showForgot">忘记密码？</span></p>
+  <main class="auth-stage" id="loginBox">
+    <section class="intro">
+      <p class="eyebrow">CLOUD PREVIEW</p>
+      <h1>登录后看项目预览</h1>
+      <p class="lead">账号和密码就够了。预览图用来认照片和编号，原图仍在电脑里处理。</p>
+      <details class="fineprint">
+        <summary>云端照片怎么保存</summary>
+        <p>电脑端既有照片仍只同步缩略图；手机原图仅短期中转到绑定电脑，电脑确认归档后服务器删除原图，云端长期只保留不超过 100KB 的预览。</p>
+      </details>
+    </section>
 
-    <div id="regBox" style="display:none; margin-top:8px">
-      <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
-      <input id="regUser" placeholder="账号（手机号 / QQ / 邮箱）">
-      <input id="regPass" type="password" placeholder="登录密码（至少 8 位，包含字母和数字）">
-      <input id="regEmail" placeholder="邮箱（选填，用于找回密码）">
-      <input id="regInvite" placeholder="邀请码（选填，填了双方有奖励）">
-      <label class="muted" style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 12px;line-height:1.5;"><input id="regDeleteAck" type="checkbox" style="width:auto;margin:3px 0 0;">我已了解：登录密码不等于工程删除密码，首次进入桌面软件时需要单独设置并保存工程删除密码。</label>
-      <button class="btn" id="regBtn" style="width:100%">注册</button>
-      <p class="muted" style="font-size:12px">好友注册并首次登录软件后才算有效邀请，同一设备重复注册不计入。</p>
-    </div>
-
-    <div id="forgotBox" style="display:none; margin-top:8px">
-      <hr style="border:none;border-top:1px solid #22303f;margin:14px 0">
-      <input id="forgotUser" placeholder="账号">
-      <div style="display:flex;gap:8px">
-        <input id="forgotCode" placeholder="邮箱验证码" style="flex:1">
-        <button class="btn" id="forgotSendBtn" style="flex:0 0 auto">发送验证码</button>
+    <section class="panel">
+      <div class="modes" role="tablist" aria-label="登录、注册或找回密码">
+        <button type="button" id="tabLogin" data-mode="login" class="active" role="tab">登录</button>
+        <button type="button" id="tabRegister" data-mode="register" role="tab">注册</button>
+        <button type="button" id="tabForgot" data-mode="forgot" role="tab">找回密码</button>
       </div>
-      <input id="forgotPass" type="password" placeholder="新密码（至少 8 位，包含字母和数字）">
-      <button class="btn" id="forgotResetBtn" style="width:100%">重置密码</button>
-    </div>
-  </div>
 
-  <!-- 项目列表 -->
+      <form class="pane" id="panelLogin" autocomplete="on">
+        <h2>登录</h2>
+        <p class="hint">用手机号、QQ 或邮箱登录。</p>
+        <label for="user">账号</label>
+        <input id="user" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <label for="pass">密码</label>
+        <div class="passline">
+          <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
+          <button class="text-btn" id="togglePass" type="button">显示</button>
+        </div>
+        <div style="height:14px"></div>
+        <button class="btn block" id="loginBtn" type="submit">登录</button>
+      </form>
+
+      <form class="pane" id="panelRegister" hidden autocomplete="on">
+        <h2>注册</h2>
+        <p class="hint">只要账号和密码。邮箱用来找回，可以现在填，也可以登录后补。</p>
+        <label for="regUser">账号</label>
+        <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <label for="regPass">密码</label>
+        <div class="passline">
+          <input id="regPass" type="password" placeholder="至少 8 位，含字母和数字" autocomplete="new-password">
+          <button class="text-btn" id="toggleRegPass" type="button">显示</button>
+        </div>
+        <p class="hint" id="regPassHint">至少 8 位，并且同时包含字母和数字</p>
+        <label for="regEmail">找回邮箱 <span class="optional">选填</span></label>
+        <input id="regEmail" type="email" placeholder="忘了密码时用来收验证码" autocomplete="email">
+        <p class="hint" id="emailHint">账号如果本身是邮箱，会自动用来找回。</p>
+        <details class="advanced">
+          <summary>有邀请码？（选填）</summary>
+          <label for="regInvite">邀请码</label>
+          <input id="regInvite" placeholder="好友的邀请码">
+          <p class="hint">好友第一次登录软件后才算邀请成功。</p>
+        </details>
+        <details class="advanced">
+          <summary>登录密码和删照片的密码不是同一个</summary>
+          <p class="hint">第一次打开桌面软件时，会再设一个工程删除密码，只在删除照片或工程时使用。平台不会显示明文。这里不用勾选确认。</p>
+        </details>
+        <div style="height:14px"></div>
+        <button class="btn block" id="regBtn" type="submit">注册</button>
+      </form>
+
+      <form class="pane" id="panelForgot" hidden>
+        <h2>找回密码</h2>
+        <p class="hint" id="forgotLead">填写注册账号。如果账号是邮箱，验证码会发到这个邮箱。</p>
+        <label for="forgotUser">账号或绑定邮箱</label>
+        <input id="forgotUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <p class="hint" id="forgotHint"></p>
+        <label for="forgotCode">验证码</label>
+        <div class="code-row">
+          <input id="forgotCode" inputmode="numeric" maxlength="6" placeholder="6 位验证码" autocomplete="one-time-code">
+          <button class="btn ghost" id="forgotSendBtn" type="button">发送验证码</button>
+        </div>
+        <div class="notice" id="forgotSuccess"></div>
+        <label for="forgotPass">新密码</label>
+        <div class="passline">
+          <input id="forgotPass" type="password" placeholder="至少 8 位，含字母和数字" autocomplete="new-password">
+          <button class="text-btn" id="toggleForgotPass" type="button">显示</button>
+        </div>
+        <p class="hint" id="forgotPassHint">至少 8 位，并且同时包含字母和数字</p>
+        <div style="height:14px"></div>
+        <button class="btn block" id="forgotResetBtn" type="submit">重置密码</button>
+      </form>
+
+      <div class="pane" id="panelDone" hidden>
+        <div class="success-box">
+          <h2>密码已重置</h2>
+          <p class="lead">现在可以用新密码登录。</p>
+          <button class="btn block" id="doneLoginBtn" type="button">去登录</button>
+        </div>
+      </div>
+      <div class="notice" id="loginNotice" role="status"></div>
+    </section>
+  </main>
+
   <div id="projectsBox" class="wrap" style="display:none">
     <div class="card">
       <div id="whoami" class="muted"></div>
-      <div class="price-line" id="priceLine">月度会员 39 元 / 终身会员 399 元（原价）；云端长期只保留不超过 100KB 的预览，手机原图仅作短期中转。</div>
+      <div id="priceLine" class="muted">会员价格加载后显示。云端长期只保留不超过 100KB 的预览。</div>
     </div>
     <div class="grid" id="projectGrid"></div>
   </div>
 
-  <!-- 项目缩略图详情 -->
   <div id="detailBox" class="wrap" style="display:none">
     <span class="back" id="backBtn">← 返回项目列表</span>
     <div class="card">
-      <div id="detailTitle" style="font-weight:700;margin-bottom:4px"></div>
+      <div id="detailTitle" style="font-weight:760;margin-bottom:4px"></div>
       <div class="muted" id="detailMeta"></div>
-      <p class="muted" style="margin-bottom:0">以下为可辨认缩略图预览（非原图）。查看和编辑原图请在局域网内使用桌面版。</p>
+      <p class="muted" style="margin-bottom:0">下面是预览图，不是原图。要看原图，请在局域网里打开桌面版。</p>
     </div>
     <div class="thumb-grid" id="thumbGrid"></div>
+    <button class="btn ghost more" id="thumbMore" type="button" hidden>加载更多预览</button>
   </div>
 
   <script>
     const $ = (s) => document.querySelector(s);
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const THUMB_PAGE = 24;
     let token = localStorage.getItem("album_cloud_token") || "";
     let username = localStorage.getItem("album_cloud_user") || "";
+    let forgotCooldown = 0;
+    let forgotTimer = 0;
+    let thumbPager = null;
 
     function reportError(message, context = {}, stack = "", severity = "error") {
       fetch("/api/client-errors", {
@@ -139,6 +263,60 @@
       el.textContent = msg;
       el.className = "notice show " + (ok ? "ok" : "err");
     }
+    function clearNotice() {
+      const el = $("#loginNotice");
+      el.textContent = "";
+      el.className = "notice";
+    }
+    function passwordOk(value) {
+      return value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value);
+    }
+    function paintPasswordHint(input, hint) {
+      const ok = passwordOk(input.value);
+      hint.textContent = input.value && ok ? "密码强度符合要求" : "至少 8 位，并且同时包含字母和数字";
+      hint.className = "hint" + (input.value && ok ? " ok" : "");
+    }
+    function bindPasswordToggle(button, input) {
+      button.addEventListener("click", () => {
+        const show = input.type === "password";
+        input.type = show ? "text" : "password";
+        button.textContent = show ? "隐藏" : "显示";
+      });
+    }
+    function showMode(mode, updateHash = true) {
+      const name = ["register", "forgot", "done"].includes(mode) ? mode : "login";
+      $("#panelLogin").hidden = name !== "login";
+      $("#panelRegister").hidden = name !== "register";
+      $("#panelForgot").hidden = name !== "forgot";
+      $("#panelDone").hidden = name !== "done";
+      document.querySelectorAll(".modes button").forEach((button) => {
+        const on = button.dataset.mode === (name === "done" ? "forgot" : name);
+        button.classList.toggle("active", on);
+        button.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      clearNotice();
+      if (name === "forgot") {
+        const typed = $("#user").value.trim();
+        if (typed && !$("#forgotUser").value.trim()) $("#forgotUser").value = typed;
+        updateForgotHint();
+      }
+      if (updateHash && name !== "done") {
+        history.replaceState(null, "", name === "login" ? location.pathname + location.search : "#" + name);
+      }
+    }
+    function updateForgotHint() {
+      const account = $("#forgotUser").value.trim();
+      $("#forgotHint").textContent = EMAIL_RE.test(account) ? "这个账号是邮箱，验证码会发到它。" : "";
+    }
+    function syncRecoveryEmail() {
+      const user = $("#regUser").value.trim();
+      const email = $("#regEmail");
+      if (EMAIL_RE.test(user) && (!email.value.trim() || email.dataset.autofilled === "1")) {
+        email.value = user;
+        email.dataset.autofilled = "1";
+        $("#emailHint").textContent = "已填入账号邮箱，用来找回密码。可以改成别的邮箱。";
+      }
+    }
 
     async function api(url, opts = {}) {
       const headers = { "Content-Type": "application/json" };
@@ -151,82 +329,130 @@
       }
       let data;
       try { data = await resp.json(); } catch (e) { data = { ok: false, error: "服务器响应异常" }; }
-      if (!resp.ok || data.ok === false) reportError(data.error || `HTTP ${resp.status}`, { url, method: opts.method || "GET", status: resp.status }, "", resp.status >= 500 ? "error" : "warning");
+      if ((!resp.ok || data.ok === false) && resp.status >= 500) {
+        reportError(data.error || `HTTP ${resp.status}`, { url, method: opts.method || "GET", status: resp.status }, "", "error");
+      }
       return data;
     }
 
     async function loadProduct() {
       const data = await api("/api/product-config");
-      if (!data.ok) return;
+      if (!data.ok || !$("#priceLine")) return;
       const pricing = data.product?.pricing || {};
-      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 39} 元 / 终身会员 ${pricing.lifetime_price || 399} 元（${pricing.price_label || "原价"}）；云端长期只保留不超过 100KB 的预览，手机原图仅作短期中转。`;
+      $("#priceLine").textContent = `月度会员 ${pricing.monthly_price || 39} 元 / 终身会员 ${pricing.lifetime_price || 399} 元（${pricing.price_label || "原价"}）。云端长期只保留不超过 100KB 的预览。`;
     }
 
     async function checkAuth() {
       if (!token) return false;
       const data = await api("/api/me");
       if (data.ok) { showProjects(); return true; }
+      token = "";
+      localStorage.removeItem("album_cloud_token");
       return false;
     }
 
-    $("#loginBtn").addEventListener("click", async () => {
+    $("#panelLogin").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const name = $("#user").value.trim();
+      const password = $("#pass").value;
+      if (!name || !password) { notice($("#loginNotice"), "请填写账号和密码", false); return; }
+      $("#loginBtn").disabled = true;
       const data = await api("/api/login", {
         method: "POST",
-        body: JSON.stringify({ username: $("#user").value.trim(), password: $("#pass").value }),
+        body: JSON.stringify({ username: name, password }),
       });
-      if (!data.ok) { notice($("#loginNotice"), data.error || "登录失败", false); return; }
-      token = data.token; username = (data.account && data.account.username) || $("#user").value.trim();
+      $("#loginBtn").disabled = false;
+      if (!data.ok) { notice($("#loginNotice"), data.error || "账号或密码不对，请再试一次", false); return; }
+      token = data.token; username = (data.account && data.account.username) || name;
       localStorage.setItem("album_cloud_token", token);
       localStorage.setItem("album_cloud_user", username);
       $("#user").value = ""; $("#pass").value = "";
+      loadProduct();
       showProjects();
     });
 
-    $("#showReg").addEventListener("click", () => {
-      $("#regBox").style.display = $("#regBox").style.display === "none" ? "block" : "none";
+    document.querySelectorAll(".modes button").forEach((button) => {
+      button.addEventListener("click", () => showMode(button.dataset.mode));
     });
+    $("#regUser").addEventListener("change", syncRecoveryEmail);
+    $("#regPass").addEventListener("input", () => paintPasswordHint($("#regPass"), $("#regPassHint")));
+    $("#forgotPass").addEventListener("input", () => paintPasswordHint($("#forgotPass"), $("#forgotPassHint")));
+    $("#forgotUser").addEventListener("input", updateForgotHint);
+    bindPasswordToggle($("#togglePass"), $("#pass"));
+    bindPasswordToggle($("#toggleRegPass"), $("#regPass"));
+    bindPasswordToggle($("#toggleForgotPass"), $("#forgotPass"));
 
-    $("#regBtn").addEventListener("click", async () => {
+    $("#panelRegister").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      syncRecoveryEmail();
       const payload = {
         username: $("#regUser").value.trim(),
         password: $("#regPass").value,
       };
       const email = $("#regEmail").value.trim();
       const invite = $("#regInvite").value.trim();
+      if (!payload.username || !payload.password) { notice($("#loginNotice"), "请填写账号和密码", false); return; }
       if (email) payload.email = email;
       if (invite) payload.invite_code = invite;
-      if (payload.password.length < 8 || !/[A-Za-z]/.test(payload.password) || !/\d/.test(payload.password)) {
+      if (!passwordOk(payload.password)) {
         notice($("#loginNotice"), "登录密码至少 8 位，并同时包含字母和数字", false); return;
       }
-      if (!$("#regDeleteAck").checked) { notice($("#loginNotice"), "请先确认已了解工程删除密码的用途", false); return; }
+      $("#regBtn").disabled = true;
       const data = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
-      notice($("#loginNotice"), data.ok ? "注册成功。首次进入桌面软件时请立即设置并保存工程删除密码。" : (data.error || "注册失败"), !!data.ok);
-      if (data.ok) { $("#regBox").style.display = "none"; $("#user").value = payload.username; }
+      $("#regBtn").disabled = false;
+      notice($("#loginNotice"), data.ok ? "注册成功，用刚才的账号登录即可。" : (data.error || "注册没有完成，请检查账号后再试"), !!data.ok);
+      if (data.ok) { $("#user").value = payload.username; showMode("login"); }
     });
 
-    // 忘记密码
-    $("#showForgot").addEventListener("click", () => {
-      $("#forgotBox").style.display = $("#forgotBox").style.display === "none" ? "block" : "none";
-    });
+    function startForgotCooldown() {
+      forgotCooldown = 60;
+      const button = $("#forgotSendBtn");
+      button.disabled = true;
+      clearInterval(forgotTimer);
+      forgotTimer = setInterval(() => {
+        forgotCooldown -= 1;
+        button.textContent = forgotCooldown > 0 ? `重新发送 ${forgotCooldown}s` : "发送验证码";
+        if (forgotCooldown <= 0) {
+          clearInterval(forgotTimer);
+          button.disabled = false;
+        }
+      }, 1000);
+    }
     $("#forgotSendBtn").addEventListener("click", async () => {
       const account = $("#forgotUser").value.trim();
-      if (!account) { notice($("#loginNotice"), "请输入账号", false); return; }
+      if (!account) { notice($("#loginNotice"), "请先填写账号或邮箱", false); return; }
+      if (forgotCooldown > 0) return;
+      $("#forgotSendBtn").disabled = true;
+      $("#forgotSendBtn").textContent = "发送中…";
       const data = await api("/api/forgot-password", { method: "POST", body: JSON.stringify({ account }) });
-      notice($("#loginNotice"), data.ok ? `验证码已发送到 ${data.email}` : (data.error || "发送失败"), !!data.ok);
-    });
-    $("#forgotResetBtn").addEventListener("click", async () => {
-      const data = await api("/api/reset-password", { method: "POST", body: JSON.stringify({
-        account: $("#forgotUser").value.trim(),
-        code: $("#forgotCode").value.trim(),
-        new_password: $("#forgotPass").value,
-      }) });
-      notice($("#loginNotice"), data.ok ? "密码已重置，请用新密码登录" : (data.error || "重置失败"), !!data.ok);
-      if (data.ok) {
-        $("#forgotBox").style.display = "none";
-        $("#user").value = $("#forgotUser").value.trim();
-        $("#forgotCode").value = ""; $("#forgotPass").value = "";
+      if (!data.ok) {
+        $("#forgotSendBtn").disabled = false;
+        $("#forgotSendBtn").textContent = "发送验证码";
+        notice($("#loginNotice"), data.error || "验证码没有发出去，请稍后再试", false);
+        return;
       }
+      notice($("#forgotSuccess"), `验证码已发到 ${data.email}，10 分钟内有效。`, true);
+      clearNotice();
+      startForgotCooldown();
     });
+    $("#panelForgot").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const account = $("#forgotUser").value.trim();
+      const code = $("#forgotCode").value.trim();
+      const newPass = $("#forgotPass").value;
+      if (!account || !code || !newPass) { notice($("#loginNotice"), "请填写账号、验证码和新密码", false); return; }
+      if (!passwordOk(newPass)) { notice($("#loginNotice"), "新密码至少 8 位，并同时包含字母和数字", false); return; }
+      $("#forgotResetBtn").disabled = true;
+      const data = await api("/api/reset-password", { method: "POST", body: JSON.stringify({
+        account, code, new_password: newPass,
+      }) });
+      $("#forgotResetBtn").disabled = false;
+      if (!data.ok) { notice($("#loginNotice"), data.error || "密码没有重置，请核对验证码", false); return; }
+      $("#user").value = account;
+      $("#forgotCode").value = ""; $("#forgotPass").value = "";
+      showMode("done");
+    });
+    $("#doneLoginBtn").addEventListener("click", () => showMode("login"));
 
     $("#logoutBtn").addEventListener("click", () => {
       token = ""; localStorage.removeItem("album_cloud_token"); localStorage.removeItem("album_cloud_user");
@@ -236,60 +462,107 @@
     async function showProjects() {
       $("#loginBox").style.display = "none";
       $("#projectsBox").style.display = "block";
+      $("#detailBox").style.display = "none";
       $("#logoutBtn").style.display = "inline-block";
       $("#whoami").textContent = "当前账号：" + username;
       const data = await api("/api/cloud/projects");
       const grid = $("#projectGrid");
       grid.innerHTML = "";
-      if (!data.ok) { notice(grid, data.error || "加载失败", false); return; }
+      if (!data.ok) {
+        grid.innerHTML = '<div class="card muted">' + esc(data.error || "项目暂时加载不了，请稍后重试") + "</div>";
+        return;
+      }
       const list = data.projects || [];
       if (!list.length) {
-        grid.innerHTML = '<div class="card muted">暂无项目数据。请在局域网内的软件上打开一次，自动同步后这里就能看到。</div>';
+        grid.innerHTML = '<div class="card muted">还没有项目。在电脑上打开一次软件，同步后这里就能看到。</div>';
         return;
       }
       list.forEach((p) => {
         const tile = document.createElement("div");
         tile.className = "tile";
-        const count = p.thumb_count ? p.thumb_count + " 张" : "暂无";
+        const count = p.thumb_count ? p.thumb_count + " 张预览" : "暂无预览";
         tile.innerHTML =
-          '<div class="code">' + esc(p.project_code) + '</div>' +
-          '<div class="name">' + esc(p.project_name || "") + '</div>' +
-          '<div class="count">' + count + '</div>';
+          '<div class="code">' + esc(p.project_code) + "</div>" +
+          '<div class="name">' + esc(p.project_name || "未命名项目") + "</div>" +
+          '<div class="count">' + count + "</div>";
         tile.addEventListener("click", () => openDetail(p));
         grid.appendChild(tile);
       });
     }
 
+    function setMoreLabel(text, hidden) {
+      const button = $("#thumbMore");
+      button.hidden = !!hidden;
+      button.textContent = text;
+      button.disabled = text.indexOf("正在") === 0;
+    }
+    async function loadMoreThumbs() {
+      if (!thumbPager || thumbPager.loading) return;
+      if (thumbPager.total && thumbPager.offset >= thumbPager.total) return;
+      thumbPager.loading = true;
+      setMoreLabel("正在加载…", false);
+      const data = await api("/api/cloud/thumbs?project_id=" + encodeURIComponent(thumbPager.id) + "&limit=" + THUMB_PAGE + "&offset=" + thumbPager.offset);
+      const grid = $("#thumbGrid");
+      thumbPager.loading = false;
+      if (!data.ok) {
+        if (!thumbPager.offset) grid.innerHTML = '<div class="card muted">预览暂时加载不了，请返回后再试。</div>';
+        setMoreLabel("加载更多预览", true);
+        return;
+      }
+      const thumbs = data.thumbs || [];
+      if (!thumbs.length && !thumbPager.offset) {
+        grid.innerHTML = '<div class="card muted">这个项目还没有预览图。</div>';
+        setMoreLabel("", true);
+        return;
+      }
+      thumbs.forEach((t) => {
+        const div = document.createElement("div");
+        div.innerHTML = '<img alt="' + esc(t.photo_name) + '" src="data:image/webp;base64,' + esc(t.thumb_b64) + '">' +
+          '<div class="muted" style="font-size:12px;word-break:break-all">' + esc(t.photo_name) + "</div>";
+        grid.appendChild(div);
+      });
+      thumbPager.offset += thumbs.length;
+      thumbPager.total = Number(data.total || thumbPager.offset);
+      const more = thumbPager.offset < thumbPager.total;
+      setMoreLabel(more ? "加载更多预览" : "", !more);
+      if (more) requestAnimationFrame(() => {
+        const button = $("#thumbMore");
+        if (!button.hidden && button.getBoundingClientRect().top < window.innerHeight + 40) loadMoreThumbs();
+      });
+    }
     async function openDetail(proj) {
       $("#projectsBox").style.display = "none";
       $("#detailBox").style.display = "block";
-      $("#detailTitle").textContent = (proj.project_name || "") + "  " + (proj.project_code || "");
+      $("#detailTitle").textContent = (proj.project_name || "未命名项目") + "  " + (proj.project_code || "");
       $("#detailMeta").textContent = "编号：" + (proj.project_code || "");
-      const data = await api("/api/cloud/thumbs?project_id=" + proj.id);
-      const grid = $("#thumbGrid");
-      grid.innerHTML = "";
-      if (!data.ok) { grid.innerHTML = '<div class="card muted">加载失败</div>'; return; }
-      const thumbs = data.thumbs || [];
-      if (!thumbs.length) { grid.innerHTML = '<div class="card muted">暂无缩略图</div>'; return; }
-      thumbs.forEach((t) => {
-        const div = document.createElement("div");
-        div.innerHTML = '<img src="data:image/webp;base64,' + t.thumb_b64 + '" alt="' + esc(t.photo_name) + '">' +
-          '<div class="muted" style="font-size:11px;word-break:break-all">' + esc(t.photo_name) + '</div>';
-        grid.appendChild(div);
-      });
+      $("#thumbGrid").innerHTML = "";
+      thumbPager = { id: proj.id, offset: 0, total: 0, loading: false };
+      await loadMoreThumbs();
+    }
+    $("#thumbMore").addEventListener("click", () => loadMoreThumbs());
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreThumbs();
+      }, { rootMargin: "160px" });
+      observer.observe($("#thumbMore"));
     }
 
     $("#backBtn").addEventListener("click", () => {
       $("#detailBox").style.display = "none";
       $("#projectsBox").style.display = "block";
+      thumbPager = null;
     });
 
     function esc(s) {
       return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
-    loadProduct();
-    checkAuth();
+    showMode(location.hash === "#register" ? "register" : location.hash === "#forgot" ? "forgot" : "login", false);
+    window.addEventListener("hashchange", () => {
+      const mode = location.hash === "#register" ? "register" : location.hash === "#forgot" ? "forgot" : "login";
+      showMode(mode, false);
+    });
+    if (token) Promise.all([loadProduct(), checkAuth()]);
   </script>
 </body>
 </html>

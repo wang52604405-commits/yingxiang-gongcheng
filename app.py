@@ -267,12 +267,19 @@ def standard_rules_from_checklist():
     return rules
 
 
+_STANDARD_UNIT_RULES_CACHE = None
+
+
 def standard_unit_rules():
-    rules = default_standard_unit_rules() + standard_rules_from_checklist()
-    for rule in rules:
-        rule["division_type"] = "unit"
-        rule["processes"] = []
-    return rules
+    """清单文件在安装后不变，进程内只读一次。"""
+    global _STANDARD_UNIT_RULES_CACHE
+    if _STANDARD_UNIT_RULES_CACHE is None:
+        rules = default_standard_unit_rules() + standard_rules_from_checklist()
+        for rule in rules:
+            rule["division_type"] = "unit"
+            rule["processes"] = []
+        _STANDARD_UNIT_RULES_CACHE = rules
+    return _STANDARD_UNIT_RULES_CACHE
 
 
 def match_standard_unit(unit_name):
@@ -868,13 +875,14 @@ def _normalize_engineering_settings(settings):
     return settings
 
 
-def read_engineering_settings(project_id=None):
+def read_engineering_settings(project_id=None, data=None):
     """读取当前工程的独立设置。
 
     老版只有一份工程设置文件。升级后不改写它；未迁移的当前工程仍可读到
     原有设置，第一次保存或新建工程后才会写入该工程自己的 metadata。
+    传入已读入的工程列表时不再重复打开工程文件。
     """
-    data = read_engineering_projects()
+    data = read_engineering_projects() if data is None else data
     target_id = project_id or data.get("active_id")
     project = next((item for item in data.get("projects", []) if item.get("id") == target_id), None)
     saved = project.get("engineering_settings") if isinstance(project, dict) else None
@@ -1071,9 +1079,9 @@ def numbering_settings_signature(settings):
     ).hexdigest()
 
 
-def apply_current_engineering_numbering(force=False):
+def apply_current_engineering_numbering(force=False, data=None):
     """把当前工程已保存的编号规则应用到所有已有照片。"""
-    settings = read_engineering_settings()
+    settings = read_engineering_settings(data=data)
     signature = numbering_settings_signature(settings)
     applied = str(settings.get("numbering_applied_signature") or "")
     # 编号策略升级或用户修改规则后都立即重排。策略版本进入签名，确保
@@ -1084,7 +1092,8 @@ def apply_current_engineering_numbering(force=False):
         result = manager.renumber_current_engineering_projects()
         result["changed"] = True
     if should_apply or applied != signature:
-        data = read_engineering_projects()
+        if data is None:
+            data = read_engineering_projects()
         project = current_engineering_project(data)
         stored = project.get("engineering_settings")
         stored = dict(stored) if isinstance(stored, dict) else dict(settings)
@@ -5475,9 +5484,27 @@ def default_engineering_project():
     }
 
 
+_ENGINEERING_READ_CACHE = {"sig": None, "data": None}
+
+
+def _copy_engineering_data(data):
+    return json.loads(json.dumps(data, ensure_ascii=False))
+
+
 def read_engineering_projects():
     default_project = default_engineering_project()
-    if not ENGINEERING_PROJECTS_PATH.exists():
+    try:
+        stat = ENGINEERING_PROJECTS_PATH.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        signature = None
+    if (
+        signature is not None
+        and _ENGINEERING_READ_CACHE["sig"] == signature
+        and isinstance(_ENGINEERING_READ_CACHE["data"], dict)
+    ):
+        return _copy_engineering_data(_ENGINEERING_READ_CACHE["data"])
+    if signature is None:
         return {"active_id": default_project["id"], "projects": [default_project]}
     try:
         data = json.loads(ENGINEERING_PROJECTS_PATH.read_text(encoding="utf-8"))
@@ -5529,12 +5556,20 @@ def read_engineering_projects():
             ENGINEERING_PROJECTS_PATH.write_text(
                 json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            stat = ENGINEERING_PROJECTS_PATH.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
         except OSError:
-            pass
+            signature = None
+    if signature is not None:
+        _ENGINEERING_READ_CACHE["sig"] = signature
+        _ENGINEERING_READ_CACHE["data"] = normalized
+        return _copy_engineering_data(normalized)
     return normalized
 
 
 def write_engineering_projects(data):
+    _ENGINEERING_READ_CACHE["sig"] = None
+    _ENGINEERING_READ_CACHE["data"] = None
     for project in data.get("projects", []) if isinstance(data, dict) else []:
         if isinstance(project, dict):
             project.pop("delete_password", None)
@@ -7513,25 +7548,26 @@ def api_bootstrap():
             "dashboard": {}, "hierarchy": [], "optimization_status": _public_photo_optimization_status(),
             "app_version": cloud_client.APP_VERSION,
         })
-    apply_current_engineering_numbering(force=False)
     engineering_data = read_engineering_projects()
+    apply_current_engineering_numbering(force=False, data=engineering_data)
+    active_project = current_engineering_project(engineering_data)
     snapshot = manager.hierarchy_snapshot()
     response = jsonify({
         "ok": True,
         "user": user,
         "revision": manager.revision(),
-        "project_info": _public_project(current_engineering_project(engineering_data)),
+        "project_info": _public_project(active_project),
         "engineering_projects": [_public_project(item) for item in engineering_data.get("projects", [])],
         "active_engineering_project_id": engineering_data.get("active_id"),
-        "settings": read_engineering_settings(),
+        "settings": read_engineering_settings(data=engineering_data),
         "dashboard": snapshot["dashboard"],
         "hierarchy": snapshot["hierarchy"],
         "optimization_status": _public_photo_optimization_status(),
         "app_version": cloud_client.APP_VERSION,
         "professional_catalog": professional_templates.catalog(),
         "professional_plan_summary": professional_templates.plan_summary(
-            current_engineering_project(engineering_data).get("industry", "水利工程"),
-            current_engineering_project(engineering_data).get("project_type", ""),
+            active_project.get("industry", "水利工程"),
+            active_project.get("project_type", ""),
         ),
     })
     ensure_photo_optimizer_started()

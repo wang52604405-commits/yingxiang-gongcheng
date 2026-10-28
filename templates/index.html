@@ -212,14 +212,16 @@
         <h1>工程影像管理平台</h1>
       </div>
       <h2>账号登录</h2>
-      <p>登录后进入工程工作台；首次使用请直接注册账号。</p>
+      <p>登录后进入工程工作台。没有账号可以注册，忘了密码可以找回。</p>
       <div class="auth-form">
         <label>账号<input id="gateUsername" type="text" placeholder="手机号 / QQ / 邮箱" autocomplete="username"></label>
-        <label>密码<input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"></label>
+        <label>密码<span class="auth-passline"><input id="gatePassword" type="password" placeholder="请输入登录密码" autocomplete="current-password"><button type="button" id="gateTogglePass" class="auth-text-btn">显示</button></span></label>
         <div class="auth-actions">
           <button type="button" id="gateLoginBtn">登录</button>
           <a class="secondary auth-register-link" id="gateRegisterBtn" href="https://shuiliyingxiang.cn/member#register" target="_blank" rel="noopener noreferrer" role="button">注册</a>
         </div>
+        <p class="auth-extra"><a id="gateForgotBtn" href="https://shuiliyingxiang.cn/member#forgot" target="_blank" rel="noopener noreferrer">忘记密码</a></p>
+        <div id="gateNotice" class="notice"></div>
         <section class="project-staff-entry" aria-labelledby="projectStaffEntryTitle">
           <div class="project-staff-entry-head">
             <strong id="projectStaffEntryTitle">项目人员入口</strong>
@@ -232,7 +234,6 @@
           <button type="button" id="gateStaffEnterBtn" class="secondary">进入已加入项目</button>
         </section>
       </div>
-      <div id="gateNotice" class="notice"></div>
     </div>
     <!-- 首开引导：登录页新手提示（popover 挂载点） -->
     <div id="guideHost" aria-hidden="true"></div>
