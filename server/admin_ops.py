@@ -8,6 +8,9 @@ from datetime import datetime, timedelta, timezone
 from contextlib import closing
 import sqlite3
 import time
+import secrets
+
+from werkzeug.security import generate_password_hash
 
 from flask import g, jsonify, request
 from . import config, db
@@ -134,6 +137,8 @@ def register_admin_ops(app, require_admin, user_from_token):
                 return jsonify(ok=False, error='账号不存在'), 404
             if account_id == admin['id'] or account['role'] == 'admin':
                 return jsonify(ok=False, error='此入口不能停用或恢复管理员账号'), 400
+            if account['status'] == 'retired':
+                return jsonify(ok=False, error='已注销的旧账号不可恢复，请使用原用户名重新注册'), 409
             if account['status'] == status:
                 return jsonify(ok=True, changed=False)
             conn.execute('UPDATE accounts SET status=? WHERE id=?', (status, account_id))
@@ -146,5 +151,129 @@ def register_admin_ops(app, require_admin, user_from_token):
                          (account_id, admin['id'], status, note, datetime.now(timezone.utc).isoformat()))
             conn.commit()
             return jsonify(ok=True, changed=True)
+        finally:
+            conn.close()
+
+
+    @app.post('/api/admin/accounts/<int:account_id>/reset-login-password')
+    def admin_reset_login_password(account_id):
+        """Admin-assisted recovery for customers without a verified recovery mailbox.
+
+        A strong temporary password is displayed exactly once. Never log it or
+        store it in audit notes; all previously issued tokens are revoked.
+        """
+        admin = require_admin()
+        if not admin:
+            return jsonify(ok=False, error='需要管理员权限'), 403
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(ok=False, error='参数不正确'), 400
+        username = str(data.get('confirm_username') or '').strip()
+        note = str(data.get('note') or '').strip()
+        if not note or len(note) > 500:
+            return jsonify(ok=False, error='请填写操作原因（不超过500字）'), 400
+        if not username:
+            return jsonify(ok=False, error='请输入完整账号确认操作'), 400
+        conn = db.connect()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            account = conn.execute(
+                'SELECT id,username,role,status FROM accounts WHERE id=?', (account_id,)
+            ).fetchone()
+            if not account:
+                return jsonify(ok=False, error='账号不存在'), 404
+            if account['role'] == 'admin' or account_id == admin['id']:
+                return jsonify(ok=False, error='此入口不能重置管理员账号'), 403
+            if account['status'] != 'active':
+                return jsonify(ok=False, error='请先恢复账号，再重置密码'), 409
+            if account['username'] != username:
+                return jsonify(ok=False, error='确认账号不匹配'), 400
+            temporary_password = 'R7-' + secrets.token_urlsafe(15)
+            conn.execute(
+                'UPDATE accounts SET password_hash=? WHERE id=?',
+                (generate_password_hash(temporary_password), account_id)
+            )
+            conn.execute(
+                'INSERT INTO admin_account_access VALUES (?,1) '
+                'ON CONFLICT(account_id) DO UPDATE SET version=version+1',
+                (account_id,)
+            )
+            conn.execute(
+                'UPDATE accounts SET mobile_auth_version=COALESCE(mobile_auth_version,0)+1 WHERE id=?',
+                (account_id,)
+            )
+            conn.execute(
+                'INSERT INTO admin_account_audit(account_id,actor_id,status,note,created_at) '
+                'VALUES (?,?,?,?,?)',
+                (account_id, admin['id'], 'password_reset', note,
+                 datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+            return jsonify(ok=True, temporary_password=temporary_password,
+                           message='登录密码已重置，所有旧登录凭证已失效')
+        finally:
+            conn.close()
+
+    @app.post('/api/admin/accounts/<int:account_id>/retire')
+    def admin_retire_account(account_id):
+        """Retire a DISABLED account, releasing its username for a fresh identity.
+
+        Retain historical account_id-linked projects, photos, licenses and logs.
+        This does not grant the newly registered account access to old data.
+        """
+        admin = require_admin()
+        if not admin:
+            return jsonify(ok=False, error='需要管理员权限'), 403
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(ok=False, error='参数不正确'), 400
+        username = str(data.get('confirm_username') or '').strip()
+        note = str(data.get('note') or '').strip()
+        if not note or len(note) > 500:
+            return jsonify(ok=False, error='必须填写注销原因（不超过500字）'), 400
+        if not username:
+            return jsonify(ok=False, error='请输入要释放的完整账号'), 400
+        conn = db.connect()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            account = conn.execute(
+                'SELECT id,username,role,status FROM accounts WHERE id=?', (account_id,)
+            ).fetchone()
+            if not account:
+                return jsonify(ok=False, error='账号不存在'), 404
+            if account['role'] == 'admin' or account_id == admin['id']:
+                return jsonify(ok=False, error='不能注销管理员账号'), 403
+            if account['status'] == 'retired':
+                return jsonify(ok=False, error='此账号已注销，不能重复操作'), 409
+            if account['status'] != 'disabled':
+                return jsonify(ok=False, error='请先停用账号，再执行注销释放'), 409
+            if account['username'] != username:
+                return jsonify(ok=False, error='确认账号不匹配'), 400
+
+            reserved_name = '__retired_%d_%s' % (account_id, secrets.token_hex(8))
+            conn.execute(
+                "UPDATE accounts SET username=?, status='retired', password_hash=?, "
+                "mobile_auth_version=COALESCE(mobile_auth_version,0)+1 WHERE id=?",
+                (reserved_name, generate_password_hash(secrets.token_urlsafe(24)), account_id)
+            )
+            conn.execute('UPDATE machines SET active=0 WHERE account_id=?', (account_id,))
+            # Release the WeChat identity for explicit binding to the new account.
+            # Old mobile tokens are revoked. Do NOT remove cloud photos or projects.
+            conn.execute('DELETE FROM wechat_bindings WHERE account_id=?', (account_id,))
+            conn.execute('DELETE FROM mail_codes WHERE code_key=?', ('reset:' + username,))
+            conn.execute(
+                'INSERT INTO admin_account_access VALUES (?,1) '
+                'ON CONFLICT(account_id) DO UPDATE SET version=version+1',
+                (account_id,)
+            )
+            conn.execute(
+                'INSERT INTO admin_account_audit(account_id,actor_id,status,note,created_at) '
+                'VALUES (?,?,?,?,?)',
+                (account_id, admin['id'], 'retired',
+                 '释放原账号 '+username+'；'+note, datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+            return jsonify(ok=True, released_username=username,
+                           message='原用户名已释放，可重新注册；旧工程影像及授权历史保持隔离')
         finally:
             conn.close()

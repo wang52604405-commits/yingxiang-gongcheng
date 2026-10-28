@@ -914,12 +914,19 @@ def create_app():
         conn = db.connect()
         try:
             cur = conn.execute(
-                "UPDATE accounts SET password_hash = ? WHERE username = ?",
+                "UPDATE accounts SET password_hash = ?, mobile_auth_version=COALESCE(mobile_auth_version,0)+1 "
+                "WHERE username = ? AND status = 'active'",
                 (generate_password_hash(new_password), account),
             )
-            conn.commit()
             if cur.rowcount == 0:
-                return _error("账号不存在")
+                return _error("账号不存在或已停用")
+            conn.execute(
+                "INSERT INTO admin_account_access VALUES "
+                "((SELECT id FROM accounts WHERE username=?),1) "
+                "ON CONFLICT(account_id) DO UPDATE SET version=version+1",
+                (account,),
+            )
+            conn.commit()
         finally:
             conn.close()
         return jsonify({"ok": True, "message": "密码已重置，请用新密码登录"})
