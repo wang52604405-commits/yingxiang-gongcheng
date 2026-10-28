@@ -258,7 +258,7 @@ def register_admin_ops(app, require_admin, user_from_token):
             # Release the WeChat identity for explicit binding to the new account.
             # Old mobile tokens are revoked. Do NOT remove cloud photos or projects.
             conn.execute('DELETE FROM wechat_bindings WHERE account_id=?', (account_id,))
-            conn.execute('DELETE FROM verification_codes WHERE code_key=?', ('reset:' + username,))
+            conn.execute('DELETE FROM mail_codes WHERE code_key=?', ('reset:' + username,))
             conn.execute(
                 'INSERT INTO admin_account_access VALUES (?,1) '
                 'ON CONFLICT(account_id) DO UPDATE SET version=version+1',
