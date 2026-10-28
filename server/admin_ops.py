@@ -137,6 +137,8 @@ def register_admin_ops(app, require_admin, user_from_token):
                 return jsonify(ok=False, error='账号不存在'), 404
             if account_id == admin['id'] or account['role'] == 'admin':
                 return jsonify(ok=False, error='此入口不能停用或恢复管理员账号'), 400
+            if account['status'] == 'retired':
+                return jsonify(ok=False, error='已注销的旧账号不可恢复，请使用原用户名重新注册'), 409
             if account['status'] == status:
                 return jsonify(ok=True, changed=False)
             conn.execute('UPDATE accounts SET status=? WHERE id=?', (status, account_id))
