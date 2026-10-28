@@ -4,6 +4,7 @@ const themeStyle = usePageTheme()
 import { computed, ref } from 'vue'
 import { onShow, onUnload } from '@dcloudio/uni-app'
 import { normalizeInviteCode, peekPendingInvite, rememberPendingInvite } from '@/services/pending-invite'
+import { sendPasswordRecoveryCode, completePasswordRecovery } from '@/services/password-recovery'
 import PageHeader from '@/components/PageHeader.vue'
 import {
   cancelWechatBinding,
@@ -23,7 +24,12 @@ const phone = ref('')
 const username = ref('')
 const password = ref('')
 const formError = ref('')
-const pendingAction = ref<'account' | 'bind' | 'quick' | 'join' | ''>('')
+const forgotMode = ref(false)
+const forgotAccount = ref('')
+const forgotCode = ref('')
+const forgotPassword = ref('')
+const forgotHint = ref('')
+const pendingAction = ref<'account' | 'bind' | 'quick' | 'join' | 'recovery-code' | 'recovery-reset' | ''>('')
 const visibleError = computed(() => formError.value || sessionState.error)
 const pendingName = computed(() => sessionState.pendingAccount?.username || sessionState.pendingAccount?.display_name || '')
 
@@ -32,6 +38,7 @@ function showInviteForm(): void {
   cancelWechatJoin()
   inviteCode.value = peekPendingInvite() || inviteCode.value
   inviteMode.value = true
+  forgotMode.value = false
 }
 function showAccountForm(): void {
   resetError()
@@ -39,6 +46,7 @@ function showAccountForm(): void {
   const code = normalizeInviteCode(inviteCode.value)
   if (code.length === 10) rememberPendingInvite(code)
   inviteMode.value = false
+  forgotMode.value = false
 }
 async function joinWithWechat() {
   if (pendingAction.value) return
@@ -60,6 +68,54 @@ onUnload(cancelWechatJoin)
 function resetError(): void {
   formError.value = ''
   clearAuthError()
+}
+
+
+function openForgotPassword(): void {
+  resetError()
+  forgotAccount.value = username.value.trim()
+  forgotCode.value = ''
+  forgotPassword.value = ''
+  forgotHint.value = ''
+  forgotMode.value = true
+}
+
+function backFromForgot(): void {
+  resetError()
+  forgotMode.value = false
+  forgotPassword.value = ''
+  forgotCode.value = ''
+  forgotHint.value = ''
+}
+
+async function sendRecoveryCode(): Promise<void> {
+  if (pendingAction.value) return
+  resetError()
+  pendingAction.value = 'recovery-code'
+  try {
+    const result = await sendPasswordRecoveryCode(forgotAccount.value)
+    forgotHint.value = '验证码已发送到 ' + (result.email || '账号绑定邮箱') + '，请在有效期内填写'
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : '发送验证码失败'
+  } finally {
+    pendingAction.value = ''
+  }
+}
+
+async function resetRecoveredPassword(): Promise<void> {
+  if (pendingAction.value) return
+  resetError()
+  pendingAction.value = 'recovery-reset'
+  try {
+    await completePasswordRecovery(forgotAccount.value, forgotCode.value, forgotPassword.value)
+    username.value = forgotAccount.value.trim()
+    backFromForgot()
+    uni.showToast({ title: '密码重置成功，请重新登录', icon: 'none', duration: 2200 })
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : '重置密码失败'
+  } finally {
+    pendingAction.value = ''
+  }
 }
 
 async function submitAccount() {
@@ -154,7 +210,27 @@ function backToAccount(): void {
       </template>
 
       <template v-else>
-        <text class="auth-title">登录账号</text>
+        <template v-if="forgotMode">
+          <text class="auth-title">找回密码</text>
+          <text class="auth-hint">通过注册时绑定的邮箱接收验证码；未绑定邮箱请联系管理员重置</text>
+          <text class="field-label first-label">注册账号</text>
+          <input v-model="forgotAccount" class="input" placeholder="输入原注册账号" :disabled="Boolean(pendingAction)" @input="resetError" />
+          <text class="field-label">邮箱验证码</text>
+          <input v-model="forgotCode" class="input" type="number" maxlength="6" placeholder="请输入6位验证码" :disabled="Boolean(pendingAction)" @input="resetError" />
+          <button class="secondary-button pressable quick-button" :disabled="Boolean(pendingAction)" @tap="sendRecoveryCode">
+            {{ pendingAction === 'recovery-code' ? '发送中…' : '发送邮箱验证码' }}
+          </button>
+          <text v-if="forgotHint" class="auth-hint">{{ forgotHint }}</text>
+          <text class="field-label">新登录密码</text>
+          <input v-model="forgotPassword" class="input" password placeholder="至少8位，同时包含字母和数字" :disabled="Boolean(pendingAction)" @input="resetError" />
+          <view v-if="visibleError" class="error-panel" role="alert">{{ visibleError }}</view>
+          <button class="primary-button pressable action-button" :disabled="Boolean(pendingAction)" @tap="resetRecoveredPassword">
+            {{ pendingAction === 'recovery-reset' ? '重置中…' : '重置登录密码' }}
+          </button>
+          <button class="text-button pressable" :disabled="Boolean(pendingAction)" @tap="backFromForgot">返回账号登录</button>
+        </template>
+        <template v-else>
+          <text class="auth-title">登录账号</text>
         <text class="field-label first-label">账号</text>
         <input v-model="username" class="input" placeholder="请输入电脑端账号" placeholder-class="input-placeholder" @input="resetError" />
         <text class="field-label">密码</text>
@@ -166,7 +242,9 @@ function backToAccount(): void {
         <button class="secondary-button pressable quick-button" :disabled="Boolean(pendingAction)" @tap="quickLogin">
           {{ pendingAction === 'quick' ? '验证中…' : '微信快捷登录' }}
         </button>
+        <button class="text-button pressable" :disabled="Boolean(pendingAction)" @tap="openForgotPassword">忘记密码？</button>
         <button class="text-button pressable" :disabled="Boolean(pendingAction)" @tap="showInviteForm">我有项目邀请码</button>
+        </template>
       </template>
     </view>
   </view>
