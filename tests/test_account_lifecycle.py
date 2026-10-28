@@ -139,7 +139,7 @@ class AccountLifecycleTest(unittest.TestCase):
             "/api/login",json={"username":"customer","password":"OldPassword2026"}
         ).status_code,401)
         self.assertEqual(self.client.post("/api/admin/accounts/2/status",
-                         headers=self.h(),json={"status":"active","note":"try restore"}).status_code,200)
+                         headers=self.h(),json={"status":"active","note":"try restore"}).status_code,409)
         # An archived account must not be restored by the ordinary status route:
         # status remains retired (regression gate).
         conn=db.connect()
