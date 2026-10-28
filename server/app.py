@@ -315,6 +315,56 @@ def _error(message: str, code: int = 400):
     return jsonify({"ok": False, "error": message}), code
 
 
+_EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[^\s@]+\Z")
+
+
+def _mask_email(email: str) -> str:
+    """只露出邮箱开头，避免找回流程把完整邮箱回给浏览器。"""
+    text = str(email or "").strip()
+    at = text.rfind("@")
+    if at <= 0:
+        return ""
+    local = text[:at]
+    shown = local[:1] if len(local) <= 1 else local[:3]
+    return shown + "***" + text[at:]
+
+
+def _public_recovery_fields(account: dict) -> dict:
+    email = str((account or {}).get("email") or "").strip()
+    return {
+        "email_bound": bool(email),
+        "recovery_email": _mask_email(email),
+    }
+
+
+def _resolve_recovery_account(conn, account: str):
+    """按注册账号查找；账号本身是邮箱时，也可唯一匹配已绑定的找回邮箱。"""
+    text = str(account or "").strip()
+    if not (3 <= len(text) <= 64):
+        return None, "请填写账号，或填写绑定的邮箱"
+    row = conn.execute(
+        "SELECT id, username, email, status FROM accounts WHERE username = ?",
+        (text,),
+    ).fetchone()
+    if row is None and _EMAIL_RE.fullmatch(text):
+        matches = conn.execute(
+            "SELECT id, username, email, status FROM accounts WHERE lower(email) = lower(?)",
+            (text,),
+        ).fetchall()
+        active = [item for item in matches if str(item["status"] or "") == "active"]
+        if len(active) > 1:
+            return None, "这个邮箱绑了多个账号，请改用注册时的账号找回"
+        if len(active) == 1:
+            row = active[0]
+        elif matches:
+            return None, "这个账号已停用，请联系管理员"
+    if row is None:
+        return None, "没有找到这个账号。请核对后再试，或改用绑定的邮箱"
+    if str(row["status"] or "") != "active":
+        return None, "这个账号已停用，请联系管理员"
+    return row, ""
+
+
 def _token_for(
     user_id: int,
     scope: str = "desktop",
@@ -812,8 +862,11 @@ def create_app():
             return _error("账号长度需在 3~64 个字符之间（可用手机号/QQ/邮箱）")
         if len(password) < 8 or not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
             return _error("登录密码至少 8 位，并同时包含字母和数字")
-        if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        if email and not _EMAIL_RE.fullmatch(email):
             return _error("邮箱格式不正确")
+        # 账号本身是邮箱时，自动当作找回邮箱，注册时可以少填一栏。
+        if not email and _EMAIL_RE.fullmatch(username):
+            email = username
         # 免验证码注册（用户名+密码直接注册）
 
         conn = db.connect()
@@ -869,33 +922,32 @@ def create_app():
             return _error("操作过于频繁，请稍后再试", 429)
         data = request.get_json(silent=True) or {}
         account = str(data.get("account") or "").strip()
-        if not (3 <= len(account) <= 64):
-            return _error("请输入正确的账号")
         conn = db.connect()
         try:
-            row = conn.execute(
-                "SELECT id, username, email FROM accounts WHERE username = ?", (account,)
-            ).fetchone()
+            row, reason = _resolve_recovery_account(conn, account)
         finally:
             conn.close()
-        if not row:
-            return _error("账号不存在")
+        if row is None:
+            return _error(reason)
+        username = str(row["username"])
         email = str(row["email"] or "").strip()
         if not email:
             return _error("该账号未绑定邮箱，无法通过邮箱找回。请联系管理员重置密码")
         code = str(random.randint(100000, 999999))
-        _save_code(f"reset:{account}", code)
+        _save_code(f"reset:{username}", code)
         try:
             from . import mailer
             mailer.send_code_email(email, code)
         except ValueError as exc:
             return _error(str(exc))
         except Exception as exc:
-            return _error(f"邮件发送失败：{exc}")
+            sys.stderr.write(f"[mail] recovery send failed: {type(exc).__name__}\n")
+            return _error("验证码暂时发不出去，请稍后再试。如果一直失败，请联系管理员")
         return jsonify({
             "ok": True,
-            "email": email[:3] + "***" + email[email.find("@"):],
+            "email": _mask_email(email),
             "expires_in": CODE_TTL,
+            "message": "验证码已发送，10 分钟内有效",
         })
 
     @app.post("/api/reset-password")
@@ -909,14 +961,22 @@ def create_app():
         new_password = str(data.get("new_password") or "")
         if len(new_password) < 8 or not re.search(r"[A-Za-z]", new_password) or not re.search(r"\d", new_password):
             return _error("新密码至少 8 位，并同时包含字母和数字")
-        if not _consume_code(f"reset:{account}", code):
-            return _error("验证码错误或已过期，请重新获取", 400)
+        conn = db.connect()
+        try:
+            row, reason = _resolve_recovery_account(conn, account)
+        finally:
+            conn.close()
+        if row is None:
+            return _error(reason)
+        username = str(row["username"])
+        if not _consume_code(f"reset:{username}", code):
+            return _error("验证码不对，或已经过期。请重新获取", 400)
         conn = db.connect()
         try:
             cur = conn.execute(
                 "UPDATE accounts SET password_hash = ?, mobile_auth_version=COALESCE(mobile_auth_version,0)+1 "
                 "WHERE username = ? AND status = 'active'",
-                (generate_password_hash(new_password), account),
+                (generate_password_hash(new_password), username),
             )
             if cur.rowcount == 0:
                 return _error("账号不存在或已停用")
@@ -924,12 +984,40 @@ def create_app():
                 "INSERT INTO admin_account_access VALUES "
                 "((SELECT id FROM accounts WHERE username=?),1) "
                 "ON CONFLICT(account_id) DO UPDATE SET version=version+1",
-                (account,),
+                (username,),
             )
             conn.commit()
         finally:
             conn.close()
         return jsonify({"ok": True, "message": "密码已重置，请用新密码登录"})
+
+    @app.post("/api/account/recovery-email")
+    def set_recovery_email():
+        """登录后补填找回邮箱。已绑定的不在这里静默换掉。"""
+        if _rate_limited():
+            return _error("操作过于频繁，请稍后再试", 429)
+        user = _require_user()
+        if not user:
+            return _error("未登录或登录已过期", 401)
+        data = request.get_json(silent=True) or {}
+        email = str(data.get("email") or "").strip()
+        if not _EMAIL_RE.fullmatch(email):
+            return _error("邮箱格式不正确")
+        conn = db.connect()
+        try:
+            current = str(user.get("email") or "").strip()
+            if current:
+                return _error("已经绑定过找回邮箱。如需更换，请联系管理员")
+            cur = conn.execute(
+                "UPDATE accounts SET email = ? WHERE id = ? AND (email IS NULL OR email = '')",
+                (email, user["id"]),
+            )
+            if cur.rowcount == 0:
+                return _error("已经绑定过找回邮箱。如需更换，请联系管理员")
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True, "recovery_email": _mask_email(email), "message": "找回邮箱已保存"})
 
     @app.post("/api/login")
     def login():
@@ -959,6 +1047,7 @@ def create_app():
                     "username": account["username"],
                     "display_name": account["display_name"],
                     "role": account["role"],
+                    **_public_recovery_fields(account),
                 },
             }
         )
@@ -1075,6 +1164,7 @@ def create_app():
                     "username": user["username"],
                     "display_name": user["display_name"],
                     "role": user["role"],
+                    **_public_recovery_fields(user),
                 },
                 "license": _license_status_for(user),
             }
@@ -1490,14 +1580,35 @@ def create_app():
             ).fetchone()
             if not owns:
                 return _error("项目不存在", 404)
-            thumbs = conn.execute(
-                "SELECT photo_name, thumb_b64, order_index FROM cloud_thumbs "
-                "WHERE project_id = ? ORDER BY order_index, id",
+            total = int(conn.execute(
+                "SELECT COUNT(*) AS n FROM cloud_thumbs WHERE project_id = ?",
                 (project_id,),
-            ).fetchall()
+            ).fetchone()["n"])
+            sql = (
+                "SELECT photo_name, thumb_b64, order_index FROM cloud_thumbs "
+                "WHERE project_id = ? ORDER BY order_index, id"
+            )
+            params = [project_id]
+            limit_arg = request.args.get("limit")
+            offset_arg = request.args.get("offset")
+            page = {}
+            if limit_arg is not None or offset_arg is not None:
+                try:
+                    limit = int(24 if limit_arg is None else limit_arg)
+                    offset = int(offset_arg or 0)
+                except (TypeError, ValueError):
+                    return _error("页码不正确，请刷新后再看")
+                if limit < 1 or limit > 60 or offset < 0:
+                    return _error("一次最多看 60 张，请分批加载")
+                sql += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+                page = {"limit": limit, "offset": offset}
+            thumbs = conn.execute(sql, params).fetchall()
             return jsonify({
                 "ok": True,
                 "thumbs": [dict(t) for t in thumbs],
+                "total": total,
+                **page,
             })
         finally:
             conn.close()

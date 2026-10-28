@@ -124,6 +124,11 @@
     textarea { min-height: 90px; resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+    .auth-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; margin-bottom: 8px; background: #0d1117; border-radius: 12px; }
+    .auth-tab { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+    .auth-tab.active { background: var(--panel2); color: #fff; }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .advanced { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 
     /* 邀请进度 */
     .invite-box { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
@@ -229,6 +234,11 @@
 
     <div class="card" id="accountCard">
       <div id="cloudStatus" class="sub" style="margin-bottom:10px;"></div>
+      <div class="auth-switch" id="authSwitch" role="tablist" aria-label="登录、注册或找回密码">
+        <button type="button" class="auth-tab active" data-panel="login" id="showLoginTab">登录</button>
+        <button type="button" class="auth-tab" data-panel="register" id="showRegBtn">注册</button>
+        <button type="button" class="auth-tab" data-panel="forgot" id="showForgotBtn">找回密码</button>
+      </div>
       <div id="accountLoginForm">
         <div class="grid2">
           <div>
@@ -241,49 +251,56 @@
           </div>
         </div>
         <div class="row" style="margin-top:14px;">
-          <button class="btn primary" id="cloudLoginBtn">登录</button>
-          <button class="btn" id="showRegBtn">没有账号？去注册</button>
-          <button class="btn danger" id="cloudLogoutBtn" style="display:none;margin-left:auto;">退出登录</button>
-          <span class="link" id="showForgotBtn" style="margin-left:auto;cursor:pointer;color:var(--accent2);font-size:13px;">忘记密码？</span>
+          <button class="btn primary" id="cloudLoginBtn" type="button">登录</button>
+          <button class="btn danger" id="cloudLogoutBtn" type="button" style="display:none;margin-left:auto;">退出登录</button>
         </div>
       </div>
 
-      <div id="accountRegForm" style="display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
-        <label for="regUser">注册账号</label>
+      <div id="accountRegForm" style="display:none;">
+        <p class="hint">账号和密码必填。邮箱用来找回，账号本身是邮箱时会自动填上。</p>
+        <label for="regUser">账号</label>
         <input id="regUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
         <label for="regPass">密码</label>
         <input id="regPass" type="password" placeholder="至少 8 位，同时包含字母和数字" autocomplete="new-password">
-        <label for="regEmail">邮箱（选填，用于找回密码）</label>
-        <input id="regEmail" type="email" placeholder="you@example.com">
-        <label for="regInvite">邀请码（选填）</label>
-        <input id="regInvite" placeholder="好友邀请码，填了双方有奖励">
-        <div style="padding:12px;margin-top:12px;border-radius:8px;background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.35);">
-          <strong>登录密码不等于工程删除密码</strong>
-          <p class="sub" style="margin:5px 0 10px;">删除密码仅用于删除照片、单元或工程，只保存不可逆摘要，平台无法显示明文。</p>
+        <p class="hint" id="regPassHint">至少 8 位，并且同时包含字母和数字</p>
+        <label for="regEmail">找回邮箱 <span style="color:var(--muted);font-weight:600">选填</span></label>
+        <input id="regEmail" type="email" placeholder="忘了密码时用来收验证码">
+        <p class="hint" id="emailHint">可以留空。账号如果是邮箱，会自动用来找回。</p>
+        <details class="advanced">
+          <summary>有邀请码？（选填）</summary>
+          <label for="regInvite">邀请码</label>
+          <input id="regInvite" placeholder="好友的邀请码">
+        </details>
+        <details class="advanced" open>
+          <summary>工程删除密码（删照片时用，和登录密码不同）</summary>
+          <p class="hint">只在删除照片、单元或工程时使用，软件不会显示明文。</p>
           <label for="regDeletePass">工程删除密码</label>
           <input id="regDeletePass" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="6~32 位，请勿使用过于简单的数字">
-          <label for="regDeletePassConfirm">确认工程删除密码</label>
-          <input id="regDeletePassConfirm" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="再次输入删除密码">
-        </div>
+          <label for="regDeletePassConfirm">再输入一次</label>
+          <input id="regDeletePassConfirm" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="再输入一次删除密码">
+        </details>
         <div class="row" style="margin-top:14px;">
-          <button class="btn primary" id="regBtn">注册</button>
-          <button class="btn" id="backLoginBtn">返回登录</button>
+          <button class="btn primary" id="regBtn" type="button">注册</button>
+          <button class="btn" id="backLoginBtn" type="button">返回登录</button>
         </div>
       </div>
 
-      <div id="accountForgotForm" style="display:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;">
-        <label for="forgotUser">账号</label>
-        <input id="forgotUser" placeholder="手机号 / QQ / 邮箱">
+      <div id="accountForgotForm" style="display:none;">
+        <p class="hint">填写注册账号。账号如果是邮箱，验证码会发到这个邮箱。</p>
+        <label for="forgotUser">账号或绑定邮箱</label>
+        <input id="forgotUser" placeholder="手机号 / QQ / 邮箱" autocomplete="username">
+        <p class="hint" id="forgotHint"></p>
         <label for="forgotCode">邮箱验证码</label>
         <div class="row" style="align-items:flex-end;">
-          <input id="forgotCode" placeholder="6 位验证码" style="flex:1;margin:0;">
-          <button class="btn" id="forgotSendBtn">发送验证码</button>
+          <input id="forgotCode" inputmode="numeric" maxlength="6" placeholder="6 位验证码" style="flex:1;margin:0;" autocomplete="one-time-code">
+          <button class="btn" id="forgotSendBtn" type="button">发送验证码</button>
         </div>
+        <div class="notice" id="forgotSuccess"></div>
         <label for="forgotPass">新密码</label>
-        <input id="forgotPass" type="password" placeholder="至少 8 位，同时包含字母和数字">
+        <input id="forgotPass" type="password" placeholder="至少 8 位，同时包含字母和数字" autocomplete="new-password">
         <div class="row" style="margin-top:14px;">
-          <button class="btn primary" id="forgotResetBtn">重置密码</button>
-          <button class="btn" id="backLoginBtn2">返回登录</button>
+          <button class="btn primary" id="forgotResetBtn" type="button">重置密码</button>
+          <button class="btn" id="backLoginBtn2" type="button">返回登录</button>
         </div>
       </div>
     </div>
@@ -301,16 +318,35 @@
     let productConfig = {};
     let registrationRequested = new URLSearchParams(location.search).get("register") === "1";
 
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    function passwordOk(value) {
+      return value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value);
+    }
+    function markAuthTab(mode) {
+      document.querySelectorAll(".auth-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.panel === mode));
+    }
     function showRegistrationForm() {
       $("#accountLoginForm").style.display = "none";
       $("#accountForgotForm").style.display = "none";
       $("#accountRegForm").style.display = "block";
+      markAuthTab("register");
     }
 
     function showLoginForm() {
       $("#accountRegForm").style.display = "none";
       $("#accountForgotForm").style.display = "none";
       $("#accountLoginForm").style.display = "block";
+      markAuthTab("login");
+    }
+    function showForgotForm() {
+      const typed = $("#cloudUser").value.trim();
+      if (typed && !$("#forgotUser").value.trim()) $("#forgotUser").value = typed;
+      const account = $("#forgotUser").value.trim();
+      if ($("#forgotHint")) $("#forgotHint").textContent = EMAIL_RE.test(account) ? "这个账号是邮箱，验证码会发到它。" : "";
+      $("#accountLoginForm").style.display = "none";
+      $("#accountRegForm").style.display = "none";
+      $("#accountForgotForm").style.display = "block";
+      markAuthTab("forgot");
     }
 
     // 注册入口必须立即响应，不能等待产品配置或云端账号状态返回。
@@ -337,7 +373,7 @@
       }
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.ok === false) {
-        if (url !== "/api/client-error") reportError(data.error || `HTTP ${response.status}`, { url, method: options.method || "GET", status: response.status }, "", response.status >= 500 ? "error" : "warning");
+        if (url !== "/api/client-error" && response.status >= 500) reportError(data.error || `HTTP ${response.status}`, { url, method: options.method || "GET", status: response.status }, "", "error");
         throw new Error(data.error || "请求失败");
       }
       return data;
@@ -401,12 +437,14 @@
         showLoginForm();
         $("#cloudLogoutBtn").style.display = "inline-block";
         $("#showRegBtn").style.display = "none";
+        if ($("#authSwitch")) $("#authSwitch").style.display = "none";
       } else {
         el.textContent = `未登录（注册后可永久免费使用 ${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`;
         if (registrationRequested) showRegistrationForm();
         else showLoginForm();
         $("#cloudLogoutBtn").style.display = "none";
         $("#showRegBtn").style.display = "inline-block";
+        if ($("#authSwitch")) $("#authSwitch").style.display = "grid";
       }
       // 邀请码
       if (data.logged_in) {
@@ -449,6 +487,10 @@
     });
 
     // ---- 登录 / 注册切换 ----
+    $("#showLoginTab").addEventListener("click", () => {
+      registrationRequested = false;
+      showLoginForm();
+    });
     $("#showRegBtn").addEventListener("click", () => {
       registrationRequested = true;
       showRegistrationForm();
@@ -483,6 +525,19 @@
     });
 
     // ---- 注册 ----
+    $("#regUser").addEventListener("change", () => {
+      const user = $("#regUser").value.trim();
+      const email = $("#regEmail");
+      if (EMAIL_RE.test(user) && (!email.value.trim() || email.dataset.autofilled === "1")) {
+        email.value = user;
+        email.dataset.autofilled = "1";
+        $("#emailHint").textContent = "已填入账号邮箱，用来找回密码。可以改成别的邮箱。";
+      }
+    });
+    $("#regPass").addEventListener("input", () => {
+      const ok = passwordOk($("#regPass").value);
+      $("#regPassHint").textContent = $("#regPass").value && ok ? "密码强度符合要求" : "至少 8 位，并且同时包含字母和数字";
+    });
     $("#regBtn").addEventListener("click", async () => {
       const username = $("#regUser").value.trim();
       const password = $("#regPass").value;
@@ -491,7 +546,7 @@
       const deletePassword = $("#regDeletePass").value;
       const deletePasswordConfirm = $("#regDeletePassConfirm").value;
       if (!username || !password) { showNotice("请填写账号和密码。", true); return; }
-      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) { showNotice("登录密码至少 8 位，并同时包含字母和数字。", true); return; }
+      if (!passwordOk(password)) { showNotice("登录密码至少 8 位，并同时包含字母和数字。", true); return; }
       if (deletePassword.length < 6 || deletePassword !== deletePasswordConfirm) { showNotice("请设置工程删除密码，并确保两次输入一致。", true); return; }
       try {
         const data = await apiJson("/api/cloud/register", {
@@ -507,30 +562,52 @@
 
     // ---- 忘记密码 ----
     $("#showForgotBtn").addEventListener("click", () => {
-      $("#accountLoginForm").style.display = "none";
-      $("#accountForgotForm").style.display = "block";
+      showForgotForm();
+    });
+    $("#forgotUser").addEventListener("input", () => {
+      const account = $("#forgotUser").value.trim();
+      $("#forgotHint").textContent = EMAIL_RE.test(account) ? "这个账号是邮箱，验证码会发到它。" : "";
     });
     $("#backLoginBtn2").addEventListener("click", () => {
-      $("#accountForgotForm").style.display = "none";
-      $("#accountLoginForm").style.display = "block";
+      registrationRequested = false;
+      showLoginForm();
     });
+    let forgotCooldown = 0;
+    let forgotTimer = 0;
     $("#forgotSendBtn").addEventListener("click", async () => {
       const account = $("#forgotUser").value.trim();
-      if (!account) { showNotice("请输入账号。", true); return; }
+      if (!account) { showNotice("请先填写账号或邮箱。", true); return; }
+      if (forgotCooldown > 0) return;
+      $("#forgotSendBtn").disabled = true;
+      $("#forgotSendBtn").textContent = "发送中…";
       try {
         const data = await apiJson("/api/cloud/forgot-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ account })
         });
-        showNotice(`验证码已发送到 ${data.email}，10 分钟内有效。`);
-      } catch (error) { showNotice(error.message, true); }
+        const box = $("#forgotSuccess");
+        box.textContent = `验证码已发到 ${data.email}，10 分钟内有效。`;
+        box.className = "notice show ok";
+        forgotCooldown = 60;
+        clearInterval(forgotTimer);
+        forgotTimer = setInterval(() => {
+          forgotCooldown -= 1;
+          $("#forgotSendBtn").textContent = forgotCooldown > 0 ? `重新发送 ${forgotCooldown}s` : "发送验证码";
+          if (forgotCooldown <= 0) { clearInterval(forgotTimer); $("#forgotSendBtn").disabled = false; }
+        }, 1000);
+      } catch (error) {
+        $("#forgotSendBtn").disabled = false;
+        $("#forgotSendBtn").textContent = "发送验证码";
+        showNotice(error.message, true);
+      }
     });
     $("#forgotResetBtn").addEventListener("click", async () => {
       const account = $("#forgotUser").value.trim();
       const code = $("#forgotCode").value.trim();
       const newPass = $("#forgotPass").value;
       if (!account || !code || !newPass) { showNotice("请填写账号、验证码和新密码。", true); return; }
+      if (!passwordOk(newPass)) { showNotice("新密码至少 8 位，并同时包含字母和数字。", true); return; }
       try {
         await apiJson("/api/cloud/reset-password", {
           method: "POST",
@@ -538,8 +615,7 @@
           body: JSON.stringify({ account, code, new_password: newPass })
         });
         showNotice("密码已重置，请用新密码登录。");
-        $("#accountForgotForm").style.display = "none";
-        $("#accountLoginForm").style.display = "block";
+        showLoginForm();
         $("#cloudUser").value = account;
         $("#forgotCode").value = ""; $("#forgotPass").value = "";
       } catch (error) { showNotice(error.message, true); }
@@ -554,9 +630,10 @@
     });
     $("#freeCurrentBtn").disabled = true;
 
-    loadProduct()
-      .then(() => Promise.all([refreshStatus(), refreshCloud()]))
-      .catch(() => {});
+    Promise.all([
+      loadProduct().catch(() => {}),
+      refreshStatus().catch(() => {}),
+    ]).then(() => refreshCloud()).catch(() => {});
   </script>
 </body>
 </html>

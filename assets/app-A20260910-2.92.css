@@ -167,13 +167,21 @@
         var(--bg);
     }
     .auth-card {
-      width: min(100%, 390px);
-      padding: 24px;
+      width: min(100%, 440px);
+      padding: 28px 26px 24px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 18px;
       background: #fff;
-      box-shadow: var(--shadow);
+      box-shadow: 0 18px 48px rgba(15, 60, 70, .12);
     }
+    .auth-passline { display: flex; gap: 8px; align-items: center; }
+    .auth-passline input { flex: 1; min-width: 0; }
+    .auth-text-btn {
+      border: 0; background: transparent; color: var(--primary, #0f8a7a);
+      font: inherit; font-weight: 700; cursor: pointer; padding: 8px 2px;
+    }
+    .auth-extra { margin: -2px 0 0; text-align: right; font-size: 13px; }
+    .auth-extra a { color: var(--primary, #0f8a7a); font-weight: 700; text-decoration: none; }
     .auth-card .brand {
       margin-bottom: 18px;
       color: var(--text);

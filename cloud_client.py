@@ -164,13 +164,32 @@ def server_url() -> str:
     return normalized
 
 
+_JSON_READ_CACHE = {}
+
+
 def _read_json(path: Path):
+    """同一份未改动的配置只解析一次。调用方拿到的是浅拷贝。"""
+    key = str(path)
     try:
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pass
-    return None
+        stat = path.stat()
+    except OSError:
+        _JSON_READ_CACHE.pop(key, None)
+        return None
+    signature = (stat.st_mtime_ns, stat.st_size)
+    cached = _JSON_READ_CACHE.get(key)
+    if cached and cached[0] == signature:
+        data = cached[1]
+    else:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        _JSON_READ_CACHE[key] = (signature, data)
+    if isinstance(data, dict):
+        return dict(data)
+    if isinstance(data, list):
+        return list(data)
+    return data
 
 
 def _write_json(path: Path, data) -> None:
@@ -178,6 +197,7 @@ def _write_json(path: Path, data) -> None:
     temp_path = path.with_name(path.name + ".tmp")
     temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temp_path, path)
+    _JSON_READ_CACHE.pop(str(path), None)
 
 
 def _dpapi_protect(value: str) -> str:

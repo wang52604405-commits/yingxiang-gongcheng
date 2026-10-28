@@ -69,6 +69,30 @@ class CloudAccountStateTest(unittest.TestCase):
             with patch.object(cloud_client, "cloud_account_path", return_value=missing):
                 self.assertEqual(cloud_client._read_cloud_account(), {})
 
+    def test_unchanged_json_is_not_read_twice(self):
+        import cloud_client
+
+        with tempfile.TemporaryDirectory(prefix="album-json-cache-") as temp_dir:
+            path = Path(temp_dir) / "sample.json"
+            path.write_text('{"ok": 1, "nested": {"n": 2}}', encoding="utf-8")
+            cloud_client._JSON_READ_CACHE.clear()
+            reads = {"n": 0}
+            real_read = Path.read_text
+
+            def counting(target, *args, **kwargs):
+                if Path(target) == path:
+                    reads["n"] += 1
+                return real_read(target, *args, **kwargs)
+
+            with patch.object(Path, "read_text", counting):
+                first = cloud_client._read_json(path)
+                first["ok"] = 9
+                second = cloud_client._read_json(path)
+            self.assertEqual(reads["n"], 1)
+            self.assertEqual(second["ok"], 1)
+            path.write_text('{"ok": 3}', encoding="utf-8")
+            self.assertEqual(cloud_client._read_json(path)["ok"], 3)
+
 
 class ServerProductContractTest(unittest.TestCase):
     @classmethod
@@ -1596,6 +1620,46 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertEqual(blocked.status_code, 403, blocked.get_json())
         with self.client.session_transaction() as session:
             session.clear()
+
+    def test_bootstrap_reuses_engineering_file_after_first_read(self):
+        with self.client.session_transaction() as session:
+            session["username"] = "首屏用户"
+        warmed = self.client.get("/api/bootstrap")
+        self.assertEqual(warmed.status_code, 200, warmed.get_json())
+        path = Path(self.desktop.ENGINEERING_PROJECTS_PATH)
+        self.assertTrue(path.exists())
+        self.desktop._ENGINEERING_READ_CACHE["sig"] = None
+        self.desktop._ENGINEERING_READ_CACHE["data"] = None
+        reads = {"n": 0}
+        real_read = Path.read_text
+
+        def counting(target, *args, **kwargs):
+            if Path(target) == path:
+                reads["n"] += 1
+            return real_read(target, *args, **kwargs)
+
+        with patch.object(Path, "read_text", counting):
+            response = self.client.get("/api/bootstrap")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(reads["n"], 1)
+        with self.client.session_transaction() as session:
+            session.clear()
+
+    def test_standard_unit_rules_are_built_once(self):
+        self.desktop._STANDARD_UNIT_RULES_CACHE = None
+        calls = {"n": 0}
+        real = self.desktop.standard_rules_from_checklist
+
+        def counting():
+            calls["n"] += 1
+            return real()
+
+        with patch.object(self.desktop, "standard_rules_from_checklist", counting):
+            first = self.desktop.standard_unit_rules()
+            second = self.desktop.standard_unit_rules()
+        self.assertEqual(calls["n"], 1)
+        self.assertIs(first, second)
+        self.assertTrue(first)
 
 
 if __name__ == "__main__":
