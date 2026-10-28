@@ -72,8 +72,8 @@
       </section>
       <div class="card" id="accountsPanel" hidden>
         <div class="stats" id="statsRow"></div>
-        <h2>客户与授权管理 <span class="hint">开通 / 续期 / 吊销 / 解绑</span></h2>
-        <div class="toolbar"><label>账号状态<select id="accountStatusFilter"><option value="active">正常账号</option><option value="disabled">已停用账号</option><option value="">全部账号</option></select></label><span class="muted">停用保留数据；恢复不延期、不重新开通授权。</span></div>
+        <h2>客户与授权管理 <span class="hint">开通 / 续期 / 吊销 / 解绑 / 密码重置 / 注销释放账号</span></h2>
+        <div class="toolbar"><label>账号状态<select id="accountStatusFilter"><option value="active">正常账号</option><option value="disabled">已停用账号</option><option value="">全部账号</option></select></label><span class="muted">停用保留数据；需先停用再注销释放用户名。注销不删除历史工程影像。</span></div>
         <div class="toolbar"><label>搜索客户<input id="accountSearch" placeholder="账号、昵称、邀请码或设备 ID"></label><label>授权状态<select id="accountFilter"><option value="">全部授权</option><option value="term">限期会员</option><option value="lifetime">终身会员</option><option value="expired">已到期</option><option value="none">未开通 / 已吊销</option></select></label><span id="accountCount" class="muted"></span></div>
         <div style="overflow-x:auto">
           <table>
@@ -126,6 +126,21 @@
     </div>
   </div>
 
+  <dialog id="recoveryDialog" aria-labelledby="recoveryTitle">
+    <form id="recoveryForm">
+      <h2 id="recoveryTitle">账号安全操作</h2>
+      <p id="recoveryDescription" class="muted"></p>
+      <label>输入完整账号确认<input id="recoveryConfirm" autocomplete="off" required placeholder="与上方账号完全一致"></label>
+      <label>操作原因<textarea id="recoveryNote" maxlength="500" rows="2" required placeholder="写明账号归属核实情况和操作原因"></textarea></label>
+      <div id="recoveryNotice" class="notice" role="status"></div>
+      <div id="recoveryPasswordBox" hidden>
+        <p class="muted">临时登录密码只在此显示一次，不会记录在后台日志。请通过安全渠道告知用户。</p>
+        <input id="recoveryPassword" readonly autocomplete="off" style="width:100%;font-family:Consolas,monospace;">
+        <button class="btn" type="button" id="copyRecoveryPassword">复制临时密码</button>
+      </div>
+      <div class="toolbar"><button id="cancelRecoveryBtn" class="btn" type="button">关闭</button><button id="confirmRecoveryBtn" class="btn primary" type="submit">确认操作</button></div>
+    </form>
+  </dialog>
   <dialog id="statusDialog" aria-labelledby="statusTitle">
     <form id="statusForm"><h2 id="statusTitle">调整账号状态</h2><p id="statusDescription"></p><p class="muted">不删除项目、照片、邀请或授权记录。离线电脑无法被服务器即时控制，已有离线授权仍遵循软件原有校验规则。</p><label>操作备注<textarea id="statusNote" maxlength="500" rows="3" placeholder="记录停用原因或恢复说明"></textarea></label><div id="statusNotice" class="notice" role="status"></div><div class="toolbar"><button id="cancelStatusBtn" class="btn" type="button">取消</button><button class="btn primary" type="submit">确认操作</button></div></form>
   </dialog>
@@ -150,6 +165,7 @@
   <script>
     const $ = (s) => document.querySelector(s);
     let accountsCache = [], errorsCache = [], activeTab = "overview", selectedError = null, errorRequest = 0, selectedAccountStatus = null, dashboardRequest = 0;
+    let selectedRecoveryAction = null;
     let token = localStorage.getItem("album_admin_token") || "";
 
     function reportError(message, context = {}, stack = "", severity = "error") {
@@ -283,17 +299,18 @@
           `<span class="muted">注册 ${invite_count || 0} 人 / 有效 ${invite_qualified_count || 0} 人</span>${invited_by ? `<br><span class="muted">由 ${escapeHtml(invited_by)} 邀请</span>` : ""}`;
         return `<tr>
           <td><strong>${escapeHtml(account.username)}</strong><br><span class="muted">${escapeHtml(account.display_name || "")}</span></td>
-          <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : "停用"}</span></td>
+          <td><span class="badge ${account.status === "active" ? "ok" : "off"}">${account.status === "active" ? "正常" : account.status === "retired" ? "已注销" : "停用"}</span></td>
           <td><span class="badge ${typeCls}">${typeText}</span></td>
           <td class="mono">${escapeHtml(expText)}</td>
           <td><details><summary>有效 ${invite_qualified_count || 0} 人</summary>${invText}<br>${inviteList}</details></td>
           <td><span class="muted">${machineText}</span><br>${machines || '<span class="muted">-</span>'}</td>
           <td>
-            ${account.role !== 'admin' ? `<button class="btn sm ${account.status === 'active' ? 'danger' : 'primary'}" data-action="status" data-account="${account.id}">${account.status === 'active' ? '停用并归档' : '恢复账号'}</button>` : '<span class="muted">管理员受保护</span>'}
+            ${account.role === "admin" ? '<span class="muted">管理员受保护</span>' : account.status === "retired" ? '<span class="muted">账号已注销，资料留存</span>' : `<button class="btn sm ${account.status === 'active' ? 'danger' : 'primary'}" data-action="status" data-account="${account.id}">${account.status === 'active' ? '停用并归档' : '恢复账号'}</button>`}
+            ${account.role !== "admin" && account.status === "active" ? `<button class="btn sm" data-action="reset-login" data-account="${account.id}">重置登录密码</button>` : ""}
+            ${account.role !== "admin" && account.status === "disabled" ? `<button class="btn sm danger" data-action="retire" data-account="${account.id}">注销释放账号</button>` : ""}
             ${account.last_status_change ? `<div class="status-note">${escapeHtml(account.last_status_change.note || '无操作备注')} · ${escapeHtml(formatTime(account.last_status_change.created_at))}</div>` : ''}
-            <button class="btn sm" data-action="license" data-account="${account.id}" data-user="${escapeAttr(account.username)}">开通/续期</button>
-            <button class="btn sm danger" data-action="revoke" data-account="${account.id}">吊销</button>
-            ${machineButtons}
+            ${account.status !== "retired" ? `<button class="btn sm" data-action="license" data-account="${account.id}" data-user="${escapeAttr(account.username)}">开通/续期</button><button class="btn sm danger" data-action="revoke" data-account="${account.id}">吊销</button>` : ""}
+            ${account.status !== "retired" ? machineButtons : ""}
           </td>
         </tr>`;
       }).join("") || '<tr><td colspan="7" class="empty">没有匹配的客户，请调整搜索或筛选条件。</td></tr>';
@@ -459,6 +476,7 @@
       const machineId = btn.getAttribute("data-machine") || "";
       if (action === "license") issueLicense(Number(accountId), username);
       else if (action === "status") openAccountStatus(Number(accountId));
+      else if (action === "reset-login" || action === "retire") openRecoveryAction(Number(accountId), action);
       else if (action === "revoke") revoke(Number(accountId));
       else if (action === "unbind") unbind(Number(accountId), machineId);
     });
@@ -491,6 +509,74 @@
       $('#usageChannels').innerHTML=(d.channels || []).map(x=>`<div class="channel-row"><span>${x.channel==='mobile'?'微信小程序':'桌面端 / 会员网页'}</span><strong>${Number(x.active)} 个账号</strong></div>`).join('') || '<p class="muted">今日暂无已采集的联网活动</p>';
       $('#usageRecent').innerHTML=(d.latest || []).map(x=>`<div class="recent-row"><div><strong>${escapeHtml(x.username)}</strong> <span class="muted">${escapeHtml(x.display_name || '')}</span>${x.status!=='active'?'<span class="badge off">现已停用</span>':''}</div><span class="mono">${escapeHtml(formatTime(Number(x.last_seen)*1000))}</span></div>`).join('') || '<p class="muted">暂无记录。客户下一次成功联网后会开始显示。</p>';
     }
+
+    function openRecoveryAction(id, mode) {
+      const item = accountsCache.find(x => x.account.id === id);
+      if (!item || item.account.role === "admin" || item.account.status === "retired") return;
+      if (mode === "reset-login" && item.account.status !== "active") return;
+      if (mode === "retire" && item.account.status !== "disabled") return;
+      selectedRecoveryAction = {id, mode, username:item.account.username};
+      $("#recoveryTitle").textContent = mode === "retire" ? "注销并释放用户名" : "管理员重置登录密码";
+      $("#recoveryDescription").textContent = mode === "retire"
+        ? "仅允许已停用账号。释放原用户名后可重新注册；旧照片、工程、会员和审计记录保留在原账号 ID，新注册账号不会继承。此操作不可自动撤销。"
+        : "仅重置登录密码，工程删除密码不变。旧桌面及微信登录凭证全部失效，需要重新登录。";
+      $("#recoveryConfirm").value = "";
+      $("#recoveryNote").value = "";
+      $("#recoveryPassword").value = "";
+      $("#recoveryPasswordBox").hidden = true;
+      $("#recoveryNotice").className = "notice";
+      $("#confirmRecoveryBtn").hidden = false;
+      $("#recoveryDialog").showModal();
+    }
+    $("#cancelRecoveryBtn").addEventListener("click", () => {
+      $("#recoveryPassword").value = "";
+      selectedRecoveryAction = null;
+      $("#recoveryDialog").close();
+    });
+    $("#copyRecoveryPassword").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($("#recoveryPassword").value);
+        notice($("#recoveryNotice"), "临时密码已复制，请使用安全渠道发送");
+      } catch {
+        notice($("#recoveryNotice"), "复制失败，请手动选择临时密码", true);
+      }
+    });
+    $("#recoveryForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      if (!selectedRecoveryAction) return;
+      const current = selectedRecoveryAction;
+      const confirmUsername = $("#recoveryConfirm").value.trim();
+      const note = $("#recoveryNote").value.trim();
+      if (confirmUsername !== current.username) {
+        notice($("#recoveryNotice"), "输入的账号与目标不一致", true);
+        return;
+      }
+      if (!note) {
+        notice($("#recoveryNotice"), "请填写操作原因", true);
+        return;
+      }
+      if (current.mode === "retire" && !confirm("注销后原账号不能恢复登录；旧照片不会删除，新注册账号不会继承旧资料。确认继续？")) return;
+      const path = current.mode === "retire" ? "retire" : "reset-login-password";
+      try {
+        const result = await api("/api/admin/accounts/" + current.id + "/" + path, {
+          method:"POST",
+          body:JSON.stringify({confirm_username:confirmUsername, note})
+        });
+        if (current.mode === "reset-login") {
+          $("#recoveryPassword").value = String(result.temporary_password || "");
+          $("#recoveryPasswordBox").hidden = false;
+          $("#confirmRecoveryBtn").hidden = true;
+          notice($("#recoveryNotice"), "重置成功。下方是一次性显示的临时密码。");
+        } else {
+          selectedRecoveryAction = null;
+          $("#recoveryDialog").close();
+          notice($("#notice"), "原用户名已释放，可以重新注册；旧工程资料保持隔离。");
+        }
+        await Promise.all([loadAccounts(),loadDashboard()]);
+      } catch(error) {
+        notice($("#recoveryNotice"),error.message,true);
+      }
+    });
     function openAccountStatus(id) {
       const item=accountsCache.find(x=>x.account.id===id);
       if(!item || item.account.role==='admin')return;
