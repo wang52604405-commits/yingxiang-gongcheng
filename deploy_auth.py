@@ -29,9 +29,9 @@ SSH_KEY = Path(os.environ.get(
     "ALBUM_SSH_KEY",
     REPO / "服务器访问-工程影像管理平台" / "server_key",
 ))
-# 不再内置公网地址。未设置环境变量时只留占位，真正连服务器前会拒绝。
+# 有 ALBUM_SERVER_HOST 时用它。空值或占位示例则回退到与 deploy_website.py 相同的默认主机。
 SERVER_HOST_EXAMPLE = "root@YOUR_SERVER_IP"
-SERVER_HOST = os.environ.get("ALBUM_SERVER_HOST", SERVER_HOST_EXAMPLE).strip() or SERVER_HOST_EXAMPLE
+DEFAULT_SERVER_HOST = "root@47.95.221.66"
 REMOTE_SERVER_DIR = "/opt/album-auth/server"
 REMOTE_PYTHON = "/opt/album-auth/venv/bin/python"
 SERVICE_NAME = "album-auth"
@@ -145,15 +145,30 @@ os.chmod(target, 0o600)
 print(f"SQLite 在线备份完成：{source} -> {target}")
 """
 
-def require_configured_server_host() -> str:
-    """部署目标必须来自 ALBUM_SERVER_HOST，占位示例不能拿去连公网。"""
-    host = (SERVER_HOST or "").strip()
-    if not host or host == SERVER_HOST_EXAMPLE or "YOUR_SERVER" in host.upper():
-        raise SystemExit(
-            "缺少可用的 ALBUM_SERVER_HOST。请设置为实际地址，例如 root@YOUR_SERVER_IP。"
-            "部署脚本不再内置公网服务器地址。"
-        )
+def _placeholder_server_host(host: str) -> bool:
+    text = str(host or "").strip()
+    return (not text) or text == SERVER_HOST_EXAMPLE or "YOUR_SERVER" in text.upper()
+
+
+def resolve_server_host(raw: str | None = None) -> str:
+    """真实环境变量优先。空字符串和占位示例回退到网站发布用的同一台主机。"""
+    if raw is None:
+        raw = os.environ.get("ALBUM_SERVER_HOST", "")
+    host = str(raw or "").strip()
+    if _placeholder_server_host(host):
+        return DEFAULT_SERVER_HOST
     return host
+
+
+SERVER_HOST = resolve_server_host()
+
+
+def require_configured_server_host() -> str:
+    """连接前取主机。已解析出的真实地址不会被默认值覆盖。"""
+    current = str(SERVER_HOST or "").strip()
+    if not _placeholder_server_host(current):
+        return current
+    return resolve_server_host()
 
 
 def run(cmd, check=True):

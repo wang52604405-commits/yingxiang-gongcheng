@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+import deploy_auth
 
 
 LAN = {"REMOTE_ADDR": "192.168.1.50"}
@@ -178,9 +179,16 @@ class LanMediaSecurityTest(unittest.TestCase):
 
     def test_public_samples_drop_live_host_and_local_paths(self):
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        website = (ROOT / "deploy_website.py").read_text(encoding="utf-8")
         self.assertIn("ALBUM_SERVER_HOST", deployer)
         self.assertIn("root@YOUR_SERVER_IP", deployer)
-        self.assertNotRegex(deployer, r"root@\d+\.\d+\.\d+\.\d+")
+        self.assertIn(deploy_auth.DEFAULT_SERVER_HOST, website)
+        self.assertEqual(deploy_auth.resolve_server_host(""), deploy_auth.DEFAULT_SERVER_HOST)
+        self.assertEqual(
+            deploy_auth.resolve_server_host("root@YOUR_SERVER_IP"),
+            deploy_auth.DEFAULT_SERVER_HOST,
+        )
+        self.assertEqual(deploy_auth.resolve_server_host("root@203.0.113.10"), "root@203.0.113.10")
 
         example = json.loads((ROOT / "album_config.example.json").read_text(encoding="utf-8"))
         blob = json.dumps(example, ensure_ascii=False)

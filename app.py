@@ -8561,8 +8561,14 @@ def _safe_media_name(filename):
 
     secure_filename 会把中文全变成下划线，导致中文编号照片 404，
     这里只做防路径遍历的最小处理（send_from_directory 内部还会再校验一次）。
+
+    Windows 上 pathlib 会把反斜杠当成目录分隔符，``..\\secret.jpg`` 会先被剥成
+    secret.jpg，后面的检查就拦不住。原始字符串里只要出现反斜杠，一律拒绝。
     """
-    name = Path(str(filename or "")).name
+    raw = str(filename or "")
+    if "\\" in raw:
+        return ""
+    name = Path(raw).name
     if name in {"", ".", ".."} or "/" in name or "\\" in name:
         return ""
     return name
