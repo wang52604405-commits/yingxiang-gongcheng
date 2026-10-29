@@ -1,72 +1,52 @@
+/* 工程影像官网 v7 — 轻交互：导航、滚动显现。无粒子、无自定义光标。 */
 (function () {
   "use strict";
 
-  var nav = document.querySelector(".nav");
+  var reduce =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* Mobile nav */
   var toggle = document.querySelector(".nav-toggle");
-  var links = document.querySelector(".nav-links");
-  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  function closeMenu() {
-    if (!nav || !toggle) return;
-    nav.classList.remove("menu-open");
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.setAttribute("aria-label", "打开导航");
-  }
-
+  var nav = document.querySelector(".nav");
   if (toggle && nav) {
     toggle.addEventListener("click", function () {
-      var open = nav.classList.toggle("menu-open");
+      var open = nav.classList.toggle("is-open");
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
-      toggle.setAttribute("aria-label", open ? "关闭导航" : "打开导航");
     });
-    if (links) {
-      links.addEventListener("click", function (event) {
-        if (event.target.closest("a")) closeMenu();
+    nav.querySelectorAll("a").forEach(function (a) {
+      a.addEventListener("click", function () {
+        nav.classList.remove("is-open");
+        toggle.setAttribute("aria-expanded", "false");
       });
-    }
-    document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") closeMenu();
     });
   }
 
-  var path = (location.pathname.split("/").pop() || "index.html").toLowerCase();
-  document.querySelectorAll(".nav-links a").forEach(function (link) {
-    var href = (link.getAttribute("href") || "").split("#")[0].toLowerCase();
-    if (href && href === path) link.classList.add("active");
-    if ((path === "" || path === "/") && href === "index.html") link.classList.add("active");
-  });
-
-  function startCarousel(root, slideSelector, interval) {
-    var slides = Array.prototype.slice.call(root.querySelectorAll(slideSelector));
-    if (slides.length < 2) return;
-    var dots = root.querySelectorAll(".prof-dots span, .g-dots span");
-    var index = 0;
-    var paused = false;
-    function show(next) {
-      slides.forEach(function (slide, slideIndex) {
-        slide.classList.toggle("active", slideIndex === next);
-      });
-      dots.forEach(function (dot, dotIndex) {
-        dot.classList.toggle("on", dotIndex === next);
-      });
-    }
-    show(0);
-    if (reduceMotion) return;
-    root.addEventListener("mouseenter", function () { paused = true; });
-    root.addEventListener("mouseleave", function () { paused = false; });
-    root.addEventListener("focusin", function () { paused = true; });
-    root.addEventListener("focusout", function () { paused = false; });
-    window.setInterval(function () {
-      if (paused || document.hidden) return;
-      index = (index + 1) % slides.length;
-      show(index);
-    }, interval);
+  /* Scroll reveal */
+  if (!reduce && "IntersectionObserver" in window) {
+    var io = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add("is-in");
+            io.unobserve(e.target);
+          }
+        });
+      },
+      { rootMargin: "0px 0px -8% 0px", threshold: 0.08 }
+    );
+    document.querySelectorAll(".reveal").forEach(function (el, i) {
+      el.style.transitionDelay = Math.min(i % 6, 5) * 0.05 + "s";
+      io.observe(el);
+    });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function (el) {
+      el.classList.add("is-in");
+    });
   }
 
-  document.querySelectorAll(".prof-card").forEach(function (card) {
-    startCarousel(card, ".slide", 4200);
-  });
-  document.querySelectorAll(".gallery").forEach(function (gallery) {
-    startCarousel(gallery, ".g-slide", 4800);
+  /* Current year */
+  document.querySelectorAll("[data-year]").forEach(function (el) {
+    el.textContent = String(new Date().getFullYear());
   });
 })();

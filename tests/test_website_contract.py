@@ -57,6 +57,18 @@ class WebsiteContractTest(unittest.TestCase):
         self.assertIn("https://shuiliyingxiang.cn/member#register", usage)
         self.assertNotIn("300 张", pages)
         self.assertNotIn("自动检查更新", pages)
+        self.assertNotIn("stat-pill", pages)
+        self.assertNotIn("免费 1000 张", index)
+        self.assertIn("price-card", index)
+        self.assertIn("¥39", index)
+        self.assertIn("¥399", index)
+        self.assertIn("1000", download + usage)
+        product = (SITE / "product.html").read_text(encoding="utf-8")
+        self.assertNotIn("field_", index + product)
+        self.assertNotIn("data-tilt", index + product)
+        self.assertNotIn('id="aurora"', index + product)
+        self.assertIn("ui_main.png", index)
+        self.assertIn("四大专业", index)
 
     def test_internal_links_point_at_real_pages_and_anchors(self):
         parsed = {}

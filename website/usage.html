@@ -1,177 +1,153 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>使用说明 · 工程影像管理平台</title>
-<meta name="description" content="工程影像管理平台桌面端与微信小程序使用说明：注册、登录、新建工程、项目划分、编号、上传、打印、小程序同步和手动更新。">
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>使用指南 · 工程影像管理平台</title>
+<meta name="description" content="从安装、注册登录到上传打印的短路径说明，并提供 Word 完整教程。"/>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-  <div class="vignette" aria-hidden="true"></div>
-  <div class="grain" aria-hidden="true"></div>
-  <div class="nav-shell">
-    <nav class="nav" aria-label="主导航">
-      <a class="logo" href="index.html"><span class="logo-mark">影</span><span>工程影像</span></a>
-      <div class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="product.html">产品</a>
-        <a href="usage.html">使用说明</a>
-        <a href="contact.html">联系</a>
-        <a href="index.html#mini-program">微信小程序</a>
-      </div>
-      <a class="cta nav-download" href="download.html">下载</a>
-      <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false"><span></span></button>
+<a class="skip-link" href="#main">跳到正文</a>
+<header class="site-header">
+  <div class="container">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
+      工程影像管理平台
+    </a>
+    <button class="nav-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="site-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
+    </button>
+    <nav class="nav" id="site-nav">
+      <a href="index.html">首页</a>
+      <a href="product.html">产品能力</a>
+      <a href="usage.html" aria-current="page">使用指南</a>
+      <a href="download.html">下载</a>
+      <a href="contact.html">联系</a>
     </nav>
-  </div>
-
-  <main class="wrap page-shell">
-    <header class="page-hero">
-      <div class="eyebrow">桌面端 + 微信小程序</div>
-      <h1>从注册登录，到照片归档交付</h1>
-      <p>先在电脑建立独立工程并导入项目划分，再让现场人员用同一云账号拍照。下面按软件里真实有的步骤来写。</p>
-      <div class="page-hero-actions">
-        <a class="cta" href="#first-use">从注册开始</a>
-        <a class="cta cta-ghost" href="/download/工程影像管理平台-使用教程.docx">下载 Word 教程</a>
-      </div>
-    </header>
-
-    <section class="section" id="first-use">
-      <div class="section-label">第一次使用</div>
-      <div class="section-head">
-        <h2>先把账号和第一个工程准备好</h2>
-        <p>登录密码用来进软件。工程删除密码只在删除照片、单元或工程时使用。这两套密码不是一回事。</p>
-      </div>
-      <div class="steps">
-        <article class="step"><span class="step-number">01</span><div>
-          <h3>注册账号</h3>
-          <p>打开软件，在登录页点「注册」，会打开官网会员页 <a href="https://shuiliyingxiang.cn/member#register">shuiliyingxiang.cn/member#register</a>。账号可以是手机号、QQ 或邮箱，长度 3 到 64 位。登录密码至少 8 位，并且同时包含字母和数字。找回邮箱和邀请码都可以先不填。注册完成后，回到软件用同一账号登录。</p>
-          <div class="tip">软件里也可以打开会员中心 /license 注册。本机地址一般是 http://127.0.0.1:5088/license 。这条路径可以在注册时一并填写工程删除密码。官网会员页注册时不要求当场填写删除密码，等新建工程再设。</div>
-        </div></article>
-        <article class="step"><span class="step-number">02</span><div>
-          <h3>登录，忘记了就找回</h3>
-          <p>在登录页填写账号和登录密码。如果忘了密码，点「忘记密码」：账号已绑定邮箱，或账号本身就是邮箱时，验证码会发到邮箱，10 分钟内用 6 位验证码设置新密码。没有找回邮箱的账号，不能走邮箱找回，需要联系管理员重置。</p>
-        </div></article>
-        <article class="step"><span class="step-number">03</span><div>
-          <h3>新建独立工程</h3>
-          <p>登录后点顶部工程选择器右侧的「＋」。填写工程名称、专业、类型和归档地区，并给这个工程单独设删除密码。删除密码为 6 到 32 位，不要用过于简单的组合。新工程不会继承另一个工程的照片、项目划分、成员、编号规则、打印设置或水印设置。</p>
-          <div class="tip">工程要绑定到当前登录的云账号，小程序才能看到。软件会提示「绑定当前工程到此账号」。绑定后不能悄悄改到别的账号；换账号登录时，软件会拦住，避免串号。</div>
-        </div></article>
-        <article class="step"><span class="step-number">04</span><div>
-          <h3>导入项目划分</h3>
-          <p>进入「设置 → 项目划分」，先下载 Excel 模板。每个单元工程单独占一行。标准表头共八列：合同工程名称、单位工程名称、单位工程编码、分部工程名称、分部工程编码、单元工程名称、单元工程编码、关键词。也可以粘贴文本导入。导入只写入当前工程。</p>
-        </div></article>
-        <article class="step"><span class="step-number">05</span><div>
-          <h3>修改照片编号规则</h3>
-          <p>进入「设置 → 上传与匹配 → 编号规则」，分别设置施工单元、施工工序、监理单元、监理工序的格式、起始号和流水位数。可以用「单元编号、单元顺序号、工序编码、流水号、类别」这些中文占位。保存后只对当前工程生效，并会重排这个工程里已有照片的编号。</p>
-        </div></article>
-        <article class="step"><span class="step-number">06</span><div>
-          <h3>核对目录，先试传一张</h3>
-          <p>左侧按「单位工程 → 分部工程 → 单元工程」核对。确认当前工程后，选一个单元，把照片加入队列再开始上传。也可以用文件夹导入：软件根据水印给出候选，对不上的进入「待分类影像」，人工选好单元或工序后再入库。</p>
-          <div class="tip">界面只显示工程名称。导入和上传前都先看一眼顶部当前工程。</div>
-        </div></article>
-      </div>
-    </section>
-
-    <section class="section" id="daily" style="padding-top:0">
-      <div class="section-label">日常整理</div>
-      <div class="workflow-grid">
-        <article class="workflow-card"><h3>照片信息</h3><p>可以改题名、拍摄日期、拍摄者、描述、方向和所属工序。移动到其他单元前要再确认目标。</p></article>
-        <article class="workflow-card"><h3>删除保护</h3><p>删除照片、单元、项目划分或整个工程时，输入的是这个工程的删除密码，不是登录密码。工程删除会先留下可恢复的备份。</p></article>
-        <article class="workflow-card"><h3>打印</h3><p>单元里可以打印当前图库，或只打印勾选的照片，也可以沿用上次的打印方案。跨多个单元的批量打印需要会员；免费版请在单元里选「打印当前」。</p></article>
-        <article class="workflow-card"><h3>导出</h3><p>可以导出照片统计表、当前单元的压缩包，以及整个工程的资料包。资料包也可以再导入到当前工程。</p></article>
-      </div>
-    </section>
-
-    <section class="section" id="members" style="padding-top:0">
-      <div class="section-label">会员差异</div>
-      <div class="section-head">
-        <h2>免费额度和会员不是同一套数字</h2>
-        <p>电脑上的照片张数、小程序上传张数、小程序能绑定的工程个数，是三件不同的事。开通后由管理员按账号生效，价格以当前公示为准。</p>
-      </div>
-      <div class="workflow-grid">
-        <article class="workflow-card"><h3>免费版</h3><p>电脑上的照片合计最多 1000 张，用完就不能再上传。可以正常打印当前图库和导出，不另加产品水印。不能使用跨单元批量打印。小程序只能绑定 1 个工程，免费上传额度是 500 张。</p></article>
-        <article class="workflow-card"><h3>月度会员</h3><p>39 元 / 月。电脑上不限照片张数，可以使用批量打印。小程序上传不再受 500 张限制。月费会员最多 2 个小程序工程。</p></article>
-        <article class="workflow-card"><h3>终身会员</h3><p>399 元，一次买断。电脑上不限照片张数，可以使用批量打印，小程序上传不限这 500 张。终身会员最多 3 个小程序工程。</p></article>
-        <article class="workflow-card"><h3>项目成员</h3><p>主账号在「设置 → 项目成员」生成邀请码、审批申请、调整角色或移出成员。受邀人只能进入已批准的项目。邀请好友注册是另一件事：好友要注册并首次登录软件才算有效。</p></article>
-      </div>
-      <p class="hero-meta">上面写的是「月费会员最多 2 个，终身会员最多 3 个」小程序工程。电脑本机还可以建立自己的工程，但没有绑定到当前云账号的工程，小程序看不到。</p>
-    </section>
-
-    <section class="section" id="mini" style="padding-top:0">
-      <div class="section-label">小程序完整流程</div>
-      <div class="section-head">
-        <h2>现场按这个顺序拍</h2>
-        <p>小程序使用电脑已经同步、并且属于同一云账号的工程、项目划分和成员权限。</p>
-      </div>
-      <div class="steps">
-        <article class="step"><span class="step-number">01</span><div>
-          <h3>用同一个账号进入</h3>
-          <p>主账号直接登录。受邀人填写真实姓名和手机号申请加入，审批后才能进项目。微信要绑定这个桌面账号；一个桌面账号不能同时绑在另一个微信上，需要更换时先在电脑端解绑。</p>
-        </div></article>
-        <article class="step"><span class="step-number">02</span><div>
-          <h3>选工程、选部位、拍水印</h3>
-          <p>先选择已经绑定的工程。拍照前选择单位工程、分部工程、单元工程和工序，可以用关键字搜索。水印可以改项目、施工内容、时间、拍摄者、地点和施工单位。地点可以用微信地图选点，也可以手写。</p>
-        </div></article>
-        <article class="step"><span class="step-number">03</span><div>
-          <h3>队列上传，电脑收回来</h3>
-          <p>照片先保存在手机队列里。没网时可以继续拍，网络恢复后再传。上传失败的留在队列里，可以重试或删掉。电脑端保持登录，现场照片才会拉回对应工程。</p>
-        </div></article>
-      </div>
-    </section>
-
-    <section class="section" id="sync" style="padding-top:0">
-      <div class="section-label">工程之间</div>
-      <div class="section-head">
-        <h2>同步与隔离</h2>
-        <p>切换顶部当前工程后，项目划分、照片、成员和设置一起换。它们不会串到另一个工程。</p>
-      </div>
-      <div class="workflow-grid">
-        <article class="workflow-card"><h3>独立项目划分</h3><p>每个工程保存自己的合同、单位、分部、单元和工序。</p></article>
-        <article class="workflow-card"><h3>独立照片</h3><p>待上传、已上传和待分类按账号、电脑和工程分开。</p></article>
-        <article class="workflow-card"><h3>不能跨账号</h3><p>工程属于哪个云账号，就只能由那个账号在小程序里看到。当前账号不能接收属于别人的工程影像。</p></article>
-        <article class="workflow-card"><h3>会员跟着主账号</h3><p>小程序里的上传额度看工程主账号。受邀人的权限只在已批准的项目里。</p></article>
-      </div>
-    </section>
-
-    <section class="section" id="update" style="padding-top:0">
-      <div class="section-label">更新和局域网</div>
-      <div class="steps">
-        <article class="step"><span class="step-number">15</span><div>
-          <h3>检查更新要手动安装</h3>
-          <p>软件可以检查有没有新版本，但不会自动关掉程序替你安装。看到新版本后，下载安装包，先退出正在运行的软件，再覆盖安装。原来的工程和照片还在原来的资料目录里。</p>
-          <div class="tip">也可以直接从本站下载页获取最新的 Windows 安装程序，同样是退出后覆盖安装。</div>
-        </div></article>
-        <article class="step"><span class="step-number">选</span><div>
-          <h3>同一局域网的其他电脑</h3>
-          <p>如果这台电脑要给同网的人用，打开局域网配置页 /setup，按页面生成登录网址。提供服务的这台电脑要保持打开。其他电脑不在同一局域网时打不开。</p>
-        </div></article>
-      </div>
-    </section>
-
-    <section class="cta-band">
-      <div><h2>安装包和这份说明的 Word 版</h2><p>都在下载页，手机上也能点右上角的「下载」。</p></div>
-      <a class="cta cta-lg" href="download.html">前往下载</a>
-    </section>
-  </main>
-  <footer class="site-footer">
-    <div class="wrap">
-      <div class="footer-grid">
-        <div>
-          <div class="footer-brand"><span class="logo-mark">影</span>工程影像管理平台</div>
-          <p class="footer-copy">面向水利、房建、市政、电力的工程现场影像采集、归档、检索与交付工具。</p>
-        </div>
-        <div class="footer-links">
-          <a href="index.html">首页</a>
-          <a href="product.html">产品介绍</a>
-          <a href="download.html">软件下载</a>
-          <a href="contact.html">联系我们</a>
-        </div>
-      </div>
-      <div class="copyright">© 2026 工程影像管理平台</div>
+    <div class="header-actions">
+      <a class="btn btn-ghost" href="https://shuiliyingxiang.cn/member">会员中心</a>
+      <a class="cta nav-download" href="download.html">下载</a>
     </div>
-  </footer>
-  <script src="assets/site.js" defer></script>
+  </div>
+</header>
+<main id="main">
+
+<section class="section-tight">
+  <div class="container prose reveal">
+    <p class="eyebrow">使用指南</p>
+    <h1>先跑通主路径</h1>
+    <p class="lead">下面是最短闭环。完整逐步说明见 Word 教程（含易错点，依据源码整理）。</p>
+    <div class="callout">完整教程：<a href="/download/工程影像管理平台-使用教程.docx"><strong>工程影像管理平台-使用教程.docx</strong></a>。上线站点路径为 <code>/download/工程影像管理平台-使用教程.docx</code>。</div>
+  </div>
+</section>
+
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div class="steps">
+      <article class="step reveal"><h3>安装</h3><p>下载 Windows 安装包，选择安装位置与资料目录；用桌面快捷方式打开（本机默认 127.0.0.1:5088）。</p></article>
+      <article class="step reveal"><h3>注册并登录</h3><p>官网会员页注册，或软件内注册；回到桌面用同一账号登录。登录密码 ≠ 工程删除密码。</p></article>
+      <article class="step reveal"><h3>建工程并上传</h3><p>新建工程、导入项目划分，再上传或现场采集；匹配失败进待分类。</p></article>
+      <article class="step reveal"><h3>打印导出</h3><p>在对应分类下打印或导出统计 / 工程包，完成交付。</p></article>
+    </div>
+    <div class="grid-2" style="margin-top:28px">
+      <article class="card feature-card reveal">
+        <h3>注册入口</h3>
+        <p>主路径：<a href="https://shuiliyingxiang.cn/member#register">shuiliyingxiang.cn/member#register</a>。软件登录门也有注册按钮，会打开同一会员页。</p>
+      </article>
+      <article class="card feature-card reveal">
+        <h3>更新方式</h3>
+        <p>检查更新后需手动下载安装新版本；自动应用更新接口已关闭。覆盖安装不主动清除工程资料。</p>
+      </article>
+    </div>
+    <div style="margin-top:28px" class="reveal">
+      <a class="btn btn-primary btn-lg" href="download.html">去下载页</a>
+      <a class="btn btn-ghost btn-lg" href="/download/工程影像管理平台-使用教程.docx" style="margin-left:10px">下载 Word 教程</a>
+    </div>
+  </div>
+</section>
+
+<section class="section section-band" id="first-use">
+  <div class="container prose">
+    <p class="eyebrow">桌面端 + 微信小程序</p>
+    <h2>从注册登录，到照片归档交付</h2>
+    <p>先在电脑建立独立工程并导入项目划分，再让现场人员用同一云账号拍照。</p>
+    <div class="steps">
+      <article class="step"><h3>新建独立工程</h3><p>登录后点顶部工程选择器右侧的「＋」。填写工程名称、专业、类型和归档地区，并给这个工程单独设删除密码。删除密码为 6 到 32 位。新工程不会继承另一个工程的照片、项目划分、成员、编号规则、打印设置或水印设置。工程要绑定到当前登录的云账号，小程序才能看到。</p></article>
+      <article class="step"><h3>导入项目划分</h3><p>进入「设置 → 项目划分」，先下载 Excel 模板。每个单元工程单独占一行。标准表头共八列：合同工程名称、单位工程名称、单位工程编码、分部工程名称、分部工程编码、单元工程名称、单元工程编码、关键词。导入只写入当前工程。</p></article>
+      <article class="step"><h3>修改照片编号规则</h3><p>进入「设置 → 上传与匹配 → 编号规则」，分别设置施工单元、施工工序、监理单元、监理工序的格式、起始号和流水位数。保存后只对当前工程生效。</p></article>
+    </div>
+  </div>
+</section>
+<section class="section" id="members">
+  <div class="container">
+    <div class="section-head">
+      <p class="eyebrow">会员差异</p>
+      <h2>免费额度和会员不是同一套数字</h2>
+    </div>
+    <div class="grid-3">
+      <article class="card feature-card"><h3>免费版</h3><p>电脑上的照片合计最多 1000 张，用完就不能再上传。可以正常打印当前图库和导出。不能使用跨单元批量打印。小程序只能绑定 1 个工程，免费上传额度是 500 张。</p></article>
+      <article class="card feature-card"><h3>月度会员</h3><p>39 元 / 月。电脑上不限照片张数，可以使用批量打印。小程序上传不再受 500 张限制。月费会员最多 2 个小程序工程。</p></article>
+      <article class="card feature-card"><h3>终身会员</h3><p>399 元，一次买断。电脑上不限照片张数，可以使用批量打印。终身会员最多 3 个小程序工程。</p></article>
+    </div>
+    <p class="price-note">上面写的是「月费会员最多 2 个，终身会员最多 3 个」小程序工程。</p>
+  </div>
+</section>
+<section class="section section-band" id="mini">
+  <div class="container prose">
+    <p class="eyebrow">小程序完整流程</p>
+    <h2>现场按这个顺序拍</h2>
+    <p>用同一个云账号进入。先选已经绑定的工程，再选单位、分部、单元和工序，拍上水印。照片先留在手机队列里，网络恢复后再上传。电脑端保持登录，现场照片才会拉回对应工程。</p>
+  </div>
+</section>
+<section class="section" id="sync">
+  <div class="container prose">
+    <p class="eyebrow">工程之间</p>
+    <h2>同步与隔离</h2>
+    <p>切换顶部当前工程后，项目划分、照片、成员和设置一起换。工程属于哪个云账号，就只能由那个账号在小程序里看到。</p>
+  </div>
+</section>
+
+</main>
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          工程影像管理平台
+        </a>
+        <p>面向水利、房建、市政、电力现场的影像采集、归档与打印交付工具。</p>
+      </div>
+      <div>
+        <h4>产品</h4>
+        <a href="product.html">产品能力</a>
+        <a href="usage.html">使用指南</a>
+        <a href="download.html">下载安装</a>
+      </div>
+      <div>
+        <h4>账户</h4>
+        <a href="https://shuiliyingxiang.cn/member">会员中心</a>
+        <a href="https://shuiliyingxiang.cn/member#register">注册账号</a>
+        <a href="contact.html">联系我们</a>
+      </div>
+      <div>
+        <h4>资源</h4>
+        <a href="/download/工程影像管理平台-使用教程.docx">使用教程（Word）</a>
+        <a href="https://shuiliyingxiang.cn/download/工程影像管理平台-安装程序.exe">Windows 安装包</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> 工程影像管理平台</span>
+      <span>shuiliyingxiang.cn</span>
+    </div>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
 </body>
 </html>
