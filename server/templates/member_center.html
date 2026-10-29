@@ -672,11 +672,11 @@
         notice("登录密码至少 8 位，并同时包含字母和数字", true); return;
       }
       const d = await api("/api/register", { method: "POST", body: JSON.stringify(payload) });
-      notice(d.ok ? "注册成功，用刚才的账号登录即可。" : (d.error || "注册没有完成，请检查账号后再试"), !d.ok);
       if (d.ok) {
-        showAccountPanel("login");
-        $("#cloudUser").value = payload.username;
+        window.location.assign("http://127.0.0.1:5088/");
+        return;
       }
+      notice(d.error || "注册没有完成，请检查账号后再试", true);
     });
 
     // ---- 忘记密码 ----

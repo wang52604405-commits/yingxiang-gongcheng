@@ -45,6 +45,16 @@ class DesktopMemberNavigationContractTest(unittest.TestCase):
         self.assertIn("photo_limit || 1000", page)
         self.assertNotIn("photo_limit || 300", page)
 
+    def test_registration_success_opens_the_software_login(self):
+        root = Path(__file__).resolve().parents[1]
+        pages = [
+            (root / "server" / "templates" / "member_center.html").read_text(encoding="utf-8"),
+            (root / "server" / "templates" / "cloud.html").read_text(encoding="utf-8"),
+        ]
+        for page in pages:
+            self.assertIn('window.location.assign("http://127.0.0.1:5088/")', page)
+            self.assertNotIn("注册成功，用刚才的账号登录即可。", page)
+
     def test_website_tutorial_covers_desktop_mini_program_and_first_use(self):
         root = Path(__file__).resolve().parents[1]
         page = (root / "website" / "usage.html").read_text(encoding="utf-8")
