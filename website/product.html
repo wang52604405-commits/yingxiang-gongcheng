@@ -3,386 +3,157 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>产品介绍 · 工程影像管理平台</title>
-<meta name="description" content="四大专业影像归档：水利、房建、市政、电力的现场采集与桌面整理"/>
+<title>产品能力 · 工程影像管理平台</title>
+<meta name="description" content="工程容器、上传匹配、待分类、打印导出、小程序与局域网协同。"/>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 </head>
-<body data-scene="ocean">
-  <div class="cursor-dot" id="cDot" hidden></div>
-  <div class="cursor-ring" id="cRing" hidden></div>
-  <canvas id="aurora" aria-hidden="true"></canvas>
-  <div class="vignette" aria-hidden="true"></div>
-  <div class="grain" aria-hidden="true"></div>
-  <div class="bg-grid" aria-hidden="true"></div>
-  <div class="bg-flow" aria-hidden="true"></div>
-  <div class="bg-refract" aria-hidden="true"></div>
-  <div class="nav-shell">
-    <nav class="nav" aria-label="主导航">
-      <a class="logo" href="index.html">
-        <span class="logo-mark">影</span>
-        <span>工程影像</span>
-      </a>
-      <div class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="product.html">产品</a>
-        <a href="usage.html">使用说明</a>
-        <a href="contact.html">联系</a>
-        <a href="index.html#mini-program">微信小程序</a>
-      </div>
-      <a class="cta nav-download" data-magnet id="navCta" href="download.html">下载</a>
-      <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false"><span></span></button>
+<body>
+<a class="skip-link" href="#main">跳到正文</a>
+<header class="site-header">
+  <div class="container">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </span>
+      工程影像管理平台
+    </a>
+    <button class="nav-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="site-nav">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
+    </button>
+    <nav class="nav" id="site-nav">
+      <a href="index.html">首页</a>
+      <a href="product.html" aria-current="page">产品能力</a>
+      <a href="usage.html">使用指南</a>
+      <a href="download.html">下载</a>
+      <a href="contact.html">联系</a>
     </nav>
-  </div>
-
-  <main class="wrap page-shell">
-    <header class="page-hero">
-      <div class="eyebrow">产品介绍</div>
-      <h1>四大专业，同一套影像操作系统</h1>
-      <p>桌面端管结构、编号、打印与导出；小程序管现场水印拍照与同步。按专业查看典型场景。</p>
-      <div class="page-hero-actions">
-        <a class="cta" data-magnet href="download.html">下载软件</a>
-        <a class="cta cta-ghost" href="usage.html">使用说明</a>
-      </div>
-    </header>
-
-    <section class="prof-deep" id="prof-water" data-scene="water">
-      <div class="deep-grid">
-        <div class="deep-copy">
-          <div class="eyebrow">01 · 水利</div>
-          <h2>水利工程影像</h2>
-          <p>河道、闸室、泵站等按合同—单位—分部—单元挂接。施工与监理影像分层留存，隐蔽节点可检索。</p>
-          <ul>
-            <li>拦河闸、堤防、连通工程等单元目录</li>
-            <li>浇筑、模板、检测等工序题名与编号</li>
-            <li>现场水印含项目、部位、时间、地点</li>
-            <li>批量打印与工程资料包导出</li>
-          </ul>
-        </div>
-
-            <div class="deep-viz anim-water deep-size" aria-hidden="true">
-<svg viewBox="0 0 320 360" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <linearGradient id="wSkyD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#0c4a6e" stop-opacity="0.55"/>
-      <stop offset="45%" stop-color="#0369a1" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.35"/>
-    </linearGradient>
-    <linearGradient id="wWaterD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#075985" stop-opacity="0.7"/>
-    </linearGradient>
-    <linearGradient id="wConcD" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.25"/>
-      <stop offset="50%" stop-color="#e0f2fe" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0.25"/>
-    </linearGradient>
-    <filter id="wGlowD"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect width="320" height="360" fill="url(#wSkyD)"/>
-  <!-- distant hills -->
-  <path d="M0 150 Q40 130 80 145 T160 135 T240 148 T320 140 V200 H0Z" fill="rgba(8,145,178,0.18)"/>
-  <!-- banks -->
-  <path d="M0 195 L320 185 V215 L0 225Z" fill="rgba(15,118,110,0.25)"/>
-  <path d="M0 310 L320 300 V360 H0Z" fill="rgba(15,118,110,0.3)"/>
-  <!-- water body -->
-  <rect y="200" width="320" height="120" fill="url(#wWaterD)"/>
-  <path class="wave w1" d="M0 215 Q40 200 80 215 T160 215 T240 215 T320 215 V320 H0Z" fill="rgba(56,189,248,0.32)"/>
-  <path class="wave w2" d="M0 245 Q40 228 80 245 T160 245 T240 245 T320 245 V330 H0Z" fill="rgba(14,165,233,0.38)"/>
-  <path class="wave w3" d="M0 275 Q40 262 80 275 T160 275 T240 275 T320 275 V340 H0Z" fill="rgba(7,89,133,0.5)"/>
-  <!-- sluice towers -->
-  <g class="gate" filter="url(#wGlowD)">
-    <rect x="52" y="55" width="22" height="175" rx="2" fill="url(#wConcD)" stroke="rgba(186,230,253,0.7)" stroke-width="1.5"/>
-    <rect x="246" y="55" width="22" height="175" rx="2" fill="url(#wConcD)" stroke="rgba(186,230,253,0.7)" stroke-width="1.5"/>
-    <!-- rivets -->
-    <g fill="rgba(165,243,252,0.7)">
-      <circle cx="58" cy="75" r="1.5"/><circle cx="68" cy="75" r="1.5"/>
-      <circle cx="58" cy="110" r="1.5"/><circle cx="68" cy="110" r="1.5"/>
-      <circle cx="252" cy="75" r="1.5"/><circle cx="262" cy="75" r="1.5"/>
-      <circle cx="252" cy="110" r="1.5"/><circle cx="262" cy="110" r="1.5"/>
-    </g>
-    <!-- gantry -->
-    <rect x="48" y="48" width="224" height="14" rx="2" fill="rgba(186,230,253,0.55)" stroke="rgba(224,242,254,0.8)" stroke-width="1"/>
-    <circle cx="100" cy="55" r="5" fill="none" stroke="rgba(165,243,252,0.9)" stroke-width="1.5"/>
-    <circle cx="220" cy="55" r="5" fill="none" stroke="rgba(165,243,252,0.9)" stroke-width="1.5"/>
-    <!-- gate leaf + bars -->
-    <rect x="78" y="78" width="164" height="120" rx="1" fill="rgba(14,116,144,0.35)" stroke="rgba(125,211,252,0.55)" stroke-width="1"/>
-    <g class="gate-bars" stroke="rgba(125,211,252,0.65)" stroke-width="2">
-      <path d="M84 95 H236 M84 115 H236 M84 135 H236 M84 155 H236 M84 175 H236"/>
-    </g>
-    <!-- guide rails -->
-    <path d="M76 72 V230 M244 72 V230" stroke="rgba(94,234,212,0.45)" stroke-width="1.5"/>
-  </g>
-  <!-- spray -->
-  <g class="bubbles" fill="rgba(186,230,253,0.55)">
-    <circle cx="95" cy="235" r="2.5"/><circle cx="130" cy="242" r="2"/><circle cx="160" cy="238" r="3"/>
-    <circle cx="195" cy="245" r="2.2"/><circle cx="225" cy="236" r="2.8"/>
-    <circle cx="70" cy="300" r="3"/><circle cx="140" cy="320" r="2.5"/><circle cx="210" cy="290" r="3.5"/>
-    <circle cx="260" cy="330" r="2"/><circle cx="100" cy="340" r="2.2"/>
-  </g>
-  <g class="ripples">
-    <circle class="r1" cx="160" cy="210" r="8" fill="none" stroke="rgba(186,230,253,0.6)" stroke-width="1.5"/>
-    <circle class="r2" cx="160" cy="210" r="8" fill="none" stroke="rgba(125,211,252,0.4)" stroke-width="1"/>
-  </g>
-</svg>
-              <div class="gallery-caption">水利 · 闸门与河流（代码动画，无照片）</div>
-            </div>
-</div>
-    </section>
-
-    <section class="prof-deep" id="prof-build" data-scene="build">
-      <div class="deep-grid">
-        <div class="deep-copy">
-          <div class="eyebrow">02 · 房建</div>
-          <h2>房屋建筑影像</h2>
-          <p>主体与机电按分部工程归集。单元内可细分工序，支持人工复核与待分类影像回流。</p>
-          <ul>
-            <li>单位工程 → 分部 → 单元目录树</li>
-            <li>施工 / 监理双轨类别</li>
-            <li>题名、拍摄者、日期可改可查</li>
-            <li>勾选打印与 ZIP 打包交付</li>
-          </ul>
-        </div>
-
-            <div class="deep-viz anim-build deep-size" aria-hidden="true">
-<svg viewBox="0 0 320 360" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <linearGradient id="bSkyD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#083344" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#042f2e" stop-opacity="0.95"/>
-    </linearGradient>
-    <pattern id="bpGridD" width="16" height="16" patternUnits="userSpaceOnUse">
-      <path d="M16 0 H0 V16" fill="none" stroke="rgba(103,232,249,0.12)" stroke-width="1"/>
-    </pattern>
-    <linearGradient id="bFaceD" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#0891b2" stop-opacity="0.35"/>
-      <stop offset="50%" stop-color="#67e8f9" stop-opacity="0.2"/>
-      <stop offset="100%" stop-color="#0891b2" stop-opacity="0.35"/>
-    </linearGradient>
-  </defs>
-  <rect width="320" height="360" fill="url(#bSkyD)"/>
-  <rect width="320" height="360" fill="url(#bpGridD)"/>
-  <!-- perspective ground -->
-  <path d="M0 290 L160 250 L320 290 V360 H0Z" fill="rgba(8,145,178,0.12)" stroke="rgba(103,232,249,0.25)" stroke-width="1"/>
-  <g class="building" fill="none" stroke-linejoin="round">
-    <!-- left low tower -->
-    <g stroke="rgba(103,232,249,0.55)" stroke-width="1.4">
-      <rect class="fl fl1" x="28" y="200" width="56" height="90" fill="url(#bFaceD)"/>
-      <path d="M84 200 L98 188 L98 268 L84 290" fill="rgba(8,145,178,0.2)" stroke="rgba(103,232,249,0.4)"/>
-      <path d="M28 200 L42 188 L98 188" stroke="rgba(165,243,252,0.5)"/>
-    </g>
-    <!-- main tower -->
-    <g stroke="rgba(103,232,249,0.8)" stroke-width="1.8">
-      <rect class="fl fl2" x="100" y="110" width="100" height="180" fill="url(#bFaceD)"/>
-      <path d="M200 110 L220 92 L220 270 L200 290" fill="rgba(8,145,178,0.22)" stroke="rgba(103,232,249,0.5)"/>
-      <path d="M100 110 L120 92 L220 92" stroke="rgba(186,230,253,0.65)"/>
-      <!-- floors -->
-      <path d="M105 145 H195 M105 180 H195 M105 215 H195 M105 250 H195" stroke="rgba(94,234,212,0.35)" stroke-width="1"/>
-    </g>
-    <!-- right mid -->
-    <g stroke="rgba(103,232,249,0.65)" stroke-width="1.5">
-      <rect class="fl fl3" x="230" y="155" width="70" height="135" fill="url(#bFaceD)"/>
-      <path d="M300 155 L312 142 L312 278 L300 290" fill="rgba(8,145,178,0.18)" stroke="rgba(103,232,249,0.4)"/>
-    </g>
-    <!-- crane -->
-    <g class="crane" stroke="rgba(186,230,253,0.85)" stroke-width="2">
-      <path d="M150 110 V55 H240"/>
-      <path d="M150 55 H120" stroke-width="1.5"/>
-      <path d="M146 110 L154 55 M154 110 L146 55" stroke="rgba(94,234,212,0.45)" stroke-width="1"/>
-      <line class="hook" x1="230" y1="55" x2="230" y2="100" stroke="rgba(165,243,252,0.75)" stroke-width="1.5" stroke-dasharray="3 3"/>
-      <circle cx="230" cy="100" r="4" fill="rgba(165,243,252,0.95)" stroke="none"/>
-      <circle cx="150" cy="55" r="3" fill="rgba(186,230,253,0.9)" stroke="none"/>
-    </g>
-  </g>
-  <g class="windows" fill="rgba(103,232,249,0.35)">
-    <rect class="win" x="112" y="120" width="14" height="12"/><rect class="win" x="136" y="120" width="14" height="12"/><rect class="win" x="160" y="120" width="14" height="12"/><rect class="win" x="184" y="120" width="14" height="12"/>
-    <rect class="win" x="112" y="155" width="14" height="12"/><rect class="win" x="136" y="155" width="14" height="12"/><rect class="win" x="160" y="155" width="14" height="12"/><rect class="win" x="184" y="155" width="14" height="12"/>
-    <rect class="win" x="112" y="190" width="14" height="12"/><rect class="win" x="136" y="190" width="14" height="12"/><rect class="win" x="160" y="190" width="14" height="12"/><rect class="win" x="184" y="190" width="14" height="12"/>
-    <rect class="win" x="112" y="225" width="14" height="12"/><rect class="win" x="136" y="225" width="14" height="12"/><rect class="win" x="160" y="225" width="14" height="12"/><rect class="win" x="184" y="225" width="14" height="12"/>
-    <rect class="win" x="36" y="215" width="12" height="10"/><rect class="win" x="54" y="215" width="12" height="10"/>
-    <rect class="win" x="36" y="240" width="12" height="10"/><rect class="win" x="54" y="240" width="12" height="10"/>
-    <rect class="win" x="242" y="170" width="12" height="10"/><rect class="win" x="262" y="170" width="12" height="10"/><rect class="win" x="282" y="170" width="12" height="10"/>
-    <rect class="win" x="242" y="200" width="12" height="10"/><rect class="win" x="262" y="200" width="12" height="10"/><rect class="win" x="282" y="200" width="12" height="10"/>
-  </g>
-  <line x1="16" y1="290" x2="304" y2="290" stroke="rgba(103,232,249,0.45)" stroke-width="2"/>
-</svg>
-              <div class="gallery-caption">房建 · 线框楼群与吊车（代码动画，无照片）</div>
-            </div>
-</div>
-    </section>
-
-    <section class="prof-deep" id="prof-muni" data-scene="muni">
-      <div class="deep-grid">
-        <div class="deep-copy">
-          <div class="eyebrow">03 · 市政</div>
-          <h2>市政工程影像</h2>
-          <p>道路、桥梁、管网影像按部位归档。监理与施工分层，适合线性工程多点位管理。</p>
-          <ul>
-            <li>多点位关键字搜索选部位</li>
-            <li>影像库网格浏览与筛选</li>
-            <li>文件夹导入识别水印候选</li>
-            <li>当前图库 / 勾选 / 批量打印</li>
-          </ul>
-        </div>
-
-            <div class="deep-viz anim-muni deep-size" aria-hidden="true">
-<svg viewBox="0 0 320 360" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <linearGradient id="mSkyD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#042f2e" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#064e3b" stop-opacity="0.5"/>
-    </linearGradient>
-    <linearGradient id="mDeckD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#5eead4" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#0f766e" stop-opacity="0.55"/>
-    </linearGradient>
-  </defs>
-  <rect width="320" height="360" fill="url(#mSkyD)"/>
-  <!-- hills -->
-  <path d="M0 160 Q60 130 120 150 T240 140 T320 155 V220 H0Z" fill="rgba(13,148,136,0.18)"/>
-  <!-- road far -->
-  <path class="road" d="M0 175 H320" stroke="rgba(52,211,153,0.25)" stroke-width="14"/>
-  <path class="dash" d="M0 175 H320" stroke="rgba(167,243,208,0.55)" stroke-width="1.5" stroke-dasharray="12 16"/>
-  <!-- overpass -->
-  <g fill="none" stroke-linecap="round">
-    <!-- piers -->
-    <path d="M55 230 L70 210 L90 210 L105 230 L95 310 L65 310Z" fill="rgba(13,148,136,0.35)" stroke="rgba(94,234,212,0.75)" stroke-width="1.8"/>
-    <path d="M215 230 L230 210 L250 210 L265 230 L255 310 L225 310Z" fill="rgba(13,148,136,0.35)" stroke="rgba(94,234,212,0.75)" stroke-width="1.8"/>
-    <!-- deck -->
-    <rect class="bridge-deck" x="10" y="200" width="300" height="18" rx="2" fill="url(#mDeckD)" stroke="rgba(45,212,191,0.9)" stroke-width="1.5"/>
-    <path d="M10 194 H310" stroke="rgba(94,234,212,0.5)" stroke-width="1.5"/>
-    <path d="M10 224 H310" stroke="rgba(94,234,212,0.4)" stroke-width="1.5"/>
-    <path class="dash" d="M10 209 H310" stroke="rgba(165,243,252,0.75)" stroke-width="1.8" stroke-dasharray="14 12"/>
-    <!-- towers -->
-    <path d="M80 200 L75 95 L85 95 L90 200" stroke="rgba(94,234,212,0.85)" stroke-width="2"/>
-    <path d="M240 200 L235 85 L245 85 L250 200" stroke="rgba(94,234,212,0.85)" stroke-width="2"/>
-    <circle cx="80" cy="95" r="3.5" fill="rgba(153,246,228,1)" stroke="none"/>
-    <circle cx="240" cy="85" r="3.5" fill="rgba(153,246,228,1)" stroke="none"/>
-    <!-- cables -->
-    <path class="bridge" d="M80 95 Q160 145 240 85" stroke="rgba(94,234,212,0.7)" stroke-width="2"/>
-    <path d="M95 115 L95 200 M115 128 L115 200 M140 138 L140 200 M165 138 L165 200 M190 128 L190 200 M215 112 L215 200" stroke="rgba(45,212,191,0.35)" stroke-width="1"/>
-    <!-- lamps -->
-    <path d="M40 200 V175 H48" stroke="rgba(94,234,212,0.5)" stroke-width="1.5"/>
-    <circle cx="48" cy="175" r="3" fill="rgba(153,246,228,0.85)" stroke="none"/>
-    <path d="M280 200 V175 H288" stroke="rgba(94,234,212,0.5)" stroke-width="1.5"/>
-    <circle cx="288" cy="175" r="3" fill="rgba(153,246,228,0.85)" stroke="none"/>
-    <!-- pipes under -->
-    <path class="pipe p1" d="M20 280 C70 260, 110 310, 160 285 S240 255, 300 280" stroke="rgba(45,212,191,0.7)" stroke-width="4"/>
-    <path class="pipe p2" d="M30 320 C90 335, 140 290, 200 315 S270 340, 310 325" stroke="rgba(16,185,129,0.55)" stroke-width="3.5"/>
-  </g>
-  <circle class="dot d1" r="5" fill="#6ee7b7"/><circle class="dot d2" r="4" fill="#34d399"/><circle class="dot d3" r="4.5" fill="#a7f3d0"/>
-</svg>
-              <div class="gallery-caption">市政 · 高架桥与管网（代码动画，无照片）</div>
-            </div>
-</div>
-    </section>
-
-    <section class="prof-deep" id="prof-power" data-scene="power">
-      <div class="deep-grid">
-        <div class="deep-copy">
-          <div class="eyebrow">04 · 电力</div>
-          <h2>电力工程影像</h2>
-          <p>电缆、光伏等隐蔽工程关键节点一次拍清。编号规则按工程独立，切换工程资料隔离。</p>
-          <ul>
-            <li>工序级编号格式与流水位</li>
-            <li>删除密码保护关键删除</li>
-            <li>打印方案可配置输出</li>
-            <li>统计表 XLSX 与资料包导出</li>
-          </ul>
-        </div>
-
-            <div class="deep-viz anim-power deep-size" aria-hidden="true">
-<svg viewBox="0 0 320 360" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <linearGradient id="pSkyD" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#083344" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#164e63" stop-opacity="0.55"/>
-    </linearGradient>
-    <filter id="pGlowD"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect width="320" height="360" fill="url(#pSkyD)"/>
-  <line x1="0" y1="310" x2="320" y2="310" stroke="rgba(34,211,238,0.3)" stroke-width="1.5"/>
-  <!-- left pylon -->
-  <g class="circuit" stroke="rgba(34,211,238,0.85)" stroke-width="1.8" fill="none">
-    <path d="M70 310 L95 70 M130 310 L105 70"/>
-    <path d="M72 280 L128 280 M78 240 L122 240 M84 200 L116 200 M88 160 L112 160 M92 120 L108 120"/>
-    <path d="M70 310 L95 280 L130 310 M78 240 L122 200 M84 200 L116 160 M88 160 L112 120"/>
-    <path d="M130 310 L105 280 L70 310 M122 240 L78 200 M116 200 L84 160 M112 160 L88 120"/>
-    <!-- arms -->
-    <path d="M55 95 H145 M50 130 H150 M48 165 H152" stroke="rgba(103,232,249,0.95)" stroke-width="2.2"/>
-    <path d="M70 95 L100 80 L130 95" stroke="rgba(34,211,238,0.5)" stroke-width="1.2"/>
-  </g>
-  <!-- right pylon -->
-  <g stroke="rgba(34,211,238,0.85)" stroke-width="1.8" fill="none">
-    <path d="M210 310 L230 80 M270 310 L250 80"/>
-    <path d="M214 280 L266 280 M218 240 L262 240 M222 200 L258 200 M226 160 L254 160 M230 120 L250 120"/>
-    <path d="M210 310 L230 280 L270 310 M218 240 L262 200 M222 200 L258 160"/>
-    <path d="M270 310 L250 280 L210 310 M262 240 L218 200 M258 200 L222 160"/>
-    <path d="M200 100 H280 M195 135 H285 M192 170 H288" stroke="rgba(103,232,249,0.95)" stroke-width="2.2"/>
-  </g>
-  <!-- wires -->
-  <g fill="none" stroke="rgba(34,211,238,0.7)" stroke-width="2">
-    <path class="pulse-line" d="M55 95 Q160 130 200 100" stroke-dasharray="8 10"/>
-    <path d="M50 130 Q160 165 195 135"/>
-    <path d="M48 165 Q160 200 192 170"/>
-  </g>
-  <!-- insulators -->
-  <g class="nodes" filter="url(#pGlowD)">
-    <circle class="node n1" cx="55" cy="95" r="4"/><circle class="node n2" cx="145" cy="95" r="4"/>
-    <circle class="node n3" cx="50" cy="130" r="3.5"/><circle class="node n4" cx="150" cy="130" r="3.5"/>
-    <circle class="node n5" cx="200" cy="100" r="4"/><circle class="node n6" cx="280" cy="100" r="4"/>
-  </g>
-  <!-- bolts -->
-  <g class="bolt" fill="none" stroke="#67e8f9" stroke-width="2.5" stroke-linejoin="round">
-    <polyline class="b1" points="160,40 148,85 168,85 130,150"/>
-    <polyline class="b2" points="190,50 178,95 198,95 160,160"/>
-  </g>
-  <!-- substation -->
-  <g class="panel" fill="rgba(34,211,238,0.2)" stroke="rgba(103,232,249,0.55)" stroke-width="1.5">
-    <rect x="120" y="300" width="36" height="28" rx="2"/>
-    <rect x="162" y="300" width="36" height="28" rx="2"/>
-    <rect x="204" y="300" width="36" height="28" rx="2"/>
-  </g>
-  <circle cx="100" cy="70" r="4" fill="rgba(165,243,252,0.95)"/>
-  <circle cx="240" cy="80" r="4" fill="rgba(165,243,252,0.95)"/>
-</svg>
-              <div class="gallery-caption">电力 · 电塔与线路（代码动画，无照片）</div>
-            </div>
-</div>
-    </section>
-
-    <section class="section">
-      <div class="section-label">界面一览</div>
-      <div class="shot-row">
-        <figure><img src="assets/poster-overview.png" alt="总览海报" loading="lazy"/></figure>
-        <figure><img src="assets/poster-unit.png" alt="单元海报" loading="lazy"/></figure>
-        <figure><img src="assets/poster-print.png" alt="打印海报" loading="lazy"/></figure>
-      </div>
-    </section>
-
-    <section class="cta-band">
-      <div><h2>准备好建立第一个工程？</h2><p>下载安装后按使用说明六步起步。</p></div>
-      <a class="cta cta-lg" data-magnet href="download.html">前往下载</a>
-    </section>
-  </main>
-  <footer class="site-footer">
-    <div class="wrap">
-      <div class="footer-grid">
-        <div>
-          <div class="footer-brand"><span class="logo-mark">影</span>工程影像管理平台</div>
-          <p class="footer-copy">面向水利、房建、市政、电力的工程现场影像采集、归档、检索与交付工具。</p>
-        </div>
-        <div class="footer-links">
-          <a href="index.html">首页</a>
-          <a href="product.html">产品介绍</a>
-          <a href="usage.html">使用说明</a>
-          <a href="download.html">软件下载</a>
-          <a href="contact.html">联系我们</a>
-        </div>
-      </div>
-      <div class="copyright">© 2026 工程影像管理平台</div>
+    <div class="header-actions">
+      <a class="btn btn-ghost" href="https://shuiliyingxiang.cn/member">会员中心</a>
+      <a class="cta nav-download" href="download.html">下载</a>
     </div>
-  </footer>
-  <script src="assets/site.js" defer></script>
+  </div>
+</header>
+<main id="main">
+
+<section class="section-tight">
+  <div class="container prose reveal">
+    <p class="eyebrow">产品能力</p>
+    <h1>为现场影像准备的完整工具链</h1>
+    <p class="lead">下列能力均对应桌面端与服务端已实现路径，不是概念清单。</p>
+  </div>
+</section>
+
+<section class="section" style="padding-top:0">
+  <div class="container">
+    <div class="grid-2">
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>独立工程容器</h3><p>每个工程独立设置、编号规则与删除密码；新建工程不继承另一工程的照片与成员，避免串料。</p></article>
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h10M4 12h16M4 18h8" stroke-linecap="round"/><path d="M18 8v10M15 15l3 3 3-3" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>项目划分导入</h3><p>提供 Excel / CSV 模板；支持文本导入与清空重建，快速搭好单位工程树。</p></article>
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10l4-2v8l-4-2"/><circle cx="10" cy="12" r="2.5"/></svg></div><h3>上传与自动匹配</h3><p>单张、文件夹、匹配预览与提交；识别编码失败的照片进入待分类，而不是静默丢弃。</p></article>
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V4h12v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M8 17h8v3H8z"/></svg></div><h3>打印与工程包</h3><p>分类批量打印、上次打印续打；照片统计导出与工程包导入导出，方便移交。</p></article>
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18h10a4 4 0 0 0 .5-8 5.5 5.5 0 0 0-10.6 1.5A3.5 3.5 0 0 0 7 18z"/><path d="M12 12v5M10 15l2 2 2-2" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>小程序同步</h3><p>现场补拍后与桌面同步；工程需绑定云归属后，小程序侧才可见。</p></article>
+      <article class="card feature-card reveal"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="7" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="M8.5 12H14M16 8.5l-1.5 2.5L16 15.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>局域网入口</h3><p>本机服务默认端口 5088；同网段设备可通过设置页获取访问地址。</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="section section-band" id="prof">
+  <div class="container">
+    <div class="section-head reveal">
+      <p class="eyebrow">专业</p>
+      <h2>水利 · 房建 · 市政 · 电力</h2>
+      <p class="lead">通过专业采集清单与模板区分工序要求；界面与归档模型保持一致，降低跨专业学习成本。</p>
+    </div>
+    <div class="grid-4">
+      <div class="card specialty-card reveal"><div class="specialty-art"><svg viewBox="0 0 320 120" fill="none" aria-hidden="true">
+  <rect x="24" y="28" width="18" height="64" rx="2" stroke="currentColor" stroke-width="1.6"/>
+  <rect x="278" y="28" width="18" height="64" rx="2" stroke="currentColor" stroke-width="1.6"/>
+  <path d="M42 48h236M42 72h236" stroke="currentColor" stroke-width="1.4" opacity=".35"/>
+  <rect class="lvl" x="48" y="58" width="224" height="28" rx="2" fill="currentColor" opacity=".18"/>
+  <path d="M48 58h224" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M120 36v-10M200 36v-10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M112 26h16M192 26h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+</svg></div><div class="specialty-body"><h3>水利</h3><p>强调部位、隐蔽与工序节点影像完整。</p></div></div>
+      <div class="card specialty-card reveal"><div class="specialty-art"><svg viewBox="0 0 320 120" fill="none" aria-hidden="true">
+  <path d="M56 96V40l48-16 48 16v56" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M152 96V48h72v48" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M72 56h16M72 72h16M104 56h16M104 72h16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+  <path d="M168 64h16M168 80h16M200 64h16M200 80h16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+  <path d="M48 96h224" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M56 40h96" stroke="currentColor" stroke-width="1.2" opacity=".4"/>
+</svg></div><div class="specialty-body"><h3>房建</h3><p>楼层 / 分部分项维度清晰可查。</p></div></div>
+      <div class="card specialty-card reveal"><div class="specialty-art"><svg viewBox="0 0 320 120" fill="none" aria-hidden="true">
+  <path d="M32 88h256" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M48 88c24-28 48-42 80-42s56 14 80 42" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M80 88V70M208 88V70" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M40 96l40-8 40 4 40-6 40 6 40-4 40 8" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" opacity=".45"/>
+  <circle cx="128" cy="46" r="3" fill="currentColor" opacity=".55"/>
+</svg></div><div class="specialty-body"><h3>市政</h3><p>标段与桩号类项目适合统一编码。</p></div></div>
+      <div class="card specialty-card reveal"><div class="specialty-art"><svg viewBox="0 0 320 120" fill="none" aria-hidden="true">
+  <path d="M160 18v86" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M128 40h64M118 62h84M108 84h104" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M128 40L108 84M192 40L212 84M128 40L148 84M192 40L172 84" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  <path class="wire-pulse" d="M40 50h68M212 50h68" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+  <path class="wire-pulse" d="M32 72h76M212 72h76" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".7"/>
+</svg></div><div class="specialty-body"><h3>电力</h3><p>间隔、杆塔等点位归档更稳。</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container showcase">
+    <div class="reveal">
+      <div class="media-frame">
+        <div class="media-frame-bar"><i></i><i></i><i></i><em>打印预览</em></div>
+        <img src="assets/poster-print.png" alt="打印相关界面" loading="lazy"/>
+      </div>
+    </div>
+    <div class="reveal">
+      <p class="eyebrow">交付</p>
+      <h2>打印不是附加项</h2>
+      <p class="lead">影像最终要进资料。平台把版式与批量出口放在主路径上，减少导出后还要排版的二次劳动。</p>
+      <div class="callout">免费档可用基础能力；批量打印等增强项随会员配置开放。具体以线上 product-config 为准。</div>
+      <a class="btn btn-primary" href="download.html">下载试用</a>
+    </div>
+  </div>
+</section>
+</main>
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          工程影像管理平台
+        </a>
+        <p>面向水利、房建、市政、电力现场的影像采集、归档与打印交付工具。</p>
+      </div>
+      <div>
+        <h4>产品</h4>
+        <a href="product.html">产品能力</a>
+        <a href="usage.html">使用指南</a>
+        <a href="download.html">下载安装</a>
+      </div>
+      <div>
+        <h4>账户</h4>
+        <a href="https://shuiliyingxiang.cn/member">会员中心</a>
+        <a href="https://shuiliyingxiang.cn/member#register">注册账号</a>
+        <a href="contact.html">联系我们</a>
+      </div>
+      <div>
+        <h4>资源</h4>
+        <a href="/download/工程影像管理平台-使用教程.docx">使用教程（Word）</a>
+        <a href="https://shuiliyingxiang.cn/download/工程影像管理平台-安装程序.exe">Windows 安装包</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span data-year>2026</span> 工程影像管理平台</span>
+      <span>shuiliyingxiang.cn</span>
+    </div>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
 </body>
 </html>
