@@ -5,142 +5,293 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>会员中心 - 工程影像管理平台</title>
   <style>
+    /* 授权中心对齐官网 v7 冷青雾面：白卡片、统一描边圆角、顶栏下载。无全屏粒子。 */
     :root {
-      --bg: #0d1117;
-      --panel: #161b22;
-      --panel2: #1c2230;
-      --line: #2d3748;
-      --text: #f0f6fc;
-      --muted: #8b949e;
-      --accent: #2f81f7;
-      --accent2: #58a6ff;
-      --green: #3fb950;
-      --gold: #d29922;
-      --red: #f85149;
+      --ink: #0b1220;
+      --ink-soft: #334155;
+      --text: #0b1220;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --line-strong: #cbd5e1;
+      --surface: #ffffff;
+      --panel: #ffffff;
+      --panel2: #f8fafc;
+      --bg: #f3f7f9;
+      --accent: #0e7490;
+      --accent2: #0e7490;
+      --accent-hover: #0f5f75;
+      --accent-soft: #e0f2fe;
+      --accent-ring: rgba(14, 116, 144, 0.28);
+      --green: #0f766e;
+      --gold: #b45309;
+      --red: #b42318;
+      --radius: 12px;
+      --radius-sm: 10px;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
+      --font: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      color: var(--text);
-      background:
-        radial-gradient(1200px 500px at 50% -100px, rgba(47,129,247,.14), transparent 60%),
-        radial-gradient(900px 400px at 90% 110%, rgba(63,185,80,.08), transparent 60%),
-        var(--bg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--ink-soft);
+      background: var(--bg);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 28px 20px 60px; }
-
-    .hero { text-align: center; margin-bottom: 26px; }
-    .hero .logo {
-      width: 56px; height: 56px; margin: 0 auto 14px;
-      display: grid; place-items: center; border-radius: 14px;
-      background: linear-gradient(135deg, var(--accent), #1158c7);
-      font-size: 26px; font-weight: 800; color: #fff;
-      box-shadow: 0 8px 24px rgba(47,129,247,.35);
+    .page-glow {
+      position: fixed;
+      inset: -18% 8% auto -12%;
+      height: 380px;
+      background: radial-gradient(ellipse at 30% 40%, rgba(14, 116, 144, 0.16), rgba(14, 116, 144, 0.04) 42%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
     }
-    .hero h1 { margin: 0; font-size: 24px; }
-    .hero p { margin: 8px 0 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .wrap { position: relative; z-index: 1; width: min(100% - 48px, 1120px); margin: 0 auto; padding: 8px 0 72px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    h1, h2, h3 { color: var(--ink); letter-spacing: -0.02em; line-height: 1.25; }
 
-    .btn {
-      padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px;
-      background: var(--panel2); color: var(--text); font: inherit; font-size: 13px;
-      font-weight: 700; cursor: pointer; transition: all .15s;
+    .site-header {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; min-height: 64px;
+      background: rgba(243, 247, 249, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.9);
     }
-    .btn:hover { border-color: var(--accent); color: #fff; }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn.primary:hover { background: #3b8af5; }
-    .btn.danger { color: var(--red); }
-    .btn.danger:hover { border-color: var(--red); }
+    .bar {
+      width: min(100% - 48px, 1120px);
+      margin: 0 auto;
+      display: flex; align-items: center; gap: 20px;
+    }
+    .site-brand {
+      display: inline-flex; align-items: center; gap: 10px;
+      color: var(--ink); font-weight: 700; font-size: 15px;
+      letter-spacing: -0.01em; flex-shrink: 0;
+    }
+    .site-brand:hover { color: var(--ink); }
+    .brand-mark {
+      width: 28px; height: 28px; border-radius: 8px;
+      display: grid; place-items: center; color: #fff;
+      background: linear-gradient(145deg, #0891b2, #0e7490 55%, #155e75);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    .brand-mark svg { width: 16px; height: 16px; }
+    .nav { display: flex; align-items: center; gap: 4px; flex: 1; }
+    .nav a {
+      color: var(--ink-soft); font-size: 14px; font-weight: 500;
+      padding: 8px 12px; border-radius: 8px;
+    }
+    .nav a:hover, .nav a[aria-current="page"] {
+      color: var(--ink); background: rgba(14, 116, 144, 0.08);
+    }
+    .header-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+    .whoami { color: var(--muted); font-size: 13px; }
+    .whoami:empty { display: none; }
+    .nav-toggle {
+      display: none; width: 40px; height: 40px;
+      border: 1px solid var(--line); border-radius: 10px;
+      background: var(--surface); color: var(--ink); cursor: pointer;
+      align-items: center; justify-content: center;
+    }
+    .nav-toggle svg { width: 18px; height: 18px; }
 
-    .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .btn, .cta {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 42px; padding: 0 18px; border-radius: var(--radius-sm);
+      border: 1px solid var(--line); background: transparent;
+      color: var(--ink-soft); font: inherit; font-size: 14px; font-weight: 600;
+      cursor: pointer; text-decoration: none; white-space: nowrap;
+      transition: background .18s var(--ease), border-color .18s var(--ease), color .18s var(--ease);
+    }
+    .btn:hover, .cta:hover { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
+    .btn.primary, a.cta.nav-download {
+      background: var(--accent); border-color: transparent; color: #fff;
+      box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(14,116,144,.25);
+    }
+    a.cta.nav-download { box-shadow: 0 0 0 3px var(--accent-ring); }
+    .btn.primary:hover, a.cta.nav-download:hover { background: var(--accent-hover); color: #fff; }
+    .btn.danger { color: var(--red); background: transparent; }
+    .btn.danger:hover { border-color: var(--red); color: var(--red); background: #fff; }
+    .btn.ghost { background: transparent; }
+
+    .page-hero { padding: 40px 0 8px; max-width: 640px; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin: 0 0 12px; font-size: 12px; font-weight: 650;
+      letter-spacing: 0.08em; color: var(--accent); text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 16px; height: 2px; background: var(--accent); border-radius: 1px; }
+    .page-hero h1 { margin: 0 0 12px; font-size: clamp(32px, 4vw, 40px); font-weight: 700; }
+    .lead { margin: 0; font-size: 17px; line-height: 1.7; color: var(--muted); }
+
+    .plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 28px 0 20px; }
     .plan {
       position: relative; display: flex; flex-direction: column;
-      padding: 22px 20px; border: 1px solid var(--line); border-radius: 14px;
-      background: var(--panel); transition: transform .15s, border-color .15s;
+      padding: 26px 24px; min-height: 280px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease);
     }
-    .plan:hover { transform: translateY(-3px); border-color: #3d4b61; }
-    .plan.hot { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 12px 32px rgba(47,129,247,.18); }
+    .plan:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--line-strong); }
+    .plan.hot { border-color: rgba(14, 116, 144, 0.35); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow); }
     .plan .flag {
-      position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
-      padding: 3px 12px; border-radius: 999px; font-size: 11px; font-weight: 800;
-      background: var(--accent); color: #fff; white-space: nowrap;
+      position: absolute; top: 18px; right: 18px;
+      padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 650;
+      background: var(--accent-soft); color: var(--accent); white-space: nowrap;
     }
-    .plan .pname { font-size: 15px; font-weight: 800; }
-    .plan .price { margin: 12px 0 4px; }
-    .plan .price b { font-size: 32px; letter-spacing: -.5px; }
-    .plan .price small { color: var(--muted); font-size: 13px; margin-left: 4px; }
-    .plan .oldprice { display: inline-block; color: var(--muted); font-size: 13px; text-decoration: line-through; margin-right: 6px; }
-    .plan .save { display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(210,153,34,.15); color: var(--gold); font-size: 11px; font-weight: 800; margin-left: 6px; }
-    .plan .desc { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
-    .plan ul { margin: 0; padding: 0; list-style: none; flex: 1; }
-    .plan li { position: relative; padding: 4px 0 4px 22px; font-size: 13px; color: #c9d1d9; }
-    .plan li::before { content: "✓"; position: absolute; left: 2px; color: var(--green); font-weight: 800; }
-    .plan li.no::before { content: "✕"; color: var(--red); }
-    .plan li.no { color: #6e7681; }
-    .plan .btn { margin-top: 16px; width: 100%; text-align: center; }
+    .plan .pname { font-size: 16px; font-weight: 650; color: var(--ink); }
+    .plan .price { margin: 8px 0 4px; color: var(--ink); }
+    .plan .price b { font-size: 36px; font-weight: 700; letter-spacing: -0.03em; }
+    .plan .price small { color: var(--muted); font-size: 15px; font-weight: 500; margin-left: 4px; }
+    .plan .desc { color: var(--muted); font-size: 14px; margin-bottom: 4px; }
+    .plan ul { margin: 16px 0 0; padding: 0; list-style: none; flex: 1; }
+    .plan li { position: relative; padding: 0 0 0 18px; margin: 8px 0; font-size: 14px; color: var(--ink-soft); }
+    .plan li::before {
+      content: ""; position: absolute; left: 0; top: 0.55em;
+      width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0.75;
+    }
+    .plan li.no { color: var(--muted); }
+    .plan li.no::before { background: transparent; border: 1.5px solid var(--line-strong); opacity: 1; width: 7px; height: 7px; }
+    .plan .btn { margin-top: 20px; width: 100%; }
 
     .card {
-      padding: 20px; margin-bottom: 16px;
-      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 24px; margin-bottom: 16px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
     }
-    .card h2 { margin: 0 0 6px; font-size: 16px; }
-    .card .sub { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    .card h2 { margin: 0 0 6px; font-size: 18px; font-weight: 650; }
+    .card .sub { margin: 0 0 14px; color: var(--muted); font-size: 14px; line-height: 1.6; }
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
-    label { display: block; margin: 12px 0 6px; color: #c9d1d9; font-size: 13px; font-weight: 700; }
+    label { display: block; margin: 12px 0 6px; color: var(--ink); font-size: 13px; font-weight: 650; }
     input {
-      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
-      background: var(--bg); color: var(--text); font: inherit; outline: none;
+      width: 100%; min-height: 46px; padding: 10px 12px;
+      border: 1px solid var(--line); border-radius: var(--radius-sm);
+      background: #fff; color: var(--ink); font: inherit; font-size: 16px; outline: none;
     }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(47,129,247,.15); }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
     .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+    .row .btn { width: auto; }
+
+    .pay-grid { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+    .qr-placeholder {
+      width: 180px; min-height: 180px; display: grid; place-items: center;
+      padding: 18px; text-align: center; border-radius: var(--radius);
+      border: 1px dashed var(--line-strong); background: var(--panel2);
+      color: var(--muted); font-size: 13px; line-height: 1.7;
+    }
+    .pay-copy { flex: 1; min-width: 220px; }
+    .pay-box {
+      margin: 6px 0; padding: 14px 16px; border-radius: var(--radius-sm);
+      background: var(--accent-soft); border: 1px solid rgba(14, 116, 144, 0.16); color: var(--ink);
+    }
+    .pay-note { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.8; }
+    .price-note { color: var(--gold); font-size: 12px; }
 
     .invite-box { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
     .invite-box code {
-      padding: 6px 14px; border: 1px dashed var(--accent); border-radius: 8px;
-      background: rgba(47,129,247,.08); color: var(--accent2); font-size: 18px;
-      font-weight: 800; letter-spacing: 2px;
+      padding: 8px 14px; border: 1px dashed rgba(14, 116, 144, 0.45); border-radius: var(--radius-sm);
+      background: var(--accent-soft); color: var(--accent); font-size: 18px;
+      font-weight: 700; letter-spacing: 2px;
     }
     .invite-box .meta { color: var(--muted); font-size: 13px; line-height: 1.6; }
-    .progress { flex: 1; min-width: 160px; height: 8px; border-radius: 999px; background: #2d3748; overflow: hidden; }
-    .progress i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--green)); }
+    .progress { flex: 1; min-width: 160px; height: 8px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+    .progress i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
-    .notice { display: none; margin-top: 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+    .notice { display: none; margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-sm); font-size: 14px; line-height: 1.6; }
     .notice.show { display: block; }
-    .notice.ok { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
-    .notice.err { background: rgba(248,81,73,.12); color: var(--red); border: 1px solid rgba(248,81,73,.3); }
-    .section-title { display: flex; align-items: center; gap: 8px; margin: 24px 0 12px; color: #c9d1d9; font-weight: 800; font-size: 14px; }
+    .notice.ok { background: #e6f4f1; color: var(--green); border: 1px solid rgba(15, 118, 110, 0.2); }
+    .notice.err { background: #fdecea; color: var(--red); border: 1px solid rgba(180, 35, 24, 0.18); }
+    .section-title {
+      display: flex; align-items: center; gap: 8px; margin: 28px 0 12px;
+      color: var(--accent); font-weight: 650; font-size: 12px; letter-spacing: 0.08em;
+    }
     .section-title::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-    .link { color: var(--accent2); cursor: pointer; font-size: 13px; }
-    .auth-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; margin-bottom: 8px; background: #0d1117; border-radius: 12px; }
-    .auth-tab { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
-    .auth-tab.active { background: var(--panel2); color: #fff; }
-    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-    .advanced { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: rgba(255,255,255,.02); }
-    .advanced summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+    .link { color: var(--accent); cursor: pointer; font-size: 13px; }
+    .auth-switch {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+      padding: 4px; margin-bottom: 8px; background: #f8fafc;
+      border: 1px solid var(--line); border-radius: 12px;
+    }
+    .auth-tab {
+      min-height: 40px; border: 0; border-radius: 9px; background: transparent;
+      color: var(--muted); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer;
+    }
+    .auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .advanced {
+      margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 8px 12px; background: #f8fafc;
+    }
+    .advanced summary { cursor: pointer; font-weight: 650; font-size: 13px; color: var(--ink); }
     .passline { display: flex; gap: 8px; align-items: center; }
     .passline input { flex: 1; }
-    .text-btn { border: 0; background: transparent; color: var(--accent2); font: inherit; font-weight: 700; cursor: pointer; }
-    .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 22px; background: #151f2b; border-bottom: 1px solid #22303f; }
-    .spacer { flex: 1; }
-    .terms { margin-top: 18px; text-align: center; color: #6e7681; font-size: 12px; line-height: 1.7; }
+    .text-btn { border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; }
+    .optional { color: var(--muted); font-weight: 600; }
+    .terms { margin-top: 28px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .foot-links { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+    .foot-links a { color: var(--muted); font-size: 13px; }
+    .foot-links a:hover { color: var(--ink); }
+
+    @media (max-width: 900px) { .plans { grid-template-columns: 1fr; } }
+    @media (max-width: 860px) {
+      .bar, .wrap { width: min(100% - 32px, 1120px); }
+      .site-header { height: auto; }
+      .bar { flex-wrap: wrap; padding: 10px 0; }
+      .nav-toggle { display: inline-flex; }
+      .nav {
+        display: none; position: absolute; left: 0; right: 0; top: 100%;
+        flex-direction: column; align-items: stretch; gap: 4px;
+        padding: 12px 16px 16px; background: var(--surface);
+        border-bottom: 1px solid var(--line); box-shadow: var(--shadow);
+      }
+      .nav.is-open { display: flex; }
+      .header-actions { width: 100%; justify-content: flex-end; }
+    }
+    @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-motion: reduce) {
+      .plan { transition: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div style="font-weight:800">工程影像管理平台</div>
-    <div class="spacer"></div>
-    <span id="whoami" style="font-size:13px;color:var(--muted)"></span>
-    <button class="btn danger" id="logoutBtn" style="display:none">退出登录</button>
-  </div>
+  <div class="page-glow" aria-hidden="true"></div>
+  <header class="site-header">
+    <div class="bar">
+      <a class="site-brand" href="https://shuiliyingxiang.cn/">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+        工程影像管理平台
+      </a>
+      <button class="nav-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
+      </button>
+      <nav class="nav" id="site-nav" aria-label="站点导航">
+        <a href="https://shuiliyingxiang.cn/">首页</a>
+        <a href="https://shuiliyingxiang.cn/product.html">产品能力</a>
+        <a href="https://shuiliyingxiang.cn/usage.html">使用指南</a>
+        <a href="https://shuiliyingxiang.cn/download.html">下载</a>
+        <a href="https://shuiliyingxiang.cn/contact.html">联系</a>
+      </nav>
+      <div class="header-actions">
+        <span id="whoami" class="whoami"></span>
+        <button class="btn danger" id="logoutBtn" type="button" style="display:none">退出登录</button>
+        <a class="btn ghost" href="https://shuiliyingxiang.cn/member" aria-current="page">会员中心</a>
+        <a class="cta nav-download" href="https://shuiliyingxiang.cn/download.html">下载</a>
+      </div>
+    </div>
+  </header>
 
   <div class="wrap">
-    <div class="hero">
-      <div class="logo">影</div>
-      <h1>工程影像管理平台 · 会员中心</h1>
-      <p>按需选择会员，解锁无限上传与无水印导出 · 邀请好友注册，还能免费续期</p>
-    </div>
+    <header class="page-hero">
+      <p class="eyebrow">会员</p>
+      <h1>会员中心</h1>
+      <p class="lead">按需开通会员，解锁无限上传与无水印导出。邀请好友注册，还能免费续期。</p>
+    </header>
 
     <!-- 定价卡片 -->
     <div class="plans">
@@ -195,15 +346,15 @@
     <div class="card">
       <h2>开通会员 · 扫码付款</h2>
       <p class="sub">微信扫码付款 → 加作者微信发送「付款截图 + 账号 + 机器ID」→ 管理员开通后立即生效。</p>
-      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
-        <div style="width:180px;min-height:180px;display:grid;place-items:center;padding:18px;text-align:center;border-radius:8px;border:1px dashed var(--line);color:var(--muted);font-size:13px;line-height:1.7;">内测付款码由管理员单独提供<br>正式收款入口暂未开放</div>
-        <div style="flex:1;min-width:220px;">
-          <div style="margin:6px 0;padding:10px;background:rgba(47,129,247,.08);border-radius:8px;">
+      <div class="pay-grid">
+        <div class="qr-placeholder">内测付款码由管理员单独提供<br>正式收款入口暂未开放</div>
+        <div class="pay-copy">
+          <div class="pay-box">
             <strong>月度会员 <span id="monthlyPayPrice">39</span> 元</strong>/月<br>
             <strong>终身会员 <span id="lifetimePayPrice">399</span> 元</strong><br>
-            <span style="color:var(--gold);font-size:12px">原价，正式定价以后续公告为准</span>
+            <span class="price-note">原价，正式定价以后续公告为准</span>
           </div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.8;">
+          <div class="pay-note">
             付款备注请写你的账号，方便核对。<br>
             付款后加作者微信发送截图 + 账号 + 机器ID。
           </div>
@@ -253,7 +404,7 @@
         <label for="regPass">密码</label>
         <input id="regPass" type="password" placeholder="至少 8 位，同时包含字母和数字" autocomplete="new-password">
         <p class="hint" id="regPassHint">至少 8 位，并且同时包含字母和数字</p>
-        <label for="regEmail">找回邮箱 <span style="color:var(--muted);font-weight:600">选填</span></label>
+        <label for="regEmail">找回邮箱 <span class="optional">选填</span></label>
         <input id="regEmail" type="email" placeholder="忘了密码时用来收验证码">
         <p class="hint" id="emailHint">账号如果本身是邮箱，会自动用来找回。</p>
         <details class="advanced">
@@ -313,8 +464,28 @@
     <div class="terms">
       使用声明：本软件仅限项目部内部试用和授权使用。<br>
       禁止复制传播、反编译、破解限制或二次销售。
+      <div class="foot-links">
+        <a href="https://shuiliyingxiang.cn/">首页</a>
+        <a href="https://shuiliyingxiang.cn/product.html">产品能力</a>
+        <a href="https://shuiliyingxiang.cn/usage.html">使用指南</a>
+        <a href="https://shuiliyingxiang.cn/download.html">下载</a>
+        <a href="https://shuiliyingxiang.cn/contact.html">联系</a>
+      </div>
     </div>
   </div>
+  <script>
+    (function () {
+      var button = document.querySelector(".nav-toggle");
+      var nav = document.getElementById("site-nav");
+      if (!button || !nav) return;
+      button.addEventListener("click", function () {
+        var open = button.getAttribute("aria-expanded") !== "true";
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+        button.setAttribute("aria-label", open ? "关闭菜单" : "打开菜单");
+        nav.classList.toggle("is-open", open);
+      });
+    })();
+  </script>
 
   <script>
     const $ = (s) => document.querySelector(s);
