@@ -8,9 +8,16 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 </head>
-<body>
+<body data-scene="ocean">
+  <div class="cursor-dot" id="cDot" hidden></div>
+  <div class="cursor-ring" id="cRing" hidden></div>
+  <canvas id="aurora" aria-hidden="true"></canvas>
+
   <div class="vignette" aria-hidden="true"></div>
   <div class="grain" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-flow" aria-hidden="true"></div>
+  <div class="bg-refract" aria-hidden="true"></div>
   <div class="nav-shell">
     <nav class="nav" aria-label="主导航">
       <a class="logo" href="index.html"><span class="logo-mark">影</span><span>工程影像</span></a>
@@ -21,7 +28,7 @@
         <a href="contact.html">联系</a>
         <a href="index.html#mini-program">微信小程序</a>
       </div>
-      <a class="cta nav-download" href="download.html">下载</a>
+      <a class="cta nav-download" data-magnet id="navCta" href="download.html">下载</a>
       <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false"><span></span></button>
     </nav>
   </div>

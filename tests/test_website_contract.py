@@ -57,6 +57,14 @@ class WebsiteContractTest(unittest.TestCase):
         self.assertIn("https://shuiliyingxiang.cn/member#register", usage)
         self.assertNotIn("300 张", pages)
         self.assertNotIn("自动检查更新", pages)
+        self.assertIn("免费 1000 张", index)
+        product = (SITE / "product.html").read_text(encoding="utf-8")
+        self.assertNotIn("field_", index + product)
+        self.assertNotIn("data-tilt", index + product)
+        for scene in ("water", "build", "muni", "power"):
+            self.assertIn('data-scene="%s"' % scene, index)
+            self.assertIn('data-scene="%s"' % scene, product)
+        self.assertIn("shot_edge_main.png", index)
 
     def test_internal_links_point_at_real_pages_and_anchors(self):
         parsed = {}
