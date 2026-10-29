@@ -5,65 +5,115 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>工程影像云预览</title>
   <style>
+    /* 云预览对齐官网 v7 冷青雾面。无全屏粒子。 */
     :root {
-      --bg: #eef3f8;
+      --bg: #f3f7f9;
       --card: #ffffff;
-      --ink: #172033;
-      --muted: #5c6b80;
-      --line: #d7e0ea;
-      --accent: #0b6bcb;
-      --accent-dark: #084f96;
-      --soft: #f5f8fb;
-      --ok-bg: #e7f6ee;
-      --ok-ink: #0d7a45;
+      --ink: #0b1220;
+      --ink-soft: #334155;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --line-strong: #cbd5e1;
+      --accent: #0e7490;
+      --accent-dark: #0f5f75;
+      --accent-soft: #e0f2fe;
+      --accent-ring: rgba(14, 116, 144, 0.28);
+      --soft: #f8fafc;
+      --ok-bg: #e6f4f1;
+      --ok-ink: #0f766e;
       --err-bg: #fdecea;
       --err-ink: #b42318;
-      --shadow: 0 18px 50px rgba(23, 32, 51, .08);
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06);
+      --radius: 12px;
+      --radius-sm: 10px;
+      --font: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      color: var(--ink);
-      background:
-        radial-gradient(900px 420px at 10% -10%, rgba(11, 107, 203, .16), transparent 60%),
-        radial-gradient(700px 360px at 100% 0%, rgba(15, 159, 110, .1), transparent 55%),
-        var(--bg);
-      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--ink-soft);
+      background: var(--bg);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
     }
     button, input { font: inherit; }
-    .topbar {
-      display: flex; align-items: center; gap: 12px;
-      padding: 14px 22px; background: rgba(255,255,255,.88);
-      border-bottom: 1px solid var(--line); backdrop-filter: blur(10px);
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-dark); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    [hidden] { display: none !important; }
+    h1, h2, h3 { color: var(--ink); letter-spacing: -0.02em; }
+    .page-glow {
+      position: fixed; inset: -18% 8% auto -12%; height: 380px; pointer-events: none; z-index: 0;
+      background: radial-gradient(ellipse at 30% 40%, rgba(14, 116, 144, 0.16), rgba(14, 116, 144, 0.04) 42%, transparent 70%);
     }
-    .brand { font-size: 17px; font-weight: 760; }
-    .brand small { display: block; margin-top: 2px; color: var(--muted); font-weight: 500; font-size: 12px; }
-    .spacer { flex: 1; }
-    .btn {
-      min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px;
-      background: var(--accent); color: #fff; font-weight: 700; cursor: pointer;
+    .site-header {
+      position: sticky; top: 0; z-index: 50;
+      display: flex; align-items: center; min-height: 64px;
+      background: rgba(243, 247, 249, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(226, 232, 240, 0.9);
     }
-    .btn:hover { background: var(--accent-dark); }
+    .bar { width: min(100% - 48px, 1120px); margin: 0 auto; display: flex; align-items: center; gap: 20px; }
+    .site-brand {
+      display: inline-flex; align-items: center; gap: 10px;
+      color: var(--ink); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; flex-shrink: 0;
+    }
+    .site-brand:hover { color: var(--ink); }
+    .brand-mark {
+      width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #fff;
+      background: linear-gradient(145deg, #0891b2, #0e7490 55%, #155e75);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    .brand-mark svg { width: 16px; height: 16px; }
+    .nav { display: flex; align-items: center; gap: 4px; flex: 1; }
+    .nav a { color: var(--ink-soft); font-size: 14px; font-weight: 500; padding: 8px 12px; border-radius: 8px; }
+    .nav a:hover, .nav a[aria-current="page"] { color: var(--ink); background: rgba(14, 116, 144, 0.08); }
+    .header-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+    .nav-toggle {
+      display: none; width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 10px;
+      background: #fff; color: var(--ink); cursor: pointer; align-items: center; justify-content: center;
+    }
+    .nav-toggle svg { width: 18px; height: 18px; }
+    .btn, .cta {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 42px; padding: 0 18px; border: 1px solid transparent; border-radius: var(--radius-sm);
+      background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+      text-decoration: none; white-space: nowrap;
+    }
+    .btn:hover, .cta:hover { background: var(--accent-dark); color: #fff; }
     .btn:disabled { opacity: .6; cursor: default; }
-    .btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+    .btn.ghost {
+      background: transparent; color: var(--ink-soft); border-color: var(--line);
+    }
+    .btn.ghost:hover { background: #fff; color: var(--ink); border-color: var(--line-strong); }
+    a.cta.nav-download { box-shadow: 0 0 0 3px var(--accent-ring); color: #fff; }
+    a.cta.nav-download:hover { color: #fff; }
     .btn.block { width: 100%; }
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
+    .wrap { position: relative; z-index: 1; width: min(100% - 48px, 1120px); margin: 0 auto; padding: 28px 0 64px; }
     .auth-stage {
       max-width: 920px; margin: 28px auto 40px; padding: 0 16px;
       display: grid; grid-template-columns: minmax(240px, 1fr) minmax(320px, 460px);
       gap: 28px; align-items: start;
     }
-    .intro h1 { margin: 8px 0 10px; font-size: 34px; line-height: 1.2; letter-spacing: -.4px; }
-    .eyebrow { margin: 0; color: var(--accent); font-size: 13px; font-weight: 760; letter-spacing: .08em; }
+    .intro h1 { margin: 0 0 12px; font-size: clamp(32px, 4vw, 40px); font-weight: 700; line-height: 1.25; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      margin: 0 0 12px; color: var(--accent); font-size: 12px; font-weight: 650; letter-spacing: .08em;
+    }
+    .eyebrow::before { content: ""; width: 16px; height: 2px; border-radius: 1px; background: var(--accent); }
     .lead { margin: 0; color: var(--muted); line-height: 1.7; }
     .fineprint { margin-top: 18px; color: var(--muted); font-size: 13px; }
     .fineprint summary { cursor: pointer; }
     .panel {
-      background: var(--card); border: 1px solid var(--line); border-radius: 20px;
-      box-shadow: var(--shadow); padding: 18px;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow); padding: 22px;
     }
-    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; background: var(--soft); border-radius: 12px; }
+    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; background: var(--soft); border: 1px solid var(--line); border-radius: 12px; }
     .modes button {
       min-height: 40px; border: 0; border-radius: 9px; background: transparent;
       color: var(--muted); font-weight: 700; cursor: pointer;
@@ -77,7 +127,7 @@
       width: 100%; min-height: 46px; padding: 10px 12px; border: 1px solid var(--line);
       border-radius: 10px; background: #fff; color: var(--ink); font-size: 16px;
     }
-    input:focus { outline: 3px solid rgba(11,107,203,.18); border-color: var(--accent); }
+    input:focus { outline: 3px solid var(--accent-ring); border-color: var(--accent); }
     .passline { display: flex; gap: 8px; align-items: center; }
     .passline input { flex: 1; }
     .text-btn { border: 0; background: transparent; color: var(--accent); font-weight: 700; cursor: pointer; padding: 8px; }
@@ -94,39 +144,74 @@
     .code-row input { flex: 1; }
     .code-row .btn { flex: 0 0 auto; }
     .card {
-      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-      padding: 16px; margin-bottom: 14px;
+      background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      padding: 20px; margin-bottom: 14px;
     }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
     .tile {
-      background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px; cursor: pointer;
+      background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; cursor: pointer;
+      transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease);
     }
     .tile .name { margin-top: 8px; font-size: 14px; line-height: 1.4; word-break: break-all; }
     .tile .code { font-size: 12px; color: var(--accent); font-family: Consolas, monospace; }
     .tile .count { margin-top: 4px; font-size: 12px; color: var(--muted); }
     .back { display: inline-block; color: var(--accent); cursor: pointer; margin-bottom: 12px; font-weight: 700; }
     .thumb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-    .thumb-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: 10px; background: var(--soft); }
+    .thumb-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--soft); }
     .muted { color: var(--muted); font-size: 13px; line-height: 1.6; }
     .more { display: block; margin: 16px auto 0; }
-    @media (max-width: 800px) {
-      .auth-stage { grid-template-columns: 1fr; margin-top: 16px; gap: 14px; }
+    .auth-stage { position: relative; z-index: 1; width: min(100% - 48px, 1120px); max-width: none; margin: 28px auto 48px; padding: 0; gap: 48px; align-items: center; }
+    @media (max-width: 860px) {
+      .bar, .auth-stage, .wrap { width: min(100% - 32px, 1120px); }
+      .site-header { height: auto; }
+      .bar { flex-wrap: wrap; padding: 10px 0; }
+      .nav-toggle { display: inline-flex; }
+      .nav {
+        display: none; position: absolute; left: 0; right: 0; top: 100%;
+        flex-direction: column; align-items: stretch; padding: 12px 16px 16px;
+        background: #fff; border-bottom: 1px solid var(--line); box-shadow: var(--shadow);
+      }
+      .nav.is-open { display: flex; }
+      .header-actions { width: 100%; justify-content: flex-end; }
+      .auth-stage { grid-template-columns: 1fr; margin-top: 16px; gap: 16px; }
       .intro h1 { font-size: 28px; }
-      .topbar { align-items: flex-start; }
     }
-    @media (hover:hover) and (pointer:fine) { .tile:hover { border-color: var(--accent); } }
+    @media (hover:hover) and (pointer:fine) {
+      .tile:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--shadow); }
+    }
+    @media (prefers-reduced-motion: reduce) { .tile { transition: none; } }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="brand">工程影像云预览<small>只看自己的项目预览</small></div>
-    <div class="spacer"></div>
-    <button class="btn ghost" id="logoutBtn" type="button" style="display:none">退出登录</button>
-  </div>
+  <div class="page-glow" aria-hidden="true"></div>
+  <header class="site-header">
+    <div class="bar">
+      <a class="site-brand" href="https://shuiliyingxiang.cn/">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 14c2.5-1 4.5-4 8-4s5.5 3 8 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5 17.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".7"/><path d="M8 10V7.5M16 10V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+        工程影像管理平台
+      </a>
+      <button class="nav-toggle" type="button" aria-label="打开菜单" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/></svg>
+      </button>
+      <nav class="nav" id="site-nav" aria-label="站点导航">
+        <a href="https://shuiliyingxiang.cn/">首页</a>
+        <a href="https://shuiliyingxiang.cn/product.html">产品能力</a>
+        <a href="https://shuiliyingxiang.cn/usage.html">使用指南</a>
+        <a href="https://shuiliyingxiang.cn/download.html">下载</a>
+        <a href="https://shuiliyingxiang.cn/contact.html">联系</a>
+      </nav>
+      <div class="header-actions">
+        <button class="btn ghost" id="logoutBtn" type="button" style="display:none">退出登录</button>
+        <a class="btn ghost" href="/">会员中心</a>
+        <a class="cta nav-download" href="https://shuiliyingxiang.cn/download.html">下载</a>
+      </div>
+    </div>
+  </header>
 
   <main class="auth-stage" id="loginBox">
     <section class="intro">
-      <p class="eyebrow">CLOUD PREVIEW</p>
+      <p class="eyebrow">云预览</p>
       <h1>登录后看项目预览</h1>
       <p class="lead">账号和密码就够了。预览图用来认照片和编号，原图仍在电脑里处理。</p>
       <details class="fineprint">
@@ -566,6 +651,19 @@
       showMode(mode, false);
     });
     if (token) Promise.all([loadProduct(), checkAuth()]);
+  </script>
+  <script>
+    (function () {
+      var button = document.querySelector(".nav-toggle");
+      var nav = document.getElementById("site-nav");
+      if (!button || !nav) return;
+      button.addEventListener("click", function () {
+        var open = button.getAttribute("aria-expanded") !== "true";
+        button.setAttribute("aria-expanded", open ? "true" : "false");
+        button.setAttribute("aria-label", open ? "关闭菜单" : "打开菜单");
+        nav.classList.toggle("is-open", open);
+      });
+    })();
   </script>
 </body>
 </html>
