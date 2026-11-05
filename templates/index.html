@@ -739,10 +739,11 @@
                 <div class="print-segment-row">
                   <span class="print-choice-label">纸张方向</span>
                   <div class="top-filter-group print-segment-group" id="printLayoutToggle" role="group" aria-label="纸张方向">
-                    <button type="button" class="active" data-print-layout="landscape" aria-pressed="true">横版</button>
-                    <button type="button" data-print-layout="portrait" aria-pressed="false">竖版</button>
+                    <button type="button" data-print-layout="landscape" aria-pressed="false">横版</button>
+                    <button type="button" class="active" data-print-layout="portrait" aria-pressed="true">竖版</button>
                   </div>
                 </div>
+                <small id="printSideLabelHint">默认是侧签：竖版纸，一页上下两张。每张左侧是横版照片，右侧是纸质侧签。</small>
                 <div class="print-segment-row">
                   <span class="print-choice-label">标签输出</span>
                   <div class="top-filter-group print-segment-group" id="printCaptionModeToggle" role="group" aria-label="标签输出方式">
@@ -752,9 +753,14 @@
                   <small>标签另页时，照片页只放照片；对应标签单独输出一张说明页。</small>
                 </div>
               </div>
-              <input id="printSetupLayout" type="hidden" value="landscape">
+              <input id="printSetupLayout" type="hidden" value="portrait">
               <input id="printSetupCaptionMode" type="hidden" value="inline">
               <div class="print-mode-grid print-style-grid">
+                <button class="print-mode-card print-style-card active" type="button" data-print-style="sidelabel" aria-pressed="true">
+                  <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-portrait ps-sidelabel"><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span></span></span>
+                  <strong>侧签 · 两行</strong>
+                  <span class="print-style-desc">竖版一页两张：左侧横版照片，右侧照片号、说明、修筑、拍摄时间、摄影者、地点</span>
+                </button>
                 <button class="print-mode-card print-style-card" type="button" data-print-style="one" aria-pressed="false">
                   <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span></span>
                   <strong>一张纸 · 1 张图</strong>

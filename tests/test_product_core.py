@@ -799,7 +799,7 @@ class DesktopSecurityContractTest(unittest.TestCase):
         self.assertIn('id="uploadFileQueue"', html)
         self.assertIn('class="upload-workspace"', html)
         self.assertIn('class="upload-target-column"', html)
-        self.assertEqual(html.count('class="print-style-schematic"'), 4)
+        self.assertEqual(html.count('class="print-style-schematic"'), 5)
         self.assertIn('data-print-layout="landscape"', html)
         self.assertIn('data-print-layout="portrait"', html)
         self.assertIn('data-print-caption-mode="separate"', html)

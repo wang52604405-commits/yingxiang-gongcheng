@@ -3,10 +3,13 @@
 {% set code = project.project_code or project.code %}
 {% set name = project.project_name or project.name %}
 {% set label = category_label or "影像资料" %}
+{% set print_style = print_style|default(request.args.get("style", ""), true)|string|trim|lower %}
 {% set layout = print_layout or request.args.get("layout", "landscape") %}
+{% if print_style == "sidelabel" %}{% set layout = "portrait" %}{% endif %}
 {% set layout = "portrait" if layout == "portrait" else "landscape" %}
 {% set page_size = print_page_size or request.args.get("page_size", 2) %}
 {% set page_size = page_size|int %}
+{% if print_style == "sidelabel" %}{% set page_size = 2 %}{% endif %}
 {% if page_size < 1 or page_size > 12 %}{% set page_size = 4 %}{% endif %}
 {% set print_settings = print_settings or {} %}
 {% set photo_preset = print_settings.get("print_photo_preset", "5inch") %}
@@ -23,12 +26,25 @@
 {% set source_margin_right = margin_right %}
 {% set source_margin_bottom = margin_bottom %}
 {% set source_margin_left = margin_left %}
-{% if layout == "landscape" %}
+{% set side_metrics = print_settings.get("side_label_metrics") or {} %}
+{% set side_margin = side_metrics.get("margin_mm", 10) %}
+{% set side_pair_gap = side_metrics.get("pair_gap_mm", 2) %}
+{% set side_row_gap = side_metrics.get("row_gap_mm", 8) %}
+{% set side_photo_w = side_metrics.get("photo_w", 125.33) %}
+{% set side_slip_w = side_metrics.get("slip_w", 62.67) %}
+{% set side_row_h = side_metrics.get("row_h", 94) %}
+{% if print_style == "sidelabel" %}
+  {% set margin_top = side_margin %}
+  {% set margin_right = side_margin %}
+  {% set margin_bottom = side_margin %}
+  {% set margin_left = side_margin %}
+{% elif layout == "landscape" %}
   {% set margin_top = 25 %}
 {% else %}
   {% set margin_left = 25 %}
 {% endif %}
 {% set show_page_title = print_settings.get("print_show_page_title", true) %}
+{% if print_style == "sidelabel" %}{% set show_page_title = false %}{% endif %}
 {% set image_fit = print_settings.get("print_image_fit", "contain") %}
 {% set paper_width = 210 if layout == "portrait" else 297 %}
 {% set paper_height = 297 if layout == "portrait" else 210 %}
@@ -44,8 +60,7 @@
 {% set print_scale = [1, scale_x, scale_y]|min %}
 {% set has_project_groups = project_groups is defined and project_groups is not none %}
 {% set has_books = has_project_groups and (project_groups|selectattr("level")|list|length > 0) %}
-{% set style_labels = {"one": "一张纸 1 张图", "two": "两宫格", "four": "四宫格", "default": "四宫格", "portrait2": "两宫格", "landscape2": "两宫格", "single": "一张纸 1 张图"} %}
-{% set print_style = request.args.get("style", "") %}
+{% set style_labels = {"sidelabel": "侧签两行", "one": "一张纸 1 张图", "two": "两宫格", "four": "四宫格", "default": "四宫格", "portrait2": "两宫格", "landscape2": "两宫格", "single": "一张纸 1 张图"} %}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -233,6 +248,121 @@
       word-break: break-word;
       overflow-wrap: anywhere;
     }
+    .page.side-label-page {
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+    .side-sheet {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: {{ side_row_gap }}mm;
+    }
+    .side-row {
+      width: {{ side_photo_w + side_pair_gap + side_slip_w }}mm;
+      height: {{ side_row_h }}mm;
+      display: grid;
+      grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;
+      column-gap: {{ side_pair_gap }}mm;
+      align-items: stretch;
+    }
+    .side-photo {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid #111;
+      background: #f4f4f4;
+      overflow: hidden;
+    }
+    .side-photo .photo-frame {
+      position: absolute;
+      inset: 0;
+      width: auto;
+      height: auto;
+      border: 0;
+    }
+    .side-slip {
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #111;
+      background: #fff;
+      color: #111;
+      font-family: "SimSun", "Songti SC", "STSong", "Microsoft YaHei", serif;
+      overflow: hidden;
+    }
+    .slip-row {
+      display: flex;
+      align-items: center;
+      gap: 1.2mm;
+      min-height: 8mm;
+      padding: 1mm 1.5mm 1.2mm;
+      border-bottom: 1px solid #111;
+      font-size: 11pt;
+      line-height: 1.2;
+    }
+    .slip-row:last-child { border-bottom: 0; }
+    .slip-k {
+      flex: none;
+      display: inline-flex;
+      align-items: baseline;
+      white-space: nowrap;
+      font-style: normal;
+    }
+    .slip-k b {
+      display: inline-block;
+      width: 4em;
+      font-weight: inherit;
+      text-align: justify;
+      text-align-last: justify;
+      text-justify: inter-character;
+    }
+    .slip-k::after { content: "："; }
+    .slip-v {
+      flex: 1;
+      min-width: 0;
+      min-height: 1.15em;
+      border-bottom: 1px solid #111;
+      text-align: center;
+      overflow: hidden;
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .slip-build {
+      flex: 1 1 auto;
+      min-height: 22mm;
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid #111;
+      overflow: hidden;
+    }
+    .slip-build-label { padding: 1mm 1.5mm 0; font-size: 11pt; }
+    .slip-build-text {
+      padding: 0 1.5mm;
+      font-size: 10.5pt;
+      line-height: 6.8mm;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .slip-build-lines {
+      flex: 1 1 auto;
+      min-height: 13mm;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent 6.4mm,
+        #111 6.4mm,
+        #111 6.7mm
+      );
+    }
     @media print {
       body { background: #fff; }
       .toolbar { display: none; }
@@ -259,7 +389,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧横版照片、右侧纸质侧签（照片号、说明、修筑、拍摄时间、摄影者、地点）。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
@@ -272,7 +402,34 @@
         {% for page in g_pages %}
         {% set page_items = page.get("items") if page is mapping and page.get("items") else page %}
         {% set page_unit = page.unit_name or group.project_name or group.name or "" %}
-        <section class="page{% if loop.first and not g_first %} group-start{% endif %}">
+        <section class="page{% if print_style == 'sidelabel' %} side-label-page{% endif %}{% if loop.first and not g_first %} group-start{% endif %}">
+          {% if print_style == "sidelabel" %}
+          <div class="side-sheet">
+            {% for item in page_items %}
+            {% set slip = item._side_label or {} %}
+            <div class="side-row">
+              <div class="side-photo">
+                <div class="photo-frame" style="--photo-w: {{ side_photo_w }}mm; --photo-h: {{ side_row_h }}mm;">
+                  <img class="pr-{{ item._rotate or 0 }}" src="{{ item.url }}" alt="">
+                  {% if watermark_text %}<div class="watermark"><span>{{ watermark_text }}</span></div>{% endif %}
+                </div>
+              </div>
+              <aside class="side-slip">
+                <div class="slip-row"><span class="slip-k"><b>照片号</b></span><span class="slip-v">{{ slip.photo_no or "" }}</span></div>
+                <div class="slip-row"><span class="slip-k"><b>说明</b></span><span class="slip-v">{{ slip.description or "" }}</span></div>
+                <div class="slip-build">
+                  <div class="slip-build-label"><span class="slip-k"><b>修筑</b></span></div>
+                  {% if slip.construction %}<div class="slip-build-text">{{ slip.construction }}</div>{% endif %}
+                  <div class="slip-build-lines" aria-hidden="true"></div>
+                </div>
+                <div class="slip-row"><span class="slip-k"><b>拍摄时间</b></span><span class="slip-v">{{ slip.shot_at or "" }}</span></div>
+                <div class="slip-row"><span class="slip-k"><b>摄影者</b></span><span class="slip-v">{{ slip.photographer or "" }}</span></div>
+                <div class="slip-row"><span class="slip-k"><b>地点</b></span><span class="slip-v">{{ slip.place or "" }}</span></div>
+              </aside>
+            </div>
+            {% endfor %}
+          </div>
+          {% else %}
           {% if show_page_title %}<div class="title">
             <h1>{{ page_unit }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
             <div class="meta">工程页 {{ "%03d"|format(page.print_page_number or loop.index) }}{% if page.unit_page_total|default(1)|int > 1 %} · 本单元第 {{ page.unit_page_number }} 页{% endif %}</div>
@@ -298,8 +455,9 @@
             </div>
             {% endfor %}
           </div>
+          {% endif %}
         </section>
-        {% if caption_mode == "separate" and page_items %}
+        {% if print_style != "sidelabel" and caption_mode == "separate" and page_items %}
         {% set caption_cols = 1 if (page_items|length) <= 2 else (2 if (page_items|length) <= 6 else 3) %}
         <section class="page caption-sheet">
           {% if show_page_title %}<div class="title">
