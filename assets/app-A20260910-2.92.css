@@ -9066,6 +9066,27 @@
     .print-mode-card span.ps-stack2 { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
     .print-mode-card span.ps-pair2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
     .print-mode-card span.ps-single { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .print-mode-card span.ps-sidelabel {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr 1fr;
+      width: 59px;
+      height: 84px;
+    }
+    .print-mode-card span.ps-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 2px;
+      min-width: 0;
+      min-height: 0;
+    }
+    .print-mode-card span.ps-slip {
+      border: 1px solid #6d8f86;
+      border-radius: 1px;
+      background: repeating-linear-gradient(to bottom, #fff 0 3px, #8eaea4 3px 4px);
+    }
+    .print-mode-card.print-style-card[data-print-style="sidelabel"] { grid-column: 1 / -1; }
+    #printSideLabelHint { color: var(--ux-muted); line-height: 1.5; }
+    #printLayoutToggle.is-locked button { opacity: .72; cursor: default; }
     .print-mode-card span.ps-slot {
       position: relative;
       min-width: 0;

@@ -40,8 +40,8 @@ const $ = (selector) => document.querySelector(selector);
       pendingUploadCategory: "",
       batchPrintCategory: "construction",
       batchPrintMode: "print",
-      printPageSize: 4,
-      printStyle: "default",
+      printPageSize: 2,
+      printStyle: "sidelabel",
       pendingPrintUrl: "",
       printSourceUrl: "",
       batchSelectedUnits: new Set(),
@@ -5689,6 +5689,7 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     const PRINT_STYLES = {
+      sidelabel: { style: "sidelabel", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "right", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "10", margin_right_mm: "10", margin_bottom_mm: "10", margin_left_mm: "10", horizontal_gap_mm: "2", vertical_gap_mm: "8", image_fit: "contain", show_page_title: "0", auto_fill: "1", caption_fields: "title,id,photo_date,photographer" },
       one: { style: "one", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
       two: { style: "two", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
       four: { style: "four", page_size: "4", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "5", margin_right_mm: "5", margin_bottom_mm: "5", margin_left_mm: "5", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
@@ -5745,7 +5746,9 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function selectPrintStyle(style) {
-      state.printStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "custom";
+      const nextStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "custom";
+      const leavingSideLabel = state.printStyle === "sidelabel" && nextStyle !== "sidelabel";
+      state.printStyle = nextStyle;
       document.querySelectorAll("[data-print-style]").forEach((button) => {
         const active = button.dataset.printStyle === state.printStyle;
         button.classList.toggle("active", active);
@@ -5755,6 +5758,11 @@ const $ = (selector) => document.querySelector(selector);
       $("#printCustomPanel").classList.toggle("open", isCustom);
       state.pendingPrintUrl = state.printSourceUrl || state.pendingPrintUrl;
       if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      if (state.printStyle === "sidelabel") {
+        $("#printSetupLayout").value = "portrait";
+      } else if (leavingSideLabel) {
+        $("#printSetupLayout").value = "landscape";
+      }
       syncPrintSegmentButtons();
     }
 
@@ -5786,12 +5794,17 @@ const $ = (selector) => document.querySelector(selector);
 
 
     function syncPrintSegmentButtons() {
-      const layout = $("#printSetupLayout")?.value || "landscape";
+      const sideLabel = state.printStyle === "sidelabel";
+      const layout = sideLabel ? "portrait" : ($("#printSetupLayout")?.value || "landscape");
+      if (sideLabel && $("#printSetupLayout")) $("#printSetupLayout").value = "portrait";
       const captionMode = $("#printSetupCaptionMode")?.value || "inline";
+      $("#printLayoutToggle")?.classList.toggle("is-locked", sideLabel);
+      $("#printSideLabelHint")?.toggleAttribute("hidden", !sideLabel);
       document.querySelectorAll("[data-print-layout]").forEach((button) => {
         const active = button.dataset.printLayout === layout;
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", active ? "true" : "false");
+        button.disabled = sideLabel;
       });
       document.querySelectorAll("[data-print-caption-mode]").forEach((button) => {
         const active = button.dataset.printCaptionMode === captionMode;
@@ -5801,6 +5814,11 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function setPrintLayoutChoice(layout) {
+      if (state.printStyle === "sidelabel") {
+        $("#printSetupLayout").value = "portrait";
+        syncPrintSegmentButtons();
+        return;
+      }
       const value = layout === "portrait" ? "portrait" : "landscape";
       $("#printSetupLayout").value = value;
       syncPrintSegmentButtons();
@@ -5844,9 +5862,7 @@ const $ = (selector) => document.querySelector(selector);
       state.pendingPrintUrl = url;
       state.printSourceUrl = url;
       loadPrintSetupValues();
-      const savedPageSize = Number(state.engineeringSettings?.print_page_size || 4);
-      const openingStyle = savedPageSize === 1 ? "one" : savedPageSize === 2 ? "two" : savedPageSize === 4 ? "four" : "custom";
-      selectPrintStyle(openingStyle);
+      selectPrintStyle("sidelabel");
       $("#printSetupModal").classList.add("open");
       $("#printSetupModal").setAttribute("aria-hidden", "false");
     }
@@ -5859,6 +5875,9 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function printSetupParams() {
+      if (state.printStyle === "sidelabel") {
+        return new URLSearchParams(PRINT_STYLES.sidelabel);
+      }
       if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) {
         const params = new URLSearchParams(PRINT_STYLES[state.printStyle]);
         params.set("layout", $("#printSetupLayout").value || "landscape");
