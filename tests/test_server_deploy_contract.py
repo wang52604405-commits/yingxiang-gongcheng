@@ -23,6 +23,31 @@ class ServerDeployContractTest(unittest.TestCase):
     def read(self, name: str) -> str:
         return (DEPLOY / name).read_text(encoding="utf-8")
 
+    def powershell_run_bodies(self, workflow: str) -> list[str]:
+        lines = workflow.splitlines()
+        bodies: list[str] = []
+        index = 0
+        while index < len(lines):
+            if re.match(r"\s+shell:\s+powershell\s*$", lines[index]):
+                cursor = index + 1
+                while cursor < len(lines) and not re.match(r"\s+(?:- name:|run:)", lines[cursor]):
+                    cursor += 1
+                matched = re.match(r"(\s+)run:\s*\|\s*$", lines[cursor]) if cursor < len(lines) else None
+                if matched:
+                    indent = len(matched.group(1))
+                    cursor += 1
+                    body: list[str] = []
+                    while cursor < len(lines):
+                        line = lines[cursor]
+                        if line.strip() == "" or (len(line) - len(line.lstrip(" "))) > indent:
+                            body.append(line)
+                            cursor += 1
+                            continue
+                        break
+                    bodies.append("\n".join(body))
+            index += 1
+        return bodies
+
     def test_systemd_loads_secrets_only_from_restricted_environment_file(self):
         service = self.read("album-auth.service")
         self.assertIn(
@@ -185,6 +210,28 @@ class ServerDeployContractTest(unittest.TestCase):
         )
         self.assertEqual(len(download_steps), 3)
         self.assertEqual(len(set(download_steps)), 1)
+        self.assertIn("throw 'GITHUB_WORKSPACE is not set'", download_steps[0])
+        self.assertIn("throw 'RUNNER_TEMP is not set'", download_steps[0])
+        # Windows PowerShell 5.x reads the generated script as the ANSI code page.
+        # A UTF-8 lead byte can swallow the closing quote, so every inline body stays ASCII.
+        bodies = self.powershell_run_bodies(workflow)
+        self.assertGreaterEqual(len(bodies), 3)
+        for body in bodies:
+            self.assertTrue(body.isascii(), body)
+        downloads = [body for body in bodies if archive_url in body]
+        self.assertEqual(len(downloads), 3)
+        self.assertEqual(len(set(downloads)), 1)
+        download = downloads[0]
+        self.assertIn("curl.exe -fsSL --ssl-no-revoke -o $zipPath $url", download)
+        self.assertIn("throw 'Failed to download the source zip'", download)
+        self.assertIn("throw 'Windows tar.exe was not found'", download)
+        self.assertNotIn("未设置", workflow)
+        codepoints = re.findall(r"\[char\]0x([0-9A-F]{4})", download)
+        self.assertEqual(
+            "".join(chr(int(point, 16)) for point in codepoints),
+            "安装脚本",
+        )
+        self.assertIn("[string]::Concat([char]0x5B89, [char]0x88C5, [char]0x811A, [char]0x672C, '.iss')", download)
         self.assertEqual(workflow.count("HTTPS_PROXY: http://127.0.0.1:7897"), 3)
         self.assertEqual(workflow.count("HTTP_PROXY: http://127.0.0.1:7897"), 3)
         self.assertEqual(workflow.count("ALL_PROXY: http://127.0.0.1:7897"), 3)
