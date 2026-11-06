@@ -4546,11 +4546,12 @@ def split_photos_by_level(project, photos):
 
 PHOTO_5IN_LANDSCAPE = (127.0, 89.0)
 PRINT_FIXED_GAP = 2.0
-# 侧签版式：A4 竖版，页边距四周相同，一行里照片约占 2/3、侧签约占 1/3。
-# 照片框按 4:3 横版，侧签与照片顶底对齐。
-SIDE_LABEL_MARGIN_MM = 10.0
-SIDE_LABEL_PAIR_GAP_MM = 2.0
-SIDE_LABEL_ROW_GAP_MM = 8.0
+# 侧签版式：A4 竖版固定上下两格，中间一条横线。
+# 侧签收窄后把宽度让给横版照片；照片框仍按 4:3，和侧签顶底对齐。
+SIDE_LABEL_MARGIN_MM = 8.0
+SIDE_LABEL_SLIP_MM = 50.0
+SIDE_LABEL_PAIR_GAP_MM = 1.5
+SIDE_LABEL_SEPARATOR_MM = 6.0
 SIDE_LABEL_FRAME_ASPECT = 0.75
 
 
@@ -4558,18 +4559,23 @@ def side_label_metrics():
     """侧签页的毫米尺寸。预览模板和实际排版共用这一套，避免两边各算各的。"""
     margin = float(SIDE_LABEL_MARGIN_MM)
     pair_gap = float(SIDE_LABEL_PAIR_GAP_MM)
+    separator = float(SIDE_LABEL_SEPARATOR_MM)
+    slip_w = float(SIDE_LABEL_SLIP_MM)
     inner_w = 210.0 - margin * 2.0
     inner_h = 297.0 - margin * 2.0
-    photo_w = round((inner_w - pair_gap) * 2.0 / 3.0, 2)
-    slip_w = round(inner_w - pair_gap - photo_w, 2)
-    row_h = round(photo_w * SIDE_LABEL_FRAME_ASPECT, 2)
+    photo_w = round(inner_w - pair_gap - slip_w, 2)
+    band_h = (inner_h - separator) / 2.0
+    # 行高不超过半页，保证两张横版照片和中间横线都落在同一张 A4 里。
+    row_h = round(min(photo_w * SIDE_LABEL_FRAME_ASPECT, max(20.0, band_h - 4.0)), 2)
     return {
         "margin_mm": margin,
         "pair_gap_mm": pair_gap,
-        "row_gap_mm": float(SIDE_LABEL_ROW_GAP_MM),
+        "separator_mm": separator,
+        "row_gap_mm": separator,
         "photo_w": photo_w,
-        "slip_w": slip_w,
+        "slip_w": round(slip_w, 2),
         "row_h": row_h,
+        "band_h": round(band_h, 2),
         "page_w": round(inner_w, 2),
         "page_h": round(inner_h, 2),
     }
@@ -4585,25 +4591,37 @@ def format_side_label_date(value):
     return f"{year}.{month}.{day}"
 
 
+def _side_label_serial_digits(digits):
+    """保留流水原文里的有效数字。SY001 印成 01，不再收成 1；SY080 印成 80。"""
+    digits = str(digits or "")
+    if not digits.isdigit():
+        return digits
+    stripped = digits.lstrip("0") or "0"
+    if len(stripped) < 2 and len(digits) >= 2:
+        return digits[-2:]
+    return stripped
+
+
 def side_label_photo_no(photo):
-    """照片号用编号末尾的流水号，窄侧签上只放短号。"""
+    """照片号用照片编号里的 SY/JY 流水，和图库卡片上的编号尾段是同一段。
+
+    不再把编号末尾任意数字用 int 收短：单元编码里的 1、以及 SY001 都会被收成 1。
+    编号里没有 SY/JY 时，原样使用照片编号。
+    """
     photo_id = str((photo or {}).get("id") or "").strip()
-    match = re.search(r"(\d+)\s*$", photo_id)
+    if not photo_id:
+        return ""
+    match = re.search(r"(?:SY|JY)(\d+)\s*$", photo_id, re.IGNORECASE)
+    if not match:
+        match = re.search(r"(?:SY|JY)(\d+)", photo_id, re.IGNORECASE)
     if not match:
         return photo_id
-    return str(int(match.group(1)))
+    return _side_label_serial_digits(match.group(1))
 
 
 def side_label_place(unit_project=None):
-    unit_project = unit_project if isinstance(unit_project, dict) else {}
-    direct = str(unit_project.get("location") or "").strip()
-    if direct:
-        return direct
-    source = unit_project.get("source_fields") if isinstance(unit_project.get("source_fields"), dict) else {}
-    for key in ("地点", "工程地点", "location"):
-        value = str(source.get(key) or "").strip()
-        if value:
-            return value
+    """地点只取工程信息里填写的工程地点，不用归档地区，也不用单元上的其它地点。"""
+    del unit_project
     try:
         engineering = current_engineering_project()
     except Exception:
@@ -4612,57 +4630,91 @@ def side_label_place(unit_project=None):
     place = str(engineering.get("location") or "").strip()
     if place:
         return place
-    return str(engineering.get("region") or "").strip()
+    try:
+        info = read_project_info()
+    except Exception:
+        info = {}
+    info = info if isinstance(info, dict) else {}
+    return str(info.get("location") or "").strip()
 
 
-def side_label_for_photo(photo, place=""):
-    """纸质侧签的六行：照片号、说明、修筑、拍摄时间、摄影者、地点。修筑允许空白。"""
+def side_label_photo_title(photo):
+    """题名就是照片名称：优先题名，没有题名时用原文件名。不使用描述，也不使用单元工程名称。"""
     photo = photo if isinstance(photo, dict) else {}
     title = str(photo.get("title") or "").strip()
-    description = str(photo.get("description") or "").strip()
-    process_name = str(photo.get("process_name") or "").strip()
-    note = title or description
-    construction_parts = []
-    if process_name:
-        construction_parts.append(process_name)
-    if description and description != note:
-        construction_parts.append(description)
+    if title:
+        return title
+    return str(photo.get("original_name") or photo.get("filename") or "").strip()
+
+
+def side_label_unit_name(unit_project):
+    """单元工程名称取项目划分里的单元工程名称，不回落到照片题名。"""
+    unit_project = unit_project if isinstance(unit_project, dict) else {}
+    if not unit_project:
+        return ""
+    try:
+        hierarchy = manager.project_hierarchy(unit_project)
+    except Exception:
+        hierarchy = {}
+    return str((hierarchy or {}).get("unit_name") or "").strip()
+
+
+def side_label_unit_code(unit_project):
+    """单元工程及编号：项目划分里的单元工程编码/编号，和单元工程名称不是同一个字段。"""
+    unit_project = unit_project if isinstance(unit_project, dict) else {}
+    if not unit_project:
+        return ""
+    try:
+        hierarchy = manager.project_hierarchy(unit_project)
+    except Exception:
+        hierarchy = {}
+    return str((hierarchy or {}).get("unit_code") or "").strip()
+
+
+def side_label_for_photo(photo, place="", unit_project=None):
+    """纸质侧签七行：题名、照片号、单元工程名称、单元工程及编号、拍摄时间、摄影者、地点。"""
+    photo = photo if isinstance(photo, dict) else {}
     return {
+        "title": side_label_photo_title(photo),
         "photo_no": side_label_photo_no(photo),
-        "description": note,
-        "construction": " ".join(construction_parts),
+        "unit_name": side_label_unit_name(unit_project),
+        "unit_code": side_label_unit_code(unit_project),
         "shot_at": format_side_label_date(photo.get("photo_date")),
         "photographer": str(photo.get("photographer") or "").strip(),
         "place": str(place or "").strip(),
     }
 
 
+def _side_label_row_top(metrics, index):
+    """第 0 行落在上半页，第 1 行落在下半页，中间留出横线，不再把整组挤在页面正中。"""
+    band_h = float(metrics["band_h"])
+    separator = float(metrics["separator_mm"])
+    row_h = float(metrics["row_h"])
+    band_top = 0.0 if int(index) <= 0 else band_h + separator
+    return round(band_top + max(0.0, (band_h - row_h) / 2.0), 2)
+
+
 def layout_side_label_pages(photos, unit_project=None):
-    """竖版一页两行。每行左侧横版照片、右侧竖向侧签，顶底对齐。"""
+    """竖版一页两行。每行左侧横版照片、右侧侧签，顶底对齐；页正中有一条横线。"""
     metrics = side_label_metrics()
     place = side_label_place(unit_project)
     photo_w = metrics["photo_w"]
     slip_w = metrics["slip_w"]
     row_h = metrics["row_h"]
-    row_gap = metrics["row_gap_mm"]
     pair_gap = metrics["pair_gap_mm"]
-    page_h = metrics["page_h"]
     row_w = round(photo_w + pair_gap + slip_w, 2)
     pages = []
     photos = list(photos or [])
     for page_start in range(0, len(photos), 2):
         page_photos = photos[page_start:page_start + 2]
-        count = len(page_photos)
-        used = row_h * count + row_gap * max(0, count - 1)
-        top = round(max(0.0, (page_h - used) / 2.0), 2)
         current = []
-        for photo in page_photos:
+        for index, photo in enumerate(page_photos):
             rotate = int(photo.get("rotation") or 0) % 360
             if str(photo.get("orientation") or "landscape") == "portrait":
                 rotate = (rotate + 90) % 360
             item = dict(photo)
             item["_left"] = 0.0
-            item["_top"] = top
+            item["_top"] = _side_label_row_top(metrics, index)
             item["_w"] = row_w
             item["_h"] = row_h
             item["_photo_w"] = photo_w
@@ -4671,9 +4723,8 @@ def layout_side_label_pages(photos, unit_project=None):
             item["_caption_h"] = row_h
             item["_caption_position"] = "right"
             item["_rotate"] = rotate
-            item["_side_label"] = side_label_for_photo(photo, place)
+            item["_side_label"] = side_label_for_photo(photo, place, unit_project)
             current.append(item)
-            top = round(top + row_h + row_gap, 2)
         if current:
             pages.append(current)
     return pages

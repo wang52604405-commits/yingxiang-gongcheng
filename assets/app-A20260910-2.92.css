@@ -9074,10 +9074,13 @@
     }
     .print-mode-card span.ps-row {
       display: grid;
-      grid-template-columns: 2fr 1fr;
+      grid-template-columns: 3fr 1fr;
       gap: 2px;
       min-width: 0;
       min-height: 0;
+    }
+    .print-mode-card span.ps-sidelabel .ps-row + .ps-row {
+      border-top: 1px solid #6d8f86;
     }
     .print-mode-card span.ps-slip {
       border: 1px solid #6d8f86;
