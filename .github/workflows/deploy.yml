@@ -76,16 +76,16 @@ jobs:
       - name: 下载本次提交的源码
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          $ProgressPreference = "SilentlyContinue"
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $workspace = $env:GITHUB_WORKSPACE
-          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
-          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          if (-not $workspace) { throw 'GITHUB_WORKSPACE is not set' }
+          if (-not $env:RUNNER_TEMP) { throw 'RUNNER_TEMP is not set' }
           New-Item -ItemType Directory -Path $workspace -Force | Out-Null
           Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
 
-          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
-          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP 'source-${{ github.sha }}.zip'
+          $url = 'https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip'
           if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
           $downloaded = $false
           foreach ($attempt in 1..5) {
@@ -97,13 +97,13 @@ jobs:
             if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
             Start-Sleep -Seconds (2 * $attempt)
           }
-          if (-not $downloaded) { throw "下载源码压缩包失败" }
+          if (-not $downloaded) { throw 'Failed to download the source zip' }
 
-          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
-          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
-          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          # Expand-Archive mangles non-ASCII names. Extract with tar, then move the repo root into the workspace.
+          $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+          if (-not (Test-Path -LiteralPath $tar)) { throw 'Windows tar.exe was not found' }
           & $tar -xf $zipPath -C $workspace
-          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw ('Failed to extract the source zip: exit code ' + $LASTEXITCODE) }
 
           $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
           if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
@@ -114,9 +114,11 @@ jobs:
             Remove-Item -LiteralPath $root -Force
           }
 
-          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+          # Installer script name is built from code points so this file stays ASCII for Windows PowerShell 5.x.
+          $installerScript = [string]::Concat([char]0x5B89, [char]0x88C5, [char]0x811A, [char]0x672C, '.iss')
+          foreach ($required in @('prepare_release_version.py', $installerScript)) {
             if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
-              throw "解压后缺少 $required"
+              throw ('Extracted workspace is missing ' + $required)
             }
           }
           Remove-Item -LiteralPath $zipPath -Force
@@ -133,7 +135,7 @@ jobs:
           SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
           SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布或服务器密钥 Secret" }
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw 'Missing release or server secret' }
           $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
           New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
           $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
@@ -165,7 +167,7 @@ jobs:
             $before = "${{ github.event.before }}"
             $compareOk = $false
             if ($before -match '^[0-9a-fA-F]{40}$' -and $before -notmatch '^0+$') {
-              # 这台机器上 git fetch 会被代理重置。文件列表改用 compare API，走已经可用的 curl。
+              # git fetch on this machine is reset by the proxy. List changed files with the compare API via curl.
               $api = "https://api.github.com/repos/${{ github.repository }}/compare/${before}...$env:GITHUB_SHA"
               $jsonPath = Join-Path $env:RUNNER_TEMP "compare-$env:GITHUB_RUN_ID.json"
               $downloaded = $false
@@ -256,16 +258,16 @@ jobs:
       - name: 下载本次提交的源码
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          $ProgressPreference = "SilentlyContinue"
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $workspace = $env:GITHUB_WORKSPACE
-          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
-          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          if (-not $workspace) { throw 'GITHUB_WORKSPACE is not set' }
+          if (-not $env:RUNNER_TEMP) { throw 'RUNNER_TEMP is not set' }
           New-Item -ItemType Directory -Path $workspace -Force | Out-Null
           Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
 
-          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
-          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP 'source-${{ github.sha }}.zip'
+          $url = 'https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip'
           if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
           $downloaded = $false
           foreach ($attempt in 1..5) {
@@ -277,13 +279,13 @@ jobs:
             if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
             Start-Sleep -Seconds (2 * $attempt)
           }
-          if (-not $downloaded) { throw "下载源码压缩包失败" }
+          if (-not $downloaded) { throw 'Failed to download the source zip' }
 
-          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
-          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
-          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          # Expand-Archive mangles non-ASCII names. Extract with tar, then move the repo root into the workspace.
+          $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+          if (-not (Test-Path -LiteralPath $tar)) { throw 'Windows tar.exe was not found' }
           & $tar -xf $zipPath -C $workspace
-          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw ('Failed to extract the source zip: exit code ' + $LASTEXITCODE) }
 
           $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
           if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
@@ -294,9 +296,11 @@ jobs:
             Remove-Item -LiteralPath $root -Force
           }
 
-          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+          # Installer script name is built from code points so this file stays ASCII for Windows PowerShell 5.x.
+          $installerScript = [string]::Concat([char]0x5B89, [char]0x88C5, [char]0x811A, [char]0x672C, '.iss')
+          foreach ($required in @('prepare_release_version.py', $installerScript)) {
             if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
-              throw "解压后缺少 $required"
+              throw ('Extracted workspace is missing ' + $required)
             }
           }
           Remove-Item -LiteralPath $zipPath -Force
@@ -313,7 +317,7 @@ jobs:
           SIGN_KEY_B64: ${{ secrets.ALBUM_SIGN_KEY_B64 }}
           SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw "缺少发布密钥 Secrets" }
+          if (-not $env:SIGN_KEY_B64 -or -not $env:SSH_KEY_B64) { throw 'Missing release secrets' }
           $credentialDir = Join-Path $env:RUNNER_TEMP "album-release-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
           New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
           $signKey = Join-Path $credentialDir "release_guard_private_key.pem"
@@ -405,16 +409,16 @@ jobs:
       - name: 下载本次提交的源码
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          $ProgressPreference = "SilentlyContinue"
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $workspace = $env:GITHUB_WORKSPACE
-          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
-          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          if (-not $workspace) { throw 'GITHUB_WORKSPACE is not set' }
+          if (-not $env:RUNNER_TEMP) { throw 'RUNNER_TEMP is not set' }
           New-Item -ItemType Directory -Path $workspace -Force | Out-Null
           Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
 
-          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
-          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP 'source-${{ github.sha }}.zip'
+          $url = 'https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip'
           if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
           $downloaded = $false
           foreach ($attempt in 1..5) {
@@ -426,13 +430,13 @@ jobs:
             if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
             Start-Sleep -Seconds (2 * $attempt)
           }
-          if (-not $downloaded) { throw "下载源码压缩包失败" }
+          if (-not $downloaded) { throw 'Failed to download the source zip' }
 
-          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
-          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
-          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          # Expand-Archive mangles non-ASCII names. Extract with tar, then move the repo root into the workspace.
+          $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+          if (-not (Test-Path -LiteralPath $tar)) { throw 'Windows tar.exe was not found' }
           & $tar -xf $zipPath -C $workspace
-          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw ('Failed to extract the source zip: exit code ' + $LASTEXITCODE) }
 
           $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
           if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
@@ -443,9 +447,11 @@ jobs:
             Remove-Item -LiteralPath $root -Force
           }
 
-          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+          # Installer script name is built from code points so this file stays ASCII for Windows PowerShell 5.x.
+          $installerScript = [string]::Concat([char]0x5B89, [char]0x88C5, [char]0x811A, [char]0x672C, '.iss')
+          foreach ($required in @('prepare_release_version.py', $installerScript)) {
             if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
-              throw "解压后缺少 $required"
+              throw ('Extracted workspace is missing ' + $required)
             }
           }
           Remove-Item -LiteralPath $zipPath -Force
@@ -455,7 +461,7 @@ jobs:
         env:
           SSH_KEY_B64: ${{ secrets.ALBUM_SSH_KEY_B64 }}
         run: |
-          if (-not $env:SSH_KEY_B64) { throw "缺少服务器密钥 Secret" }
+          if (-not $env:SSH_KEY_B64) { throw 'Missing server secret' }
           $credentialDir = Join-Path $env:RUNNER_TEMP "album-site-$env:GITHUB_RUN_ID-$env:GITHUB_JOB"
           New-Item -ItemType Directory -Path $credentialDir -Force | Out-Null
           $sshKey = Join-Path $credentialDir "server_key"
