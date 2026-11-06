@@ -166,7 +166,42 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("\\.github/workflows/deploy\\.yml", workflow)
         self.assertIn("[IO.File]::AppendAllText", workflow)
         self.assertIn("[Text.UTF8Encoding]::new($false)", workflow)
-        self.assertNotIn("git diff --name-only HEAD^ HEAD", workflow)
+        self.assertNotIn("git diff --name-only", workflow)
+        self.assertIn("api.github.com/repos/${{ github.repository }}/compare/", workflow)
+        self.assertIn("$env:GITHUB_TOKEN", workflow)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn("workflow_dispatch", workflow)
+        self.assertIn("Unable to compare the pushed range; deploying server fail-safe.", workflow)
+
+        validate, self_hosted = workflow.split("  deploy-auth:", 1)
+        self.assertEqual(validate.count("actions/checkout@v7"), 1)
+        self.assertNotIn("actions/checkout", self_hosted)
+        archive_url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+        self.assertEqual(self_hosted.count(archive_url), 3)
+        self.assertEqual(self_hosted.count("curl.exe -fsSL --ssl-no-revoke"), 4)
+        download_steps = re.findall(
+            r"- name: 下载本次提交的源码\n        shell: powershell\n        run: \|\n((?:          .*\n)+)",
+            workflow,
+        )
+        self.assertEqual(len(download_steps), 3)
+        self.assertEqual(len(set(download_steps)), 1)
+        self.assertEqual(workflow.count("HTTPS_PROXY: http://127.0.0.1:7897"), 3)
+        self.assertEqual(workflow.count("HTTP_PROXY: http://127.0.0.1:7897"), 3)
+        self.assertEqual(workflow.count("ALL_PROXY: http://127.0.0.1:7897"), 3)
+        self.assertEqual(workflow.count("NO_PROXY: 127.0.0.1,localhost"), 3)
+
+        match = re.search(r"Select-String '([^']+)'", workflow)
+        self.assertIsNotNone(match)
+        changed = re.compile(match.group(1))
+        for path in (
+            "server/app.py",
+            "deploy_auth.py",
+            "validate_mobile_migration.py",
+            ".github/workflows/deploy.yml",
+        ):
+            self.assertRegex(path, changed)
+        for path in ("prepare_release_version.py", "app.py", "website/index.html"):
+            self.assertIsNone(changed.search(path))
 
     def test_production_payload_is_one_whitelisted_verified_archive(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -73,10 +73,53 @@ jobs:
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+      - name: 下载本次提交的源码
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $workspace = $env:GITHUB_WORKSPACE
+          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
+          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+          Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
+
+          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
+          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          $downloaded = $false
+          foreach ($attempt in 1..5) {
+            & curl.exe -fsSL --ssl-no-revoke -o $zipPath $url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $zipPath)) {
+              $downloaded = $true
+              break
+            }
+            if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+            Start-Sleep -Seconds (2 * $attempt)
+          }
+          if (-not $downloaded) { throw "下载源码压缩包失败" }
+
+          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
+          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          & $tar -xf $zipPath -C $workspace
+          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+
+          $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
+          if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
+            $root = $entries[0].FullName
+            Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
+              Move-Item -LiteralPath $_.FullName -Destination $workspace -Force
+            }
+            Remove-Item -LiteralPath $root -Force
+          }
+
+          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
+              throw "解压后缺少 $required"
+            }
+          }
+          Remove-Item -LiteralPath $zipPath -Force
 
       - name: 生成本次桌面发布版本
         shell: powershell
@@ -113,21 +156,59 @@ jobs:
       - name: 判断是否需要部署服务器
         id: check
         shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $changed = $true
           } else {
             $before = "${{ github.event.before }}"
-            if (-not $before -or $before -match '^0+$') {
-              $before = "HEAD^"
-            }
-            $changedFiles = @(git diff --name-only $before $env:GITHUB_SHA 2>$null)
-            if ($LASTEXITCODE -ne 0) {
+            $compareOk = $false
+            if ($before -match '^[0-9a-fA-F]{40}$' -and $before -notmatch '^0+$') {
+              # 这台机器上 git fetch 会被代理重置。文件列表改用 compare API，走已经可用的 curl。
+              $api = "https://api.github.com/repos/${{ github.repository }}/compare/${before}...$env:GITHUB_SHA"
+              $jsonPath = Join-Path $env:RUNNER_TEMP "compare-$env:GITHUB_RUN_ID.json"
+              $downloaded = $false
+              foreach ($attempt in 1..3) {
+                & curl.exe -fsSL --ssl-no-revoke -H "Authorization: Bearer $env:GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: yingxiang-gongcheng-deploy" -o $jsonPath $api
+                if ($LASTEXITCODE -eq 0) { $downloaded = $true; break }
+                Start-Sleep -Seconds (2 * $attempt)
+              }
+              if ($downloaded) {
+                try {
+                  $raw = [IO.File]::ReadAllText($jsonPath, [Text.UTF8Encoding]::new($false))
+                  $compare = $raw | ConvertFrom-Json
+                  $compareOk = $true
+                } catch {
+                  Write-Warning "Unable to compare the pushed range; deploying server fail-safe."
+                }
+              } else {
+                Write-Warning "Unable to compare the pushed range; deploying server fail-safe."
+              }
+            } else {
               Write-Warning "Unable to compare the pushed range; deploying server fail-safe."
+            }
+            if (-not $compareOk) {
               $changed = $true
             } else {
-              $changed = $changedFiles |
-                Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|\.github/workflows/deploy\.yml$)'
+              $fileCount = 0
+              $changedFiles = @()
+              if ($compare.files) {
+                $fileCount = @($compare.files).Count
+                $changedFiles = @(
+                  $compare.files | ForEach-Object {
+                    if ($_.filename) { $_.filename }
+                    if ($_.previous_filename) { $_.previous_filename }
+                  }
+                )
+              }
+              if ($fileCount -ge 300) {
+                Write-Warning "Compare file list reached the API cap; deploying server fail-safe."
+                $changed = $true
+              } else {
+                $changed = $changedFiles |
+                  Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|\.github/workflows/deploy\.yml$)'
+              }
             }
           }
           if ($changed) {
@@ -172,8 +253,53 @@ jobs:
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v7
+      - name: 下载本次提交的源码
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $workspace = $env:GITHUB_WORKSPACE
+          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
+          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+          Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
+
+          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
+          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          $downloaded = $false
+          foreach ($attempt in 1..5) {
+            & curl.exe -fsSL --ssl-no-revoke -o $zipPath $url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $zipPath)) {
+              $downloaded = $true
+              break
+            }
+            if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+            Start-Sleep -Seconds (2 * $attempt)
+          }
+          if (-not $downloaded) { throw "下载源码压缩包失败" }
+
+          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
+          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          & $tar -xf $zipPath -C $workspace
+          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+
+          $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
+          if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
+            $root = $entries[0].FullName
+            Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
+              Move-Item -LiteralPath $_.FullName -Destination $workspace -Force
+            }
+            Remove-Item -LiteralPath $root -Force
+          }
+
+          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
+              throw "解压后缺少 $required"
+            }
+          }
+          Remove-Item -LiteralPath $zipPath -Force
 
       - name: 生成本次桌面发布版本
         shell: powershell
@@ -223,7 +349,11 @@ jobs:
         shell: powershell
         env:
           SKIP_BUILD: "1"
+          UPDATE_NOTE: ${{ github.event.head_commit.message }}
         run: |
+          if ($env:UPDATE_NOTE) {
+            $env:UPDATE_NOTE = (($env:UPDATE_NOTE -split '\r?\n')[0]).Trim()
+          }
           Set-ExecutionPolicy -Scope Process Bypass -Force
           python publish_update.py
 
@@ -272,8 +402,53 @@ jobs:
       ALL_PROXY: http://127.0.0.1:7897
       NO_PROXY: 127.0.0.1,localhost
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v7
+      - name: 下载本次提交的源码
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $workspace = $env:GITHUB_WORKSPACE
+          if (-not $workspace) { throw "GITHUB_WORKSPACE 未设置" }
+          if (-not $env:RUNNER_TEMP) { throw "RUNNER_TEMP 未设置" }
+          New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+          Get-ChildItem -LiteralPath $workspace -Force | Remove-Item -Recurse -Force
+
+          $zipPath = Join-Path $env:RUNNER_TEMP "source-${{ github.sha }}.zip"
+          $url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
+          if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          $downloaded = $false
+          foreach ($attempt in 1..5) {
+            & curl.exe -fsSL --ssl-no-revoke -o $zipPath $url
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $zipPath)) {
+              $downloaded = $true
+              break
+            }
+            if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+            Start-Sleep -Seconds (2 * $attempt)
+          }
+          if (-not $downloaded) { throw "下载源码压缩包失败" }
+
+          # Expand-Archive 会弄乱中文文件名。用系统 tar 解压后，把仓库根目录上移到工作区。
+          $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+          if (-not (Test-Path -LiteralPath $tar)) { throw "未找到 Windows tar.exe，无法解压源码" }
+          & $tar -xf $zipPath -C $workspace
+          if ($LASTEXITCODE -ne 0) { throw "解压源码失败: exit code $LASTEXITCODE" }
+
+          $entries = @(Get-ChildItem -LiteralPath $workspace -Force)
+          if ($entries.Count -eq 1 -and $entries[0].PSIsContainer) {
+            $root = $entries[0].FullName
+            Get-ChildItem -LiteralPath $root -Force | ForEach-Object {
+              Move-Item -LiteralPath $_.FullName -Destination $workspace -Force
+            }
+            Remove-Item -LiteralPath $root -Force
+          }
+
+          foreach ($required in @("prepare_release_version.py", "安装脚本.iss")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $workspace $required))) {
+              throw "解压后缺少 $required"
+            }
+          }
+          Remove-Item -LiteralPath $zipPath -Force
 
       - name: 准备临时服务器凭据
         shell: powershell

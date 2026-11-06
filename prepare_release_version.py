@@ -11,6 +11,8 @@ It intentionally changes only the checked-out CI workspace. The production
 workflow runs it before release verification, build and publish.
 """
 
+# 触发正式发布，把已合并的竖版侧签打印默认送到客户更新。
+
 from __future__ import annotations
 
 import json
