@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 class PrintLayoutSourceContractTest(unittest.TestCase):
@@ -36,12 +37,22 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn('data-print-style="sidelabel"', html)
         self.assertIn('selectPrintStyle("sidelabel")', js)
         self.assertIn("照片号", print_html)
-        self.assertIn("修筑", print_html)
+        self.assertIn("<b>题名</b>", print_html)
+        self.assertIn("单元工程名称", print_html)
+        label_order = ["题名", "照片号", "单元工程名称", "单元工程及编号", "拍摄时间", "摄影者", "地点"]
+        positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("单元工程及编号", print_html)
         self.assertIn("拍摄时间", print_html)
         self.assertIn("摄影者", print_html)
         self.assertIn("地点", print_html)
         self.assertIn('class="side-row"', print_html)
+        self.assertIn('class="side-midline"', print_html)
+        self.assertIn("flex: 1 1 0;", print_html)
         self.assertIn("grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;", print_html)
+        self.assertNotIn("<b>说明</b>", print_html)
+        self.assertNotIn("<b>修筑</b>", print_html)
+        self.assertNotIn("slip-build", print_html)
         self.assertNotIn("竖版 · 上下双图", html)
         self.assertNotIn("横版 · 左右双图", html)
         self.assertIn("print-segment-group", css)
@@ -148,6 +159,27 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         positions = {(item["_left"], item["_top"]) for item in pages[0]}
         self.assertEqual(len(positions), 5)
 
+    def test_side_label_photo_no_uses_sy_serial_not_a_stripped_one(self):
+        photo_no = self.appmod.side_label_photo_no
+        self.assertEqual(photo_no({"id": "UNIT-SY080"}), "80")
+        self.assertEqual(photo_no({"id": "UNIT-SY008"}), "08")
+        self.assertEqual(photo_no({"id": "UNIT-SY001"}), "01")
+        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-SY080"}), "80")
+        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-JY008"}), "08")
+        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1"}), "YNLQ-2024-SG-1")
+        self.assertNotEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-SY080"}), "1")
+
+    def test_side_label_place_is_project_info_location(self):
+        unit = {"location": "单元地点", "region": "山东省", "source_fields": {"地点": "别的地点", "工程地点": "划分表地点"}}
+        with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "北陈村", "region": "山东省"}):
+            self.assertEqual(self.appmod.side_label_place(unit), "北陈村")
+        with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "", "region": "山东省"}):
+            with mock.patch.object(self.appmod, "read_project_info", return_value={"location": "工地门口"}):
+                self.assertEqual(self.appmod.side_label_place(unit), "工地门口")
+        with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "", "region": "山东省"}):
+            with mock.patch.object(self.appmod, "read_project_info", return_value={"location": ""}):
+                self.assertEqual(self.appmod.side_label_place(unit), "")
+
     def test_side_label_is_portrait_two_up_with_paper_slip_fields(self):
         with self.appmod.app.test_request_context("/?style=sidelabel&layout=landscape&page_size=4"):
             self.assertEqual(self.appmod.print_layout_from_request(), "portrait")
@@ -168,34 +200,72 @@ class PrintLayoutGeometryTest(unittest.TestCase):
             "url": "/photos/sample.jpg",
         })
         photos[1].update({
-            "id": "UNIT-SY008",
+            "id": "YNLQ-2024-SG-1-01-001-SY008",
             "title": "浇筑",
             "process_name": "混凝土",
             "photo_date": "2025-03-30",
             "url": "/photos/sample-2.jpg",
         })
-        pages = self.appmod.layout_side_label_pages(photos, {"location": "北陈村"})
+        photos[2].update({
+            "id": "UNIT-SY001",
+            "title": "",
+            "description": "描述不进题名",
+            "original_name": "验收现场.jpg",
+            "photo_date": "2026-04-13",
+            "url": "/photos/sample-3.jpg",
+        })
+        unit = {
+            "project_name": "别的工程名",
+            "project_code": "internal-folder",
+            "display_project_code": "GC-001-01-080",
+            "location": "不该用的单元地点",
+            "source_fields": {
+                "单元工程名称": "灌注桩单元验收",
+                "单元工程编码": "GC-001-01-080",
+            },
+        }
+        with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "北陈村", "region": "山东省"}):
+            pages = self.appmod.layout_side_label_pages(photos, unit)
         self.assertEqual(len(pages), 2)
         self.assertEqual([len(page) for page in pages], [2, 1])
         first, second = pages[0]
+        solo = pages[1][0]
         metrics = self.appmod.side_label_metrics()
-        self.assertAlmostEqual(first["_photo_w"] / first["_caption_w"], 2.0, delta=0.02)
+        self.assertLessEqual(metrics["slip_w"], 50.0)
+        self.assertGreaterEqual(first["_photo_w"] / first["_caption_w"], 2.6)
         self.assertAlmostEqual(first["_photo_w"], metrics["photo_w"])
         self.assertAlmostEqual(first["_caption_w"], metrics["slip_w"])
         self.assertEqual(first["_h"], first["_caption_h"])
         self.assertLess(first["_h"], first["_photo_w"])
-        self.assertEqual(first["_top"], second["_top"] - first["_block_h"] - metrics["row_gap_mm"])
+        self.assertAlmostEqual(first["_top"], self.appmod._side_label_row_top(metrics, 0))
+        self.assertAlmostEqual(second["_top"], self.appmod._side_label_row_top(metrics, 1))
+        self.assertLess(first["_top"] + first["_block_h"], metrics["page_h"] / 2)
+        self.assertGreater(second["_top"], metrics["page_h"] / 2)
         self.assertLess(first["_top"] + first["_block_h"], second["_top"])
+        centered_top = (metrics["page_h"] - solo["_block_h"]) / 2
+        self.assertLess(solo["_top"] + 20, centered_top)
         self.assertLessEqual(first["_w"], metrics["page_w"] + 0.05)
+        two_rows = metrics["row_h"] * 2 + metrics["separator_mm"]
+        self.assertLess(two_rows, metrics["page_h"])
+        self.assertEqual(first["_side_label"]["title"], "阀门井")
         self.assertEqual(first["_side_label"]["photo_no"], "80")
-        self.assertEqual(first["_side_label"]["description"], "阀门井")
-        self.assertEqual(first["_side_label"]["construction"], "")
+        self.assertEqual(first["_side_label"]["unit_name"], "灌注桩单元验收")
+        self.assertNotEqual(first["_side_label"]["title"], first["_side_label"]["unit_name"])
+        self.assertEqual(first["_side_label"]["unit_code"], "GC-001-01-080")
+        self.assertNotIn("construction", first["_side_label"])
         self.assertEqual(first["_side_label"]["shot_at"], "2023.11.3")
         self.assertEqual(first["_side_label"]["photographer"], "姜伟")
         self.assertEqual(first["_side_label"]["place"], "北陈村")
-        self.assertEqual(second["_side_label"]["photo_no"], "8")
-        self.assertEqual(second["_side_label"]["construction"], "混凝土")
+        self.assertEqual(second["_side_label"]["title"], "浇筑")
+        self.assertEqual(second["_side_label"]["photo_no"], "08")
+        self.assertEqual(second["_side_label"]["unit_name"], "灌注桩单元验收")
+        self.assertNotEqual(second["_side_label"]["photo_no"], "1")
         self.assertEqual(second["_side_label"]["shot_at"], "2025.3.30")
+        self.assertEqual(solo["_side_label"]["photo_no"], "01")
+        self.assertEqual(solo["_side_label"]["title"], "验收现场.jpg")
+        self.assertNotIn("描述不进题名", solo["_side_label"].values())
+        self.assertEqual(solo["_side_label"]["unit_name"], "灌注桩单元验收")
+        self.assertNotEqual(solo["_side_label"]["unit_name"], solo["_side_label"]["unit_code"])
 
         with self.appmod.app.test_request_context("/?style=sidelabel"):
             rendered = self.appmod.render_template(
@@ -215,14 +285,26 @@ class PrintLayoutGeometryTest(unittest.TestCase):
             )
         self.assertIn("size: A4 portrait", rendered)
         self.assertEqual(rendered.count('class="side-row"'), 3)
-        for field in ("照片号", "说明", "修筑", "拍摄时间", "摄影者", "地点"):
+        self.assertEqual(rendered.count('class="side-midline"'), 2)
+        self.assertEqual(rendered.count('class="slip-row"'), 21)
+        for field in ("题名", "照片号", "单元工程名称", "单元工程及编号", "拍摄时间", "摄影者", "地点"):
             self.assertIn(field, rendered)
+        self.assertLess(rendered.index("<b>题名</b>"), rendered.index("<b>照片号</b>"))
+        self.assertLess(rendered.index("<b>照片号</b>"), rendered.index("<b>单元工程名称</b>"))
+        self.assertNotIn("<b>说明</b>", rendered)
+        self.assertNotIn("<b>修筑</b>", rendered)
+        self.assertNotIn("slip-build", rendered)
+        self.assertNotIn("混凝土", rendered)
         self.assertIn("阀门井", rendered)
+        self.assertIn("GC-001-01-080", rendered)
         self.assertIn("2023.11.3", rendered)
         self.assertIn("姜伟", rendered)
         self.assertIn("北陈村", rendered)
-        self.assertIn("slip-build-lines", rendered)
+        self.assertIn(">80<", rendered)
+        self.assertIn(">08<", rendered)
+        self.assertIn(">01<", rendered)
         self.assertIn(f'{metrics["photo_w"]}mm {metrics["slip_w"]}mm', rendered)
+        self.assertIn("flex: 1 1 0;", rendered)
         self.assertNotIn("装订边25mm", rendered)
 
 
