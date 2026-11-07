@@ -276,8 +276,8 @@
     }
     .side-row {
       width: {{ side_photo_w + side_pair_gap + side_slip_w }}mm;
-      height: {{ side_row_h }}mm;
-      max-height: 100%;
+      height: auto;
+      min-height: {{ side_row_h }}mm;
       display: grid;
       grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;
       column-gap: {{ side_pair_gap }}mm;
@@ -310,47 +310,48 @@
       background: #fff;
       color: #111;
       font-family: "SimSun", "Songti SC", "STSong", "Microsoft YaHei", serif;
-      overflow: hidden;
+      overflow: visible;
     }
     .slip-row {
-      flex: 1 1 0;
+      flex: 1 1 auto;
       display: flex;
       align-items: center;
       gap: 1mm;
-      min-height: 0;
+      min-height: min-content;
       padding: 0.6mm 1.2mm;
       border-bottom: 1px solid #111;
       font-size: 9.5pt;
-      line-height: 1.15;
+      line-height: 1.2;
+      overflow: visible;
     }
     .slip-row:last-child { border-bottom: 0; }
     .slip-k {
-      flex: none;
+      flex: 0 0 16mm;
       display: inline-flex;
       align-items: baseline;
-      white-space: nowrap;
+      white-space: normal;
       font-style: normal;
     }
     .slip-k b {
       display: inline-block;
-      width: 7em;
+      width: 16mm;
       font-weight: inherit;
       text-align: justify;
       text-align-last: justify;
       text-justify: inter-character;
+      white-space: normal;
     }
     .slip-k::after { content: "："; }
     .slip-v {
-      flex: 1;
+      flex: 1 1 auto;
       min-width: 0;
       min-height: 1.15em;
       border-bottom: 1px solid #111;
       text-align: center;
-      overflow: hidden;
-      word-break: break-all;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
+      overflow: visible;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     @media print {
       body { background: #fff; }
@@ -386,7 +387,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧横版照片、右侧纸质侧签（题名、照片号、单元工程名称、单元工程及编号、拍摄时间、摄影者、地点），两张照片中间有一条横线。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧横版照片、右侧纸质侧签（题名、照片号、单元工程名称、拍摄时间、摄影者、地点），两张照片中间有一条横线。长文字在侧签里换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
@@ -420,7 +421,6 @@
                   <div class="slip-row"><span class="slip-k"><b>题名</b></span><span class="slip-v">{{ slip.title or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>照片号</b></span><span class="slip-v">{{ slip.photo_no or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>单元工程名称</b></span><span class="slip-v">{{ slip.unit_name or "" }}</span></div>
-                  <div class="slip-row"><span class="slip-k"><b>单元工程及编号</b></span><span class="slip-v">{{ slip.unit_code or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>拍摄时间</b></span><span class="slip-v">{{ slip.shot_at or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>摄影者</b></span><span class="slip-v">{{ slip.photographer or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>地点</b></span><span class="slip-v">{{ slip.place or "" }}</span></div>
