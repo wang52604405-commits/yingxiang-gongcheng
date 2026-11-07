@@ -30,9 +30,9 @@
 {% set side_margin = side_metrics.get("margin_mm", 8) %}
 {% set side_pair_gap = side_metrics.get("pair_gap_mm", 1.5) %}
 {% set side_separator = side_metrics.get("separator_mm", 6) %}
-{% set side_photo_w = side_metrics.get("photo_w", 142.5) %}
-{% set side_slip_w = side_metrics.get("slip_w", 50) %}
-{% set side_row_h = side_metrics.get("row_h", 106.88) %}
+{% set side_photo_w = side_metrics.get("photo_w", 127) %}
+{% set side_slip_w = side_metrics.get("slip_w", 40) %}
+{% set side_row_h = side_metrics.get("row_h", 89) %}
 {% set side_page_h = side_metrics.get("page_h", 281) %}
 {% if print_style == "sidelabel" %}
   {% set margin_top = side_margin %}
@@ -47,6 +47,7 @@
 {% set show_page_title = print_settings.get("print_show_page_title", true) %}
 {% if print_style == "sidelabel" %}{% set show_page_title = false %}{% endif %}
 {% set image_fit = print_settings.get("print_image_fit", "contain") %}
+{% if print_style == "sidelabel" %}{% set image_fit = "cover" %}{% endif %}
 {% set paper_width = 210 if layout == "portrait" else 297 %}
 {% set paper_height = 297 if layout == "portrait" else 210 %}
 {% set source_content_width = paper_width - source_margin_left - source_margin_right %}
@@ -272,8 +273,8 @@
       min-height: 0;
       height: 100%;
       display: flex;
-      align-items: stretch;
-      justify-content: stretch;
+      align-items: center;
+      justify-content: center;
     }
     .side-midline {
       align-self: center;
@@ -282,13 +283,14 @@
       border-top: 0.55mm solid #111;
     }
     .side-row {
-      width: 100%;
-      height: 100%;
+      width: calc({{ side_photo_w }}mm + {{ side_pair_gap }}mm + {{ side_slip_w }}mm);
+      max-width: 100%;
+      height: {{ side_row_h }}mm;
       max-height: 100%;
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, {{ side_slip_w }}mm);
+      grid-template-columns: {{ side_photo_w }}mm minmax(0, {{ side_slip_w }}mm);
       column-gap: {{ side_pair_gap }}mm;
       align-items: stretch;
       break-inside: avoid;
@@ -296,10 +298,14 @@
     }
     .side-photo {
       position: relative;
+      width: {{ side_photo_w }}mm;
+      height: {{ side_row_h }}mm;
+      max-width: 100%;
+      max-height: 100%;
       min-width: 0;
       min-height: 0;
       border: 1px solid #111;
-      background: #f4f4f4;
+      background: #fff;
       overflow: hidden;
     }
     .side-photo .photo-frame {
@@ -308,6 +314,13 @@
       width: auto;
       height: auto;
       border: 0;
+    }
+    .side-photo .photo-frame img,
+    .side-photo .photo-frame img.pr-90,
+    .side-photo .photo-frame img.pr-180,
+    .side-photo .photo-frame img.pr-270 {
+      object-fit: cover;
+      object-position: center;
     }
     .side-slip {
       min-width: 0;
@@ -331,12 +344,10 @@
       min-width: 0;
       min-height: 0;
       padding: 0.2mm 0.7mm;
-      border-bottom: 1px solid #111;
       font-size: 7.5pt;
       line-height: 1.15;
       overflow: hidden;
     }
-    .slip-row:last-child { border-bottom: 0; }
     .slip-k {
       min-width: 0;
       max-width: 11mm;
@@ -396,7 +407,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧横版照片、右侧纸质侧签（题名、照片号、单元工程名称、拍摄时间、摄影者、地点），两张照片中间有一条横线。长文字在侧签里换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧照片按 5 寸横版裁满、右侧纸质侧签（题名、照片号、单元工程名称、拍摄时间、摄影者、地点），两张照片中间有一条横线。侧签格子里不再画横线。长文字在侧签里换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
