@@ -4265,7 +4265,8 @@ def print_settings_from_request():
     if style == "sidelabel":
         settings["side_label_metrics"] = side_label_metrics()
         settings["print_show_page_title"] = False
-        settings["print_image_fit"] = "contain"
+        # 侧签照片框是固定 5 寸，必须裁满，不能再按「完整显示」上下留白。
+        settings["print_image_fit"] = "cover"
         settings["print_caption_mode"] = "inline"
     return settings
 
@@ -4547,12 +4548,12 @@ def split_photos_by_level(project, photos):
 PHOTO_5IN_LANDSCAPE = (127.0, 89.0)
 PRINT_FIXED_GAP = 2.0
 # 侧签版式：A4 竖版固定上下两格，中间一条横线。
-# 侧签收窄后把宽度让给横版照片；照片框仍按 4:3，和侧签顶底对齐。
+# 照片框就是标准 5 寸横版（12.7×8.9cm），和侧签顶底对齐；图片裁满这个框，不再留白。
 SIDE_LABEL_MARGIN_MM = 8.0
 SIDE_LABEL_SLIP_MM = 40.0
 SIDE_LABEL_PAIR_GAP_MM = 1.5
 SIDE_LABEL_SEPARATOR_MM = 6.0
-SIDE_LABEL_FRAME_ASPECT = 0.75
+SIDE_LABEL_FRAME_ASPECT = PHOTO_5IN_LANDSCAPE[1] / PHOTO_5IN_LANDSCAPE[0]
 
 
 def side_label_metrics():
@@ -4563,10 +4564,15 @@ def side_label_metrics():
     slip_w = float(SIDE_LABEL_SLIP_MM)
     inner_w = 210.0 - margin * 2.0
     inner_h = 297.0 - margin * 2.0
-    photo_w = round(inner_w - pair_gap - slip_w, 2)
     band_h = (inner_h - separator) / 2.0
-    # 行高不超过半页，保证两张横版照片和中间横线都落在同一张 A4 里。
-    row_h = round(min(photo_w * SIDE_LABEL_FRAME_ASPECT, max(20.0, band_h - 4.0)), 2)
+    nominal_w = float(PHOTO_5IN_LANDSCAPE[0])
+    nominal_h = float(PHOTO_5IN_LANDSCAPE[1])
+    available_w = inner_w - pair_gap - slip_w
+    room_h = max(20.0, band_h - 4.0)
+    # 标准 5 寸放得下就用标准尺寸。页边距变大时按比例缩小，宽高比保持 12.7:8.9。
+    scale = min(1.0, available_w / nominal_w, room_h / nominal_h)
+    photo_w = round(nominal_w * scale, 2)
+    row_h = round(nominal_h * scale, 2)
     return {
         "margin_mm": margin,
         "pair_gap_mm": pair_gap,
@@ -4659,7 +4665,7 @@ def _side_label_row_top(metrics, index):
 
 
 def layout_side_label_pages(photos, unit_project=None):
-    """竖版一页两行。每行左侧横版照片、右侧侧签，顶底对齐；页正中有一条横线。"""
+    """竖版一页两行。每行左侧 5 寸横版照片、右侧侧签，顶底对齐；页正中有一条横线。"""
     metrics = side_label_metrics()
     place = side_label_place(unit_project)
     photo_w = metrics["photo_w"]

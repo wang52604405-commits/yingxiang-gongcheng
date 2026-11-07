@@ -50,10 +50,17 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn("font-size: 7.5pt;", slip_row_css)
         self.assertNotIn("font-size: 9pt;", slip_row_css)
         self.assertIn("grid-template-columns: 11mm", slip_row_css)
-        self.assertIn("minmax(0, 1fr) minmax(0, {{ side_slip_w }}mm);", print_html)
-        side_row_css = print_html.split(".side-row {", 1)[1].split("}", 1)[0]
-        self.assertIn("width: 100%;", side_row_css)
+        self.assertNotIn("border-bottom", slip_row_css)
+        self.assertIn("grid-template-columns: {{ side_photo_w }}mm minmax(0, {{ side_slip_w }}mm);", print_html)
+        side_row_start = print_html.index(".side-row {")
+        side_row_css = print_html[side_row_start:print_html.index(".side-photo {", side_row_start)]
+        self.assertIn("height: {{ side_row_h }}mm;", side_row_css)
+        self.assertNotIn("height: 100%;", side_row_css.replace("max-height: 100%;", ""))
         self.assertNotIn("min-height: {{ side_row_h }}", side_row_css)
+        side_img_css = print_html.split(".side-photo .photo-frame img", 1)[1].split("}", 1)[0]
+        self.assertIn("object-fit: cover;", side_img_css)
+        self.assertIn(".side-photo .photo-frame img.pr-90", print_html)
+        self.assertIn(".side-photo .photo-frame img.pr-270", print_html)
         label_order = ["题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"]
         positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
         self.assertEqual(positions, sorted(positions))
@@ -201,6 +208,10 @@ class PrintLayoutGeometryTest(unittest.TestCase):
             settings = self.appmod.print_settings_from_request()
         self.assertEqual(settings["print_style"], "sidelabel")
         self.assertFalse(settings["print_show_page_title"])
+        self.assertEqual(settings["print_image_fit"], "cover")
+        with self.appmod.app.test_request_context("/?style=sidelabel&image_fit=contain"):
+            forced = self.appmod.print_settings_from_request()
+        self.assertEqual(forced["print_image_fit"], "cover")
 
         photos = self.photos(3)
         photos[0].update({
@@ -245,6 +256,12 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         first, second = pages[0]
         solo = pages[1][0]
         metrics = self.appmod.side_label_metrics()
+        five_w, five_h = self.appmod.PHOTO_5IN_LANDSCAPE
+        self.assertAlmostEqual(metrics["photo_w"], five_w)
+        self.assertAlmostEqual(metrics["row_h"], five_h)
+        self.assertAlmostEqual(metrics["row_h"] / metrics["photo_w"], five_h / five_w, places=4)
+        self.assertLessEqual(metrics["row_h"], metrics["band_h"])
+        self.assertLessEqual(metrics["photo_w"] + metrics["pair_gap_mm"] + metrics["slip_w"], metrics["page_w"] + 0.05)
         self.assertLessEqual(metrics["slip_w"], 40.0)
         self.assertGreaterEqual(metrics["slip_w"], 36.0)
         self.assertGreaterEqual(first["_photo_w"] / first["_caption_w"], 2.6)
@@ -330,6 +347,12 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertIn("北陈村", rendered)
         self.assertIn("word-break: break-all;", rendered)
         self.assertIn("height: 248mm;", rendered)
+        self.assertIn("object-fit: cover;", rendered)
+        rendered_slip = rendered.split(".slip-row {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("border-bottom", rendered_slip)
+        self.assertIn("font-size: 7.5pt;", rendered_slip)
+        self.assertIn("--photo-w: 127", rendered)
+        self.assertIn("--photo-h: 89", rendered)
         self.assertNotIn("side_page_h - 1", rendered)
         self.assertNotIn("装订边25mm", rendered)
 
