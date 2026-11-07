@@ -44,9 +44,12 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn("地点", print_html)
         self.assertIn('class="side-row"', print_html)
         self.assertIn('class="side-midline"', print_html)
-        self.assertIn("flex: 1 1 auto;", print_html)
-        self.assertIn("overflow-wrap: anywhere;", print_html)
-        self.assertIn("grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;", print_html)
+        self.assertIn("height: 248mm;", print_html)
+        self.assertIn("word-break: break-all;", print_html)
+        self.assertIn("minmax(0, 1fr) minmax(0, {{ side_slip_w }}mm);", print_html)
+        side_row_css = print_html.split(".side-row {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 100%;", side_row_css)
+        self.assertNotIn("min-height: {{ side_row_h }}", side_row_css)
         label_order = ["题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"]
         positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
         self.assertEqual(positions, sorted(positions))
@@ -164,15 +167,15 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         positions = {(item["_left"], item["_top"]) for item in pages[0]}
         self.assertEqual(len(positions), 5)
 
-    def test_side_label_photo_no_uses_sy_serial_not_a_stripped_one(self):
+    def test_side_label_photo_no_is_the_full_archive_id(self):
         photo_no = self.appmod.side_label_photo_no
-        self.assertEqual(photo_no({"id": "UNIT-SY080"}), "80")
-        self.assertEqual(photo_no({"id": "UNIT-SY008"}), "08")
-        self.assertEqual(photo_no({"id": "UNIT-SY001"}), "01")
-        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-SY080"}), "80")
-        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-JY008"}), "08")
-        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1"}), "YNLQ-2024-SG-1")
-        self.assertNotEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-SY080"}), "1")
+        full_id = "YNLQ-2024-SG-1-01-006-SY001"
+        self.assertEqual(photo_no({"id": full_id}), full_id)
+        self.assertEqual(photo_no({"id": "UNIT-SY080"}), "UNIT-SY080")
+        self.assertEqual(photo_no({"id": "YNLQ-2024-SG-1-01-001-SY008"}), "YNLQ-2024-SG-1-01-001-SY008")
+        self.assertNotEqual(photo_no({"id": full_id}), "01")
+        self.assertNotEqual(photo_no({"id": full_id}), "1")
+        self.assertNotIn("01", photo_no({"id": "UNIT-SY080"}))
 
     def test_side_label_place_is_project_info_location(self):
         unit = {"location": "单元地点", "region": "山东省", "source_fields": {"地点": "别的地点", "工程地点": "划分表地点"}}
@@ -195,7 +198,7 @@ class PrintLayoutGeometryTest(unittest.TestCase):
 
         photos = self.photos(3)
         photos[0].update({
-            "id": "UNIT-SY080",
+            "id": "YNLQ-2024-SG-1-01-006-SY001",
             "title": "阀门井",
             "photo_date": "2023-11-03",
             "photographer": "姜伟",
@@ -253,7 +256,7 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         two_rows = metrics["row_h"] * 2 + metrics["separator_mm"]
         self.assertLess(two_rows, metrics["page_h"])
         self.assertEqual(first["_side_label"]["title"], "阀门井")
-        self.assertEqual(first["_side_label"]["photo_no"], "80")
+        self.assertEqual(first["_side_label"]["photo_no"], "YNLQ-2024-SG-1-01-006-SY001")
         self.assertEqual(first["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
         self.assertNotEqual(first["_side_label"]["title"], first["_side_label"]["unit_name"])
         self.assertNotIn("unit_code", first["_side_label"])
@@ -262,11 +265,12 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertEqual(first["_side_label"]["photographer"], "姜伟")
         self.assertEqual(first["_side_label"]["place"], "北陈村")
         self.assertEqual(second["_side_label"]["title"], "浇筑")
-        self.assertEqual(second["_side_label"]["photo_no"], "08")
+        self.assertEqual(second["_side_label"]["photo_no"], "YNLQ-2024-SG-1-01-001-SY008")
         self.assertEqual(second["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
+        self.assertNotEqual(second["_side_label"]["photo_no"], "08")
         self.assertNotEqual(second["_side_label"]["photo_no"], "1")
         self.assertEqual(second["_side_label"]["shot_at"], "2025.3.30")
-        self.assertEqual(solo["_side_label"]["photo_no"], "01")
+        self.assertEqual(solo["_side_label"]["photo_no"], "UNIT-SY001")
         self.assertEqual(solo["_side_label"]["title"], "验收现场.jpg")
         self.assertNotIn("描述不进题名", solo["_side_label"].values())
         self.assertEqual(solo["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
@@ -295,8 +299,14 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         for field in ("题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"):
             self.assertIn(field, rendered)
         self.assertNotIn("单元工程及编号", rendered)
-        self.assertNotIn("YNLQ-2024-SG-1-01-001", rendered)
+        self.assertIn("YNLQ-2024-SG-1-01-006-SY001", rendered)
+        self.assertIn("YNLQ-2024-SG-1-01-001-SY008", rendered)
+        self.assertNotIn(">01<", rendered)
+        self.assertNotIn(">08<", rendered)
         self.assertIn("★右岸Q11翼墙C30混凝土", rendered)
+        first_page = rendered.split('class="page', 2)[1]
+        self.assertEqual(first_page.count('class="side-row"'), 2)
+        self.assertIn('class="side-midline"', first_page)
         self.assertLess(rendered.index("<b>题名</b>"), rendered.index("<b>照片号</b>"))
         self.assertLess(rendered.index("<b>照片号</b>"), rendered.index("<b>单元工程名称</b>"))
         rendered_value = rendered.split(".slip-v {", 1)[1].split("}", 1)[0]
@@ -310,12 +320,9 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertIn("2023.11.3", rendered)
         self.assertIn("姜伟", rendered)
         self.assertIn("北陈村", rendered)
-        self.assertIn(">80<", rendered)
-        self.assertIn(">08<", rendered)
-        self.assertIn(">01<", rendered)
-        self.assertIn(f'{metrics["photo_w"]}mm {metrics["slip_w"]}mm', rendered)
-        self.assertIn("flex: 1 1 auto;", rendered)
-        self.assertIn("overflow-wrap: anywhere;", rendered)
+        self.assertIn("word-break: break-all;", rendered)
+        self.assertIn("height: 248mm;", rendered)
+        self.assertNotIn("side_page_h - 1", rendered)
         self.assertNotIn("装订边25mm", rendered)
 
 

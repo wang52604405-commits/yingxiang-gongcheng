@@ -252,12 +252,17 @@
     .page.side-label-page {
       display: flex;
       flex-direction: column;
+      width: {{ content_width }}mm;
+      height: 248mm;
+      max-height: 248mm;
+      overflow: hidden;
       background: #fff;
     }
     .side-sheet {
       flex: 1 1 auto;
       min-height: 0;
       height: 100%;
+      max-height: 100%;
       display: grid;
       grid-template-rows: minmax(0, 1fr) {{ side_separator }}mm minmax(0, 1fr);
       align-items: stretch;
@@ -265,21 +270,25 @@
     .side-band {
       min-width: 0;
       min-height: 0;
+      height: 100%;
       display: flex;
-      align-items: center;
-      justify-content: center;
+      align-items: stretch;
+      justify-content: stretch;
     }
     .side-midline {
       align-self: center;
+      width: 100%;
       height: 0;
       border-top: 0.55mm solid #111;
     }
     .side-row {
-      width: {{ side_photo_w + side_pair_gap + side_slip_w }}mm;
-      height: auto;
-      min-height: {{ side_row_h }}mm;
+      width: 100%;
+      height: 100%;
+      max-height: 100%;
+      min-width: 0;
+      min-height: 0;
       display: grid;
-      grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;
+      grid-template-columns: minmax(0, 1fr) minmax(0, {{ side_slip_w }}mm);
       column-gap: {{ side_pair_gap }}mm;
       align-items: stretch;
       break-inside: avoid;
@@ -304,53 +313,50 @@
       min-width: 0;
       min-height: 0;
       height: 100%;
+      max-height: 100%;
       display: flex;
       flex-direction: column;
       border: 1px solid #111;
       background: #fff;
       color: #111;
       font-family: "SimSun", "Songti SC", "STSong", "Microsoft YaHei", serif;
-      overflow: visible;
+      overflow: hidden;
     }
     .slip-row {
-      flex: 1 1 auto;
-      display: flex;
+      flex: 1 1 0;
+      display: grid;
+      grid-template-columns: 14mm minmax(0, 1fr);
       align-items: center;
-      gap: 1mm;
-      min-height: min-content;
-      padding: 0.6mm 1.2mm;
+      column-gap: 0.8mm;
+      min-width: 0;
+      min-height: 0;
+      padding: 0.4mm 1mm;
       border-bottom: 1px solid #111;
-      font-size: 9.5pt;
-      line-height: 1.2;
-      overflow: visible;
+      font-size: 9pt;
+      line-height: 1.25;
+      overflow: hidden;
     }
     .slip-row:last-child { border-bottom: 0; }
     .slip-k {
-      flex: 0 0 16mm;
-      display: inline-flex;
-      align-items: baseline;
+      min-width: 0;
+      max-width: 14mm;
       white-space: normal;
       font-style: normal;
+      overflow-wrap: anywhere;
     }
     .slip-k b {
-      display: inline-block;
-      width: 16mm;
+      display: inline;
       font-weight: inherit;
-      text-align: justify;
-      text-align-last: justify;
-      text-justify: inter-character;
       white-space: normal;
     }
     .slip-k::after { content: "："; }
     .slip-v {
-      flex: 1 1 auto;
       min-width: 0;
-      min-height: 1.15em;
+      max-width: 100%;
       border-bottom: 1px solid #111;
-      text-align: center;
-      overflow: visible;
+      text-align: left;
       white-space: normal;
-      word-break: break-word;
+      word-break: break-all;
       overflow-wrap: anywhere;
     }
     @media print {
@@ -367,12 +373,16 @@
         break-inside: avoid;
       }
       .page.side-label-page {
-        height: auto;
-        overflow: visible;
+        width: 100% !important;
+        height: 248mm;
+        max-height: 248mm;
+        overflow: hidden;
+        break-inside: avoid;
+        page-break-inside: avoid;
       }
       .side-sheet {
-        height: {{ [side_page_h - 1, 40]|max }}mm;
-        max-height: {{ [side_page_h - 1, 40]|max }}mm;
+        height: 100%;
+        max-height: 100%;
       }
       .empty { width: auto; margin: 0; }
       @page { size: A4 {{ layout }}; margin: {{ margin_top }}mm {{ margin_right }}mm {{ margin_bottom }}mm {{ margin_left }}mm; }

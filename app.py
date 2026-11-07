@@ -4591,32 +4591,9 @@ def format_side_label_date(value):
     return f"{year}.{month}.{day}"
 
 
-def _side_label_serial_digits(digits):
-    """保留流水原文里的有效数字。SY001 印成 01，不再收成 1；SY080 印成 80。"""
-    digits = str(digits or "")
-    if not digits.isdigit():
-        return digits
-    stripped = digits.lstrip("0") or "0"
-    if len(stripped) < 2 and len(digits) >= 2:
-        return digits[-2:]
-    return stripped
-
-
 def side_label_photo_no(photo):
-    """照片号用照片编号里的 SY/JY 流水，和图库卡片上的编号尾段是同一段。
-
-    不再把编号末尾任意数字用 int 收短：单元编码里的 1、以及 SY001 都会被收成 1。
-    编号里没有 SY/JY 时，原样使用照片编号。
-    """
-    photo_id = str((photo or {}).get("id") or "").strip()
-    if not photo_id:
-        return ""
-    match = re.search(r"(?:SY|JY)(\d+)\s*$", photo_id, re.IGNORECASE)
-    if not match:
-        match = re.search(r"(?:SY|JY)(\d+)", photo_id, re.IGNORECASE)
-    if not match:
-        return photo_id
-    return _side_label_serial_digits(match.group(1))
+    """照片号印完整照片编号，和「修改照片信息」标题是同一串，每张照片各用自己的编号。"""
+    return str((photo or {}).get("id") or "").strip()
 
 
 def side_label_place(unit_project=None):
