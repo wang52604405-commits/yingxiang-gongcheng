@@ -46,6 +46,10 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn('class="side-midline"', print_html)
         self.assertIn("height: 248mm;", print_html)
         self.assertIn("word-break: break-all;", print_html)
+        slip_row_css = print_html.split(".slip-row {", 1)[1].split("}", 1)[0]
+        self.assertIn("font-size: 7.5pt;", slip_row_css)
+        self.assertNotIn("font-size: 9pt;", slip_row_css)
+        self.assertIn("grid-template-columns: 11mm", slip_row_css)
         self.assertIn("minmax(0, 1fr) minmax(0, {{ side_slip_w }}mm);", print_html)
         side_row_css = print_html.split(".side-row {", 1)[1].split("}", 1)[0]
         self.assertIn("width: 100%;", side_row_css)
@@ -56,6 +60,8 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         slip_v = print_html.split(".slip-v {", 1)[1].split("}", 1)[0]
         self.assertNotIn("line-clamp", slip_v)
         self.assertNotIn("ellipsis", slip_v)
+        self.assertNotIn("border-bottom", slip_v)
+        self.assertNotIn("text-decoration", slip_v)
         self.assertIn("white-space: normal", slip_v)
         self.assertNotIn("<b>说明</b>", print_html)
         self.assertNotIn("<b>修筑</b>", print_html)
@@ -239,7 +245,8 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         first, second = pages[0]
         solo = pages[1][0]
         metrics = self.appmod.side_label_metrics()
-        self.assertLessEqual(metrics["slip_w"], 50.0)
+        self.assertLessEqual(metrics["slip_w"], 40.0)
+        self.assertGreaterEqual(metrics["slip_w"], 36.0)
         self.assertGreaterEqual(first["_photo_w"] / first["_caption_w"], 2.6)
         self.assertAlmostEqual(first["_photo_w"], metrics["photo_w"])
         self.assertAlmostEqual(first["_caption_w"], metrics["slip_w"])
@@ -312,6 +319,7 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         rendered_value = rendered.split(".slip-v {", 1)[1].split("}", 1)[0]
         self.assertNotIn("line-clamp", rendered_value)
         self.assertNotIn("ellipsis", rendered_value)
+        self.assertNotIn("border-bottom", rendered_value)
         self.assertNotIn("<b>说明</b>", rendered)
         self.assertNotIn("<b>修筑</b>", rendered)
         self.assertNotIn("slip-build", rendered)
