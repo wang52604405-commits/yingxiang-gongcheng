@@ -4659,26 +4659,13 @@ def side_label_unit_name(unit_project):
     return str((hierarchy or {}).get("unit_name") or "").strip()
 
 
-def side_label_unit_code(unit_project):
-    """单元工程及编号：项目划分里的单元工程编码/编号，和单元工程名称不是同一个字段。"""
-    unit_project = unit_project if isinstance(unit_project, dict) else {}
-    if not unit_project:
-        return ""
-    try:
-        hierarchy = manager.project_hierarchy(unit_project)
-    except Exception:
-        hierarchy = {}
-    return str((hierarchy or {}).get("unit_code") or "").strip()
-
-
 def side_label_for_photo(photo, place="", unit_project=None):
-    """纸质侧签七行：题名、照片号、单元工程名称、单元工程及编号、拍摄时间、摄影者、地点。"""
+    """纸质侧签六行：题名、照片号、单元工程名称、拍摄时间、摄影者、地点。"""
     photo = photo if isinstance(photo, dict) else {}
     return {
         "title": side_label_photo_title(photo),
         "photo_no": side_label_photo_no(photo),
         "unit_name": side_label_unit_name(unit_project),
-        "unit_code": side_label_unit_code(unit_project),
         "shot_at": format_side_label_date(photo.get("photo_date")),
         "photographer": str(photo.get("photographer") or "").strip(),
         "place": str(place or "").strip(),

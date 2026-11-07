@@ -39,19 +39,24 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn("照片号", print_html)
         self.assertIn("<b>题名</b>", print_html)
         self.assertIn("单元工程名称", print_html)
-        label_order = ["题名", "照片号", "单元工程名称", "单元工程及编号", "拍摄时间", "摄影者", "地点"]
-        positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("单元工程及编号", print_html)
         self.assertIn("拍摄时间", print_html)
         self.assertIn("摄影者", print_html)
         self.assertIn("地点", print_html)
         self.assertIn('class="side-row"', print_html)
         self.assertIn('class="side-midline"', print_html)
-        self.assertIn("flex: 1 1 0;", print_html)
+        self.assertIn("flex: 1 1 auto;", print_html)
+        self.assertIn("overflow-wrap: anywhere;", print_html)
         self.assertIn("grid-template-columns: {{ side_photo_w }}mm {{ side_slip_w }}mm;", print_html)
+        label_order = ["题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"]
+        positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
+        self.assertEqual(positions, sorted(positions))
+        slip_v = print_html.split(".slip-v {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("line-clamp", slip_v)
+        self.assertNotIn("ellipsis", slip_v)
+        self.assertIn("white-space: normal", slip_v)
         self.assertNotIn("<b>说明</b>", print_html)
         self.assertNotIn("<b>修筑</b>", print_html)
+        self.assertNotIn("<b>单元工程及编号</b>", print_html)
         self.assertNotIn("slip-build", print_html)
         self.assertNotIn("竖版 · 上下双图", html)
         self.assertNotIn("横版 · 左右双图", html)
@@ -202,7 +207,7 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         photos[1].update({
             "id": "YNLQ-2024-SG-1-01-001-SY008",
             "title": "浇筑",
-            "process_name": "混凝土",
+            "process_name": "钢筋笼安装",
             "photo_date": "2025-03-30",
             "url": "/photos/sample-2.jpg",
         })
@@ -220,8 +225,8 @@ class PrintLayoutGeometryTest(unittest.TestCase):
             "display_project_code": "GC-001-01-080",
             "location": "不该用的单元地点",
             "source_fields": {
-                "单元工程名称": "灌注桩单元验收",
-                "单元工程编码": "GC-001-01-080",
+                "单元工程名称": "★右岸Q11翼墙C30混凝土",
+                "单元工程编码": "YNLQ-2024-SG-1-01-001",
             },
         }
         with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "北陈村", "region": "山东省"}):
@@ -249,23 +254,23 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertLess(two_rows, metrics["page_h"])
         self.assertEqual(first["_side_label"]["title"], "阀门井")
         self.assertEqual(first["_side_label"]["photo_no"], "80")
-        self.assertEqual(first["_side_label"]["unit_name"], "灌注桩单元验收")
+        self.assertEqual(first["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
         self.assertNotEqual(first["_side_label"]["title"], first["_side_label"]["unit_name"])
-        self.assertEqual(first["_side_label"]["unit_code"], "GC-001-01-080")
+        self.assertNotIn("unit_code", first["_side_label"])
         self.assertNotIn("construction", first["_side_label"])
         self.assertEqual(first["_side_label"]["shot_at"], "2023.11.3")
         self.assertEqual(first["_side_label"]["photographer"], "姜伟")
         self.assertEqual(first["_side_label"]["place"], "北陈村")
         self.assertEqual(second["_side_label"]["title"], "浇筑")
         self.assertEqual(second["_side_label"]["photo_no"], "08")
-        self.assertEqual(second["_side_label"]["unit_name"], "灌注桩单元验收")
+        self.assertEqual(second["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
         self.assertNotEqual(second["_side_label"]["photo_no"], "1")
         self.assertEqual(second["_side_label"]["shot_at"], "2025.3.30")
         self.assertEqual(solo["_side_label"]["photo_no"], "01")
         self.assertEqual(solo["_side_label"]["title"], "验收现场.jpg")
         self.assertNotIn("描述不进题名", solo["_side_label"].values())
-        self.assertEqual(solo["_side_label"]["unit_name"], "灌注桩单元验收")
-        self.assertNotEqual(solo["_side_label"]["unit_name"], solo["_side_label"]["unit_code"])
+        self.assertEqual(solo["_side_label"]["unit_name"], "★右岸Q11翼墙C30混凝土")
+        self.assertNotIn("unit_code", solo["_side_label"])
 
         with self.appmod.app.test_request_context("/?style=sidelabel"):
             rendered = self.appmod.render_template(
@@ -286,17 +291,22 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertIn("size: A4 portrait", rendered)
         self.assertEqual(rendered.count('class="side-row"'), 3)
         self.assertEqual(rendered.count('class="side-midline"'), 2)
-        self.assertEqual(rendered.count('class="slip-row"'), 21)
-        for field in ("题名", "照片号", "单元工程名称", "单元工程及编号", "拍摄时间", "摄影者", "地点"):
+        self.assertEqual(rendered.count('class="slip-row"'), 18)
+        for field in ("题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"):
             self.assertIn(field, rendered)
+        self.assertNotIn("单元工程及编号", rendered)
+        self.assertNotIn("YNLQ-2024-SG-1-01-001", rendered)
+        self.assertIn("★右岸Q11翼墙C30混凝土", rendered)
         self.assertLess(rendered.index("<b>题名</b>"), rendered.index("<b>照片号</b>"))
         self.assertLess(rendered.index("<b>照片号</b>"), rendered.index("<b>单元工程名称</b>"))
+        rendered_value = rendered.split(".slip-v {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("line-clamp", rendered_value)
+        self.assertNotIn("ellipsis", rendered_value)
         self.assertNotIn("<b>说明</b>", rendered)
         self.assertNotIn("<b>修筑</b>", rendered)
         self.assertNotIn("slip-build", rendered)
-        self.assertNotIn("混凝土", rendered)
+        self.assertNotIn("钢筋笼安装", rendered)
         self.assertIn("阀门井", rendered)
-        self.assertIn("GC-001-01-080", rendered)
         self.assertIn("2023.11.3", rendered)
         self.assertIn("姜伟", rendered)
         self.assertIn("北陈村", rendered)
@@ -304,7 +314,8 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertIn(">08<", rendered)
         self.assertIn(">01<", rendered)
         self.assertIn(f'{metrics["photo_w"]}mm {metrics["slip_w"]}mm', rendered)
-        self.assertIn("flex: 1 1 0;", rendered)
+        self.assertIn("flex: 1 1 auto;", rendered)
+        self.assertIn("overflow-wrap: anywhere;", rendered)
         self.assertNotIn("装订边25mm", rendered)
 
 
