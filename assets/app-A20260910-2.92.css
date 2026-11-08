@@ -9080,7 +9080,7 @@
       min-height: 0;
     }
     .print-mode-card span.ps-sidelabel .ps-row + .ps-row {
-      border-top: 1px solid #6d8f86;
+      border-top: 0;
     }
     .print-mode-card span.ps-slip {
       border: 1px solid #6d8f86;

@@ -29,7 +29,7 @@
 {% set side_metrics = print_settings.get("side_label_metrics") or {} %}
 {% set side_margin = side_metrics.get("margin_mm", 8) %}
 {% set side_pair_gap = side_metrics.get("pair_gap_mm", 1.5) %}
-{% set side_separator = side_metrics.get("separator_mm", 6) %}
+{% set side_separator = side_metrics.get("separator_mm", 2) %}
 {% set side_photo_w = side_metrics.get("photo_w", 127) %}
 {% set side_slip_w = side_metrics.get("slip_w", 40) %}
 {% set side_row_h = side_metrics.get("row_h", 89) %}
@@ -48,6 +48,8 @@
 {% if print_style == "sidelabel" %}{% set show_page_title = false %}{% endif %}
 {% set image_fit = print_settings.get("print_image_fit", "contain") %}
 {% if print_style == "sidelabel" %}{% set image_fit = "cover" %}{% endif %}
+{% set slip_side = (print_settings.get("print_slip_side") or "right")|string|trim|lower %}
+{% if slip_side != "left" %}{% set slip_side = "right" %}{% endif %}
 {% set paper_width = 210 if layout == "portrait" else 297 %}
 {% set paper_height = 297 if layout == "portrait" else 210 %}
 {% set source_content_width = paper_width - source_margin_left - source_margin_right %}
@@ -264,23 +266,19 @@
       min-height: 0;
       height: 100%;
       max-height: 100%;
-      display: grid;
-      grid-template-rows: minmax(0, 1fr) {{ side_separator }}mm minmax(0, 1fr);
-      align-items: stretch;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: {{ side_separator }}mm;
     }
     .side-band {
+      flex: 0 0 auto;
+      width: 100%;
       min-width: 0;
-      min-height: 0;
-      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
-    }
-    .side-midline {
-      align-self: center;
-      width: 100%;
-      height: 0;
-      border-top: 0.55mm solid #111;
     }
     .side-row {
       width: calc({{ side_photo_w }}mm + {{ side_pair_gap }}mm + {{ side_slip_w }}mm);
@@ -290,12 +288,18 @@
       min-width: 0;
       min-height: 0;
       display: grid;
-      grid-template-columns: {{ side_photo_w }}mm minmax(0, {{ side_slip_w }}mm);
       column-gap: {{ side_pair_gap }}mm;
       align-items: stretch;
       break-inside: avoid;
       page-break-inside: avoid;
     }
+    .side-row.side-slip-right {
+      grid-template-columns: {{ side_photo_w }}mm minmax(0, {{ side_slip_w }}mm);
+    }
+    .side-row.side-slip-left {
+      grid-template-columns: minmax(0, {{ side_slip_w }}mm) {{ side_photo_w }}mm;
+    }
+    .side-row.side-slip-left .side-slip { order: -1; }
     .side-photo {
       position: relative;
       width: {{ side_photo_w }}mm;
@@ -339,31 +343,41 @@
       flex: 1 1 0;
       display: grid;
       grid-template-columns: 11mm minmax(0, 1fr);
-      align-items: center;
-      column-gap: 0.6mm;
+      align-items: stretch;
+      column-gap: 0;
       min-width: 0;
       min-height: 0;
-      padding: 0.2mm 0.7mm;
+      border-bottom: 1px solid #111;
       font-size: 7.5pt;
       line-height: 1.15;
       overflow: hidden;
     }
+    .slip-row:last-child { border-bottom: 0; }
     .slip-k {
       min-width: 0;
       max-width: 11mm;
+      display: flex;
+      align-items: center;
+      border-right: 1px solid #111;
+      padding: 0.3mm 0.6mm;
       white-space: normal;
       font-style: normal;
       overflow-wrap: anywhere;
     }
     .slip-k b {
-      display: inline;
+      display: block;
+      min-width: 0;
       font-weight: inherit;
       white-space: normal;
+      overflow-wrap: anywhere;
     }
-    .slip-k::after { content: "："; }
+    .slip-k b::after { content: "："; }
     .slip-v {
       min-width: 0;
       max-width: 100%;
+      align-self: center;
+      display: block;
+      padding: 0.3mm 0.7mm;
       text-align: left;
       white-space: normal;
       word-break: break-all;
@@ -407,7 +421,7 @@
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 左侧照片按 5 寸横版裁满、右侧纸质侧签（题名、照片号、单元工程名称、拍摄时间、摄影者、地点），两张照片中间有一条横线。侧签格子里不再画横线。长文字在侧签里换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 照片按 5 寸横版裁满，侧签在照片{{ "左边" if slip_side == "left" else "右边" }}（题名、照片号、单元工程名称、拍摄时间、摄影者、地点）。两张之间留 2 毫米，没有整页横线。侧签按表格分格，长文字换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
@@ -425,12 +439,11 @@
           {% set band_items = page_items|list %}
           <div class="side-sheet">
             {% for band in (0, 1) %}
-            {% if band == 1 %}<div class="side-midline" role="separator"></div>{% endif %}
+            {% if band < (band_items|length) %}
             <div class="side-band">
-              {% if band < (band_items|length) %}
               {% set item = band_items[band] %}
               {% set slip = item._side_label or {} %}
-              <div class="side-row">
+              <div class="side-row side-slip-{{ slip_side }}">
                 <div class="side-photo">
                   <div class="photo-frame" style="--photo-w: {{ side_photo_w }}mm; --photo-h: {{ side_row_h }}mm;">
                     <img class="pr-{{ item._rotate or 0 }}" src="{{ item.url }}" alt="">
@@ -446,8 +459,8 @@
                   <div class="slip-row"><span class="slip-k"><b>地点</b></span><span class="slip-v">{{ slip.place or "" }}</span></div>
                 </aside>
               </div>
-              {% endif %}
             </div>
+            {% endif %}
             {% endfor %}
           </div>
           {% else %}

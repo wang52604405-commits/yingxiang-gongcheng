@@ -5800,6 +5800,7 @@ const $ = (selector) => document.querySelector(selector);
       const captionMode = $("#printSetupCaptionMode")?.value || "inline";
       $("#printLayoutToggle")?.classList.toggle("is-locked", sideLabel);
       $("#printSideLabelHint")?.toggleAttribute("hidden", !sideLabel);
+      $("#printSlipSideRow")?.toggleAttribute("hidden", !sideLabel);
       document.querySelectorAll("[data-print-layout]").forEach((button) => {
         const active = button.dataset.printLayout === layout;
         button.classList.toggle("active", active);
@@ -5822,6 +5823,17 @@ const $ = (selector) => document.querySelector(selector);
       const value = layout === "portrait" ? "portrait" : "landscape";
       $("#printSetupLayout").value = value;
       syncPrintSegmentButtons();
+    }
+
+    function setPrintSlipSide(side) {
+      const value = side === "left" ? "left" : "right";
+      const input = $("#printSetupSlipSide");
+      if (input) input.value = value;
+      document.querySelectorAll("[data-print-slip-side]").forEach((button) => {
+        const active = button.dataset.printSlipSide === value;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
     }
 
     function setPrintCaptionModeChoice(mode) {
@@ -5863,6 +5875,8 @@ const $ = (selector) => document.querySelector(selector);
       state.printSourceUrl = url;
       loadPrintSetupValues();
       selectPrintStyle("sidelabel");
+      const saved = lastPrintSettings();
+      setPrintSlipSide(saved?.slip_side || state.engineeringSettings?.print_slip_side || "right");
       $("#printSetupModal").classList.add("open");
       $("#printSetupModal").setAttribute("aria-hidden", "false");
     }
@@ -5876,7 +5890,10 @@ const $ = (selector) => document.querySelector(selector);
 
     function printSetupParams() {
       if (state.printStyle === "sidelabel") {
-        return new URLSearchParams(PRINT_STYLES.sidelabel);
+        const params = new URLSearchParams(PRINT_STYLES.sidelabel);
+        params.set("slip_side", $("#printSetupSlipSide")?.value === "left" ? "left" : "right");
+        params.set("vertical_gap_mm", "2");
+        return params;
       }
       if (state.printStyle !== "custom" && PRINT_STYLES[state.printStyle]) {
         const params = new URLSearchParams(PRINT_STYLES[state.printStyle]);
@@ -5911,10 +5928,14 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function rememberLastPrint(params) {
+      const savedSettings = { last_print_settings: Object.fromEntries(params.entries()) };
+      if (params.get("style") === "sidelabel") {
+        savedSettings.print_slip_side = params.get("slip_side") === "left" ? "left" : "right";
+      }
       const data = await apiJson("/api/engineering-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: { last_print_settings: Object.fromEntries(params.entries()) } })
+        body: JSON.stringify({ settings: savedSettings })
       });
       state.engineeringSettings = data.settings || state.engineeringSettings;
       refreshLastPrintStyle();
@@ -5967,6 +5988,7 @@ const $ = (selector) => document.querySelector(selector);
     document.querySelectorAll("[data-print-style]").forEach((button) => button.addEventListener("click", () => selectPrintStyle(button.dataset.printStyle)));
     document.querySelectorAll("[data-print-layout]").forEach((button) => button.addEventListener("click", () => setPrintLayoutChoice(button.dataset.printLayout)));
     document.querySelectorAll("[data-print-caption-mode]").forEach((button) => button.addEventListener("click", () => setPrintCaptionModeChoice(button.dataset.printCaptionMode)));
+    document.querySelectorAll("[data-print-slip-side]").forEach((button) => button.addEventListener("click", () => setPrintSlipSide(button.dataset.printSlipSide)));
     $("#printSetupPreset").addEventListener("change", syncPrintSetupPreset);
     $("#printSetupPageSize").addEventListener("input", syncPrintSingleAlignment);
     $("#printSetupCaptionPosition").addEventListener("change", () => {
