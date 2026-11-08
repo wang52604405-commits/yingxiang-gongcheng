@@ -743,7 +743,15 @@
                     <button type="button" class="active" data-print-layout="portrait" aria-pressed="true">竖版</button>
                   </div>
                 </div>
-                <small id="printSideLabelHint">默认是侧签：竖版纸，一页上下两张。每张左侧是横版照片，右侧是纸质侧签。</small>
+                <small id="printSideLabelHint">默认是侧签：竖版纸，一页上下两张。照片按 5 寸横版裁满，两张之间留 2 毫米。侧签可以放在照片左边或右边。</small>
+                <div class="print-segment-row" id="printSlipSideRow">
+                  <span class="print-choice-label">侧签位置</span>
+                  <div class="top-filter-group print-segment-group" id="printSlipSideToggle" role="group" aria-label="侧签位置">
+                    <button type="button" data-print-slip-side="left" aria-pressed="false">照片左边</button>
+                    <button type="button" class="active" data-print-slip-side="right" aria-pressed="true">照片右边</button>
+                  </div>
+                </div>
+                <input id="printSetupSlipSide" type="hidden" value="right">
                 <div class="print-segment-row">
                   <span class="print-choice-label">标签输出</span>
                   <div class="top-filter-group print-segment-group" id="printCaptionModeToggle" role="group" aria-label="标签输出方式">
@@ -759,7 +767,7 @@
                 <button class="print-mode-card print-style-card active" type="button" data-print-style="sidelabel" aria-pressed="true">
                   <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-portrait ps-sidelabel"><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span></span></span>
                   <strong>侧签 · 两行</strong>
-                  <span class="print-style-desc">竖版一页两张：左侧照片按 5 寸横版裁满，右侧题名、照片号、单元工程名称、拍摄时间、摄影者、地点</span>
+                  <span class="print-style-desc">竖版一页两张：照片按 5 寸横版裁满，侧签可在左边或右边，填写题名、照片号、单元工程名称、拍摄时间、摄影者、地点</span>
                 </button>
                 <button class="print-mode-card print-style-card" type="button" data-print-style="one" aria-pressed="false">
                   <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span></span>

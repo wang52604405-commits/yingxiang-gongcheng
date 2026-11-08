@@ -168,6 +168,7 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_photo_height_cm": 8.9,
     "print_caption_font_size": 10.0,
     "print_caption_position": "bottom",
+    "print_slip_side": "right",
     "print_caption_mode": "inline",
     "print_auto_fill": True,
     "print_caption_size_mm": 7.5,
@@ -824,6 +825,7 @@ def _normalize_engineering_settings(settings):
     except (TypeError, ValueError):
         settings["print_caption_font_size"] = 10.0
     settings["print_caption_position"] = settings.get("print_caption_position") if settings.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else "bottom"
+    settings["print_slip_side"] = "left" if str(settings.get("print_slip_side") or "").strip().lower() == "left" else "right"
     settings["print_caption_mode"] = settings.get("print_caption_mode") if settings.get("print_caption_mode") in {"inline", "separate"} else "inline"
     settings["print_auto_fill"] = bool(settings.get("print_auto_fill", True))
     for field, default_value, minimum, maximum in [
@@ -861,6 +863,7 @@ def _normalize_engineering_settings(settings):
         "photo_height_cm", "caption_position", "caption_size_mm", "caption_font_size",
         "margin_top_mm", "margin_right_mm", "margin_bottom_mm", "margin_left_mm",
         "horizontal_gap_mm", "vertical_gap_mm", "image_fit", "show_page_title", "caption_fields",
+        "slip_side", "style",
     }
     settings["last_print_settings"] = (
         {str(key): value for key, value in last_print.items() if str(key) in allowed_last_print_fields}
@@ -930,6 +933,8 @@ def write_engineering_settings(payload):
     except (TypeError, ValueError) as exc:
         raise ValueError("照片说明字号必须是数字") from exc
     current["print_caption_position"] = payload.get("print_caption_position") if payload.get("print_caption_position") in {"hidden", "left", "right", "top", "bottom"} else current.get("print_caption_position", "bottom")
+    requested_slip_side = str(payload.get("print_slip_side", current.get("print_slip_side", "right")) or "").strip().lower()
+    current["print_slip_side"] = requested_slip_side if requested_slip_side in {"left", "right"} else "right"
     requested_caption_mode = payload.get("print_caption_mode", current.get("print_caption_mode", "inline"))
     current["print_caption_mode"] = requested_caption_mode if requested_caption_mode in {"inline", "separate"} else "inline"
     if "print_auto_fill" in payload:
@@ -959,6 +964,7 @@ def write_engineering_settings(payload):
             "photo_height_cm", "caption_position", "caption_size_mm", "caption_font_size",
             "margin_top_mm", "margin_right_mm", "margin_bottom_mm", "margin_left_mm",
             "horizontal_gap_mm", "vertical_gap_mm", "image_fit", "show_page_title", "caption_fields",
+            "slip_side", "style",
         }
         current["last_print_settings"] = {
             str(key): value
@@ -4268,6 +4274,8 @@ def print_settings_from_request():
         # 侧签照片框是固定 5 寸，必须裁满，不能再按「完整显示」上下留白。
         settings["print_image_fit"] = "cover"
         settings["print_caption_mode"] = "inline"
+        requested_slip_side = str(request.args.get("slip_side") or settings.get("print_slip_side") or "right").strip().lower()
+        settings["print_slip_side"] = requested_slip_side if requested_slip_side in {"left", "right"} else "right"
     return settings
 
 
@@ -4547,12 +4555,12 @@ def split_photos_by_level(project, photos):
 
 PHOTO_5IN_LANDSCAPE = (127.0, 89.0)
 PRINT_FIXED_GAP = 2.0
-# 侧签版式：A4 竖版固定上下两格，中间一条横线。
+# 侧签版式：A4 竖版上下两张，两张之间只留 2 毫米，不再画整页横线。
 # 照片框就是标准 5 寸横版（12.7×8.9cm），和侧签顶底对齐；图片裁满这个框，不再留白。
 SIDE_LABEL_MARGIN_MM = 8.0
 SIDE_LABEL_SLIP_MM = 40.0
 SIDE_LABEL_PAIR_GAP_MM = 1.5
-SIDE_LABEL_SEPARATOR_MM = 6.0
+SIDE_LABEL_SEPARATOR_MM = 2.0
 SIDE_LABEL_FRAME_ASPECT = PHOTO_5IN_LANDSCAPE[1] / PHOTO_5IN_LANDSCAPE[0]
 
 
@@ -4656,17 +4664,18 @@ def side_label_for_photo(photo, place="", unit_project=None):
 
 
 def _side_label_row_top(metrics, index):
-    """第 0 行落在上半页，第 1 行落在下半页，中间留出横线，不再把整组挤在页面正中。"""
-    band_h = float(metrics["band_h"])
-    separator = float(metrics["separator_mm"])
+    """两张从页面上方排下来，中间只留 2 毫米，不再用半页空白和整页横线隔开。"""
     row_h = float(metrics["row_h"])
-    band_top = 0.0 if int(index) <= 0 else band_h + separator
-    return round(band_top + max(0.0, (band_h - row_h) / 2.0), 2)
+    separator = float(metrics["separator_mm"])
+    return round(max(0, int(index)) * (row_h + separator), 2)
 
 
-def layout_side_label_pages(photos, unit_project=None):
-    """竖版一页两行。每行左侧 5 寸横版照片、右侧侧签，顶底对齐；页正中有一条横线。"""
+def layout_side_label_pages(photos, unit_project=None, print_settings=None):
+    """竖版一页两行。每行是 5 寸横版照片加侧签，侧签可在左或右；两行只隔 2 毫米。"""
     metrics = side_label_metrics()
+    slip_side = str((print_settings or {}).get("print_slip_side") or "right").strip().lower()
+    if slip_side not in {"left", "right"}:
+        slip_side = "right"
     place = side_label_place(unit_project)
     photo_w = metrics["photo_w"]
     slip_w = metrics["slip_w"]
@@ -4691,7 +4700,7 @@ def layout_side_label_pages(photos, unit_project=None):
             item["_caption_w"] = slip_w
             item["_block_h"] = row_h
             item["_caption_h"] = row_h
-            item["_caption_position"] = "right"
+            item["_caption_position"] = slip_side
             item["_rotate"] = rotate
             item["_side_label"] = side_label_for_photo(photo, place, unit_project)
             current.append(item)
@@ -4702,7 +4711,7 @@ def layout_side_label_pages(photos, unit_project=None):
 
 def layout_print_pages(photos, layout="landscape", page_size=4, photo_width_mm=None, photo_height_mm=None, print_settings=None, unit_project=None):
     if str((print_settings or {}).get("print_style") or "") == "sidelabel":
-        return layout_side_label_pages(photos, unit_project)
+        return layout_side_label_pages(photos, unit_project, print_settings)
     return layout_fixed_photo_pages(photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings)
 
 

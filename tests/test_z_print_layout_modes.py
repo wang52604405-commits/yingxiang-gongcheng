@@ -42,16 +42,28 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn("拍摄时间", print_html)
         self.assertIn("摄影者", print_html)
         self.assertIn("地点", print_html)
-        self.assertIn('class="side-row"', print_html)
-        self.assertIn('class="side-midline"', print_html)
+        self.assertIn('class="side-row side-slip-{{ slip_side }}"', print_html)
+        self.assertNotIn('class="side-midline"', print_html)
+        self.assertNotIn("side-midline", print_html)
         self.assertIn("height: 248mm;", print_html)
+        self.assertIn('data-print-slip-side="left"', html)
+        self.assertIn('data-print-slip-side="right"', html)
+        self.assertIn('id="printSetupSlipSide"', html)
+        self.assertIn('params.set("slip_side"', js)
+        self.assertIn("setPrintSlipSide", js)
+        self.assertIn("print_slip_side", js)
         self.assertIn("word-break: break-all;", print_html)
         slip_row_css = print_html.split(".slip-row {", 1)[1].split("}", 1)[0]
         self.assertIn("font-size: 7.5pt;", slip_row_css)
         self.assertNotIn("font-size: 9pt;", slip_row_css)
         self.assertIn("grid-template-columns: 11mm", slip_row_css)
-        self.assertNotIn("border-bottom", slip_row_css)
+        self.assertIn("border-bottom: 1px solid #111;", slip_row_css)
+        self.assertIn(".slip-row:last-child { border-bottom: 0; }", print_html)
+        slip_k_css = print_html.split(".slip-k {", 1)[1].split("}", 1)[0]
+        self.assertIn("border-right: 1px solid #111;", slip_k_css)
         self.assertIn("grid-template-columns: {{ side_photo_w }}mm minmax(0, {{ side_slip_w }}mm);", print_html)
+        self.assertIn("side-slip-left .side-slip { order: -1; }", print_html)
+        self.assertIn("gap: {{ side_separator }}mm;", print_html)
         side_row_start = print_html.index(".side-row {")
         side_row_css = print_html[side_row_start:print_html.index(".side-photo {", side_row_start)]
         self.assertIn("height: {{ side_row_h }}mm;", side_row_css)
@@ -269,10 +281,13 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertAlmostEqual(first["_caption_w"], metrics["slip_w"])
         self.assertEqual(first["_h"], first["_caption_h"])
         self.assertLess(first["_h"], first["_photo_w"])
+        self.assertAlmostEqual(metrics["separator_mm"], 2.0)
         self.assertAlmostEqual(first["_top"], self.appmod._side_label_row_top(metrics, 0))
         self.assertAlmostEqual(second["_top"], self.appmod._side_label_row_top(metrics, 1))
+        self.assertAlmostEqual(second["_top"] - (first["_top"] + first["_block_h"]), 2.0)
+        self.assertEqual(first["_caption_position"], "right")
         self.assertLess(first["_top"] + first["_block_h"], metrics["page_h"] / 2)
-        self.assertGreater(second["_top"], metrics["page_h"] / 2)
+        self.assertLess(second["_top"], metrics["page_h"] / 2)
         self.assertLess(first["_top"] + first["_block_h"], second["_top"])
         centered_top = (metrics["page_h"] - solo["_block_h"]) / 2
         self.assertLess(solo["_top"] + 20, centered_top)
@@ -317,9 +332,11 @@ class PrintLayoutGeometryTest(unittest.TestCase):
                 watermark_text="",
             )
         self.assertIn("size: A4 portrait", rendered)
-        self.assertEqual(rendered.count('class="side-row"'), 3)
-        self.assertEqual(rendered.count('class="side-midline"'), 2)
+        self.assertEqual(rendered.count('class="side-row side-slip-right"'), 3)
+        self.assertNotIn("side-midline", rendered)
         self.assertEqual(rendered.count('class="slip-row"'), 18)
+        self.assertIn("side-slip-right", rendered)
+        self.assertIn("gap: 2", rendered)
         for field in ("题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"):
             self.assertIn(field, rendered)
         self.assertNotIn("单元工程及编号", rendered)
@@ -329,8 +346,8 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertNotIn(">08<", rendered)
         self.assertIn("★右岸Q11翼墙C30混凝土", rendered)
         first_page = rendered.split('class="page', 2)[1]
-        self.assertEqual(first_page.count('class="side-row"'), 2)
-        self.assertIn('class="side-midline"', first_page)
+        self.assertEqual(first_page.count('class="side-row side-slip-right"'), 2)
+        self.assertNotIn("side-midline", first_page)
         self.assertLess(rendered.index("<b>题名</b>"), rendered.index("<b>照片号</b>"))
         self.assertLess(rendered.index("<b>照片号</b>"), rendered.index("<b>单元工程名称</b>"))
         rendered_value = rendered.split(".slip-v {", 1)[1].split("}", 1)[0]
@@ -349,12 +366,58 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertIn("height: 248mm;", rendered)
         self.assertIn("object-fit: cover;", rendered)
         rendered_slip = rendered.split(".slip-row {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("border-bottom", rendered_slip)
+        self.assertIn("border-bottom: 1px solid #111;", rendered_slip)
         self.assertIn("font-size: 7.5pt;", rendered_slip)
+        rendered_value = rendered.split(".slip-v {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("border-bottom", rendered_value)
+        self.assertNotIn("text-decoration", rendered_value)
         self.assertIn("--photo-w: 127", rendered)
         self.assertIn("--photo-h: 89", rendered)
         self.assertNotIn("side_page_h - 1", rendered)
         self.assertNotIn("装订边25mm", rendered)
+        kept = self.appmod._normalize_engineering_settings({
+            "print_slip_side": "left",
+            "last_print_settings": {"style": "sidelabel", "slip_side": "left", "page_size": "2", "unknown": "drop"},
+        })
+        self.assertEqual(kept["print_slip_side"], "left")
+        self.assertEqual(kept["last_print_settings"].get("slip_side"), "left")
+        self.assertEqual(kept["last_print_settings"].get("style"), "sidelabel")
+        self.assertNotIn("unknown", kept["last_print_settings"])
+
+    def test_side_label_can_sit_on_either_side_of_the_photo(self):
+        photos = self.photos(2)
+        photos[0].update({"id": "LEFT-SY001", "title": "左签照片", "url": "/photos/left.jpg", "photo_date": "2026-09-13"})
+        photos[1].update({"id": "LEFT-SY002", "title": "第二张", "url": "/photos/right.jpg", "photo_date": "2026-09-14"})
+        with self.appmod.app.test_request_context("/?style=sidelabel&slip_side=left&image_fit=contain"):
+            settings = self.appmod.print_settings_from_request()
+        self.assertEqual(settings["print_slip_side"], "left")
+        self.assertEqual(settings["print_image_fit"], "cover")
+        with mock.patch.object(self.appmod, "current_engineering_project", return_value={"location": "北陈村"}):
+            pages = self.appmod.layout_side_label_pages(photos, {"source_fields": {"单元工程名称": "翼墙"}}, settings)
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages[0]), 2)
+        self.assertTrue(all(item["_caption_position"] == "left" for item in pages[0]))
+        self.assertAlmostEqual(pages[0][1]["_top"] - (pages[0][0]["_top"] + pages[0][0]["_h"]), 2.0)
+        with self.appmod.app.test_request_context("/?style=sidelabel&slip_side=left"):
+            rendered = self.appmod.render_template(
+                "print.html",
+                project={"project_code": "P", "project_name": "工程", "code": "P", "name": "工程"},
+                photos=photos,
+                project_groups=[{"level": "", "pages": [{"unit_name": "单元", "items": pages[0], "print_page_number": 1}]}],
+                category="construction",
+                category_label="施工单元影像",
+                print_layout="portrait",
+                print_page_size=2,
+                print_settings=settings,
+                watermark_text="",
+            )
+        self.assertEqual(rendered.count('class="side-row side-slip-left"'), 2)
+        self.assertNotIn('class="side-row side-slip-right"', rendered)
+        self.assertNotIn("side-midline", rendered)
+        self.assertIn("object-fit: cover", rendered)
+        self.assertIn("side-slip-left .side-slip { order: -1; }", rendered)
+        self.assertIn("LEFT-SY001", rendered)
+        self.assertIn("LEFT-SY002", rendered)
 
 
 if __name__ == "__main__":
