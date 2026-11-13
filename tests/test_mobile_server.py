@@ -3336,7 +3336,35 @@ class MobileServerContractTest(unittest.TestCase):
             headers=self._headers(self.desktop_token_b),
         )
         self.assertEqual(other_archive.status_code, 409, other_archive.get_json())
-        self.assertEqual(other_archive.get_json()["code"], "project_machine_unbound")
+        self.assertEqual(other_archive.get_json()["code"], "project_not_bound")
+        self.assertNotIn("新成员", json.dumps(other_archive.get_json(), ensure_ascii=False))
+
+        with_ref = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": local_project_id,
+                "project_ref": snapshot["project_ref"],
+                "desktop_machine_id": "MACHINE-A",
+                "display_name": "新成员",
+                "phone": "13800138000",
+            },
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(with_ref.status_code, 200, with_ref.get_json())
+        self.assertEqual(with_ref.get_json()["member"]["role"], "capturer")
+        wrong_machine = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": local_project_id,
+                "project_ref": snapshot["project_ref"],
+                "desktop_machine_id": "MACHINE-A-ALT",
+                "display_name": "新成员",
+                "phone": "13800138000",
+            },
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(wrong_machine.status_code, 409, wrong_machine.get_json())
+        self.assertEqual(wrong_machine.get_json()["code"], "project_machine_unbound")
 
         same_archive_other_account = self.client.post(
             "/api/activate",
@@ -3357,28 +3385,14 @@ class MobileServerContractTest(unittest.TestCase):
                 },
                 headers=self._headers(other_token),
             )
-            self.assertEqual(crossed.status_code, 200, crossed.get_json())
-            self.assertEqual(crossed.get_json()["member"]["role"], "capturer")
-            self.assertFalse(crossed.get_json()["project"].get("can_manage_members"))
-            wrong_name = self.client.post(
-                "/api/desktop/v1/project-members/verify",
-                json={
-                    "project_id": local_project_id,
-                    "project_ref": snapshot["project_ref"],
-                    "desktop_machine_id": "MACHINE-A",
-                    "display_name": "不是此人",
-                    "phone": "13800138000",
-                },
-                headers=self._headers(other_token),
-            )
-            self.assertEqual(wrong_name.status_code, 403, wrong_name.get_json())
-            self.assertEqual(wrong_name.get_json()["code"], "project_staff_not_approved")
+            self.assertEqual(crossed.status_code, 409, crossed.get_json())
+            self.assertEqual(crossed.get_json()["code"], "project_not_bound")
+            self.assertNotIn("member", crossed.get_json())
             managed = self.client.get(
                 f"/api/desktop/v1/project-members?project_id={local_project_id}&desktop_machine_id=MACHINE-A",
                 headers=self._headers(other_token),
             )
             self.assertEqual(managed.status_code, 404, managed.get_json())
-            self.assertNotEqual(managed.get_json().get("code"), "project_staff_not_approved")
         finally:
             conn = self.db.connect()
             try:

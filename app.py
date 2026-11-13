@@ -6377,8 +6377,10 @@ def _cloud_proxy_response(result):
 def api_cloud_project_staff_entry():
     """Let an approved mini-program member enter the locally bound project.
 
-    Verification uses this computer's project id, project_ref and machine id.
-    It does not require the album_server cloud session to be the project owner.
+    This route does not apply the member-management ownership gate. The cloud
+    still checks the archive computer's signed-in account, the local project
+    id, and this machine. A different cloud account cannot be substituted by
+    repeating the machine id.
     """
     payload = request.get_json(silent=True) or {}
     display_name = str(payload.get("display_name") or "").strip()

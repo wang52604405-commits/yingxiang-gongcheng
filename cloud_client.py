@@ -1039,9 +1039,8 @@ def desktop_verify_project_member(
 ) -> dict:
     """Verify an already approved project member for the LAN staff entrance.
 
-    project_ref is the locally bound owner:project id. The server uses it with
-    the archive machine, and does not require this process's cloud session to
-    be the project owner.
+    project_ref tells the server which local project the archive computer has
+    bound. The server still authorizes the signed-in cloud account only.
     """
     payload = {
         "project_id": str(project_id or "").strip(),

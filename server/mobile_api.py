@@ -6084,17 +6084,19 @@ def register_mobile_api(
             conn.close()
 
     def desktop_staff_entry_project(conn, current, data, desktop_machine_id):
-        """Resolve the bound archive project without requiring the token owner.
+        """Resolve this token's archive project for a staff-entry check.
 
-        Managing members still goes through desktop_project_context, which
-        requires the signed-in cloud account to own the project. Staff entry
-        only checks the locally bound project_ref and this archive machine.
+        The desktop may send its locally stored project_ref so a stale local
+        owner id does not block the call. The ref is not authorization.
+        /api/activate accepts whatever machine id the caller types, so another
+        account cannot read this project's members by repeating that string.
         """
         requested_ref = str(data.get("project_ref") or "").strip()
         requested_project_id = str(data.get("project_id") or "").strip()
+        owner_account_id = int(current["id"])
         if requested_ref:
-            owner_account_id, local_project_id, legacy = _parse_project_ref(
-                requested_ref, int(current["id"])
+            _ref_owner, local_project_id, legacy = _parse_project_ref(
+                requested_ref, owner_account_id
             )
             if legacy:
                 raise ApiProblem(
@@ -6109,9 +6111,6 @@ def register_mobile_api(
                     409,
                 )
         else:
-            # Desktop builds that only send project_id are already signed in
-            # as the owner. Keep that path working.
-            owner_account_id = int(current["id"])
             local_project_id = _project_id(requested_project_id)
         row = conn.execute(
             "SELECT * FROM cloud_engineering_projects WHERE account_id = ? "
