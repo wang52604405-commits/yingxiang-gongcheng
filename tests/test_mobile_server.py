@@ -3352,7 +3352,9 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertEqual(with_ref.status_code, 200, with_ref.get_json())
         self.assertEqual(with_ref.get_json()["member"]["role"], "capturer")
-        wrong_machine = self.client.post(
+        # Same owner, activated on another computer. A LAN browser is served by
+        # album_server; that client PC is not the project's archive machine.
+        lan_client = self.client.post(
             "/api/desktop/v1/project-members/verify",
             json={
                 "project_id": local_project_id,
@@ -3363,8 +3365,59 @@ class MobileServerContractTest(unittest.TestCase):
             },
             headers=self._headers(self.desktop_token_a_alt),
         )
-        self.assertEqual(wrong_machine.status_code, 409, wrong_machine.get_json())
-        self.assertEqual(wrong_machine.get_json()["code"], "project_machine_unbound")
+        self.assertEqual(lan_client.status_code, 200, lan_client.get_json())
+        self.assertEqual(lan_client.get_json()["member"]["role"], "capturer")
+        self.assertFalse(lan_client.get_json()["project"].get("can_manage_members"))
+        lan_body = json.dumps(lan_client.get_json(), ensure_ascii=False)
+        self.assertNotIn("未绑定", lan_body)
+        self.assertNotIn("归档电脑", lan_body)
+        member_id = lan_client.get_json()["member"]["account_id"]
+
+        archive_members = self.client.get(
+            f"/api/desktop/v1/project-members?project_id={local_project_id}&desktop_machine_id=MACHINE-A",
+            headers=self._headers(self.desktop_token_a),
+        )
+        self.assertEqual(archive_members.status_code, 200, archive_members.get_json())
+
+        listed = self.client.get(
+            f"/api/desktop/v1/project-members?project_id={local_project_id}&desktop_machine_id=MACHINE-A-ALT",
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(listed.status_code, 403, listed.get_json())
+        self.assertEqual(listed.get_json()["code"], "wrong_desktop_machine")
+        self.assertNotIn("新成员", json.dumps(listed.get_json(), ensure_ascii=False))
+        invited = self.client.post(
+            "/api/desktop/v1/project-invites",
+            json={
+                "project_id": local_project_id,
+                "role": "viewer",
+                "desktop_machine_id": "MACHINE-A-ALT",
+            },
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(invited.status_code, 403, invited.get_json())
+        self.assertEqual(invited.get_json()["code"], "wrong_desktop_machine")
+        changed = self.client.patch(
+            f"/api/desktop/v1/project-members/{member_id}",
+            json={
+                "project_id": local_project_id,
+                "role": "viewer",
+                "desktop_machine_id": "MACHINE-A-ALT",
+            },
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(changed.status_code, 403, changed.get_json())
+        self.assertEqual(changed.get_json()["code"], "wrong_desktop_machine")
+        removed = self.client.delete(
+            f"/api/desktop/v1/project-members/{member_id}",
+            json={
+                "project_id": local_project_id,
+                "desktop_machine_id": "MACHINE-A-ALT",
+            },
+            headers=self._headers(self.desktop_token_a_alt),
+        )
+        self.assertEqual(removed.status_code, 403, removed.get_json())
+        self.assertEqual(removed.get_json()["code"], "wrong_desktop_machine")
 
         same_archive_other_account = self.client.post(
             "/api/activate",

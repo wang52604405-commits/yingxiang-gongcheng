@@ -6084,12 +6084,19 @@ def register_mobile_api(
             conn.close()
 
     def desktop_staff_entry_project(conn, current, data, desktop_machine_id):
-        """Resolve this token's archive project for a staff-entry check.
+        """Resolve this account's project for a LAN staff-entry check.
 
-        The desktop may send its locally stored project_ref so a stale local
-        owner id does not block the call. The ref is not authorization.
-        /api/activate accepts whatever machine id the caller types, so another
-        account cannot read this project's members by repeating that string.
+        The browser on another computer does not send its own machine id.
+        album_server on the computer that holds the project calls this with
+        that server's desktop token and the project id stored on that server.
+        Staff entry therefore checks the signed-in account's project, not
+        whether this machine id equals the project's archive computer.
+
+        Invite, role changes, and removal still go through
+        desktop_project_context, which keeps the archive-machine requirement.
+        /api/activate accepts whatever machine id the caller types, so the
+        project is loaded only for the token's own account. Repeating a known
+        machine id from another account does not reveal approved people.
         """
         requested_ref = str(data.get("project_ref") or "").strip()
         requested_project_id = str(data.get("project_id") or "").strip()
@@ -6124,13 +6131,10 @@ def register_mobile_api(
                 409,
             )
         project = dict(row)
-        bound_machine = _machine_id(project.get("desktop_machine_id"))
-        if not bound_machine or bound_machine != desktop_machine_id:
-            raise ApiProblem(
-                "project_machine_unbound",
-                "这台电脑不是该工程的归档电脑，或绑定已失效，暂时无法核验项目人员",
-                409,
-            )
+        # The token's machine must be one this account actually activated.
+        # It does not have to be the machine stored as the archive computer:
+        # a LAN browser is served by album_server, and that client PC is not
+        # itself bound to the project.
         _require_active_machine(conn, owner_account_id, desktop_machine_id)
         project["project_owner_account_id"] = int(project["account_id"])
         return project

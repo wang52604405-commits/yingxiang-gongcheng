@@ -1039,8 +1039,9 @@ def desktop_verify_project_member(
 ) -> dict:
     """Verify an already approved project member for the LAN staff entrance.
 
-    project_ref tells the server which local project the archive computer has
-    bound. The server still authorizes the signed-in cloud account only.
+    project_ref tells the server which local project this album_server has
+    bound. The server still authorizes the signed-in cloud account only, and
+    does not require the caller's machine to be the project's archive computer.
     """
     payload = {
         "project_id": str(project_id or "").strip(),
