@@ -29,10 +29,10 @@ class ProjectAdminHotfixTest(unittest.TestCase):
         cls.temp.cleanup()
 
     def test_admin_entry_has_full_write_access(self):
-        ownership = {
-            "state": "matched",
-            "local_project_id": "owner-local-project",
-            "project_ref": "42:owner-local-project",
+        bound_project = {
+            "id": "owner-local-project",
+            "cloud_owner_id": "42",
+            "cloud_project_ref": "42:owner-local-project",
         }
         verified = {
             "ok": True,
@@ -43,18 +43,25 @@ class ProjectAdminHotfixTest(unittest.TestCase):
             "member": {"display_name": "Admin User", "role": "admin"},
         }
         with patch.object(
-            self.desktop, "current_project_cloud_ownership", return_value=ownership
+            self.desktop, "current_engineering_project", return_value=bound_project
         ), patch.object(
             self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
         ), patch.object(
             self.desktop.cloud_client,
             "desktop_verify_project_member",
             return_value=verified,
-        ):
+        ) as verify:
             entered = self.client.post(
                 "/api/cloud/project-staff-entry",
                 json={"display_name": "Admin User", "phone": "13800138001"},
             )
+        verify.assert_called_once_with(
+            "owner-local-project",
+            "Admin User",
+            "13800138001",
+            "ARCHIVE-PC",
+            project_ref="42:owner-local-project",
+        )
         self.assertEqual(entered.status_code, 200, entered.get_json())
         self.assertEqual(entered.get_json()["user"]["role"], "project_admin")
         writable = self.client.post(

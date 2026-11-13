@@ -6295,6 +6295,12 @@ def api_cloud_project_ownership():
 
 
 def _desktop_team_project_context():
+    """Owner-only context for managing members on the archive computer.
+
+    Staff entry must not call this. A LAN browser login is not the album_server
+    cloud session, and a mismatch here blocks approved people before their
+    name and phone are checked.
+    """
     ownership = current_project_cloud_ownership()
     if ownership.get("state") != "matched":
         if ownership.get("state") == "logged_out":
@@ -6308,6 +6314,59 @@ def _desktop_team_project_context():
     return str(ownership.get("local_project_id") or DEFAULT_ENGINEERING_PROJECT_ID), machine_id
 
 
+_STAFF_ENTRY_NAME_MISMATCH = "姓名或手机号与已审批的项目人员不一致"
+_STAFF_ENTRY_BINDING_PROBLEM = "当前工程还没有绑定到这台电脑，或这台电脑的绑定有问题，暂时无法核验项目人员"
+_STAFF_ENTRY_BINDING_CODES = {
+    "project_not_found",
+    "project_not_bound",
+    "project_machine_unbound",
+    "project_binding_mismatch",
+    "wrong_desktop_machine",
+    "desktop_machine_not_bound",
+    "desktop_machine_required",
+    "desktop_token_machine_mismatch",
+}
+
+
+def _desktop_staff_entry_context():
+    """Local project id, archive machine, and bound project_ref for staff entry."""
+    project = current_engineering_project()
+    project_id = str(project.get("id") or DEFAULT_ENGINEERING_PROJECT_ID).strip() or DEFAULT_ENGINEERING_PROJECT_ID
+    owner_id = str(project.get("cloud_owner_id") or "").strip()
+    project_ref = engineering_project_cloud_ref(project)
+    if not owner_id or not project_ref:
+        raise ValueError("当前工程还没有绑定云账号，项目人员暂时无法从这里进入")
+    if not owner_id.isdigit() or not project_ref.startswith(owner_id + ":"):
+        raise ValueError(_STAFF_ENTRY_BINDING_PROBLEM)
+    if project_ref.split(":", 1)[1] != project_id:
+        raise ValueError(_STAFF_ENTRY_BINDING_PROBLEM)
+    machine_id = str(licensing.machine_id() or "").strip()
+    if not machine_id:
+        raise ValueError("这台电脑缺少稳定机器编号，暂时无法核验项目人员")
+    return project_id, machine_id, project_ref
+
+
+def _rewrite_staff_entry_failure(result):
+    """Keep staff-entry failures distinct from the member-management sentence."""
+    payload = dict(result or {})
+    code = str(payload.get("code") or "")
+    if payload.get("logged_in") is False or code in {
+        "account_identity_pending",
+        "desktop_sync_token_required",
+    }:
+        payload["error"] = "这台归档电脑还没有可用的云账号连接，暂时无法核验项目人员"
+        payload.setdefault("code", "archive_cloud_unavailable")
+        return payload
+    if code == "project_staff_not_approved":
+        payload["error"] = _STAFF_ENTRY_NAME_MISMATCH
+        return payload
+    if code in _STAFF_ENTRY_BINDING_CODES or "管理项目成员" in str(payload.get("error") or ""):
+        payload["error"] = _STAFF_ENTRY_BINDING_PROBLEM
+        payload.setdefault("code", code or "project_binding_problem")
+        return payload
+    return payload
+
+
 def _cloud_proxy_response(result):
     payload = dict(result or {})
     status = int(payload.get("http_status") or (200 if payload.get("ok") else 400))
@@ -6316,7 +6375,13 @@ def _cloud_proxy_response(result):
 
 @app.route("/api/cloud/project-staff-entry", methods=["POST"])
 def api_cloud_project_staff_entry():
-    """Use approved mini-program identity for the restricted LAN staff entrance."""
+    """Let an approved mini-program member enter the locally bound project.
+
+    This route does not apply the member-management ownership gate. The cloud
+    still checks the archive computer's signed-in account, the local project
+    id, and this machine. A different cloud account cannot be substituted by
+    repeating the machine id.
+    """
     payload = request.get_json(silent=True) or {}
     display_name = str(payload.get("display_name") or "").strip()
     phone = str(payload.get("phone") or "").strip()
@@ -6325,14 +6390,18 @@ def api_cloud_project_staff_entry():
     if not re.fullmatch(r"1[3-9][0-9]{9}", phone):
         return json_error("请输入审批时填写的11位手机号", 400)
     try:
-        project_id, machine_id = _desktop_team_project_context()
+        project_id, machine_id, project_ref = _desktop_staff_entry_context()
     except ValueError as exc:
         return json_error(str(exc), 409)
     result = cloud_client.desktop_verify_project_member(
-        project_id, display_name, phone, machine_id
+        project_id,
+        display_name,
+        phone,
+        machine_id,
+        project_ref=project_ref,
     )
     if not result.get("ok"):
-        return _cloud_proxy_response(result)
+        return _cloud_proxy_response(_rewrite_staff_entry_failure(result))
     member = dict(result.get("member") or {})
     project = dict(result.get("project") or {})
     session.clear()
