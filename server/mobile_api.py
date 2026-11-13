@@ -6083,6 +6083,59 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    def desktop_staff_entry_project(conn, current, data, desktop_machine_id):
+        """Resolve the bound archive project without requiring the token owner.
+
+        Managing members still goes through desktop_project_context, which
+        requires the signed-in cloud account to own the project. Staff entry
+        only checks the locally bound project_ref and this archive machine.
+        """
+        requested_ref = str(data.get("project_ref") or "").strip()
+        requested_project_id = str(data.get("project_id") or "").strip()
+        if requested_ref:
+            owner_account_id, local_project_id, legacy = _parse_project_ref(
+                requested_ref, int(current["id"])
+            )
+            if legacy:
+                raise ApiProblem(
+                    "project_binding_mismatch",
+                    "当前工程的绑定信息不完整，暂时无法核验项目人员",
+                    409,
+                )
+            if requested_project_id and _project_id(requested_project_id) != local_project_id:
+                raise ApiProblem(
+                    "project_binding_mismatch",
+                    "当前工程的绑定信息不一致，暂时无法核验项目人员",
+                    409,
+                )
+        else:
+            # Desktop builds that only send project_id are already signed in
+            # as the owner. Keep that path working.
+            owner_account_id = int(current["id"])
+            local_project_id = _project_id(requested_project_id)
+        row = conn.execute(
+            "SELECT * FROM cloud_engineering_projects WHERE account_id = ? "
+            "AND project_id = ? AND active = 1",
+            (owner_account_id, local_project_id),
+        ).fetchone()
+        if not row:
+            raise ApiProblem(
+                "project_not_bound",
+                "当前工程还没有绑定到这台电脑，暂时无法核验项目人员",
+                409,
+            )
+        project = dict(row)
+        bound_machine = _machine_id(project.get("desktop_machine_id"))
+        if not bound_machine or bound_machine != desktop_machine_id:
+            raise ApiProblem(
+                "project_machine_unbound",
+                "这台电脑不是该工程的归档电脑，或绑定已失效，暂时无法核验项目人员",
+                409,
+            )
+        _require_active_machine(conn, owner_account_id, desktop_machine_id)
+        project["project_owner_account_id"] = int(project["account_id"])
+        return project
+
     @blueprint.post("/api/desktop/v1/project-members/verify")
     def desktop_verify_project_member():
         """Resolve a LAN staff entry only when mobile approval already exists."""
@@ -6095,8 +6148,8 @@ def register_mobile_api(
         display_name, phone = join_contact(data)
         conn = db.connect()
         try:
-            project = desktop_project_context(
-                conn, current, data.get("project_id"), desktop_machine_id
+            project = desktop_staff_entry_project(
+                conn, current, data, desktop_machine_id
             )
             row = conn.execute(
                 "SELECT pm.*, a.username, a.display_name FROM project_members pm "
@@ -6108,14 +6161,20 @@ def register_mobile_api(
                 "AND pm.status = 'active' AND r.status = 'approved' "
                 "AND r.display_name = ? AND r.phone = ? "
                 "ORDER BY r.decided_at DESC, r.id DESC LIMIT 1",
-                (current["id"], project["project_id"], display_name, phone),
+                (
+                    int(project["account_id"]),
+                    project["project_id"],
+                    display_name,
+                    phone,
+                ),
             ).fetchone()
             if not row:
                 raise ApiProblem(
                     "project_staff_not_approved",
-                    "未找到已审批的项目人员，请先在小程序完成加入申请并等待审批",
+                    "姓名或手机号与已审批的项目人员不一致",
                     403,
                 )
+            project["access_role"] = str(row["role"] or "viewer")
             return jsonify(
                 {
                     "ok": True,

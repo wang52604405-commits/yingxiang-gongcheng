@@ -1582,22 +1582,35 @@ class DesktopSecurityContractTest(unittest.TestCase):
         ) as blocked_call:
             blocked = self.client.get("/api/cloud/project-members")
         self.assertEqual(blocked.status_code, 409)
+        self.assertIn("管理项目成员", blocked.get_json()["error"])
         blocked_call.assert_not_called()
 
+    def _bind_staff_project(self, project_id="owner-local-project", owner_id="42"):
+        project = self.desktop.default_engineering_project()
+        project.update({
+            "id": project_id,
+            "project_name": "共享工程",
+            "project_code": project_id,
+            "cloud_owner_id": owner_id,
+            "cloud_owner_username": "owner-account",
+            "cloud_owner_claimed_at": "2026-11-13 08:00:00",
+            "cloud_project_ref": f"{owner_id}:{project_id}",
+            "delete_password_hash": self.desktop.generate_password_hash("StaffSafe2026"),
+        })
+        self.desktop.write_engineering_projects({
+            "active_id": project_id,
+            "projects": [project],
+        })
+        return project
+
     def test_z_approved_project_staff_can_enter_lan_workspace_without_cloud_password(self):
-        ownership = {
-            "state": "matched",
-            "local_project_id": "owner-local-project",
-            "project_ref": "42:owner-local-project",
-        }
+        self._bind_staff_project()
         verified = {
             "ok": True,
             "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
             "member": {"display_name": "现场人员", "role": "capturer"},
         }
         with patch.object(
-            self.desktop, "current_project_cloud_ownership", return_value=ownership
-        ), patch.object(
             self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
         ), patch.object(
             self.desktop.cloud_client,
@@ -1610,14 +1623,131 @@ class DesktopSecurityContractTest(unittest.TestCase):
             )
         self.assertEqual(entered.status_code, 200, entered.get_json())
         self.assertEqual(entered.get_json()["user"]["role"], "project_staff")
+        self.assertNotIn("管理项目成员", json.dumps(entered.get_json(), ensure_ascii=False))
         verify.assert_called_once_with(
-            "owner-local-project", "现场人员", "13800138000", "ARCHIVE-PC"
+            "owner-local-project",
+            "现场人员",
+            "13800138000",
+            "ARCHIVE-PC",
+            project_ref="42:owner-local-project",
         )
         with self.client.session_transaction() as session:
             self.assertEqual(session["role"], "project_staff")
             self.assertEqual(session["project_staff_project_ref"], "42:owner-local-project")
         blocked = self.client.post("/api/engineering-settings", json={})
         self.assertEqual(blocked.status_code, 403, blocked.get_json())
+        self.assertIn("查看和上传", blocked.get_json()["error"])
+        with self.client.session_transaction() as session:
+            session.clear()
+
+    def test_z_staff_entry_does_not_use_member_management_ownership(self):
+        """A mismatched cloud session must not block an approved staff entry."""
+        self._bind_staff_project()
+        verified = {
+            "ok": True,
+            "http_status": 200,
+            "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
+            "member": {"display_name": "金雅萱", "role": "viewer"},
+        }
+        with patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_id", return_value="99"
+        ), patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_username", return_value="other"
+        ), patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_verify_project_member",
+            return_value=verified,
+        ) as verify, patch.object(
+            self.desktop.cloud_client, "desktop_project_members", new=MagicMock()
+        ) as members_call:
+            self.assertEqual(self.desktop.current_project_cloud_ownership()["state"], "mismatch")
+            entered = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "金雅萱", "phone": "15081016708"},
+            )
+            with self.client.session_transaction() as session:
+                session["username"] = "archive-owner"
+                session["role"] = "user"
+            blocked = self.client.get("/api/cloud/project-members")
+        self.assertEqual(entered.status_code, 200, entered.get_json())
+        self.assertEqual(entered.get_json()["user"]["role"], "project_staff")
+        self.assertNotIn("管理项目成员", json.dumps(entered.get_json(), ensure_ascii=False))
+        verify.assert_called_once_with(
+            "owner-local-project",
+            "金雅萱",
+            "15081016708",
+            "ARCHIVE-PC",
+            project_ref="42:owner-local-project",
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.get_json())
+        self.assertEqual(blocked.get_json()["error"], "只有工程所属账号可以在归档电脑管理项目成员")
+        members_call.assert_not_called()
+        with self.client.session_transaction() as session:
+            session.clear()
+
+    def test_z_staff_entry_distinguishes_name_mismatch_from_binding_problems(self):
+        self._bind_staff_project()
+        with patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_verify_project_member",
+            return_value={
+                "ok": False,
+                "code": "project_staff_not_approved",
+                "error": "未找到已审批的项目人员，请先在小程序完成加入申请并等待审批",
+                "http_status": 403,
+            },
+        ):
+            mismatched = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "金雅萱", "phone": "15081016708"},
+            )
+        self.assertEqual(mismatched.status_code, 403, mismatched.get_json())
+        self.assertEqual(
+            mismatched.get_json()["error"],
+            "姓名或手机号与已审批的项目人员不一致",
+        )
+        self.assertNotIn("管理项目成员", mismatched.get_json()["error"])
+
+        with patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_verify_project_member",
+            return_value={
+                "ok": False,
+                "code": "project_not_bound",
+                "error": "工程不存在或无权访问",
+                "http_status": 409,
+            },
+        ):
+            unbound_cloud = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "金雅萱", "phone": "15081016708"},
+            )
+        self.assertEqual(unbound_cloud.status_code, 409, unbound_cloud.get_json())
+        self.assertIn("绑定", unbound_cloud.get_json()["error"])
+        self.assertNotIn("管理项目成员", unbound_cloud.get_json()["error"])
+        self.assertNotIn("姓名或手机号", unbound_cloud.get_json()["error"])
+
+        data = self.desktop.read_engineering_projects()
+        data["projects"][0]["cloud_owner_id"] = ""
+        data["projects"][0]["cloud_project_ref"] = ""
+        self.desktop.write_engineering_projects(data)
+        with patch.object(
+            self.desktop.cloud_client, "desktop_verify_project_member", new=MagicMock()
+        ) as skipped:
+            local_unbound = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "金雅萱", "phone": "15081016708"},
+            )
+        self.assertEqual(local_unbound.status_code, 409, local_unbound.get_json())
+        self.assertIn("还没有绑定云账号", local_unbound.get_json()["error"])
+        self.assertNotIn("管理项目成员", local_unbound.get_json()["error"])
+        skipped.assert_not_called()
         with self.client.session_transaction() as session:
             session.clear()
 

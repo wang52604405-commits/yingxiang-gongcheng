@@ -3294,6 +3294,7 @@ class MobileServerContractTest(unittest.TestCase):
         )
         self.assertEqual(verified.status_code, 200, verified.get_json())
         self.assertEqual(verified.get_json()["member"]["role"], "capturer")
+        self.assertFalse(verified.get_json()["project"].get("can_manage_members"))
         denied = self.client.post(
             "/api/desktop/v1/project-members/verify",
             json={
@@ -3305,6 +3306,88 @@ class MobileServerContractTest(unittest.TestCase):
             headers=self._headers(self.desktop_token_a),
         )
         self.assertEqual(denied.status_code, 403, denied.get_json())
+        self.assertEqual(denied.get_json()["code"], "project_staff_not_approved")
+        self.assertIn("姓名或手机号", denied.get_json()["error"])
+        self.assertNotIn("管理项目成员", denied.get_json()["error"])
+
+        local_project_id = snapshot["project_ref"].split(":", 1)[1]
+        forged_machine = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": local_project_id,
+                "project_ref": snapshot["project_ref"],
+                "desktop_machine_id": "MACHINE-A",
+                "display_name": "新成员",
+                "phone": "13800138000",
+            },
+            headers=self._headers(self.desktop_token_b),
+        )
+        self.assertEqual(forged_machine.status_code, 403, forged_machine.get_json())
+        self.assertEqual(forged_machine.get_json()["code"], "desktop_token_machine_mismatch")
+        other_archive = self.client.post(
+            "/api/desktop/v1/project-members/verify",
+            json={
+                "project_id": local_project_id,
+                "project_ref": snapshot["project_ref"],
+                "desktop_machine_id": "MACHINE-B",
+                "display_name": "新成员",
+                "phone": "13800138000",
+            },
+            headers=self._headers(self.desktop_token_b),
+        )
+        self.assertEqual(other_archive.status_code, 409, other_archive.get_json())
+        self.assertEqual(other_archive.get_json()["code"], "project_machine_unbound")
+
+        same_archive_other_account = self.client.post(
+            "/api/activate",
+            json={"machine_id": "MACHINE-A"},
+            headers=self._headers(self.token_b),
+        )
+        self.assertEqual(same_archive_other_account.status_code, 200, same_archive_other_account.get_json())
+        other_token = same_archive_other_account.get_json()["desktop_sync_token"]
+        try:
+            crossed = self.client.post(
+                "/api/desktop/v1/project-members/verify",
+                json={
+                    "project_id": local_project_id,
+                    "project_ref": snapshot["project_ref"],
+                    "desktop_machine_id": "MACHINE-A",
+                    "display_name": "新成员",
+                    "phone": "13800138000",
+                },
+                headers=self._headers(other_token),
+            )
+            self.assertEqual(crossed.status_code, 200, crossed.get_json())
+            self.assertEqual(crossed.get_json()["member"]["role"], "capturer")
+            self.assertFalse(crossed.get_json()["project"].get("can_manage_members"))
+            wrong_name = self.client.post(
+                "/api/desktop/v1/project-members/verify",
+                json={
+                    "project_id": local_project_id,
+                    "project_ref": snapshot["project_ref"],
+                    "desktop_machine_id": "MACHINE-A",
+                    "display_name": "不是此人",
+                    "phone": "13800138000",
+                },
+                headers=self._headers(other_token),
+            )
+            self.assertEqual(wrong_name.status_code, 403, wrong_name.get_json())
+            self.assertEqual(wrong_name.get_json()["code"], "project_staff_not_approved")
+            managed = self.client.get(
+                f"/api/desktop/v1/project-members?project_id={local_project_id}&desktop_machine_id=MACHINE-A",
+                headers=self._headers(other_token),
+            )
+            self.assertEqual(managed.status_code, 404, managed.get_json())
+            self.assertNotEqual(managed.get_json().get("code"), "project_staff_not_approved")
+        finally:
+            conn = self.db.connect()
+            try:
+                conn.execute(
+                    "DELETE FROM machines WHERE account_id = (SELECT id FROM accounts WHERE username = 'tenant_b') AND machine_id = 'MACHINE-A'"
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
     def test_wechat_join_rejects_expired_revoked_inactive_and_invalid_wechat_without_accounts(self):
         from server.mobile_api import ApiProblem

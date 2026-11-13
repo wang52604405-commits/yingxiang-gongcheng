@@ -1035,17 +1035,27 @@ def desktop_verify_project_member(
     display_name: str,
     phone: str,
     desktop_machine_id: str,
+    project_ref: str = "",
 ) -> dict:
-    """Verify an already approved project member for the LAN staff entrance."""
+    """Verify an already approved project member for the LAN staff entrance.
+
+    project_ref is the locally bound owner:project id. The server uses it with
+    the archive machine, and does not require this process's cloud session to
+    be the project owner.
+    """
+    payload = {
+        "project_id": str(project_id or "").strip(),
+        "display_name": str(display_name or "").strip(),
+        "phone": str(phone or "").strip(),
+        "desktop_machine_id": str(desktop_machine_id or "").strip(),
+    }
+    ref = str(project_ref or "").strip()
+    if ref:
+        payload["project_ref"] = ref
     return _cloud_api_json(
         "/api/desktop/v1/project-members/verify",
         method="POST",
-        payload={
-            "project_id": str(project_id or "").strip(),
-            "display_name": str(display_name or "").strip(),
-            "phone": str(phone or "").strip(),
-            "desktop_machine_id": str(desktop_machine_id or "").strip(),
-        },
+        payload=payload,
     )
 
 
