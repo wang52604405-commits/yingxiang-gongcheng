@@ -6375,12 +6375,14 @@ def _cloud_proxy_response(result):
 
 @app.route("/api/cloud/project-staff-entry", methods=["POST"])
 def api_cloud_project_staff_entry():
-    """Let an approved mini-program member enter the locally bound project.
+    """Let an approved mini-program member enter the project on this server.
 
-    This route does not apply the member-management ownership gate. The cloud
-    still checks the archive computer's signed-in account, the local project
-    id, and this machine. A different cloud account cannot be substituted by
-    repeating the machine id.
+    A LAN browser only sends the person's name and phone. This process adds
+    the project stored on this computer and this computer's machine id; it
+    does not ask whether the browser's computer is the archive computer.
+    Member management still requires the owning account on the archive
+    computer. The cloud still refuses another account that only repeats a
+    known machine id.
     """
     payload = request.get_json(silent=True) or {}
     display_name = str(payload.get("display_name") or "").strip()

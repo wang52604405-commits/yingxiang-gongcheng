@@ -1640,6 +1640,70 @@ class DesktopSecurityContractTest(unittest.TestCase):
         with self.client.session_transaction() as session:
             session.clear()
 
+    def test_z_lan_browser_staff_entry_uses_this_server_not_the_client_machine(self):
+        """A browser on another computer posts only a name and phone.
+
+        The album_server that receives it supplies its own machine id and the
+        project bound on this computer. The client address is not a machine id.
+        """
+        self._bind_staff_project()
+        verified = {
+            "ok": True,
+            "http_status": 200,
+            "project": {"project_ref": "42:owner-local-project", "project_name": "共享工程"},
+            "member": {"display_name": "金雅萱", "role": "viewer"},
+        }
+        with patch.object(
+            self.desktop, "lan_access_config", return_value={"username": "", "password": "lan-door"}
+        ), patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_id", return_value="99"
+        ), patch.object(
+            self.desktop.cloud_client, "desktop_sync_account_username", return_value="other"
+        ), patch.object(
+            self.desktop.licensing, "machine_id", return_value="ARCHIVE-PC"
+        ), patch.object(
+            self.desktop.cloud_client,
+            "desktop_verify_project_member",
+            return_value=verified,
+        ) as verify, patch.object(
+            self.desktop.cloud_client, "desktop_create_project_invite", new=MagicMock()
+        ) as invite_call:
+            entered = self.client.post(
+                "/api/cloud/project-staff-entry",
+                json={"display_name": "金雅萱", "phone": "15081016708"},
+                environ_base={"REMOTE_ADDR": "192.168.8.23"},
+            )
+            self.assertEqual(entered.status_code, 200, entered.get_json())
+            blocked = self.client.post(
+                "/api/engineering-settings",
+                json={},
+                environ_base={"REMOTE_ADDR": "192.168.8.23"},
+            )
+            with self.client.session_transaction() as session:
+                session["username"] = "archive-owner"
+                session["role"] = "user"
+            denied = self.client.post(
+                "/api/cloud/project-invites",
+                json={"role": "viewer"},
+                environ_base={"REMOTE_ADDR": "192.168.8.23"},
+            )
+        self.assertEqual(entered.get_json()["user"]["role"], "project_staff")
+        self.assertNotIn("未绑定", json.dumps(entered.get_json(), ensure_ascii=False))
+        verify.assert_called_once_with(
+            "owner-local-project",
+            "金雅萱",
+            "15081016708",
+            "ARCHIVE-PC",
+            project_ref="42:owner-local-project",
+        )
+        self.assertEqual(blocked.status_code, 403, blocked.get_json())
+        self.assertIn("查看和上传", blocked.get_json()["error"])
+        self.assertEqual(denied.status_code, 409, denied.get_json())
+        self.assertIn("管理项目成员", denied.get_json()["error"])
+        invite_call.assert_not_called()
+        with self.client.session_transaction() as session:
+            session.clear()
+
     def test_z_staff_entry_does_not_use_member_management_ownership(self):
         """A mismatched cloud session must not block an approved staff entry."""
         self._bind_staff_project()
