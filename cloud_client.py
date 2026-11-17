@@ -37,7 +37,7 @@ APP_VERSION = "A20260910-2.92"  # 与桌面启动器版本一致，用于检查�
 DEFAULT_PRODUCT_CONFIG = {
     "config_version": 1,
     "pricing": {"monthly_price": 39, "lifetime_price": 399, "price_label": "原价"},
-    "free": {"photo_limit": 300, "batch_print_enabled": False, "watermark_enabled": False, "upload_expiry_enabled": False},
+    "free": {"photo_limit": 3000, "batch_print_enabled": False, "watermark_enabled": False, "upload_expiry_enabled": False},
     "invite": {"enabled": True, "milestone": 10, "reward_days": 30},
     "cloud_preview": {
         "enabled": True,

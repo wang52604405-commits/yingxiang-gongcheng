@@ -4895,7 +4895,7 @@ const $ = (selector) => document.querySelector(selector);
         subText = license.machine_id ? `机器ID：${license.machine_id}` : "授权已生效。";
       } else if (license.free_forever) {
         mainText = "免费版：永久免费";
-        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 300} 张，可正常打印和导出，无产品水印。`;
+        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 3000} 张，可正常打印和导出，无产品水印。`;
       } else if (license.upload_locked) {
         mainText = "软件试用已到期";
         subText = trialExpiry ? `试用到期时间：${trialExpiry}，请联系管理员继续使用。` : "请联系管理员继续使用。";
@@ -4921,7 +4921,7 @@ const $ = (selector) => document.querySelector(selector);
       setText("#monthlyPricePaymentText", monthly);
       setText("#lifetimePriceText", lifetime);
       setText("#lifetimePricePaymentText", lifetime);
-      setText("#freePhotoLimitText", Number(free.photo_limit || 300));
+      setText("#freePhotoLimitText", Number(free.photo_limit ?? 3000));
       setText("#inviteMilestoneText", Number(invite.milestone || 10));
       setText("#inviteRewardDaysText", Number(invite.reward_days || 30));
       return product;
@@ -5690,9 +5690,9 @@ const $ = (selector) => document.querySelector(selector);
 
     const PRINT_STYLES = {
       sidelabel: { style: "sidelabel", layout: "portrait", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "right", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "8", margin_right_mm: "8", margin_bottom_mm: "8", margin_left_mm: "8", horizontal_gap_mm: "1.5", vertical_gap_mm: "6", image_fit: "cover", show_page_title: "0", auto_fill: "1", caption_fields: "title,id,photo_date,photographer" },
-      one: { style: "one", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      two: { style: "two", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "6", margin_right_mm: "6", margin_bottom_mm: "6", margin_left_mm: "6", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
-      four: { style: "four", page_size: "4", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "5", margin_right_mm: "5", margin_bottom_mm: "5", margin_left_mm: "5", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      one: { style: "one", page_size: "1", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "20", margin_right_mm: "20", margin_bottom_mm: "20", margin_left_mm: "20", horizontal_gap_mm: "2", vertical_gap_mm: "2", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      two: { style: "two", page_size: "2", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "20", margin_right_mm: "20", margin_bottom_mm: "20", margin_left_mm: "20", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
+      four: { style: "four", page_size: "4", single_alignment: "center", photo_preset: "custom", photo_width_cm: "1", photo_height_cm: "1", caption_position: "bottom", caption_size_mm: "7.5", caption_font_size: "10", margin_top_mm: "20", margin_right_mm: "20", margin_bottom_mm: "20", margin_left_mm: "20", horizontal_gap_mm: "3", vertical_gap_mm: "3", image_fit: "contain", show_page_title: "1", auto_fill: "1", caption_fields: "title,id,part_name,photo_date,photographer" },
       custom: null
     };
 
@@ -5745,8 +5745,19 @@ const $ = (selector) => document.querySelector(selector);
       description.textContent = `恢复上次选中的 ${photoCount || "多"} 张照片 · ${saved.layout === "portrait" ? "A4 竖版" : "A4 横版"} · 每页${pageSize}张 · ${sizeLabels[saved.photo_preset] || "自定义尺寸"}`;
     }
 
+    function applySavedPrintMargins() {
+      const settings = state.engineeringSettings || {};
+      const fallback = 20;
+      $("#printSetupMarginTop").value = settings.print_margin_top_mm ?? fallback;
+      $("#printSetupMarginRight").value = settings.print_margin_right_mm ?? fallback;
+      $("#printSetupMarginBottom").value = settings.print_margin_bottom_mm ?? fallback;
+      $("#printSetupMarginLeft").value = settings.print_margin_left_mm ?? fallback;
+    }
+
     function selectPrintStyle(style) {
       const nextStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "custom";
+      // 已经停在自定义上再点一次，保留输入框里刚改的页边距。
+      if (state.printStyle === "custom" && nextStyle === "custom") return;
       const leavingSideLabel = state.printStyle === "sidelabel" && nextStyle !== "sidelabel";
       state.printStyle = nextStyle;
       document.querySelectorAll("[data-print-style]").forEach((button) => {
@@ -5758,6 +5769,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#printCustomPanel").classList.toggle("open", isCustom);
       state.pendingPrintUrl = state.printSourceUrl || state.pendingPrintUrl;
       if (!isCustom) applyPrintStyleToPanel(state.printStyle);
+      else applySavedPrintMargins();
       if (state.printStyle === "sidelabel") {
         $("#printSetupLayout").value = "portrait";
       } else if (leavingSideLabel) {
@@ -5855,10 +5867,10 @@ const $ = (selector) => document.querySelector(selector);
       $("#printSetupCaptionPosition").value = settings.print_caption_position || "bottom";
       $("#printSetupCaptionSize").value = settings.print_caption_size_mm || 7.5;
       $("#printSetupCaptionFont").value = settings.print_caption_font_size || 10;
-      $("#printSetupMarginTop").value = settings.print_margin_top_mm ?? 6;
-      $("#printSetupMarginRight").value = settings.print_margin_right_mm ?? 6;
-      $("#printSetupMarginBottom").value = settings.print_margin_bottom_mm ?? 6;
-      $("#printSetupMarginLeft").value = settings.print_margin_left_mm ?? 6;
+      $("#printSetupMarginTop").value = settings.print_margin_top_mm ?? 20;
+      $("#printSetupMarginRight").value = settings.print_margin_right_mm ?? 20;
+      $("#printSetupMarginBottom").value = settings.print_margin_bottom_mm ?? 20;
+      $("#printSetupMarginLeft").value = settings.print_margin_left_mm ?? 20;
       $("#printSetupHorizontalGap").value = settings.print_horizontal_gap_mm ?? 2;
       $("#printSetupVerticalGap").value = settings.print_vertical_gap_mm ?? 2;
       $("#printSetupImageFit").value = settings.print_image_fit || "contain";

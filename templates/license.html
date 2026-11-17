@@ -178,7 +178,7 @@
         <div class="price"><b>0</b><small>元 / 永久</small></div>
         <div class="desc">适合体验与小额使用</div>
         <ul>
-          <li>最多 <span id="freeLimitText">1000</span> 张照片</li>
+          <li>最多 <span id="freeLimitText">3000</span> 张照片</li>
           <li>正常打印 / 导出，无产品水印</li>
           <li>局域网内完整使用</li>
           <li class="no">无限上传</li>
@@ -385,7 +385,7 @@
       const pricing = productConfig.pricing || {}, free = productConfig.free || {};
       $("#monthlyPrice").textContent = pricing.monthly_price || 39;
       $("#lifetimePrice").textContent = pricing.lifetime_price || 399;
-      $("#freeLimitText").textContent = free.photo_limit || 300;
+      $("#freeLimitText").textContent = free.photo_limit ?? 3000;
       $("#priceFlag").textContent = pricing.price_label || "原价";
     }
 
@@ -411,7 +411,7 @@
       } else {
         $("#statusBadge").className = "badge free";
         $("#statusBadge").textContent = status.free_forever ? "免费版 · 永久" : "免费版";
-        $("#status").textContent = `免费版永久免费，已使用 ${status.photo_count || 0} / ${status.free_photo_limit || 300} 张；正常打印和导出，无产品水印。`;
+        $("#status").textContent = `免费版永久免费，已使用 ${status.photo_count || 0} / ${status.free_photo_limit || 3000} 张；正常打印和导出，无产品水印。`;
         highlightPlan(0);
       }
     }
@@ -433,13 +433,13 @@
       const el = $("#cloudStatus");
       if (data.logged_in) {
         registrationRequested = false;
-        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用）" : `免费版（${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`}`;
+        el.textContent = `已登录：${data.account}｜${data.is_member ? "会员版（无限使用）" : `免费版（${productConfig.free?.photo_limit ?? 3000} 张照片，无产品水印）`}`;
         showLoginForm();
         $("#cloudLogoutBtn").style.display = "inline-block";
         $("#showRegBtn").style.display = "none";
         if ($("#authSwitch")) $("#authSwitch").style.display = "none";
       } else {
-        el.textContent = `未登录（注册后可永久免费使用 ${productConfig.free?.photo_limit || 300} 张照片，无产品水印）`;
+        el.textContent = `未登录（注册后可永久免费使用 ${productConfig.free?.photo_limit ?? 3000} 张照片，无产品水印）`;
         if (registrationRequested) showRegistrationForm();
         else showLoginForm();
         $("#cloudLogoutBtn").style.display = "none";

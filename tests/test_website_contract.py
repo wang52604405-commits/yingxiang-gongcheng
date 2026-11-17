@@ -53,16 +53,19 @@ class WebsiteContractTest(unittest.TestCase):
         self.assertIn("/download/工程影像管理平台-安装程序.exe", index + download)
         self.assertIn("17737397395", contact)
         self.assertIn("544711855@qq.com", contact)
-        self.assertIn("1000", usage + download)
+        self.assertIn("3000", usage + download)
+        self.assertNotIn("1000 张", usage + download + index)
+        self.assertNotIn("2000 张", usage + download + index)
         self.assertIn("https://shuiliyingxiang.cn/member#register", usage)
         self.assertNotIn("300 张", pages)
         self.assertNotIn("自动检查更新", pages)
         self.assertNotIn("stat-pill", pages)
         self.assertNotIn("免费 1000 张", index)
+        self.assertIn("3000 张", index)
         self.assertIn("price-card", index)
         self.assertIn("¥39", index)
         self.assertIn("¥399", index)
-        self.assertIn("1000", download + usage)
+        self.assertIn("3000", download + usage)
         product = (SITE / "product.html").read_text(encoding="utf-8")
         self.assertNotIn("field_", index + product)
         self.assertNotIn("data-tilt", index + product)
@@ -97,7 +100,7 @@ class WebsiteContractTest(unittest.TestCase):
             for node in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
         )
         for expected in (
-            "1000",
+            "3000",
             "39 元",
             "399 元",
             "500",
@@ -110,6 +113,8 @@ class WebsiteContractTest(unittest.TestCase):
         ):
             self.assertIn(expected, text)
         self.assertNotIn("300 张", text)
+        self.assertNotIn("1000 张", text)
+        self.assertNotIn("2000 张", text)
         self.assertNotIn("自动检查更新", text)
 
     def test_site_source_never_contains_the_server_download_directory(self):
