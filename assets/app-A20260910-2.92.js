@@ -5756,6 +5756,8 @@ const $ = (selector) => document.querySelector(selector);
 
     function selectPrintStyle(style) {
       const nextStyle = Object.prototype.hasOwnProperty.call(PRINT_STYLES, style) ? style : "custom";
+      // 已经停在自定义上再点一次，保留输入框里刚改的页边距。
+      if (state.printStyle === "custom" && nextStyle === "custom") return;
       const leavingSideLabel = state.printStyle === "sidelabel" && nextStyle !== "sidelabel";
       state.printStyle = nextStyle;
       document.querySelectorAll("[data-print-style]").forEach((button) => {

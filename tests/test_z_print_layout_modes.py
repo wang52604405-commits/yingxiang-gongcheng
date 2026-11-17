@@ -110,6 +110,7 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn('margin_top_mm: "20"', js)
         self.assertIn('margin_top_mm: "8"', js)
         self.assertIn('applySavedPrintMargins()', js)
+        self.assertIn('state.printStyle === "custom" && nextStyle === "custom"', js)
         self.assertIn('params.set("vertical_gap_mm", "2")', js)
         self.assertNotIn('margin_top_mm: "6"', js)
         self.assertNotIn('margin_top_mm: "5"', js)
