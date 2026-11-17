@@ -172,10 +172,10 @@ DEFAULT_ENGINEERING_SETTINGS = {
     "print_caption_mode": "inline",
     "print_auto_fill": True,
     "print_caption_size_mm": 7.5,
-    "print_margin_top_mm": 6.0,
-    "print_margin_right_mm": 6.0,
-    "print_margin_bottom_mm": 6.0,
-    "print_margin_left_mm": 6.0,
+    "print_margin_top_mm": 20.0,
+    "print_margin_right_mm": 20.0,
+    "print_margin_bottom_mm": 20.0,
+    "print_margin_left_mm": 20.0,
     "print_horizontal_gap_mm": 2.0,
     "print_vertical_gap_mm": 2.0,
     "print_image_fit": "contain",
@@ -791,6 +791,58 @@ def _normalize_last_print_job(value):
     }
 
 
+PRINT_MARGIN_DEFAULT_MM = 20.0
+LEGACY_FACTORY_PRINT_MARGINS_MM = (5.0, 6.0)
+PRINT_MARGIN_SCHEMA_VERSION = 2
+PRINT_MARGIN_FIELDS = (
+    "print_margin_top_mm",
+    "print_margin_right_mm",
+    "print_margin_bottom_mm",
+    "print_margin_left_mm",
+)
+LAST_PRINT_MARGIN_FIELDS = (
+    "margin_top_mm",
+    "margin_right_mm",
+    "margin_bottom_mm",
+    "margin_left_mm",
+)
+
+
+def _is_legacy_factory_print_margin(value):
+    """旧出厂/内置预设页边距是 5mm 或 6mm。手改成其它数字的不算。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return any(abs(number - old) < 0.001 for old in LEGACY_FACTORY_PRINT_MARGINS_MM)
+
+
+def _upgrade_legacy_print_margins(settings):
+    """只把仍停在旧出厂默认上的页边距升到 20mm。
+
+    已手改成与 5mm/6mm 不同的值保持原样。升过一次并记下版本后，
+    用户再改回 6mm 也不会被下次读取盖掉。侧签用的 8mm 不在这份旧默认里。
+    """
+    try:
+        version = int(settings.get("print_margin_schema_version") or 1)
+    except (TypeError, ValueError):
+        version = 1
+    if version >= PRINT_MARGIN_SCHEMA_VERSION:
+        settings["print_margin_schema_version"] = version
+        return settings
+    for field in PRINT_MARGIN_FIELDS:
+        if _is_legacy_factory_print_margin(settings.get(field)):
+            settings[field] = PRINT_MARGIN_DEFAULT_MM
+    last_print = settings.get("last_print_settings")
+    if isinstance(last_print, dict):
+        for field in LAST_PRINT_MARGIN_FIELDS:
+            if field not in last_print or not _is_legacy_factory_print_margin(last_print.get(field)):
+                continue
+            last_print[field] = "20" if isinstance(last_print.get(field), str) else PRINT_MARGIN_DEFAULT_MM
+    settings["print_margin_schema_version"] = PRINT_MARGIN_SCHEMA_VERSION
+    return settings
+
+
 def _normalize_engineering_settings(settings):
     """校正工程设置，保证旧数据和手工编辑都不会破坏编号与打印。"""
     settings = settings if isinstance(settings, dict) else deep_default_settings()
@@ -830,10 +882,10 @@ def _normalize_engineering_settings(settings):
     settings["print_auto_fill"] = bool(settings.get("print_auto_fill", True))
     for field, default_value, minimum, maximum in [
         ("print_caption_size_mm", 7.5, 4.0, 60.0),
-        ("print_margin_top_mm", 6.0, 0.0, 30.0),
-        ("print_margin_right_mm", 6.0, 0.0, 30.0),
-        ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
-        ("print_margin_left_mm", 6.0, 0.0, 30.0),
+        ("print_margin_top_mm", 20.0, 0.0, 30.0),
+        ("print_margin_right_mm", 20.0, 0.0, 30.0),
+        ("print_margin_bottom_mm", 20.0, 0.0, 30.0),
+        ("print_margin_left_mm", 20.0, 0.0, 30.0),
         ("print_horizontal_gap_mm", 2.0, 0.0, 20.0),
         ("print_vertical_gap_mm", 2.0, 0.0, 20.0),
     ]:
@@ -875,7 +927,7 @@ def _normalize_engineering_settings(settings):
     if not isinstance(fields, list) or not fields:
         settings["photo_detail_fields"] = deep_default_settings()["photo_detail_fields"]
     settings["watermark_ocr_enabled"] = True
-    return settings
+    return _upgrade_legacy_print_margins(settings)
 
 
 def read_engineering_settings(project_id=None, data=None):
@@ -941,10 +993,10 @@ def write_engineering_settings(payload):
         current["print_auto_fill"] = bool(payload.get("print_auto_fill"))
     for field, default_value, minimum, maximum in [
         ("print_caption_size_mm", 7.5, 4.0, 60.0),
-        ("print_margin_top_mm", 6.0, 0.0, 30.0),
-        ("print_margin_right_mm", 6.0, 0.0, 30.0),
-        ("print_margin_bottom_mm", 6.0, 0.0, 30.0),
-        ("print_margin_left_mm", 6.0, 0.0, 30.0),
+        ("print_margin_top_mm", 20.0, 0.0, 30.0),
+        ("print_margin_right_mm", 20.0, 0.0, 30.0),
+        ("print_margin_bottom_mm", 20.0, 0.0, 30.0),
+        ("print_margin_left_mm", 20.0, 0.0, 30.0),
         ("print_horizontal_gap_mm", 2.0, 0.0, 20.0),
         ("print_vertical_gap_mm", 2.0, 0.0, 20.0),
     ]:
@@ -4017,7 +4069,7 @@ def app_license_status():
         "upload_locked": upload_expiry_enabled and (not status.get("ok")) and not trial_period_active,
         "plan": "member" if status.get("ok") else "free",
         "free_forever": not upload_expiry_enabled,
-        "free_photo_limit": int(free_cfg.get("photo_limit") or 300),
+        "free_photo_limit": int(free_cfg.get("photo_limit") or FREE_PHOTO_LIMIT),
     })
     return status
 
@@ -4154,10 +4206,10 @@ PRINT_STYLE_DEFAULTS = {
         "print_caption_position": "bottom",
         "print_caption_size_mm": 7.5,
         "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 6.0,
-        "print_margin_right_mm": 6.0,
-        "print_margin_bottom_mm": 6.0,
-        "print_margin_left_mm": 6.0,
+        "print_margin_top_mm": 20.0,
+        "print_margin_right_mm": 20.0,
+        "print_margin_bottom_mm": 20.0,
+        "print_margin_left_mm": 20.0,
         "print_horizontal_gap_mm": 2.0,
         "print_vertical_gap_mm": 2.0,
         "print_image_fit": "contain",
@@ -4173,10 +4225,10 @@ PRINT_STYLE_DEFAULTS = {
         "print_caption_position": "bottom",
         "print_caption_size_mm": 7.5,
         "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 6.0,
-        "print_margin_right_mm": 6.0,
-        "print_margin_bottom_mm": 6.0,
-        "print_margin_left_mm": 6.0,
+        "print_margin_top_mm": 20.0,
+        "print_margin_right_mm": 20.0,
+        "print_margin_bottom_mm": 20.0,
+        "print_margin_left_mm": 20.0,
         "print_horizontal_gap_mm": 3.0,
         "print_vertical_gap_mm": 3.0,
         "print_image_fit": "contain",
@@ -4192,10 +4244,10 @@ PRINT_STYLE_DEFAULTS = {
         "print_caption_position": "bottom",
         "print_caption_size_mm": 7.5,
         "print_caption_font_size": 10.0,
-        "print_margin_top_mm": 5.0,
-        "print_margin_right_mm": 5.0,
-        "print_margin_bottom_mm": 5.0,
-        "print_margin_left_mm": 5.0,
+        "print_margin_top_mm": 20.0,
+        "print_margin_right_mm": 20.0,
+        "print_margin_bottom_mm": 20.0,
+        "print_margin_left_mm": 20.0,
         "print_horizontal_gap_mm": 3.0,
         "print_vertical_gap_mm": 3.0,
         "print_image_fit": "contain",
@@ -4204,10 +4256,10 @@ PRINT_STYLE_DEFAULTS = {
     },
     # Compatibility aliases for old saved/bookmarked links. They now use the
     # safe cell allocator instead of fixed 18.5x12.3cm dimensions.
-    "default": {"print_layout": "landscape", "print_page_size": 4, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 5.0, "print_margin_right_mm": 5.0, "print_margin_bottom_mm": 5.0, "print_margin_left_mm": 5.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
-    "portrait2": {"print_layout": "portrait", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
-    "landscape2": {"print_layout": "landscape", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
-    "single": {"print_layout": "landscape", "print_page_size": 1, "print_single_alignment": "center", "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 6.0, "print_margin_right_mm": 6.0, "print_margin_bottom_mm": 6.0, "print_margin_left_mm": 6.0, "print_horizontal_gap_mm": 2.0, "print_vertical_gap_mm": 2.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "default": {"print_layout": "landscape", "print_page_size": 4, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 20.0, "print_margin_right_mm": 20.0, "print_margin_bottom_mm": 20.0, "print_margin_left_mm": 20.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "portrait2": {"print_layout": "portrait", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 20.0, "print_margin_right_mm": 20.0, "print_margin_bottom_mm": 20.0, "print_margin_left_mm": 20.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "landscape2": {"print_layout": "landscape", "print_page_size": 2, "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 20.0, "print_margin_right_mm": 20.0, "print_margin_bottom_mm": 20.0, "print_margin_left_mm": 20.0, "print_horizontal_gap_mm": 3.0, "print_vertical_gap_mm": 3.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
+    "single": {"print_layout": "landscape", "print_page_size": 1, "print_single_alignment": "center", "print_photo_preset": "custom", "print_photo_width_cm": 1.0, "print_photo_height_cm": 1.0, "print_caption_position": "bottom", "print_caption_size_mm": 7.5, "print_caption_font_size": 10.0, "print_margin_top_mm": 20.0, "print_margin_right_mm": 20.0, "print_margin_bottom_mm": 20.0, "print_margin_left_mm": 20.0, "print_horizontal_gap_mm": 2.0, "print_vertical_gap_mm": 2.0, "print_image_fit": "contain", "print_show_page_title": True, "print_auto_fill": True},
 }
 
 
@@ -4252,7 +4304,7 @@ def print_settings_from_request():
     settings["print_caption_size_mm"] = request_float("caption_size_mm", settings.get("print_caption_size_mm", 7.5), 4.0, 60.0)
     for side in ("top", "right", "bottom", "left"):
         key = f"print_margin_{side}_mm"
-        settings[key] = request_float(f"margin_{side}_mm", settings.get(key, 6.0), 0.0, 30.0)
+        settings[key] = request_float(f"margin_{side}_mm", settings.get(key, 20.0), 0.0, 30.0)
     settings["print_horizontal_gap_mm"] = request_float("horizontal_gap_mm", settings.get("print_horizontal_gap_mm", 2.0), 0.0, 20.0)
     settings["print_vertical_gap_mm"] = request_float("vertical_gap_mm", settings.get("print_vertical_gap_mm", 2.0), 0.0, 20.0)
     image_fit = str(request.args.get("image_fit") or settings.get("print_image_fit") or "contain")
@@ -4269,6 +4321,10 @@ def print_settings_from_request():
     style = request_print_style()
     settings["print_style"] = style
     if style == "sidelabel":
+        # 侧签页边距跟版式走，不用自定义/出厂的 20mm，避免把侧签内容挤变形。
+        for side in ("top", "right", "bottom", "left"):
+            if request.args.get(f"margin_{side}_mm") is None:
+                settings[f"print_margin_{side}_mm"] = SIDE_LABEL_MARGIN_MM
         settings["side_label_metrics"] = side_label_metrics()
         settings["print_show_page_title"] = False
         # 侧签照片框是固定 5 寸，必须裁满，不能再按「完整显示」上下留白。
@@ -4746,10 +4802,10 @@ def layout_fixed_photo_pages(photos, layout="landscape", page_size=4, photo_widt
         page_size = max(1, min(12, int(page_size or 4)))
     except (TypeError, ValueError):
         page_size = 4
-    margin_top = float(settings.get("print_margin_top_mm", 6.0))
-    margin_right = float(settings.get("print_margin_right_mm", 6.0))
-    margin_bottom = float(settings.get("print_margin_bottom_mm", 6.0))
-    margin_left = float(settings.get("print_margin_left_mm", 6.0))
+    margin_top = float(settings.get("print_margin_top_mm", 20.0))
+    margin_right = float(settings.get("print_margin_right_mm", 20.0))
+    margin_bottom = float(settings.get("print_margin_bottom_mm", 20.0))
+    margin_left = float(settings.get("print_margin_left_mm", 20.0))
     horizontal_gap = float(settings.get("print_horizontal_gap_mm", PRINT_FIXED_GAP))
     vertical_gap = float(settings.get("print_vertical_gap_mm", PRINT_FIXED_GAP))
     caption_position = str(settings.get("print_caption_position") or "bottom")
@@ -5132,7 +5188,7 @@ def match_project_by_filename(filename):
     return best if best_score else None
 
 
-FREE_PHOTO_LIMIT = 300  # 离线兜底；在线值由服务器产品配置下发
+FREE_PHOTO_LIMIT = 2000  # 断网且没有已缓存的线上额度时兜底；不覆盖已下发的配置
 WATERMARK_TEXT = "乐嵘聚合"  # 免费版打印/导出水印文字
 
 

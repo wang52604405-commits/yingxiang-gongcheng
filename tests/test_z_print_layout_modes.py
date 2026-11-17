@@ -94,6 +94,25 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn('caption_mode == "separate"', print_html)
         self.assertIn('class="page caption-sheet"', print_html)
         self.assertIn('caption_mode != "separate" and item.detail_rows', print_html)
+        for margin_id in (
+            "printSetupMarginTop",
+            "printSetupMarginBottom",
+            "printSetupMarginLeft",
+            "printSetupMarginRight",
+        ):
+            field = html.split(f'id="{margin_id}"', 1)[1].split(">", 1)[0]
+            self.assertIn('max="30"', field)
+            self.assertIn('value="20"', field)
+        self.assertIn(">顶部(mm)<", html)
+        self.assertIn(">底部(mm)<", html)
+        self.assertIn(">左(mm)<", html)
+        self.assertIn(">右(mm)<", html)
+        self.assertIn('margin_top_mm: "20"', js)
+        self.assertIn('margin_top_mm: "8"', js)
+        self.assertIn('applySavedPrintMargins()', js)
+        self.assertIn('params.set("vertical_gap_mm", "2")', js)
+        self.assertNotIn('margin_top_mm: "6"', js)
+        self.assertNotIn('margin_top_mm: "5"', js)
 
 
 class PrintLayoutGeometryTest(unittest.TestCase):
@@ -383,6 +402,89 @@ class PrintLayoutGeometryTest(unittest.TestCase):
         self.assertEqual(kept["last_print_settings"].get("slip_side"), "left")
         self.assertEqual(kept["last_print_settings"].get("style"), "sidelabel")
         self.assertNotIn("unknown", kept["last_print_settings"])
+
+    def test_factory_print_margins_are_20mm_and_keep_hand_edited_values(self):
+        fresh = self.appmod._normalize_engineering_settings({})
+        for key in (
+            "print_margin_top_mm",
+            "print_margin_right_mm",
+            "print_margin_bottom_mm",
+            "print_margin_left_mm",
+        ):
+            self.assertEqual(fresh[key], 20.0)
+        self.assertEqual(fresh["print_margin_schema_version"], 2)
+        legacy = self.appmod._normalize_engineering_settings({
+            "print_margin_top_mm": 6,
+            "print_margin_right_mm": 6.0,
+            "print_margin_bottom_mm": 5,
+            "print_margin_left_mm": "5",
+            "last_print_settings": {
+                "style": "four",
+                "margin_top_mm": "6",
+                "margin_right_mm": "5",
+                "margin_bottom_mm": "8",
+                "margin_left_mm": "12",
+            },
+        })
+        self.assertEqual(legacy["print_margin_top_mm"], 20.0)
+        self.assertEqual(legacy["print_margin_right_mm"], 20.0)
+        self.assertEqual(legacy["print_margin_bottom_mm"], 20.0)
+        self.assertEqual(legacy["print_margin_left_mm"], 20.0)
+        self.assertEqual(legacy["last_print_settings"]["margin_top_mm"], "20")
+        self.assertEqual(legacy["last_print_settings"]["margin_right_mm"], "20")
+        self.assertEqual(legacy["last_print_settings"]["margin_bottom_mm"], "8")
+        self.assertEqual(legacy["last_print_settings"]["margin_left_mm"], "12")
+        custom = self.appmod._normalize_engineering_settings({
+            "print_margin_top_mm": 12,
+            "print_margin_right_mm": 8,
+            "print_margin_bottom_mm": 0,
+            "print_margin_left_mm": 15,
+        })
+        self.assertEqual(custom["print_margin_top_mm"], 12.0)
+        self.assertEqual(custom["print_margin_right_mm"], 8.0)
+        self.assertEqual(custom["print_margin_bottom_mm"], 0.0)
+        self.assertEqual(custom["print_margin_left_mm"], 15.0)
+        kept = self.appmod._normalize_engineering_settings({
+            "print_margin_top_mm": 6,
+            "print_margin_right_mm": 6,
+            "print_margin_bottom_mm": 6,
+            "print_margin_left_mm": 6,
+            "print_margin_schema_version": 2,
+        })
+        self.assertEqual(kept["print_margin_top_mm"], 6.0)
+        for style_name in ("one", "two", "four", "default", "portrait2", "landscape2", "single"):
+            style = self.appmod.PRINT_STYLE_DEFAULTS[style_name]
+            for key in (
+                "print_margin_top_mm",
+                "print_margin_right_mm",
+                "print_margin_bottom_mm",
+                "print_margin_left_mm",
+            ):
+                self.assertEqual(style[key], 20.0, style_name)
+        self.assertEqual(self.appmod.SIDE_LABEL_MARGIN_MM, 8.0)
+        self.assertEqual(self.appmod.SIDE_LABEL_SEPARATOR_MM, 2.0)
+        defaults = self.appmod._normalize_engineering_settings({})
+        with mock.patch.object(self.appmod, "read_engineering_settings", return_value=defaults):
+            with self.appmod.app.test_request_context("/?style=custom"):
+                custom_settings = self.appmod.print_settings_from_request()
+            for key in (
+                "print_margin_top_mm",
+                "print_margin_right_mm",
+                "print_margin_bottom_mm",
+                "print_margin_left_mm",
+            ):
+                self.assertEqual(custom_settings[key], 20.0)
+            with self.appmod.app.test_request_context("/?style=sidelabel"):
+                side_settings = self.appmod.print_settings_from_request()
+                self.assertEqual(self.appmod.print_layout_from_request(), "portrait")
+                self.assertEqual(self.appmod.print_page_size_from_request(), 2)
+        for key in (
+            "print_margin_top_mm",
+            "print_margin_right_mm",
+            "print_margin_bottom_mm",
+            "print_margin_left_mm",
+        ):
+            self.assertEqual(side_settings[key], 8.0)
 
     def test_side_label_can_sit_on_either_side_of_the_photo(self):
         photos = self.photos(2)
