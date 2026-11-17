@@ -5188,7 +5188,7 @@ def match_project_by_filename(filename):
     return best if best_score else None
 
 
-FREE_PHOTO_LIMIT = 2000  # 断网且没有已缓存的线上额度时兜底；不覆盖已下发的配置
+FREE_PHOTO_LIMIT = 3000  # 断网且没有已缓存的线上额度时兜底；不覆盖已下发的配置
 WATERMARK_TEXT = "乐嵘聚合"  # 免费版打印/导出水印文字
 
 

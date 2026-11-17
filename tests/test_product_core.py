@@ -167,14 +167,14 @@ class ServerProductContractTest(unittest.TestCase):
         from server.app import _normalized_product_config
         product = _normalized_product_config({"mini_program": {"free_upload_limit": 0}})
         self.assertEqual(product["mini_program"]["free_upload_limit"], 0)
-        self.assertEqual(product["free"]["photo_limit"], 2000)
+        self.assertEqual(product["free"]["photo_limit"], 3000)
         product = _normalized_product_config({"mini_program": {"free_upload_limit": 100}})
         self.assertEqual(product["mini_program"]["free_upload_limit"], 500)
-        self.assertEqual(product["free"]["photo_limit"], 2000)
+        self.assertEqual(product["free"]["photo_limit"], 3000)
 
     def test_product_config_invite_qualification_and_telemetry(self):
         product = self.client.get("/api/product-config").get_json()["product"]
-        self.assertEqual(product["free"]["photo_limit"], 2000)
+        self.assertEqual(product["free"]["photo_limit"], 3000)
         self.assertEqual(product["mini_program"]["free_upload_limit"], 500)
         self.assertFalse(product["free"]["upload_expiry_enabled"])
         self.assertFalse(product["free"]["watermark_enabled"])

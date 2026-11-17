@@ -4895,7 +4895,7 @@ const $ = (selector) => document.querySelector(selector);
         subText = license.machine_id ? `机器ID：${license.machine_id}` : "授权已生效。";
       } else if (license.free_forever) {
         mainText = "免费版：永久免费";
-        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 2000} 张，可正常打印和导出，无产品水印。`;
+        subText = `已使用 ${license.photo_count || 0} / ${license.free_photo_limit || 3000} 张，可正常打印和导出，无产品水印。`;
       } else if (license.upload_locked) {
         mainText = "软件试用已到期";
         subText = trialExpiry ? `试用到期时间：${trialExpiry}，请联系管理员继续使用。` : "请联系管理员继续使用。";
@@ -4921,7 +4921,7 @@ const $ = (selector) => document.querySelector(selector);
       setText("#monthlyPricePaymentText", monthly);
       setText("#lifetimePriceText", lifetime);
       setText("#lifetimePricePaymentText", lifetime);
-      setText("#freePhotoLimitText", Number(free.photo_limit ?? 2000));
+      setText("#freePhotoLimitText", Number(free.photo_limit ?? 3000));
       setText("#inviteMilestoneText", Number(invite.milestone || 10));
       setText("#inviteRewardDaysText", Number(invite.reward_days || 30));
       return product;

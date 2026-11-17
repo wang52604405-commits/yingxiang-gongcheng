@@ -9,7 +9,7 @@
   "version_source": "https://api.shuiliyingxiang.cn/update/version.json",
   "product_config_source": "https://api.shuiliyingxiang.cn/api/product-config",
   "product": {
-    "free_photo_limit": 2000,
+    "free_photo_limit": 3000,
     "monthly_price": 39,
     "lifetime_price": 399,
     "price_label": "原价",

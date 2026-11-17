@@ -40,11 +40,12 @@ class DesktopMemberNavigationContractTest(unittest.TestCase):
     def test_member_center_free_plan_follows_product_config(self):
         root = Path(__file__).resolve().parents[1]
         page = (root / "server" / "templates" / "member_center.html").read_text(encoding="utf-8")
-        self.assertIn('id="freeLimitText">2000</span> 张照片', page)
+        self.assertIn('id="freeLimitText">3000</span> 张照片', page)
+        self.assertNotIn('id="freeLimitText">2000</span>', page)
         self.assertNotIn('id="freeLimitText">1000</span>', page)
         self.assertNotIn('id="freeLimitText">300</span>', page)
         self.assertIn("/api/product-config", page)
-        self.assertIn("free.photo_limit ?? 2000", page)
+        self.assertIn("free.photo_limit ?? 3000", page)
         self.assertNotIn("photo_limit || 1000", page)
         self.assertNotIn("photo_limit || 300", page)
 
