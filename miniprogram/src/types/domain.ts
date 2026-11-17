@@ -101,7 +101,7 @@ export interface CaptureRequirementRef {
 export interface ProjectNode {
   code: string
   name: string
-  type: 'contract' | 'unit_project' | 'part' | 'unit' | 'process' | 'other'
+  type: 'contract' | 'unit_project' | 'sub_unit' | 'part' | 'sub_part' | 'unit' | 'item' | 'process' | 'other'
   active?: boolean
   processes?: string[]
   children?: ProjectNode[]
@@ -110,14 +110,22 @@ export interface ProjectNode {
 export interface Assignment {
   unit_project_code?: string
   unit_project_name?: string
+  sub_unit_code?: string
+  sub_unit_name?: string
   part_code?: string
   part_name?: string
+  sub_part_code?: string
+  sub_part_name?: string
   unit_code?: string
   unit_name?: string
+  item_code?: string
+  item_name?: string
   process_name?: string
   process_required?: boolean
   other_node_code?: string
   other_node_name?: string
+  archive?: Record<string, unknown>
+  spatial?: Record<string, string>
 }
 
 export interface UploadDraft {
@@ -246,6 +254,10 @@ export interface CloudPhoto {
   part_name?: string
   unit_code?: string
   unit_name?: string
+  item_code?: string
+  item_name?: string
+  archive?: Record<string, unknown>
+  spatial?: Record<string, string>
   process_name?: string
   other_node_code?: string
   other_node_name?: string

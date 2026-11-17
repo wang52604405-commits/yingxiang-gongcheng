@@ -7,11 +7,18 @@ export interface DestinationHistory { recent: DestinationSelection[]; favorites:
 export function flattenDestinations(nodes: ProjectNode[], ancestors: ProjectNode[] = []): SelectableDestination[] {
   return nodes.filter((node) => node.active !== false).flatMap((node) => {
     const unitProject = [...ancestors].reverse().find((item) => item.type === 'unit_project')
+    const subUnit = [...ancestors].reverse().find((item) => item.type === 'sub_unit')
     const part = [...ancestors].reverse().find((item) => item.type === 'part')
-    const assignment: Assignment = node.type === 'unit' ? {
+    const subPart = [...ancestors].reverse().find((item) => item.type === 'sub_part')
+    const assignment: Assignment = node.type === 'unit' || node.type === 'item' ? {
       unit_project_code: unitProject?.code, unit_project_name: unitProject?.name,
-      part_code: part?.code, part_name: part?.name, unit_code: node.code, unit_name: node.name,
-      process_required: Boolean(node.processes?.length),
+      sub_unit_code: subUnit?.code, sub_unit_name: subUnit?.name,
+      part_code: part?.code, part_name: part?.name,
+      sub_part_code: subPart?.code, sub_part_name: subPart?.name,
+      ...(node.type === 'item'
+        ? { item_code: node.code, item_name: node.name }
+        : { unit_code: node.code, unit_name: node.name }),
+      process_required: node.type === 'unit' && Boolean(node.processes?.length),
     } : { other_node_code: node.code, other_node_name: node.name }
     return [{ ...node, pathLabel: ancestors.map((item) => item.name).join(' / '), assignment },
       ...flattenDestinations(node.children || [], [...ancestors, node])]
@@ -20,14 +27,16 @@ export function flattenDestinations(nodes: ProjectNode[], ancestors: ProjectNode
 
 export function destinationKey(value: DestinationSelection): string {
   const a = value.assignment
-  return JSON.stringify([value.scope, a.unit_project_code || '', a.part_code || '', a.unit_code || a.other_node_code || '', a.process_name || ''])
+  return JSON.stringify([value.scope, a.unit_project_code || '', a.part_code || '', a.item_code || a.unit_code || a.other_node_code || '', a.process_name || ''])
 }
 
 /** Rebuild from the live tree: stale names, removed nodes and retired processes are never reused. */
 export function reconcileDestination(value: DestinationSelection, nodes: SelectableDestination[]): DestinationSelection | null {
   const a = value.assignment
   const node = nodes.find((item) => value.scope === 'engineering'
-    ? item.type === 'unit' && item.code === a.unit_code && (!a.part_code || item.assignment.part_code === a.part_code) && (!a.unit_project_code || item.assignment.unit_project_code === a.unit_project_code)
+    ? ((a.item_code && item.type === 'item' && item.code === a.item_code) || (!a.item_code && item.type === 'unit' && item.code === a.unit_code))
+      && (!a.part_code || item.assignment.part_code === a.part_code)
+      && (!a.unit_project_code || item.assignment.unit_project_code === a.unit_project_code)
     : item.type === 'other' && item.code === a.other_node_code && !item.children?.length)
   if (!node || (a.process_name && !node.processes?.includes(a.process_name))) return null
   if (node.processes?.length && !a.process_name) return null
@@ -73,5 +82,5 @@ export function consumePhotoEditDestination(owner: string, projectId: string): D
 
 export function destinationLabel(value: DestinationSelection): string {
   const a = value.assignment
-  return (value.scope === 'engineering' ? [a.unit_project_name, a.part_name, a.unit_name, a.process_name] : [a.other_node_name]).filter(Boolean).join(' / ')
+  return (value.scope === 'engineering' ? [a.unit_project_name, a.sub_unit_name, a.part_name, a.sub_part_name, a.item_name || a.unit_name, a.process_name] : [a.other_node_name]).filter(Boolean).join(' / ')
 }

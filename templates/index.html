@@ -864,6 +864,16 @@
               <label>工序<select id="photoEditProcessInput"><option value="">单元照片</option></select></label>
               <label>打印旋转<select id="photoEditRotationInput" class="orientation-select"><option value="0">不旋转</option><option value="90">左转90°</option><option value="180">旋转180°</option><option value="270">右转90°</option></select></label>
               <label>文字说明<textarea id="photoEditDescriptionInput"></textarea></label>
+              <div id="municipalPhotoFields">
+                <label>阶段<select id="photoEditPhaseInput" class="orientation-select"><option value="">未填</option><option value="before">施工前</option><option value="during">施工中</option><option value="after">竣工后</option><option value="activity">重要活动</option></select></label>
+                <label>隐蔽状态<select id="photoEditConcealmentInput" class="orientation-select"><option value="">未填</option><option value="none">不适用</option><option value="before_cover">隐蔽前</option><option value="after_cover">覆盖后</option></select></label>
+                <label>工序事件<input id="photoEditProcessEventInput" type="text" maxlength="80" placeholder="按需填写，不是工程划分"></label>
+                <label>地点<input id="photoEditLocationInput" type="text" maxlength="200" placeholder="GPS 拒绝时手填，不编造坐标"></label>
+                <label>空间定位<input id="photoEditSpatialInput" type="text" maxlength="200" placeholder="桩号、井号、墩台跨按原文本，例如 K0+120 或 W01"></label>
+                <label>验收记录号<input id="photoEditAcceptanceInput" type="text" maxlength="80" placeholder="照片不代替验收文件"></label>
+                <label>模板编号<input id="photoEditTemplateInput" type="text" maxlength="80"></label>
+                <p class="import-hint">拍摄日期、上传时间和 EXIF 原值分开保存。缺原件时不能标成可归档原片。哈希不证明现场事实。</p>
+              </div>
               <div class="photo-storage-actions">
                 <button class="secondary" type="button" id="viewOriginalPhotoBtn">查看原图备份</button>
                 <button class="secondary" type="button" id="restoreOriginalPhotoBtn">恢复原图</button>
@@ -954,6 +964,13 @@
                 <span>首次使用先下载 Excel 模板，填写后选择文件导入。导入前不会改动现有照片。</span>
               </div>
               <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载项目划分模板（Excel）</button>
+              <button class="secondary-tool" type="button" id="downloadMunicipalTemplateBtn">下载市政划分模板（按分项）</button>
+              <button class="secondary-tool" type="button" id="exportDivisionBtn">导出当前划分</button>
+              <p class="import-hint" id="municipalDivisionHint">市政工程按单位、可选子单位、分部、可选子分部、分项导入。合同或标段只是管理层。不会把水利单元表改名当成市政分项，也不会按照片清单自动生成工程。</p>
+              <label class="wide">照片组名称<input id="archiveGroupTitleInput" type="text" maxlength="80" placeholder="与工程树分开的整理组"></label>
+              <label class="wide">照片编号或 UUID，每行一个<textarea id="archivePhotoIdsInput" placeholder="只导出这些照片"></textarea></label>
+              <label class="wide"><input id="archiveExpectConcealmentInput" type="checkbox"> 这组需要检查隐蔽前影像</label>
+              <button class="secondary-tool" type="button" id="exportArchivePackBtn">导出照片整理包</button>
               <label class="file-tool">
                 <span class="file-label" id="importFileLabel">选择项目划分文件导入</span>
                 <input id="importFile" type="file" accept=".xls,.xlsx,.xlsm,.csv">
@@ -1147,7 +1164,7 @@
           <label class="wide">工程名称<input id="newEngineeringProjectNameInput" type="text" maxlength="120" required placeholder="例如：某某水库除险加固工程"></label>
           <label>工程编号<input id="newEngineeringProjectCodeInput" type="text" maxlength="80" placeholder="可选；不填自动生成"></label>
           <label>工程专业<select id="newEngineeringProjectIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="电力工程">电力工程</option></select></label>
-          <label>工程类型<input id="newEngineeringProjectTypeInput" type="text" maxlength="80" placeholder="例如：河道治理 / 房建主体"></label>
+          <label>工程类型<select id="newEngineeringProjectTypeInput" class="orientation-select"><option value="">请选择工程类型</option></select></label>
           <label>归档地区<input id="newEngineeringProjectRegionInput" type="text" maxlength="80" placeholder="可选"></label>
           <label class="wide">工程删除密码<input id="newEngineeringProjectDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="6–32 位；用于删除本工程"></label>
           <label class="wide">确认删除密码<input id="newEngineeringProjectDeletePasswordConfirmInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="再次输入删除密码"></label>

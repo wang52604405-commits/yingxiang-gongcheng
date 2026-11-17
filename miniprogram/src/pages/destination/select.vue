@@ -25,13 +25,13 @@ const owner = ref('')
 const history = ref<ReturnType<typeof getDestinationHistory>>({ recent: [], favorites: [] })
 const allNodes = computed(() => flattenDestinations(roots.value))
 const leafNodes = computed(() => allNodes.value.filter((node) => scope.value === 'engineering'
-  ? node.type === 'unit' : node.type === 'other' && !node.children?.length))
+  ? node.type === 'unit' || node.type === 'item' : node.type === 'other' && !node.children?.length))
 const searchResults = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return leafNodes.value.filter((node) => matchesDivisionKeywords(node, query))
 })
 const browseNodes = computed(() => (trail.value.length ? trail.value[trail.value.length - 1].children || [] : roots.value)
-  .filter((node) => node.active !== false && (node.type === 'unit' || node.type === 'other' || flattenDestinations([node]).some((item) => item.type === 'unit'))))
+  .filter((node) => node.active !== false && (node.type === 'unit' || node.type === 'item' || node.type === 'other' || flattenDestinations([node]).some((item) => item.type === 'unit' || item.type === 'item'))))
 const recent = computed(() => validHistory(history.value.recent))
 const favorites = computed(() => validHistory(history.value.favorites))
 const hasProcessSheet = computed(() => scope.value === 'engineering' && selectedNode.value?.processes?.length && !['library', 'watermark'].includes(returnTarget.value))
@@ -64,7 +64,7 @@ async function loadTree() {
 }
 function browse(node: ProjectNode) {
   selectedNode.value = null
-  if (node.type === 'unit' || (scope.value === 'other' && !node.children?.length)) {
+  if (node.type === 'unit' || node.type === 'item' || (scope.value === 'other' && !node.children?.length)) {
     const part = [...trail.value].reverse().find((item) => item.type === 'part')
     const unitProject = [...trail.value].reverse().find((item) => item.type === 'unit_project')
     const selected = leafNodes.value.find((item) => item.code === node.code && item.pathLabel === trail.value.map((parent) => parent.name).join(' / ') && (!part || item.assignment.part_code === part.code) && (!unitProject || item.assignment.unit_project_code === unitProject.code))

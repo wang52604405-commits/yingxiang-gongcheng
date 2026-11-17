@@ -197,6 +197,9 @@ def build_project_snapshot(
             or professional_templates.catalog().get("version")
             or "V1.0"
         ).strip(),
+        "rule_version": str(project.get("rule_version") or "").strip(),
+        "industry_code": str(project.get("industry_code") or "").strip(),
+        "project_type_code": str(project.get("project_type_code") or "").strip(),
     }
 
     contract_groups: Dict[Tuple[str, str], dict] = {}
@@ -220,10 +223,18 @@ def build_project_snapshot(
         part_code = hierarchy.get("part_code") or _node_code(
             "FB", project_id, contract_name, unit_project_code, part_name
         )
-        unit_code = hierarchy.get("unit_code") or data.get("display_project_code") or code
-        contract_code = str(fields.get("合同工程编码") or "").strip() or _node_code(
+        contract_code = str(fields.get("合同工程编码") or fields.get("标段编码") or "").strip() or _node_code(
             "HT", project_id, contract_name
         )
+        sub_unit_name = str(hierarchy.get("sub_unit_name") or "").strip()
+        sub_unit_code = str(hierarchy.get("sub_unit_code") or "").strip()
+        sub_part_name = str(hierarchy.get("sub_part_name") or "").strip()
+        sub_part_code = str(hierarchy.get("sub_part_code") or "").strip()
+        node_kind = str(hierarchy.get("node_kind") or "unit")
+        processes = data.get("processes") or []
+        if not isinstance(processes, list):
+            processes = [part.strip() for part in str(processes).split("、") if part.strip()]
+        process_names = [str(value).strip() for value in processes if str(value).strip()]
 
         contract_key = (contract_code, contract_name)
         contract = contract_groups.setdefault(contract_key, {
@@ -235,40 +246,90 @@ def build_project_snapshot(
         unit_project = contract["unit_projects"].setdefault(unit_key, {
             "code": unit_project_code,
             "name": unit_project_name,
+            "sub_units": {},
             "parts": {},
         })
-        part_key = (part_code, part_name)
-        part = unit_project["parts"].setdefault(part_key, {
+        if sub_unit_code or sub_unit_name:
+            sub_key = (sub_unit_code or sub_unit_name, sub_unit_name)
+            container = unit_project["sub_units"].setdefault(sub_key, {
+                "code": sub_unit_code or _node_code("ZDW", project_id, unit_project_code, sub_unit_name),
+                "name": sub_unit_name or sub_unit_code,
+                "parts": {},
+            })
+        else:
+            container = unit_project
+        part_key = (part_code, part_name, sub_part_code, sub_part_name)
+        part = container["parts"].setdefault(part_key, {
             "code": part_code,
             "name": part_name,
+            "sub_parts": {},
             "units": [],
+            "items": [],
         })
-        processes = data.get("processes") or []
-        if not isinstance(processes, list):
-            processes = [part.strip() for part in str(processes).split("、") if part.strip()]
-        part["units"].append({
-            "unit_code": str(unit_code).strip(),
-            "internal_project_code": code,
-            "name": str(hierarchy.get("unit_name") or data.get("project_name") or unit_code).strip(),
-            "division_type": str(data.get("division_type") or "unit").strip(),
-            "processes": [str(value).strip() for value in processes if str(value).strip()],
-            "project_order": data.get("project_order"),
-        })
+        if sub_part_code or sub_part_name:
+            leaf_parent = part["sub_parts"].setdefault((sub_part_code or sub_part_name, sub_part_name), {
+                "code": sub_part_code or _node_code("ZFB", project_id, part_code, sub_part_name),
+                "name": sub_part_name or sub_part_code,
+                "units": [],
+                "items": [],
+            })
+        else:
+            leaf_parent = part
+        if node_kind == "item":
+            leaf_code = str(hierarchy.get("item_code") or data.get("display_project_code") or code).strip()
+            leaf_parent["items"].append({
+                "item_code": leaf_code,
+                "internal_project_code": code,
+                "name": str(hierarchy.get("item_name") or data.get("project_name") or leaf_code).strip(),
+                "division_type": "item",
+                "processes": process_names,
+                "project_order": data.get("project_order"),
+            })
+        else:
+            unit_code = hierarchy.get("unit_code") or data.get("display_project_code") or code
+            leaf_parent["units"].append({
+                "unit_code": str(unit_code).strip(),
+                "internal_project_code": code,
+                "name": str(hierarchy.get("unit_name") or data.get("project_name") or unit_code).strip(),
+                "division_type": str(data.get("division_type") or "unit").strip(),
+                "processes": process_names,
+                "project_order": data.get("project_order"),
+            })
 
     tree = []
     for contract in contract_groups.values():
+        def _sort_leaves(node):
+            for key, code_key in (("units", "unit_code"), ("items", "item_code")):
+                node.setdefault(key, [])
+                node[key].sort(key=lambda leaf: (
+                    int(leaf.get("project_order")) if str(leaf.get("project_order") or "").isdigit() else 10**12,
+                    leaf.get(code_key, ""),
+                ))
+                for leaf in node[key]:
+                    leaf.pop("project_order", None)
+            sub_parts = list(node.pop("sub_parts", {}).values()) if isinstance(node.get("sub_parts"), dict) else []
+            for sub_part in sub_parts:
+                _sort_leaves(sub_part)
+            if sub_parts:
+                node["sub_parts"] = sub_parts
+
         unit_projects = []
         for unit_project in contract.pop("unit_projects").values():
             parts = []
             for part in unit_project.pop("parts").values():
-                part["units"].sort(key=lambda unit: (
-                    int(unit.get("project_order")) if str(unit.get("project_order") or "").isdigit() else 10**12,
-                    unit.get("unit_code", ""),
-                ))
-                for unit in part["units"]:
-                    unit.pop("project_order", None)
+                _sort_leaves(part)
                 parts.append(part)
+            sub_units = []
+            for sub_unit in unit_project.pop("sub_units").values():
+                sub_parts = []
+                for part in sub_unit.pop("parts").values():
+                    _sort_leaves(part)
+                    sub_parts.append(part)
+                sub_unit["parts"] = sub_parts
+                sub_units.append(sub_unit)
             unit_project["parts"] = parts
+            if sub_units:
+                unit_project["sub_units"] = sub_units
             unit_projects.append(unit_project)
         contract["unit_projects"] = unit_projects
         tree.append(contract)
@@ -278,15 +339,25 @@ def build_project_snapshot(
         "project": project_payload,
         "tree": tree,
         "other_tree": _normalize_other_tree((other_images or {}).get("nodes") or []),
-        "requirements": professional_templates.requirements(
-            project_payload.get("industry", "水利工程"),
-            project_payload.get("project_type", ""),
-        ),
-        "requirement_summary": professional_templates.plan_summary(
-            project_payload.get("industry", "水利工程"),
-            project_payload.get("project_type", ""),
-        ),
     }
+    try:
+        body["requirements"] = professional_templates.requirements(
+            project_payload.get("industry", "水利工程"),
+            project_payload.get("project_type", ""),
+        )
+        body["requirement_summary"] = professional_templates.plan_summary(
+            project_payload.get("industry", "水利工程"),
+            project_payload.get("project_type", ""),
+        )
+    except Exception as exc:
+        body["requirements"] = []
+        body["requirement_summary"] = {
+            "total": 0,
+            "required": 0,
+            "conditional": 0,
+            "recommended": 0,
+            "warning": str(exc),
+        }
     if project.get("delete_password_hash"):
         body["deletion_password_hash"] = str(project["delete_password_hash"])
     content_hash = hashlib.sha256(
@@ -1249,6 +1320,7 @@ class DesktopMobileSync:
             raise ValueError("手机指定的其它影像目录在电脑端不存在")
         if scope != "engineering":
             raise ValueError("手机影像范围无效")
+        item_code = str(item.get("item_code") or (item.get("assignment") or {}).get("item_code") or "").strip()
         unit_code = str(item.get("unit_code") or "").strip()
         category = str(item.get("category") or "").strip()
         if category not in {"construction", "supervision"}:
@@ -1259,13 +1331,22 @@ class DesktopMobileSync:
             if (data.get("source_fields") or {}).get("_other_image"):
                 continue
             hierarchy = self.manager.project_hierarchy(data)
-            candidates = {
-                code,
-                str(data.get("display_project_code") or "").strip(),
-                str(hierarchy.get("unit_code") or "").strip(),
-            }
-            if unit_code not in candidates:
-                continue
+            if item_code:
+                item_candidates = {
+                    code,
+                    str(data.get("display_project_code") or "").strip(),
+                    str(hierarchy.get("item_code") or "").strip(),
+                }
+                if item_code not in item_candidates or hierarchy.get("node_kind") != "item":
+                    continue
+            else:
+                candidates = {
+                    code,
+                    str(data.get("display_project_code") or "").strip(),
+                    str(hierarchy.get("unit_code") or "").strip(),
+                }
+                if unit_code not in candidates:
+                    continue
             process_name = str(item.get("process_name") or "").strip()
             allowed = [str(value).strip() for value in (data.get("processes") or []) if str(value).strip()]
             if process_name and process_name not in allowed:
@@ -1459,6 +1540,8 @@ class DesktopMobileSync:
                 "review_reason": review_reason if staged else "",
                 "site_part": str(item.get("site_part") or "").strip(),
                 "mobile_source_scope": str(item.get("scope") or ""),
+                "archive": (item.get("assignment") or {}).get("archive") if isinstance(item.get("assignment"), dict) else item.get("archive"),
+                "spatial": (item.get("assignment") or {}).get("spatial") if isinstance(item.get("assignment"), dict) else item.get("spatial"),
             }
         }
         raw_orientation = str(item.get("orientation") or "").strip().lower()
