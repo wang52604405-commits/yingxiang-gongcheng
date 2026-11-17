@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPhotoLibrary, type LibraryPhotoPage, type LibraryPhotoQuery } from '@/services/photo-library'
+import { createPhotoLibrary, destinationPhotoQuery, type LibraryPhotoPage, type LibraryPhotoQuery } from '@/services/photo-library'
 import type { CloudPhoto } from '@/types/domain'
 
 function photo(id: number): CloudPhoto { return { photo_uuid: String(id) } as CloudPhoto }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
+
+describe('归档位置筛选', () => {
+  it('市政分项把 item_code 传给图库，不退回空的单元条件', () => {
+    expect(destinationPhotoQuery('engineering', { item_code: 'FX-001', unit_code: '' })).toEqual({ item_code: 'FX-001' })
+    expect(destinationPhotoQuery('engineering', { unit_code: 'DY-001' })).toEqual({ unit_code: 'DY-001' })
+    expect(destinationPhotoQuery('other', { other_node_code: 'QT-1' })).toEqual({ other_node_code: 'QT-1' })
+  })
+})
 
 describe('全部影像与持续分页', () => {
   it('连续读取全部725张，没有600张上限，计数不被已加载数量替代', async () => {

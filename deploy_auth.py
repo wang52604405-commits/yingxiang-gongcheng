@@ -67,6 +67,14 @@ CODE_FILES = [
     "README.md",
 ]
 TEMPLATE_FILES = ["admin.html", "cloud.html", "member_center.html"]
+# 服务进程的工作目录是 /opt/album-auth，gunicorn 以 server.app 启动。
+# mobile_api 在处理任何工程照片时都会 import 这些仓库根模块，
+# 只把 server/ 拷进线上会在第一次校验归档目标时 ModuleNotFoundError。
+ROOT_RUNTIME_FILES = [
+    ("municipal_rules.py", "municipal_rules.py"),
+    ("professional_templates.py", "professional_templates.py"),
+    ("assets/professional_templates.json", "assets/professional_templates.json"),
+]
 DEPLOY_FILES = [
     "album-auth-backup.cron",
     "album-auth.service",
@@ -231,6 +239,11 @@ def build_release_archive(target: Path, validator_source: Path) -> list[str]:
         if source.is_file():
             members.append((source, f"server/templates/{name}"))
     members.append((validator_source, "validate_mobile_migration.py"))
+    for source_rel, archive_name in ROOT_RUNTIME_FILES:
+        source = REPO / source_rel
+        if not source.is_file():
+            raise SystemExit(f"发布缺少服务端运行文件：{source_rel}")
+        members.append((source, archive_name))
 
     with tarfile.open(target, "w:gz") as archive:
         for source, archive_name in members:
@@ -499,10 +512,16 @@ def main() -> int:
             restore_backup_cron = f"cp -a {backup}/previous-backup.cron {BACKUP_CRON_TARGET}"
         else:
             restore_backup_cron = f"rm -f {BACKUP_CRON_TARGET}"
+        runtime_rollback = " && ".join(
+            f"if test -f {backup}/runtime/{name}; then install -D -m 0644 {backup}/runtime/{name} /opt/album-auth/{name}; "
+            f"else rm -f -- /opt/album-auth/{name}; fi"
+            for _, name in ROOT_RUNTIME_FILES
+        )
         restored = ssh(
             f"test \"$(readlink -f -- {backup}/server)\" = \"{backup}/server\" && "
             f"test \"$(readlink -f -- {REMOTE_SERVER_DIR})\" = \"{REMOTE_SERVER_DIR}\" && "
             f"rsync -a --delete -- {backup}/server/ {REMOTE_SERVER_DIR}/ && "
+            f"{runtime_rollback} && "
             f"{restore_dropin} && {restore_domain_nginx} && {restore_backup_cron} && "
             f"systemctl daemon-reload && systemctl restart {SERVICE_NAME} && "
             "nginx -t && systemctl reload nginx",
@@ -537,8 +556,18 @@ def main() -> int:
         raise SystemExit(f"systemd drop-in 安装失败，已恢复原配置：{install_dropin.stderr}")
 
     print("[7/9] 替换代码、重启并检查旧接口和移动端接口")
+    runtime_backup = " && ".join(
+        f"if test -f /opt/album-auth/{name}; then install -D -m 0644 /opt/album-auth/{name} {backup}/runtime/{name}; fi"
+        for _, name in ROOT_RUNTIME_FILES
+    )
+    runtime_install = " && ".join(
+        f"install -D -m 0644 {release_root}/{name} /opt/album-auth/{name}"
+        for _, name in ROOT_RUNTIME_FILES
+    )
     replacement = ssh(
+        f"{runtime_backup} && "
         f"cp -a {stage_server}/. {REMOTE_SERVER_DIR}/ && "
+        f"{runtime_install} && "
         f"systemctl restart {SERVICE_NAME} && sleep 3",
         check=False,
     )

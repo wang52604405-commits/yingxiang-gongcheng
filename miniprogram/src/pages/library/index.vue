@@ -12,7 +12,7 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
-import { createPhotoLibrary } from '@/services/photo-library'
+import { createPhotoLibrary, destinationPhotoQuery } from '@/services/photo-library'
 import type { PhotoCategory, Scope } from '@/types/domain'
 import { shortDate } from '@/utils/format'
 
@@ -33,8 +33,7 @@ const library = createPhotoLibrary(() => ({
     project_id: selectionStorage.getProject().id,
     scope: scope.value === 'all' ? undefined : scope.value,
     category: scope.value === 'engineering' && category.value !== 'all' ? category.value : undefined,
-    unit_code: scope.value === 'engineering' ? activeDestination.value?.assignment.unit_code : undefined,
-    other_node_code: scope.value === 'other' ? activeDestination.value?.assignment.other_node_code : undefined,
+    ...destinationPhotoQuery(scope.value, activeDestination.value?.assignment),
   },
 }), mobileApi.photos)
 const { photos, loading, loadingMore, nextCursor, totalCount, error } = toRefs(library.state)
@@ -109,7 +108,7 @@ onShow(() => {
   if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) {
     scope.value = selectedDestination.value.scope
     unitSearch.value = selectedDestination.value.scope === 'engineering'
-      ? String(selectedDestination.value.assignment.unit_name || selectedDestination.value.assignment.unit_code || '')
+      ? String(selectedDestination.value.assignment.item_name || selectedDestination.value.assignment.item_code || selectedDestination.value.assignment.unit_name || selectedDestination.value.assignment.unit_code || '')
       : ''
   }
   choosingDestination = false

@@ -265,7 +265,13 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("server/deploy/album-auth-backup.cron", archived)
         self.assertIn("server/templates/admin.html", archived)
         self.assertIn("validate_mobile_migration.py", archived)
+        self.assertIn("municipal_rules.py", archived)
+        self.assertIn("professional_templates.py", archived)
+        self.assertIn("assets/professional_templates.json", archived)
         self.assertTrue(all(not name.startswith(("/", "..")) for name in archived))
+        deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
+        self.assertIn("/opt/album-auth/{name}", deployer)
+        self.assertIn("backup}/runtime/{name}", deployer)
 
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
         self.assertIn("sha256sum -c -", deployer)

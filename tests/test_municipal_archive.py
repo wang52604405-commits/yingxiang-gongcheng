@@ -245,6 +245,31 @@ class MunicipalDesktopFlowTest(unittest.TestCase):
         self.assertEqual(water.get_json()["project_info"]["industry"], "水利工程")
         self.assertEqual(professional_templates_requirements_for_water(), [])
 
+    def test_municipal_xlsx_reads_cell_values_not_headers(self):
+        from openpyxl import Workbook
+
+        created = self._create("道路表格", f"XLS-{uuid.uuid4().hex[:8]}", "城镇道路")
+        self.assertEqual(created.status_code, 200, created.get_json())
+        item_code = "FX-" + uuid.uuid4().hex[:8]
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["分项工程编码", "分项工程名称", "分部工程编码", "分部工程名称", "单位工程编码", "单位工程名称"])
+        sheet.append([item_code, "基层", "FB-01", "基层", "DW-01", "人民路"])
+        memory = io.BytesIO()
+        workbook.save(memory)
+        memory.seek(0)
+        imported = self.client.post(
+            "/api/import-projects",
+            data={"file": (memory, "division.xlsx")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(imported.status_code, 200, imported.get_json())
+        self.assertEqual(imported.get_json()["result"]["created"], 1, imported.get_json())
+        project = self.desktop.manager.get_project(item_code)
+        self.assertEqual(project["project_name"], "基层")
+        self.assertEqual(project["source_fields"]["分部工程名称"], "基层")
+        self.assertNotEqual(project["project_name"], "分项工程名称")
+
     def test_municipal_import_item_nodes_skip_water_matcher_and_keep_legacy_units(self):
         created = self._create("桥梁工程", f"QL-{uuid.uuid4().hex[:8]}", "城市桥梁")
         self.assertEqual(created.status_code, 200, created.get_json())

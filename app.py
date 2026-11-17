@@ -3478,8 +3478,9 @@ class AlbumManager:
                 if not any(self._cell_text(value) for value in raw):
                     continue
                 records.append({
-                    headers[index]: self._cell_text(value) if index < len(raw) else ""
-                    for index, value in enumerate(headers) if headers[index]
+                    header: municipal_rules.preserve_code_text(raw[index]) if index < len(raw) else ""
+                    for index, header in enumerate(headers)
+                    if header
                 })
         return self.import_municipal_records(records, path.name)
 
