@@ -64,12 +64,11 @@ class DesktopMemberNavigationContractTest(unittest.TestCase):
         page = (root / "website" / "usage.html").read_text(encoding="utf-8")
         for expected in (
             "桌面端 + 微信小程序",
-            "新建独立工程",
-            "导入项目划分",
+            "建立独立工程",
+            "导入对应专业的划分",
             "修改照片编号规则",
-            "小程序完整流程",
-            "同步与隔离",
-            "月费会员最多 2 个，终身会员最多 3 个",
+            "现场采集与同步",
+            "照片、划分与设置随工程切换",
         ):
             self.assertIn(expected, page)
 
