@@ -329,7 +329,7 @@
                           <label style="display:block;margin-top:6px;">工程删除密码<input id="cloudDeletePass" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="6~32 位，请勿使用过于简单的数字"></label>
                           <label style="display:block;margin-top:6px;">确认工程删除密码<input id="cloudDeletePassConfirm" type="password" autocomplete="new-password" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="再次输入删除密码"></label>
                           <label style="display:block;margin-top:6px;">邀请码（选填）<input id="cloudInvite" style="width:100%;margin-top:4px;padding:6px 8px;border:1px solid #c7d6e2;border-radius:6px;" placeholder="好友邀请码"></label>
-                          <small style="display:block;margin-top:7px;color:#765b22;line-height:1.5;">登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。</small>
+                          <small style="display:block;margin-top:7px;color:#765b22;line-height:1.5;" data-leaf-label="登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。">登录密码用于账号登录；工程删除密码只在删除照片、单元或工程时使用。平台不显示明文，请单独保存。</small>
                         </div>
                       </div>
                       <div id="cloudProjectOwnershipBox" style="display:none;margin-top:9px;padding:9px 10px;border-radius:7px;line-height:1.55;"></div>
@@ -424,13 +424,13 @@
               <option value="all">全部层级</option>
               <option value="unitProject">只看单位工程</option>
               <option value="part">只看分部工程</option>
-              <option value="unit">只看单元工程</option>
+              <option value="unit" data-leaf-label="只看单元工程">只看单元工程</option>
             </select>
             <div class="level-filter" id="treeLevelButtons" aria-label="层级筛选">
               <button class="active" type="button" data-tree-level="all">全部层级</button>
               <button type="button" data-tree-level="unitProject">单位工程</button>
               <button type="button" data-tree-level="part">分部工程</button>
-              <button type="button" data-tree-level="unit">单元工程</button>
+              <button type="button" data-tree-level="unit" data-leaf-label="单元工程">单元工程</button>
             </div>
             <div id="tree" class="tree"><div class="side-load-skeleton"><span></span><span></span><span></span></div></div>
           </div>
@@ -462,7 +462,7 @@
               <span class="overview-tile-icon">施</span>
               <span class="overview-tile-main">
                 <strong>施工影像</strong>
-                <small><b id="constructionOverviewCount">0</b> 个单元，施工 <b id="constructionOverviewPhotos">0</b> 张，监理 <b id="supervisionOverviewPhotos">0</b> 张</small>
+                <small><b id="constructionOverviewCount">0</b><span data-leaf-label=" 个单元，施工"> 个单元，施工</span> <b id="constructionOverviewPhotos">0</b> 张，监理 <b id="supervisionOverviewPhotos">0</b> 张</small>
               </span>
             </button>
             <button class="overview-tile active" type="button" id="otherOverviewBtn">
@@ -502,18 +502,18 @@
               <h2 id="partTitle">分部工程</h2>
               <p id="partSub">单元工程列表，滚轮滑动浏览。</p>
             </div>
-            <div class="unit-filter-toolbar" aria-label="单元工程筛选">
-              <input id="unitListSearchInput" type="search" placeholder="搜索单元编号或名称" aria-label="搜索单元编号或名称">
+            <div class="unit-filter-toolbar" aria-label="单元工程筛选" data-leaf-aria-label="单元工程筛选">
+              <input id="unitListSearchInput" type="search" placeholder="搜索单元编号或名称" aria-label="搜索单元编号或名称" data-leaf-placeholder="搜索单元编号或名称" data-leaf-aria-label="搜索单元编号或名称">
               <select id="unitUploadFilter" class="orientation-select" aria-label="按上传状态筛选">
-                <option value="all">全部单元</option>
-                <option value="uploaded">已上传单元</option>
-                <option value="empty">未上传单元</option>
+                <option value="all" data-leaf-label="全部单元">全部单元</option>
+                <option value="uploaded" data-leaf-label="已上传单元">已上传单元</option>
+                <option value="empty" data-leaf-label="未上传单元">未上传单元</option>
               </select>
             </div>
             <button class="secondary" type="button" id="backOverviewBtn">返回施工影像一览</button>
           </div>
           <section class="panel part-scroll-panel">
-            <div class="panel-head"><h3>单元工程</h3><span id="partCount" class="pill">0 条</span></div>
+            <div class="panel-head"><h3 data-leaf-label="单元工程">单元工程</h3><span id="partCount" class="pill">0 条</span></div>
             <div id="unitRows" class="unit-card-grid"></div>
           </section>
         </section>
@@ -521,7 +521,7 @@
         <section id="unitView" style="display:none;">
           <div class="page-head">
             <div>
-              <div class="unit-breadcrumbs" id="unitBreadcrumbs">工程影像 / 单元工程</div>
+              <div class="unit-breadcrumbs" id="unitBreadcrumbs"><span data-leaf-label="工程影像 / 单元工程">工程影像 / 单元工程</span></div>
               <h2 id="unitTitle">单元工程详情</h2>
               <p id="unitSub">查看、上传和整理当前单元照片。</p>
             </div>
@@ -534,7 +534,7 @@
                 <div class="unit-more-menu" id="unitMoreMenu">
                   <button type="button" id="exportUnitStatsBtn">导出统计表</button>
                   <button type="button" id="exportZipBtn">导出 ZIP</button>
-                  <button class="danger" type="button" id="deleteUnitBtn">删除单元</button>
+                  <button class="danger" type="button" id="deleteUnitBtn" data-leaf-label="删除单元">删除单元</button>
                 </div>
               </div>
               <button type="button" id="printConstructionBtn" hidden>施工打印</button>
@@ -548,7 +548,7 @@
                 <button class="active" type="button" id="unitCategoryConstructionBtn" data-unit-category="construction">施工 <span id="unitConstructionCount">0</span></button>
                 <button type="button" id="unitCategorySupervisionBtn" data-unit-category="supervision">监理 <span id="unitSupervisionCount">0</span></button>
               </div>
-              <div class="unit-process-tabs" id="unitProcessTabs" aria-label="单元与工序"></div>
+              <div class="unit-process-tabs" id="unitProcessTabs" aria-label="单元与工序" data-leaf-aria-label="单元与工序"></div>
               <div class="unit-gallery-actions">
                 <span class="unit-gallery-count" id="unitGalleryCount">0 张</span>
                 <button class="secondary" type="button" id="gallerySelectBtn">选择</button>
@@ -566,7 +566,7 @@
               <section id="photoSectionsHost" class="photo-side photo-sections">
                 <section class="photo-section">
                   <div class="photo-section-head">
-                    <h3 class="photo-section-title">施工单元影像</h3>
+                    <h3 class="photo-section-title" data-leaf-label="施工单元影像">施工单元影像</h3>
                     <div class="photo-section-actions">
                       <button type="button" data-unit-upload="construction">上传</button>
                     </div>
@@ -589,7 +589,7 @@
 
                 <section class="photo-section">
                   <div class="photo-section-head">
-                    <h3 class="photo-section-title">监理单元影像</h3>
+                    <h3 class="photo-section-title" data-leaf-label="监理单元影像">监理单元影像</h3>
                     <div class="photo-section-actions">
                       <button class="secondary" type="button" disabled>复制施工照片</button>
                       <button type="button" data-unit-upload="supervision">上传</button>
@@ -626,8 +626,8 @@
             </div>
             <div class="upload-workspace">
               <div class="upload-main-column">
-                <div class="upload-step-label"><b>归档位置</b><span>确认当前单元、类别和工序</span></div>
-                <div class="upload-flow-summary" id="uploadTargetSummary">尚未选择归档单元</div>
+                <div class="upload-step-label"><b>归档位置</b><span data-leaf-label="确认当前单元、类别和工序">确认当前单元、类别和工序</span></div>
+                <div class="upload-flow-summary" id="uploadTargetSummary"><span data-leaf-label="尚未选择归档单元">尚未选择归档单元</span></div>
                 <div class="upload-choice-body">
                   <button class="upload-choice-card" type="button" data-upload-choice="construction">
                     <strong>施工影像</strong>
@@ -637,7 +637,7 @@
                     <strong>监理影像</strong>
                     <span>旁站、验收、见证记录</span>
                   </button>
-                  <label class="upload-process-field">归档层级<select id="uploadProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
+                  <label class="upload-process-field">归档层级<select id="uploadProcessSelect" class="orientation-select"><option value="" data-leaf-label="单元照片">单元照片</option></select></label>
                 </div>
                 <form id="uploadModalForm" class="upload-modal-form">
                   <div class="upload-step-label"><b>添加照片</b><span>支持多选、拖入或直接粘贴</span></div>
@@ -657,18 +657,18 @@
                   </details>
                   <div id="uploadModalResult" class="upload-modal-result"></div>
                   <div class="upload-submit-row">
-                    <button class="secondary" type="button" id="autoMatchUploadBtn">自动匹配其它单元</button>
+                    <button class="secondary" type="button" id="autoMatchUploadBtn" data-leaf-label="自动匹配其它单元">自动匹配其它单元</button>
                     <button type="submit" id="startUploadBtn">开始上传</button>
                   </div>
                 </form>
               </div>
-              <aside class="upload-target-column" aria-label="选择归档单元">
+              <aside class="upload-target-column" aria-label="选择归档单元" data-leaf-aria-label="选择归档单元">
                 <div class="upload-target-head">
-                  <strong>选择归档单元</strong>
+                  <strong data-leaf-label="选择归档单元">选择归档单元</strong>
                   <span>仅从顶部全局上传进入时需要选择</span>
                 </div>
                 <div class="upload-project-bar">
-                  <label>搜索单元名称、编号或缩略词<input id="uploadProjectSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
+                  <label><span data-leaf-label="搜索单元名称、编号或缩略词">搜索单元名称、编号或缩略词</span><input id="uploadProjectSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
                 </div>
                 <div id="uploadProjectPickerBody" class="upload-choice-projects"></div>
               </aside>
@@ -686,7 +686,7 @@
               <button class="ghost" type="button" id="closeProjectPickerBtn">关闭</button>
             </div>
             <div class="project-picker-search">
-              <label>搜索单元名称或编号<input id="projectPickerSearch" type="search" placeholder="输入关键字检索单元工程名称、编号"></label>
+              <label><span data-leaf-label="搜索单元名称或编号">搜索单元名称或编号</span><input id="projectPickerSearch" type="search" placeholder="输入关键字检索单元工程名称、编号" data-leaf-placeholder="输入关键字检索单元工程名称、编号"></label>
             </div>
             <div id="projectPickerBody" class="project-picker-body"></div>
           </section>
@@ -710,7 +710,7 @@
               
             </div>
             <div class="project-picker-search">
-              <label>搜索单元名称、编号或缩略词<input id="batchPrintSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
+              <label><span data-leaf-label="搜索单元名称、编号或缩略词">搜索单元名称、编号或缩略词</span><input id="batchPrintSearch" type="search" placeholder="例如：gc、dygc、GC-001-01-001"></label>
             </div>
             <div class="batch-print-toolbar">
               <span id="batchPrintCount" class="pill">已选 0 个</span>
@@ -767,7 +767,7 @@
                 <button class="print-mode-card print-style-card active" type="button" data-print-style="sidelabel" aria-pressed="true">
                   <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-portrait ps-sidelabel"><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span><span class="ps-row"><span class="ps-slot"></span><span class="ps-slip"></span></span></span></span>
                   <strong>侧签 · 两行</strong>
-                  <span class="print-style-desc">竖版一页两张：照片按 5 寸横版裁满，侧签可在左边或右边，填写题名、照片号、单元工程名称、拍摄时间、摄影者、地点</span>
+                  <span class="print-style-desc" data-leaf-label="竖版一页两张：照片按 5 寸横版裁满，侧签可在左边或右边，填写题名、照片号、单元工程名称、拍摄时间、摄影者、地点">竖版一页两张：照片按 5 寸横版裁满，侧签可在左边或右边，填写题名、照片号、单元工程名称、拍摄时间、摄影者、地点</span>
                 </button>
                 <button class="print-mode-card print-style-card" type="button" data-print-style="one" aria-pressed="false">
                   <span class="print-style-schematic" aria-hidden="true"><span class="ps-paper ps-landscape ps-single"><span class="ps-slot"></span></span></span>
@@ -808,13 +808,13 @@
                   <label>右(mm)<input id="printSetupMarginRight" type="number" min="0" max="30" step="1" value="20"></label>
                   <label>照片横向间距(mm)<input id="printSetupHorizontalGap" type="number" min="0" max="20" step="0.5" value="2"></label>
                   <label>照片纵向间距(mm)<input id="printSetupVerticalGap" type="number" min="0" max="20" step="0.5" value="2"></label>
-                  <label>页标题<select id="printSetupShowPageTitle"><option value="1">显示单元名称和页码</option><option value="0">不显示</option></select></label>
+                  <label>页标题<select id="printSetupShowPageTitle"><option value="1" data-leaf-label="显示单元名称和页码">显示单元名称和页码</option><option value="0">不显示</option></select></label>
                 </div>
                 <div class="print-field-options" aria-label="文字标签内容">
                   <strong>标签内容</strong>
                   <label><input type="checkbox" value="title" data-print-caption-field checked>题名</label>
                   <label><input type="checkbox" value="id" data-print-caption-field checked>照片编号</label>
-                  <label><input type="checkbox" value="project_name" data-print-caption-field>单元工程</label>
+                  <label><input type="checkbox" value="project_name" data-print-caption-field><span data-leaf-label="单元工程">单元工程</span></label>
                   <label><input type="checkbox" value="part_name" data-print-caption-field checked>分部工程</label>
                   <label><input type="checkbox" value="photo_date" data-print-caption-field checked>拍摄日期</label>
                   <label><input type="checkbox" value="photographer" data-print-caption-field checked>摄影人</label>
@@ -861,24 +861,23 @@
               <label>题名<input id="photoEditTitleInput" type="text"></label>
               <label>日期<input id="photoEditDateInput" type="date" required></label>
               <label>摄影者<input id="photoEditPhotographerInput" type="text"></label>
-              <label>工序<select id="photoEditProcessInput"><option value="">单元照片</option></select></label>
+              <label>工序<select id="photoEditProcessInput"><option value="" data-leaf-label="单元照片">单元照片</option></select></label>
               <label>打印旋转<select id="photoEditRotationInput" class="orientation-select"><option value="0">不旋转</option><option value="90">左转90°</option><option value="180">旋转180°</option><option value="270">右转90°</option></select></label>
               <label>文字说明<textarea id="photoEditDescriptionInput"></textarea></label>
               <div id="municipalPhotoFields">
                 <label>阶段<select id="photoEditPhaseInput" class="orientation-select"><option value="">未填</option><option value="before">施工前</option><option value="during">施工中</option><option value="after">竣工后</option><option value="activity">重要活动</option></select></label>
                 <label>隐蔽状态<select id="photoEditConcealmentInput" class="orientation-select"><option value="">未填</option><option value="none">不适用</option><option value="before_cover">隐蔽前</option><option value="after_cover">覆盖后</option></select></label>
-                <label>工序事件<input id="photoEditProcessEventInput" type="text" maxlength="80" placeholder="按需填写，不是工程划分"></label>
-                <label>地点<input id="photoEditLocationInput" type="text" maxlength="200" placeholder="GPS 拒绝时手填，不编造坐标"></label>
+                <label>工序事件<input id="photoEditProcessEventInput" type="text" maxlength="80" placeholder="填写工序事件"></label>
+                <label>地点<input id="photoEditLocationInput" type="text" maxlength="200" placeholder="填写拍摄地点"></label>
                 <label>空间定位<input id="photoEditSpatialInput" type="text" maxlength="200" placeholder="桩号、井号、墩台跨按原文本，例如 K0+120 或 W01"></label>
-                <label>验收记录号<input id="photoEditAcceptanceInput" type="text" maxlength="80" placeholder="照片不代替验收文件"></label>
+                <label>验收记录号<input id="photoEditAcceptanceInput" type="text" maxlength="80" placeholder="填写关联记录号"></label>
                 <label>模板编号<input id="photoEditTemplateInput" type="text" maxlength="80"></label>
-                <p class="import-hint">拍摄日期、上传时间和 EXIF 原值分开保存。缺原件时不能标成可归档原片。哈希不证明现场事实。</p>
               </div>
               <div class="photo-storage-actions">
                 <button class="secondary" type="button" id="viewOriginalPhotoBtn">查看原图备份</button>
                 <button class="secondary" type="button" id="restoreOriginalPhotoBtn">恢复原图</button>
                 <button class="secondary" type="button" id="optimizePhotoBtn">重新优化</button>
-                <button class="secondary photo-move-open" type="button" id="movePhotoBtn">移动到工序/单元</button>
+                <button class="secondary photo-move-open" type="button" id="movePhotoBtn" data-leaf-label="移动到工序/单元">移动到工序/单元</button>
               </div>
               <div class="photo-edit-actions">
                 <button class="secondary" type="button" id="cancelPhotoEditBtn">取消</button>
@@ -945,7 +944,7 @@
               <label>工程地点<input id="projectInfoLocationInput" type="text" placeholder="可选"></label>
               <label>开工日期<input id="projectInfoStartDateInput" type="date"></label>
               <label>工程删除密码<input id="projectInfoDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" placeholder="新工程必填；编辑时留空表示不修改"></label>
-              <p class="import-hint wide">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
+              <p class="import-hint wide" data-leaf-label="删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。">删除照片、单元或整个工程时需要验证。密码只保存为不可逆摘要，平台无法显示明文，请妥善保存。</p>
               <div class="project-settings-card wide" id="professionalPlanSummary"><strong>专业影像采集模板</strong><p class="import-hint">水利沿用现有项目划分；房建、市政、电力会按专业模板同步“必拍 / 条件必拍 / 推荐”清单到小程序。</p><button class="secondary" type="button" id="openProfessionalPlanBtn">查看详细采集清单</button></div>
               <label class="wide">备注<textarea id="projectInfoDescriptionInput" placeholder="可选"></textarea></label>
             </div>
@@ -1023,12 +1022,12 @@
             <div class="project-settings-grid">
               <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">按导入的工程节点编码（默认）</option><option value="unit_order">按项目划分顺序号（001、002…）</option></select></label>
               <label>节点排序编号位数<input id="settingsUnitOrderDigitsInput" type="number" min="1" max="8" step="1"></label>
-              <label class="wide">施工照片编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
-              <label class="wide">施工工序照片编号格式（仅已有工序适用）<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
+              <label class="wide">施工照片编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】" data-number-placeholder="【单元编号】-SY【流水号】"></label>
+              <label class="wide">施工工序照片编号格式（仅已有工序适用）<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】" data-number-placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
               <label>施工起始号<input id="settingsConstructionStart" type="number" min="1" step="1"></label>
               <label>施工流水位数<input id="settingsConstructionDigits" type="number" min="1" max="8" step="1"></label>
-              <label class="wide">监理照片编号格式<input id="settingsSupervisionUnitTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
-              <label class="wide">监理工序照片编号格式（仅已有工序适用）<input id="settingsSupervisionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-JY【流水号】"></label>
+              <label class="wide">监理照片编号格式<input id="settingsSupervisionUnitTemplate" type="text" placeholder="【单元编号】-JY【流水号】" data-number-placeholder="【单元编号】-JY【流水号】"></label>
+              <label class="wide">监理工序照片编号格式（仅已有工序适用）<input id="settingsSupervisionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-JY【流水号】" data-number-placeholder="【单元编号】-【工序编码】-JY【流水号】"></label>
               <label>监理起始号<input id="settingsSupervisionStart" type="number" min="1" step="1"></label>
               <label>监理流水位数<input id="settingsSupervisionDigits" type="number" min="1" max="8" step="1"></label>
             </div>
@@ -1115,16 +1114,16 @@
     <section class="machine-id-modal photo-move-modal" role="dialog" aria-modal="true" aria-labelledby="photoMoveTitle">
       <div class="upload-choice-head">
         <div>
-          <h3 id="photoMoveTitle">移动照片到工序或其它单元</h3>
-          <p>同一单元可在工序之间直接传递；跨单元移动时永久照片 UUID、题名、日期和原图备份都会保留，并按目标单元规则重新编号。</p>
+          <h3 id="photoMoveTitle" data-leaf-label="移动照片到工序或其它单元">移动照片到工序或其它单元</h3>
+          <p data-leaf-label="同一单元可在工序之间直接传递；跨单元移动时永久照片 UUID、题名、日期和原图备份都会保留，并按目标单元规则重新编号。">同一单元可在工序之间直接传递；跨单元移动时永久照片 UUID、题名、日期和原图备份都会保留，并按目标单元规则重新编号。</p>
         </div>
         <button class="ghost" type="button" id="closePhotoMoveBtn">关闭</button>
       </div>
       <div class="photo-move-form">
-        <label>搜索单元<input id="photoMoveSearchInput" type="search" placeholder="输入单元编号或名称"></label>
-        <label>目标单元<select id="photoMoveTargetSelect" class="orientation-select" size="7"></select></label>
-        <label>目标工序<select id="photoMoveProcessSelect" class="orientation-select"><option value="">单元照片</option></select></label>
-        <div id="photoMoveSummary" class="photo-move-summary">请选择目标单元。</div>
+        <label><span data-leaf-label="搜索单元">搜索单元</span><input id="photoMoveSearchInput" type="search" placeholder="输入单元编号或名称" data-leaf-placeholder="输入单元编号或名称"></label>
+        <label><span data-leaf-label="目标单元">目标单元</span><select id="photoMoveTargetSelect" class="orientation-select" size="7"></select></label>
+        <label>目标工序<select id="photoMoveProcessSelect" class="orientation-select"><option value="" data-leaf-label="单元照片">单元照片</option></select></label>
+        <div id="photoMoveSummary" class="photo-move-summary"><span data-leaf-label="请选择目标单元。">请选择目标单元。</span></div>
         <div class="photo-edit-actions">
           <button class="secondary" type="button" id="cancelPhotoMoveBtn">取消</button>
           <button type="button" id="confirmPhotoMoveBtn">确认移动</button>
@@ -1138,7 +1137,7 @@
       <div class="upload-choice-head">
         <div>
           <h3 id="addProcessTitle">添加工序</h3>
-          <p>工序只用于当前单元，添加后会出现在照片图库上方。</p>
+          <p data-leaf-label="工序只用于当前单元，添加后会出现在照片图库上方。">工序只用于当前单元，添加后会出现在照片图库上方。</p>
         </div>
         <button class="ghost" type="button" id="closeAddProcessBtn">关闭</button>
       </div>
@@ -1189,11 +1188,11 @@
         </div>
         <button class="ghost" type="button" id="closeFolderReviewBtn">关闭</button>
       </div>
-      <div class="folder-review-help">施工内容已作为题名；施工区域用于匹配单位、分部和单元。请特别检查低置信度和“多候选”项目，确认后才会写入工程。</div>
+      <div class="folder-review-help"><span data-leaf-label="施工内容已作为题名；施工区域用于匹配单位、分部和单元。请特别检查低置信度和“多候选”项目，确认后才会写入工程。">施工内容已作为题名；施工区域用于匹配单位、分部和单元。请特别检查低置信度和“多候选”项目，确认后才会写入工程。</span></div>
       <datalist id="folderReviewProjects"></datalist>
       <div class="folder-review-table-wrap">
         <table class="folder-review-table">
-          <thead><tr><th>导入</th><th>照片 / 水印</th><th>题名与日期</th><th>匹配单元</th><th>判断依据</th></tr></thead>
+          <thead><tr><th>导入</th><th>照片 / 水印</th><th>题名与日期</th><th><span data-leaf-label="匹配单元">匹配单元</span></th><th>判断依据</th></tr></thead>
           <tbody id="folderReviewRows"></tbody>
         </table>
       </div>
@@ -1234,13 +1233,13 @@
         <button class="ghost" type="button" id="closeNumberingRulesBtn">关闭</button>
       </div>
       <form id="numberingRulesForm" class="photo-edit-form">
-        <label>施工编号格式<input id="constructionNumberTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
+        <label>施工编号格式<input id="constructionNumberTemplate" type="text" placeholder="【单元编号】-SY【流水号】" data-number-placeholder="【单元编号】-SY【流水号】"></label>
         <label>施工起始号<input id="constructionNumberStart" type="number" min="1" step="1"></label>
         <label>施工流水位数<input id="constructionNumberDigits" type="number" min="1" max="8" step="1"></label>
-        <label>监理编号格式<input id="supervisionNumberTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
+        <label>监理编号格式<input id="supervisionNumberTemplate" type="text" placeholder="【单元编号】-JY【流水号】" data-number-placeholder="【单元编号】-JY【流水号】"></label>
         <label>监理起始号<input id="supervisionNumberStart" type="number" min="1" step="1"></label>
         <label>监理流水位数<input id="supervisionNumberDigits" type="number" min="1" max="8" step="1"></label>
-        <p class="import-hint">示例：【单元编号】-【类别】【流水号】 会生成 YNLQ-001-SG001；自定义文字也可以写入格式中。</p>
+        <p class="import-hint">支持自定义文字和中文占位符。</p>
         <div class="photo-edit-actions">
           <button class="secondary" type="button" id="cancelNumberingRulesBtn">取消</button>
           <button type="submit">保存规则</button>

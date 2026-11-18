@@ -5,10 +5,10 @@ import { runInNewContext } from 'node:vm'
 const source = readFileSync(new URL('../../assets/app-A20260910-2.92.js', import.meta.url), 'utf8')
 const helpers = source.slice(source.indexOf('    function isItemProject('), source.indexOf('    function mountUnifiedSettings('))
 function context(industry: string, selectedProject: Record<string, unknown> | null = null) {
-  const state = { projectInfo: { industry }, selectedProject }
-  const ctx = { state }
+  const state = { projectInfo: { industry }, selectedProject, projects: [] as Record<string, unknown>[] }
+  const ctx = { state, projectCode: (p: { project_code?: string }) => p.project_code || "" }
   runInNewContext(helpers, ctx)
-  return ctx as typeof ctx & { nodePhotoLabel: () => string; batchParentLabel: (p: Record<string, unknown>) => string; projectLeafLabel: (p: Record<string, unknown>) => string; numberTemplateToReadable: (s: string) => string; readableToNumberTemplate: (s: string) => string }
+  return ctx as typeof ctx & { nodePhotoLabel: () => string; recentLeafLabel: (r: Record<string, unknown>) => string; collectionLeafLabel: () => string; leafUiText: (s: string, p?: Record<string, unknown>) => string; renderLeafTerminology: () => void; batchParentLabel: (p: Record<string, unknown>) => string; projectLeafLabel: (p: Record<string, unknown>) => string; numberTemplateToReadable: (s: string) => string; readableToNumberTemplate: (s: string) => string }
 }
 describe('desktop specialty labels preserve original node identity', () => {
   it('uses item labels for municipal/highway nodes', () => {
@@ -28,6 +28,47 @@ describe('desktop specialty labels preserve original node identity', () => {
     expect(ctx.batchParentLabel({ division_type: 'item' })).toBe('')
     expect(source).toContain('所属分项：${escapeHtml(batchParentLabel(project))}')
     expect(source).toContain('batchParentLabel(project) ? `分项 ${batchParentLabel(project)}`')
+  })
+  it('uses specialty counts and actual node labels without changing stored tokens', () => {
+    const water = context('水利工程'), highway = context('公路工程'), municipal = context('市政工程')
+    expect(water.leafUiText('2 个单元')).toBe('2 个单元')
+    expect(highway.leafUiText('搜索单元工程')).toBe('搜索分项工程')
+    expect(municipal.leafUiText('全部单元')).toBe('全部工程节点')
+    expect(municipal.leafUiText('删除单元', { division_type: 'unit' })).toBe('删除单元')
+    expect(municipal.leafUiText('删除单元', { division_type: 'batch' })).toBe('删除检验批')
+    municipal.state.projectInfo.industry = '公路工程'
+    expect(municipal.collectionLeafLabel()).toBe('分项')
+    const html = readFileSync(new URL('../../templates/index.html', import.meta.url), 'utf8')
+    expect(html).toContain('data-leaf-label="全部单元"')
+    expect(html).toContain('data-leaf-placeholder="搜索单元编号或名称"')
+    expect(source).toContain('metricBadge(projectCount(contract), collectionLeafLabel())')
+    expect(source).toContain('"{unit_code}"')
+    expect(source).toContain('fields["单元工程编码"]')
+  })
+  it('refreshes only marked labels and never overwrites real project names', () => {
+    const label = { dataset: { leafLabel: '全部单元' }, textContent: '', closest: () => null, getAttribute: () => null, setAttribute: () => {} }
+    const deleteLabel = { ...label, dataset: { leafLabel: '删除单元' }, closest: () => ({}) }
+    const ctx = context('市政工程', { division_type: 'batch' })
+    Object.assign(ctx, { document: { querySelectorAll: () => [label, deleteLabel] } })
+    ctx.renderLeafTerminology()
+    expect(label.textContent).toBe('全部工程节点')
+    expect(deleteLabel.textContent).toBe('删除检验批')
+    ctx.state.projectInfo.industry = '水利工程'
+    ctx.state.selectedProject = { division_type: 'unit' }
+    ctx.renderLeafTerminology()
+    expect(label.textContent).toBe('全部单元')
+    expect(deleteLabel.textContent).toBe('删除单元')
+    const html = readFileSync(new URL('../../templates/index.html', import.meta.url), 'utf8')
+    for (const id of ['unitTitle', 'unitSub', 'partSub', 'projectPickerSub', 'photoEditSub']) {
+      const opening = html.match(new RegExp(`<[^>]*id="${id}"[^>]*>`))?.[0] || ''
+      expect(opening).not.toContain('data-leaf-label')
+    }
+    expect(html).not.toContain('哈希不证明现场事实')
+  })
+  it('recent uploads use server node kind before the tree has loaded', () => {
+    const ctx = context('公路工程')
+    expect(ctx.recentLeafLabel({ project_code: 'legacy', node_kind: 'unit', display_code: '01', project_name: '旧水利单元' })).toBe('单元 01 旧水利单元')
+    expect(ctx.recentLeafLabel({ project_code: 'batch-key', node_kind: 'batch', display_code: '01', project_name: '第一批' })).toBe('检验批 01 第一批')
   })
   it('keeps legacy water units despite a specialty change', () => {
     expect(context('公路工程', { division_type: 'unit' }).nodePhotoLabel()).toBe('单元照片')

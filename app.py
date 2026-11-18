@@ -8389,6 +8389,8 @@ def api_recent_uploads():
                     continue
                 records.append({
                     "project_code": code,
+                    "node_kind": "other" if is_other else hierarchy.get("node_kind", "unit"),
+                    "project_name": project.get("project_name") or "",
                     "unit": unit_name,
                     "part": part_name,
                     "display_code": project.get("display_project_code") or project.get("project_code") or code,

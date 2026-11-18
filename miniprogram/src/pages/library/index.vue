@@ -12,11 +12,13 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
+import { specialtyLabels } from '@/services/specialty-labels'
 import { createPhotoLibrary, destinationPhotoLabel, destinationPhotoQuery } from '@/services/photo-library'
 import type { PhotoCategory, Scope } from '@/types/domain'
 import { shortDate } from '@/utils/format'
 
 const project = ref(selectionStorage.getProject())
+const specialty = computed(() => specialtyLabels(project.value.industry))
 const scope = ref<Scope | 'all'>('all')
 const category = ref<PhotoCategory | 'all'>('all')
 const unitSearch = ref('')
@@ -138,7 +140,7 @@ onReachBottom(() => { void loadPhotos(false) })
         <input
           v-model="unitSearch"
           class="unit-search-input"
-          placeholder="搜索单元名称或编码"
+          :placeholder="`搜索${specialty.leaf}名称或编码`"
           placeholder-class="input-placeholder"
           confirm-type="search"
           @confirm="searchUnit"
@@ -148,7 +150,7 @@ onReachBottom(() => { void loadPhotos(false) })
 
       <view v-if="scope !== 'all'" class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? destinationPhotoLabel(activeDestination.assignment) : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? destinationPhotoLabel(activeDestination.assignment) : scope === 'engineering' ? `所有${specialty.leaf} · 点此筛选` : '所有目录 · 点此筛选' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
       <button v-if="activeDestination" class="clear-filter pressable" @tap="clearDestination">查看全部</button>

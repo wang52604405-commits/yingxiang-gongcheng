@@ -153,6 +153,18 @@ class HighwayFlowTests(unittest.TestCase):
         self.assertEqual(data['display_project_code'], '///')
         self.assertEqual(data['source_fields']['分项工程编码'], '///')
 
+    def test_recent_uploads_exposes_actual_item_kind_without_renaming_project(self):
+        from unittest.mock import patch
+        app.manager.import_projects_from_records([self.row('001')])
+        project = app.manager.list_projects()[0]
+        data = app.manager.get_project(project['project_code'])
+        data['photos'] = [{'id':'p1', 'filename':'p1.jpg', 'title':'题名', 'upload_time':'2026-11-18 10:00:00'}]
+        with patch.object(app.manager, 'get_project', return_value=data):
+            record = self.client.get('/api/recent-uploads?scope=construction').get_json()['records'][0]
+        self.assertEqual(record['node_kind'], 'item')
+        self.assertEqual(record['project_name'], '土方路基')
+        self.assertEqual(record['unit'], '路基工程')
+
     def test_bare_project_api_cannot_bypass_scoped_import(self):
         response = self.client.post('/api/projects', json={'project_code':'001', 'project_name':'土方路基'})
         self.assertEqual(response.status_code, 400)

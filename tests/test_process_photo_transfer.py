@@ -123,7 +123,7 @@ class ProcessPhotoTransferTest(unittest.TestCase):
         self.assertNotIn('projectCode(project) && projectCode(project) !== state.selectedCode', js)
         self.assertIn('targetCode === sourceCode && targetProcess === sourceProcess', js)
         self.assertIn('移动照片到工序或其它单元', html)
-        self.assertIn('id="movePhotoBtn">移动到工序/单元</button>', html)
+        self.assertRegex(html, r'id="movePhotoBtn"[^>]*data-leaf-label="移动到工序/单元"[^>]*>移动到工序/单元</button>')
 
 
 if __name__ == "__main__":
