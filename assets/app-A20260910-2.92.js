@@ -1294,6 +1294,23 @@ const $ = (selector) => document.querySelector(selector);
         fields["分项工程名称"] || hierarchy.item_name || project?.parent_item_name].filter(Boolean).join(" ");
     }
 
+    function photoMoveTargetLabel(project) {
+      const fields = project?.source_fields || {};
+      const hierarchy = project?.hierarchy || {};
+      const segment = (name, code) => [code, name].filter(Boolean).join(" ");
+      const parents = [
+        fields["合同或标段名称"] || fields["合同工程名称"] || hierarchy.contract_name,
+        segment(fields["单位工程名称"] || hierarchy.unit_project_name, fields["单位工程编码"] || hierarchy.unit_project_code),
+        segment(fields["子单位工程名称"] || hierarchy.sub_unit_name, fields["子单位工程编码"] || hierarchy.sub_unit_code),
+        segment(fields["分部工程名称"] || hierarchy.part_name, fields["分部工程编码"] || hierarchy.part_code),
+        segment(fields["子分部工程名称"] || hierarchy.sub_part_name, fields["子分部工程编码"] || hierarchy.sub_part_code),
+        batchParentLabel(project),
+      ].filter(Boolean);
+      const code = project?.display_project_code || fields["检验批编码"] || fields["分项工程编码"] || fields["单元工程编码"] || project?.project_code || "";
+      const name = project?.project_name || fields["检验批名称"] || fields["分项工程名称"] || fields["单元工程名称"] || "";
+      return [...parents, `${projectLeafLabel(project)} · ${segment(name, code)}`].join(" / ");
+    }
+
     function recentLeafLabel(record) {
       const project = state.projects.find((item) => projectCode(item) === record.project_code);
       const kind = ({ item: "分项", batch: "检验批", unit: "单元", other: "其它影像" })[record.node_kind] || (project ? projectLeafLabel(project) : collectionLeafLabel());
@@ -4196,6 +4213,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#photoEditSub").textContent = `${photo.id || ""} · ${batchLabel(category)}`;
       $("#viewOriginalPhotoBtn").disabled = !photo.original_backup;
       $("#restoreOriginalPhotoBtn").disabled = !photo.original_backup;
+      renderLeafTerminology();
       $("#photoEditModal").classList.add("open");
       $("#photoEditModal").setAttribute("aria-hidden", "false");
       setTimeout(() => $("#photoEditTitleInput").focus(), 0);
@@ -4244,7 +4262,7 @@ const $ = (selector) => document.querySelector(selector);
       const query = String($("#photoMoveSearchInput")?.value || "").trim().toLowerCase();
       return (state.moveTargets || []).filter((project) => {
         if (!query) return true;
-        return `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)} ${batchParentLabel(project)}`.toLowerCase().includes(query);
+        return `${photoMoveTargetLabel(project)} ${projectCode(project)}`.toLowerCase().includes(query);
       });
     }
 
@@ -4273,7 +4291,8 @@ const $ = (selector) => document.querySelector(selector);
       if (processSelect) processSelect.disabled = false;
       if (confirm) confirm.disabled = photoMovePending;
       if (summary) {
-        summary.textContent = `从 ${projectDisplayCode(state.selectedProject || {}) || state.selectedCode} 移动到 ${projectDisplayCode(project) || targetCode} · ${projectName(project) || leafUiText("未命名单元")}`;
+        summary.textContent = `从 ${photoMoveTargetLabel(state.selectedProject)}
+移动到 ${photoMoveTargetLabel(project)}`;
       }
     }
 
@@ -4283,7 +4302,7 @@ const $ = (selector) => document.querySelector(selector);
       const previous = select.value;
       const targets = filteredMoveTargets();
       select.innerHTML = targets.length
-        ? targets.map((project) => `<option value="${escapeHtml(projectCode(project))}">${escapeHtml(projectDisplayCode(project))} · ${escapeHtml(projectName(project))}</option>`).join("")
+        ? targets.map((project) => `<option value="${escapeHtml(projectCode(project))}">${escapeHtml(photoMoveTargetLabel(project))}</option>`).join("")
         : `<option value="">未找到匹配${collectionLeafLabel()}</option>`;
       if (previous && targets.some((project) => projectCode(project) === previous)) select.value = previous;
       await refreshPhotoMoveProcesses();
@@ -4320,7 +4339,7 @@ const $ = (selector) => document.querySelector(selector);
         return showNotice("照片已经在当前工序，无需移动。", true);
       }
       const targetProject = (state.moveTargets || []).find((project) => projectCode(project) === targetCode);
-      const targetLabel = `${projectDisplayCode(targetProject || {}) || targetCode} · ${projectName(targetProject || {}) || leafUiText("未命名单元")}`;
+      const targetLabel = photoMoveTargetLabel(targetProject || { project_code: targetCode });
       if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : `\n归属：${nodePhotoLabel(targetProject)}`}？`)) return;
       const context = navigationContext();
       photoMovePending = true;

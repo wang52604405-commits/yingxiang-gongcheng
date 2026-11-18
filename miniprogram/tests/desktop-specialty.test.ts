@@ -8,7 +8,7 @@ function context(industry: string, selectedProject: Record<string, unknown> | nu
   const state = { projectInfo: { industry }, selectedProject, projects: [] as Record<string, unknown>[] }
   const ctx = { state, projectCode: (p: { project_code?: string }) => p.project_code || "" }
   runInNewContext(helpers, ctx)
-  return ctx as typeof ctx & { nodePhotoLabel: () => string; recentLeafLabel: (r: Record<string, unknown>) => string; collectionLeafLabel: () => string; leafUiText: (s: string, p?: Record<string, unknown>) => string; renderLeafTerminology: () => void; batchParentLabel: (p: Record<string, unknown>) => string; projectLeafLabel: (p: Record<string, unknown>) => string; numberTemplateToReadable: (s: string) => string; readableToNumberTemplate: (s: string) => string }
+  return ctx as typeof ctx & { nodePhotoLabel: () => string; photoMoveTargetLabel: (p: Record<string, unknown>) => string; recentLeafLabel: (r: Record<string, unknown>) => string; collectionLeafLabel: () => string; leafUiText: (s: string, p?: Record<string, unknown>) => string; renderLeafTerminology: () => void; batchParentLabel: (p: Record<string, unknown>) => string; projectLeafLabel: (p: Record<string, unknown>) => string; numberTemplateToReadable: (s: string) => string; readableToNumberTemplate: (s: string) => string }
 }
 describe('desktop specialty labels preserve original node identity', () => {
   it('uses item labels for municipal/highway nodes', () => {
@@ -69,6 +69,24 @@ describe('desktop specialty labels preserve original node identity', () => {
     const ctx = context('公路工程')
     expect(ctx.recentLeafLabel({ project_code: 'legacy', node_kind: 'unit', display_code: '01', project_name: '旧水利单元' })).toBe('单元 01 旧水利单元')
     expect(ctx.recentLeafLabel({ project_code: 'batch-key', node_kind: 'batch', display_code: '01', project_name: '第一批' })).toBe('检验批 01 第一批')
+  })
+  it('disambiguates duplicate original codes and names by complete parent path for moves', () => {
+    const ctx = context('市政工程')
+    const common = { division_type: 'batch', display_project_code: '001', project_name: '第一批' }
+    const a = { ...common, project_code: 'internal-A', source_fields: { 合同或标段名称: '一标', 单位工程名称: '道路', 单位工程编码: 'D1', 子单位工程名称: '东段', 子单位工程编码: 'Z1', 分部工程名称: '路基', 分部工程编码: 'F1', 子分部工程名称: '试验段', 子分部工程编码: 'S1', 分项工程名称: '土方', 分项工程编码: 'A' } }
+    const b = { ...common, project_code: 'internal-B', source_fields: { ...a.source_fields, 单位工程编码: 'D2', 分项工程编码: 'B' } }
+    const before = JSON.stringify([a, b])
+    const labels = [a, b].map(p => ctx.photoMoveTargetLabel(p))
+    expect(labels[0]).toBe('一标 / D1 道路 / Z1 东段 / F1 路基 / S1 试验段 / A 土方 / 检验批 · 001 第一批')
+    expect(labels[1]).toContain('D2 道路')
+    expect(labels[1]).toContain('B 土方')
+    expect(labels[0]).not.toBe(labels[1])
+    const selectedId = 'internal-B'
+    expect([a, b].find(p => p.project_code === selectedId)).toBe(b)
+    expect(JSON.stringify([a, b])).toBe(before)
+    expect(source).toContain('value="${escapeHtml(projectCode(project))}">${escapeHtml(photoMoveTargetLabel(project))}</option>')
+    expect(source).toContain('const targetLabel = photoMoveTargetLabel(targetProject')
+    expect(source).not.toContain('或手动补录单元工程')
   })
   it('keeps legacy water units despite a specialty change', () => {
     expect(context('公路工程', { division_type: 'unit' }).nodePhotoLabel()).toBe('单元照片')
