@@ -62,6 +62,7 @@ def validate_site(site: Path = SITE) -> None:
     approved_assets = {
         "favicon.svg", "miniprogram_qr.png", "style.css", "restructure.css", "site.js",
         "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg",
+        "demo-desktop-municipal-division.jpg", "demo-desktop-municipal-location.jpg",
     }
     approved_roots = {*PAGES, "site-content.json", "README.md", "assets", "tutorial"}
     for child in site.iterdir():

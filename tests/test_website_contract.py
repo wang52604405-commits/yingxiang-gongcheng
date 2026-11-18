@@ -93,31 +93,16 @@ class WebsiteContractTest(unittest.TestCase):
                 if anchor:
                     self.assertIn(anchor, parsed[page_name].ids, f"{name} 的锚点不存在：{raw}")
 
-    def test_tutorial_docx_uses_the_live_product_facts(self):
+    def test_tutorial_docx_contains_reviewed_steps_and_screenshots(self):
         tutorial = SITE / "tutorial" / "工程影像管理平台-使用教程.docx"
         with zipfile.ZipFile(tutorial) as bundle:
             root = ET.fromstring(bundle.read("word/document.xml"))
-        text = "".join(
-            node.text or ""
-            for node in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
-        )
-        for expected in (
-            "3000",
-            "39 元",
-            "399 元",
-            "500",
-            "https://shuiliyingxiang.cn/member#register",
-            "/license",
-            "手动下载",
-            "月费会员最多 2 个，终身会员最多 3 个",
-            "登录密码",
-            "工程删除密码",
-        ):
+            media = [name for name in bundle.namelist() if name.startswith("word/media/")]
+            self.assertEqual(len(media), 32)
+        text = "".join(node.text or "" for node in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"))
+        for expected in ("独立工程", "工程删除密码", "项目划分", "检验批", "公路分项", "空间定位", "选择照片", "上传前设置", "整理包", "打印预览", "尚未完成微信真机验证", "示例界面"):
             self.assertIn(expected, text)
-        self.assertNotIn("300 张", text)
-        self.assertNotIn("1000 张", text)
-        self.assertNotIn("2000 张", text)
-        self.assertNotIn("自动检查更新", text)
+        self.assertNotIn("真机验证已通过", text)
 
     def test_private_legacy_resources_cannot_enter_publish_payload(self):
         forbidden = [
@@ -136,12 +121,13 @@ class WebsiteContractTest(unittest.TestCase):
 
     def test_only_reviewed_images_remain_and_pending_work_is_not_advertised(self):
         images = {p.name for p in (SITE / "assets").rglob("*") if p.suffix in {".jpg", ".png"}}
-        self.assertEqual(images, {"miniprogram_qr.png", "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg"})
+        self.assertEqual(images, {"miniprogram_qr.png", "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg", "demo-desktop-municipal-division.jpg", "demo-desktop-municipal-location.jpg"})
         import json
         self.assertEqual(json.loads((SITE / "site-content.json").read_text(encoding="utf-8"))["mini_program"]["screenshots"], [])
         pages = "".join((SITE / name).read_text(encoding="utf-8") for name in PAGES)
         self.assertNotIn("公路专业已支持", pages)
-        self.assertIn("新版逐步截图教程正在制作", pages)
+        self.assertIn("26 页", pages)
+        self.assertIn("非微信真机验证", pages)
 
     def test_site_source_never_contains_the_server_download_directory(self):
         self.assertFalse((SITE / "download").exists())
