@@ -30,10 +30,11 @@ class AutostartPreflightTest(unittest.TestCase):
         for command in ("Remove-ItemProperty", "Stop-ScheduledTask", "Disable-ScheduledTask"):
             self.assertNotIn(command, source)
         self.assertNotRegex(source, r"Stop-Process[^\n]*\$parent\.")
-        call = source.index("\nAssert-LegacySourceAutostartDisabled\n")
-        self.assertLess(call, source.index("$sourceStopDeadline ="))
-        self.assertLess(call, source.index("\n    Stop-InstalledAppProcesses\n"))
-        self.assertLess(call, source.index("# ---------- 6."))
+        main = source[source.index("# ---------- 5."):]
+        call = main.index("\nAssert-LegacySourceAutostartDisabled\n")
+        self.assertLess(call, main.index('Invoke-ProgramSnapshotAction "create"'))
+        self.assertLess(call, main.index("Invoke-ProgramReplacement "))
+        self.assertLess(call, main.index("# ---------- 6."))
         self.assertRegex(source, r"do \{\s+Assert-NoLegacySourceLauncherProcess\s+\$listenerPids")
         self.assertRegex(source, r"for \(\$i = 0; \$i -lt 30; \$i\+\+\) \{\s+Assert-NoLegacySourceLauncherProcess")
 
