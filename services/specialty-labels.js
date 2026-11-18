@@ -1,0 +1,1 @@
+"use strict";exports.specialtyLabels=function(a){return"市政工程"===a||"市政"===a?{leaf:"分项/检验批",path:"选择单位、分部、分项或检验批"}:"公路工程"===a||"公路"===a||"highway"===a?{leaf:"分项",path:"选择单位、分部和分项"}:{leaf:"单元",path:"选择单位、分部、单元和工序"}};
