@@ -76,6 +76,21 @@ def _engineering_project_identity(project: dict) -> dict:
     }
 
 
+def _desktop_engineering_assignment(code: str, data: dict, hierarchy: dict, photo: dict) -> dict:
+    """Keep municipal items distinct from legacy water-engineering units."""
+    is_item = hierarchy.get("node_kind") == "item"
+    assignment = {
+        "unit_code": "" if is_item else str(hierarchy.get("unit_code") or data.get("display_project_code") or code),
+        "process_name": str(photo.get("process_name") or ""),
+    }
+    if is_item:
+        assignment["item_code"] = str(hierarchy.get("item_code") or data.get("display_project_code") or code)
+    for key in ("archive", "spatial"):
+        if isinstance(photo.get(key), dict):
+            assignment[key] = dict(photo[key])
+    return assignment
+
+
 def _new_photo_uuid(seen=None) -> str:
     seen = seen if seen is not None else set()
     while True:
@@ -258,7 +273,9 @@ def build_project_snapshot(
             })
         else:
             container = unit_project
-        part_key = (part_code, part_name, sub_part_code, sub_part_name)
+        # 子分部是分部的子节点，不能参与父分部的身份；否则同一分部
+        # 会随每个子分部重复输出，直接挂在分部下的分项也会另起一份。
+        part_key = (part_code, part_name)
         part = container["parts"].setdefault(part_key, {
             "code": part_code,
             "name": part_name,
@@ -1848,8 +1865,7 @@ class DesktopMobileSync:
                     "project_owner_account_id": project_identity["owner_account_id"],
                     "scope": "other" if is_other else "engineering",
                     "category": "" if is_other else str(photo.get("category") or "construction"),
-                    "unit_code": "" if is_other else str(hierarchy.get("unit_code") or data.get("display_project_code") or code),
-                    "process_name": "" if is_other else str(photo.get("process_name") or ""),
+                    **({"unit_code": "", "process_name": ""} if is_other else _desktop_engineering_assignment(code, data, hierarchy, photo)),
                     "other_node_code": code if is_other else "",
                 }
                 yield {
@@ -1962,6 +1978,10 @@ class DesktopMobileSync:
                 "client_captured_at": _iso_local_time(str(photo.get("upload_time") or "")), "orientation": preview.get("exif_orientation", 1),
                 "width": preview["width"], "height": preview["height"], "sha256": preview["sha256"],
             }
+            # The backfill transport is multipart, whereas classification uses JSON.
+            for key in ("archive", "spatial"):
+                if isinstance(metadata.get(key), dict):
+                    metadata[key] = json.dumps(metadata[key], ensure_ascii=False)
             attempted += 1
             result = self.cloud.desktop_backfill_photo(preview["path"], metadata)
             if not still_current():
@@ -1972,7 +1992,7 @@ class DesktopMobileSync:
                     http_status = int(result.get("http_status") or 0)
                 except (TypeError, ValueError):
                     http_status = 0
-                photo_validation_error = http_status in {400, 409, 413, 415, 422} or (http_status == 404 and result.get("code") in {"unit_not_found", "other_node_not_found"})
+                photo_validation_error = http_status in {400, 409, 413, 415, 422} or (http_status == 404 and result.get("code") in {"unit_not_found", "item_not_found", "other_node_not_found"})
                 if photo_validation_error and not result.get("network_error"):
                     state["backfill_errors"][photo_uuid] = {
                         "permanent": True, "source_fingerprint": fingerprint, "validation_revision": state.get("snapshot_revision", ""), "preview_sha256": preview["sha256"], "http_status": http_status,
@@ -2031,8 +2051,7 @@ class DesktopMobileSync:
                     result = send(permanent, {
                         "project_id": project_identity["local_project_id"],
                         "desktop_machine_id": self._desktop_machine_id(),
-                        "unit_code": hierarchy.get("unit_code") or data.get("display_project_code") or code,
-                        "process_name": str(photo.get("process_name") or ""),
+                        **_desktop_engineering_assignment(code, data, hierarchy, photo),
                         "category": str(photo.get("category") or "construction"),
                         "local_project_code": code, "local_photo_id": str(photo.get("id") or ""),
                     })

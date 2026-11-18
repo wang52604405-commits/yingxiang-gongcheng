@@ -718,6 +718,30 @@ def _flatten_snapshot(tree, other_tree):
     return result
 
 
+def _validated_snapshot_nodes(nodes):
+    """Reject ambiguous identities before replacing any stored project data."""
+    unique = {}
+    for node in nodes:
+        key = (node["scope"], node["node_code"])
+        previous = unique.get(key)
+        if previous is not None:
+            if (
+                previous["parent_code"] != node["parent_code"]
+                or previous["node_type"] != node["node_type"]
+            ):
+                raise ApiProblem(
+                    "conflicting_snapshot_node",
+                    f"工程划分编码 {node['node_code']} 对应不同上级或层级，请先核对重复编码。"
+                    "本次同步未写入，已有工程划分、照片及其归属保持不变。",
+                    409,
+                )
+            # Old desktop snapshots may repeat a parent while listing its
+            # children separately. Flattened children remain in this sequence.
+            continue
+        unique[key] = node
+    return list(unique.values())
+
+
 def _exchange_wechat_code(code: str, app_id: str) -> dict:
     code = _safe_text(code, 256)
     app_id = _safe_text(app_id, 128)
@@ -5804,7 +5828,7 @@ def register_mobile_api(
         requirements = data.get("requirements") if requirements_supplied else []
         if len(requirements) > 5000:
             raise ApiProblem("too_many_requirements", "专业采集规则超过单工程 5000 条上限")
-        nodes = _flatten_snapshot(tree, other_tree)
+        nodes = _validated_snapshot_nodes(_flatten_snapshot(tree, other_tree))
         conn = db.connect()
         try:
             _require_active_machine(conn, current["id"], desktop_machine_id)
@@ -6827,7 +6851,11 @@ def register_mobile_api(
                 raise ApiProblem("photo_not_found", "照片不存在或不属于当前归档电脑", 404)
             if row["status"] != "desktop_imported":
                 raise ApiProblem("photo_not_imported", "请先将照片完整保存到电脑", 409)
-            assignment = _validate_assignment(conn, current["id"], project["project_id"], "engineering", {"unit_code": data.get("unit_code"), "process_name": data.get("process_name", "")}, require_process=False)
+            assignment = _validate_assignment(
+                conn, current["id"], project["project_id"], "engineering",
+                {key: data[key] for key in ("unit_code", "item_code", "process_name", "archive", "spatial") if key in data},
+                require_process=False,
+            )
             match = _json(row["match_json"], {})
             idempotent = row["scope"] == "engineering" and row["category"] == category and _json(row["assignment_json"], {}) == assignment and not match.get("manual_review_required") and row["local_project_code"] == local_project_code and row["local_photo_id"] == local_photo_id
             if not idempotent:
@@ -6864,10 +6892,15 @@ def register_mobile_api(
             category = ""
         assignment = {
             "unit_code": request.form.get("unit_code", ""),
+            "item_code": request.form.get("item_code", ""),
             "process_name": request.form.get("process_name", ""),
         } if scope == "engineering" else {
             "other_node_code": request.form.get("other_node_code", "")
         }
+        if scope == "engineering":
+            for key in ("archive", "spatial"):
+                if request.form.get(key):
+                    assignment[key] = _json(request.form.get(key), {})
         row, idempotent = insert_photo(
             current_user=current,
             photo_uuid=_uuid(request.form.get("photo_uuid"), "photo_uuid"),

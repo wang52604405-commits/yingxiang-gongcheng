@@ -8,6 +8,9 @@ import importlib.util
 import tarfile
 import tempfile
 import unittest
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -118,40 +121,11 @@ class ServerDeployContractTest(unittest.TestCase):
             self.assertIsNone(deploy_auth.require_mobile_environment())
         remote_check.assert_called_once_with(expected_command, check=False)
 
-    def test_deploy_prunes_old_snapshots_and_never_touches_daily_backups(self):
+    def test_deploy_preserves_all_existing_snapshots(self):
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
-        self.assertIn("BACKUP_RETAIN_COUNT = 2", deployer)
-
-        empty = SimpleNamespace(returncode=0, stdout="prune_done\n", stderr="")
-        with patch.object(deploy_auth, "ssh", return_value=empty) as remote:
-            deploy_auth.prune_remote_snapshots()
-        script = remote.call_args[0][0]
-
-        self.assertIn(
-            "for root in /opt/album-auth/backups /opt/album-auth/releases", script
-        )
-        self.assertIn("-name 'deploy-*'", script)
-        # 每日数据库备份目录不在清理范围内。
-        self.assertNotIn("backups/database", script)
-
-    def test_prune_remote_snapshots_reports_only_removed_deploy_dirs(self):
-        output = SimpleNamespace(
-            returncode=0,
-            stdout=(
-                "已清理 /opt/album-auth/backups/deploy-20260809-005530\n"
-                "prune_done\n"
-            ),
-            stderr="",
-        )
-        with patch.object(deploy_auth, "ssh", return_value=output) as remote:
-            removed = deploy_auth.prune_remote_snapshots()
-
-        self.assertEqual(
-            removed, ["已清理 /opt/album-auth/backups/deploy-20260809-005530"]
-        )
-        script = remote.call_args[0][0]
-        self.assertIn("head -n -2", script)
-        self.assertNotIn("backups/database", script)
+        self.assertNotIn("prune_remote_snapshots", deployer)
+        self.assertNotIn("rm -rf", deployer)
+        self.assertNotIn("head -n -", deployer)
 
     def test_deploy_refuses_to_start_when_free_space_is_below_the_guard(self):
         too_low = SimpleNamespace(returncode=0, stdout="1024\n", stderr="")
@@ -170,16 +144,102 @@ class ServerDeployContractTest(unittest.TestCase):
         with patch.object(deploy_auth, "ssh", return_value=healthy):
             self.assertEqual(deploy_auth.require_free_space(), healthy_kb)
 
-    def test_prune_and_space_guard_run_after_the_wechat_preflight(self):
+    def test_low_disk_stops_before_any_snapshot_write_or_deletion(self):
+        low = SimpleNamespace(returncode=0, stdout="1024\n", stderr="")
+        with patch.object(deploy_auth, "SSH_KEY", Path(__file__)), patch.object(
+            deploy_auth, "require_mobile_environment"
+        ), patch.object(deploy_auth, "ssh", return_value=low) as remote:
+            with self.assertRaises(SystemExit):
+                deploy_auth.main()
+        remote.assert_called_once_with("df -Pk / | awk 'NR==2 {print $4}'", check=False)
+
+    def test_space_guard_runs_before_any_remote_write(self):
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
         preflight_call = deployer.index("    require_mobile_environment()")
-        prune_call = deployer.index("= prune_remote_snapshots()")
         guard_call = deployer.index("free_kb = require_free_space()")
         first_remote_write = deployer.index('    ssh(f"mkdir -p')
 
-        self.assertLess(preflight_call, prune_call)
-        self.assertLess(prune_call, guard_call)
+        self.assertLess(preflight_call, guard_call)
         self.assertLess(guard_call, first_remote_write)
+
+    def _failed_production_deploy_commands(self, failure: str) -> list[str]:
+        commands: list[str] = []
+
+        def remote(command, check=True):
+            commands.append(command)
+            if command == "date +%Y%m%d-%H%M%S":
+                return SimpleNamespace(returncode=0, stdout="20261118-010000", stderr="")
+            if "&& printf present;" in command:
+                return SimpleNamespace(returncode=0, stdout="present", stderr="")
+            if failure == "dropin" and "EnvironmentFiles --value" in command:
+                return SimpleNamespace(returncode=1, stdout="", stderr="injected drop-in failure")
+            if failure == "replacement" and command.startswith("cp -a /opt/album-auth/releases/"):
+                return SimpleNamespace(returncode=1, stdout="", stderr="injected replacement failure")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        success = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.object(deploy_auth, "SSH_KEY", Path(__file__)), patch.object(
+            deploy_auth, "require_mobile_environment"
+        ), patch.object(deploy_auth, "require_free_space", return_value=8 * 1024 * 1024), patch.object(
+            deploy_auth, "ssh", side_effect=remote
+        ), patch.object(deploy_auth, "ssh_python", return_value=success), patch.object(
+            deploy_auth, "scp_file"
+        ), patch.object(deploy_auth, "production_health", return_value=(True, "healthy")):
+            with self.assertRaises(SystemExit):
+                deploy_auth.main()
+        return commands
+
+    def test_dropin_failure_cannot_remove_uncaptured_or_unchanged_runtime_files(self):
+        commands = self._failed_production_deploy_commands("dropin")
+        self.assertTrue(any(command.startswith("test ! -e /opt/album-auth/backups/deploy-") for command in commands))
+        snapshot = next(index for index, command in enumerate(commands) if "touch " in command and ".snapshot-ready" in command)
+        dropin = next(index for index, command in enumerate(commands) if "EnvironmentFiles --value" in command)
+        rollback = next(command for command in commands if command.startswith('test "$(readlink -f'))
+        self.assertLess(snapshot, dropin)
+        # step 6 has changed only service configuration, so restoring code is unnecessary.
+        self.assertNotIn("runtime/", rollback)
+        self.assertNotIn("municipal_rules.py", rollback)
+        self.assertNotIn("rsync", rollback)
+
+    def test_replacement_failure_rolls_back_only_managed_files(self):
+        commands = self._failed_production_deploy_commands("replacement")
+        rollback = next(command for command in commands if command.startswith('test "$(readlink -f'))
+        self.assertIn("/runtime/.snapshot-ready", rollback)
+        self.assertIn("/server/app.py", rollback)
+        self.assertIn("/runtime/municipal_rules.py", rollback)
+        self.assertNotIn("rsync", rollback)
+        self.assertNotIn("/data/", rollback)
+        self.assertNotIn("server.db", rollback)
+
+    @unittest.skipIf(sys.platform == "win32" or not shutil.which("bash"), "requires POSIX shell")
+    def test_code_rollback_preserves_new_database_photos_and_unknown_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            backup, live = root / "backup", root / "live"
+            backup.mkdir()
+            (backup / "app.py").write_text("previous code", encoding="utf-8")
+            (backup / "data").mkdir()
+            (backup / "data/server.db").write_bytes(b"stale database")
+            (live / "data/mobile_objects").mkdir(parents=True)
+            (live / "data/server.db").write_bytes(b"new business records")
+            (live / "data/mobile_objects/new.jpg").write_bytes(b"new original photo")
+            (live / "operator-file").write_bytes(b"preserve")
+            (live / "app.py").write_text("failed code", encoding="utf-8")
+            (live / "new-release.py").write_text("new managed file", encoding="utf-8")
+            command = deploy_auth.managed_files_rollback_command(
+                str(backup), str(live), ["app.py", "new-release.py"]
+            )
+            subprocess.run(["bash", "-c", command], check=True)
+            self.assertEqual((live / "app.py").read_text(encoding="utf-8"), "previous code")
+            self.assertFalse((live / "new-release.py").exists())
+            self.assertEqual((live / "data/server.db").read_bytes(), b"new business records")
+            self.assertEqual((live / "data/mobile_objects/new.jpg").read_bytes(), b"new original photo")
+            self.assertEqual((live / "operator-file").read_bytes(), b"preserve")
+
+    def test_rollback_rejects_paths_outside_the_release_files(self):
+        for name in ("../server.db", "/etc/passwd", ""):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                deploy_auth.managed_files_rollback_command("backup", "live", [name])
 
     def test_github_deploy_checks_the_whole_push_for_server_changes(self):
         workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
@@ -279,6 +339,30 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("timeout=120", deployer)
         self.assertIn("attempts: int = 3", deployer)
 
+    def test_packaged_municipal_runtime_loads_without_the_source_checkout(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir)
+            archive_path = target / "payload.tar.gz"
+            deploy_auth.build_release_archive(archive_path, ROOT / "validate_mobile_migration.py")
+            isolated = target / "isolated"
+            isolated.mkdir()
+            with tarfile.open(archive_path, "r:gz") as archive:
+                for name in ("municipal_rules.py", "professional_templates.py", "assets/professional_templates.json"):
+                    destination = isolated / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.extractfile(name) as content:
+                        destination.write_bytes(content.read())
+            loaded = subprocess.run(
+                [sys.executable, "-I", "-c", (
+                    "import sys; sys.path.insert(0, sys.argv[1]); "
+                    "import municipal_rules, professional_templates; "
+                    "assert professional_templates.municipal_template_document(); "
+                    "assert professional_templates.catalog()"
+                ), str(isolated)],
+                cwd=target, capture_output=True, text=True,
+            )
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
+
     def test_scp_file_retries_a_transient_disconnect(self):
         failed = SimpleNamespace(returncode=1, stdout="", stderr="lost connection")
         passed = SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -344,9 +428,9 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("ALBUM_BACKUP_RETENTION_DAYS=7", cron)
         self.assertIn("PRAGMA quick_check;", self.read("backup.sh"))
 
-    def test_failed_deploy_has_verified_exact_tree_rollback(self):
+    def test_failed_deploy_verifies_code_rollback_without_restoring_business_data(self):
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
-        self.assertIn("rsync -a --delete --", deployer)
+        self.assertNotIn("rsync -a --delete --", deployer)
         self.assertIn("readlink -f", deployer)
         self.assertIn("production_health", deployer)
         self.assertIn("自动回滚执行失败，需要按备份人工恢复", deployer)
@@ -396,7 +480,7 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("proxy_pass http://127.0.0.1:8000", rendered)
         self.assertEqual(module.inject_acme_location(rendered), rendered)
 
-    def test_manual_rollback_never_silently_reverts_the_database(self):
+    def test_manual_rollback_validates_backup_and_does_not_run_sqlite_restore(self):
         rollback = self.read("rollback.sh")
         self.assertIn('"$root_real"/deploy-*', rollback)
         self.assertIn("py_compile", rollback)

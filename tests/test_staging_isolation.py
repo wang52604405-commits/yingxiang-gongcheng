@@ -133,7 +133,7 @@ class StagingIsolationTests(unittest.TestCase):
     def test_production_deployer_passes_private_validation_copy_root(self):
         deployer = PRODUCTION_DEPLOY.read_text(encoding="utf-8")
         self.assertIn('validation_root = f"{release_root}/migration-validation"', deployer)
-        self.assertIn('ssh(f"install -d -m 0700 {backup} {backup}/server")', deployer)
+        self.assertIn('ssh(f"test ! -e {backup} && install -d -m 0700 {backup} {backup}/server")', deployer)
         self.assertIn('ssh(f"install -d -m 0700 {validation_root}")', deployer)
         self.assertIn('f"--copy-root {validation_root} "', deployer)
         self.assertIn("os.umask(0o077)", deployer)

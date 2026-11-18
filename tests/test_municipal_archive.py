@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import copy
 import io
 import json
 import os
@@ -11,7 +12,7 @@ import unittest
 import uuid
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image
 from werkzeug.datastructures import FileStorage
@@ -309,6 +310,47 @@ class MunicipalDesktopFlowTest(unittest.TestCase):
         self.assertEqual(kept["project_name"], "旧单元")
         self.assertEqual(kept["photos"][0]["id"], "OLD-001")
 
+    def test_snapshot_groups_sibling_subparts_under_one_part_without_changing_files(self):
+        created = self._create("市政层级同步", f"TREE-{uuid.uuid4().hex[:8]}", "城市桥梁")
+        self.assertEqual(created.status_code, 200, created.get_json())
+        records = []
+        for prefix, sub_unit in (("DIRECT", ""), ("SUB", "ZDW-01")):
+            for suffix, sub_part in (("A", "ZFB-A"), ("B", "ZFB-B"), ("C", "")):
+                records.append({
+                    "分项工程编码": f"{prefix}-{suffix}",
+                    "分项工程名称": f"支座{suffix}",
+                    "单位工程编码": "DW-BRIDGE",
+                    "单位工程名称": "跨河桥",
+                    "子单位工程编码": sub_unit,
+                    "子单位工程名称": "引桥" if sub_unit else "",
+                    "分部工程编码": "FB-" + prefix,
+                    "分部工程名称": "支座",
+                    "子分部工程编码": prefix + "-" + sub_part if sub_part else "",
+                    "子分部工程名称": sub_part,
+                })
+        imported = self.desktop.manager.import_municipal_records(records, "snapshot-regression")
+        self.assertEqual(imported["created"], 6, imported)
+        metadata_before = {
+            record["分项工程编码"]: self.desktop.manager._metadata_path(record["分项工程编码"]).read_bytes()
+            for record in records
+        }
+        snapshot = self.desktop.mobile_sync.build_project_snapshot(
+            self.desktop.manager, self.desktop.current_engineering_project(), {"nodes": []},
+        )
+        unit = snapshot["tree"][0]["unit_projects"][0]
+        for container, prefix in ((unit, "DIRECT"), (unit["sub_units"][0], "SUB")):
+            self.assertEqual(len(container["parts"]), 1, container)
+            part = container["parts"][0]
+            self.assertEqual(part["code"], "FB-" + prefix)
+            self.assertEqual([item["item_code"] for item in part["items"]], [prefix + "-C"])
+            self.assertEqual(len(part["sub_parts"]), 2)
+            self.assertEqual(
+                {item["item_code"] for sub_part in part["sub_parts"] for item in sub_part["items"]},
+                {prefix + "-A", prefix + "-B"},
+            )
+        for code, before in metadata_before.items():
+            self.assertEqual(self.desktop.manager._metadata_path(code).read_bytes(), before)
+
     def test_photo_archive_fields_survive_and_export_roundtrip(self):
         created = self._create("给水管网", f"GS-{uuid.uuid4().hex[:8]}", "给水管道")
         self.assertEqual(created.status_code, 200, created.get_json())
@@ -393,6 +435,72 @@ class MunicipalDesktopFlowTest(unittest.TestCase):
         self.assertEqual(stored["division_type"], "unit")
         self.assertIn("灌注桩", stored.get("standard_unit_name", "") + stored["project_name"])
         self.assertTrue(self.desktop.is_pile_unit(stored))
+
+    def test_supervision_copy_preserves_archive_spatial_and_export_originals(self):
+        created = self._create("监理归档保留", "COPY-" + uuid.uuid4().hex[:8], "城镇道路")
+        self.assertEqual(created.status_code, 200, created.get_json())
+        code = "FX-COPY-" + uuid.uuid4().hex[:8]
+        self.desktop.manager.create_project(code, "路基", "", {
+            "节点类型": "item", "分项工程编码": code, "分项工程名称": "路基",
+            "单位工程编码": "DW", "单位工程名称": "道路",
+            "分部工程编码": "FB", "分部工程名称": "路基",
+        })
+        raw = _jpeg_bytes()
+        source = self.desktop.manager.add_photos(
+            code, [FileStorage(stream=io.BytesIO(raw), filename="site.jpg")],
+            title="路基覆土前", photo_date="2026-11-01", photographer="张三",
+            per_file_meta={"site.jpg": {
+                "archive": {
+                    "location_text": "人民路", "phase": "during", "concealment": "before_cover",
+                    "acceptance": {"record_type": "隐蔽验收", "record_no": "YS-01", "title": "路基验收记录"},
+                    "times": {"confirmed_capture": "2026-11-01", "exif_original": "2026:11:01 08:00:00", "correction_reason": "按现场记录核对"},
+                    "gps": {"status": "denied", "manual_place": "人民路"},
+                },
+                "spatial": {"stake_start": "K0+001", "stake_end": "K0+020", "side": "左幅"},
+            }},
+        )[0]
+        source_archive = json.loads(json.dumps(source["archive"]))
+        source_spatial = dict(source["spatial"])
+        copied = self.desktop.manager.copy_construction_to_supervision(code)[0]
+        self.assertNotEqual(copied["photo_uuid"], source["photo_uuid"])
+        self.assertEqual(copied["category"], "supervision")
+        self.assertEqual(copied["archive"], source_archive)
+        self.assertEqual(copied["spatial"], source_spatial)
+        self.assertEqual(self.desktop.manager._original_path(code, copied["original_backup"]).read_bytes(), raw)
+
+        package = self.client.post("/api/archive-packages", json={
+            "photo_ids": [source["photo_uuid"], copied["photo_uuid"]],
+        })
+        self.assertEqual(package.status_code, 200, package.data[:200])
+        with zipfile.ZipFile(io.BytesIO(package.data)) as bundle:
+            manifest = json.loads(bundle.read("manifest.json"))
+            self.assertEqual(manifest["catalog_count"], 2)
+            self.assertEqual(manifest["original_count"], 2)
+            self.assertTrue(manifest["precheck"]["archivable"])
+            for entry in manifest["files"]:
+                self.assertEqual(bundle.read(entry["path"]), raw)
+                self.assertEqual(entry["sha256"], source_archive["original"]["sha256"])
+
+        # Match the editor's partial nested payload. Omitted fields survive;
+        # explicitly clearing the record number still works.
+        edited = self.client.patch(f"/api/photos/{code}/{copied['id']}", json={
+            "photo_uuid": copied["photo_uuid"], "title": "监理复核题名",
+            "photo_date": "2026-11-01", "photographer": "张三",
+            "archive": {"acceptance": {"record_no": ""}, "times": {"confirmed_capture": "2026-11-01"}, "original": {}},
+            "spatial": {"stake_start": "K0+002"},
+        })
+        self.assertEqual(edited.status_code, 200, edited.get_json())
+        changed = edited.get_json()["photo"]
+        self.assertEqual(changed["archive"]["acceptance"]["record_no"], "")
+        self.assertEqual(changed["archive"]["acceptance"]["record_type"], "隐蔽验收")
+        self.assertEqual(changed["archive"]["acceptance"]["title"], "路基验收记录")
+        self.assertEqual(changed["archive"]["times"], source_archive["times"])
+        self.assertEqual(changed["archive"]["gps"], source_archive["gps"])
+        self.assertEqual(changed["archive"]["original"], source_archive["original"])
+        kept_source = next(photo for photo in self.desktop.manager.get_project(code)["photos"] if photo["photo_uuid"] == source["photo_uuid"])
+        self.assertEqual(kept_source["id"], source["id"])
+        self.assertEqual(kept_source["archive"], source_archive)
+        self.assertEqual(kept_source["spatial"], source_spatial)
 
     def test_industry_change_requires_confirmation_and_does_not_renumber(self):
         created = self._create("待改专业", f"CHG-{uuid.uuid4().hex[:8]}", "城镇道路")
@@ -505,19 +613,6 @@ class MunicipalServerRoundtripTest(unittest.TestCase):
                 "project_type": "城镇道路",
                 "rule_version": municipal_rules.RULE_VERSION,
             },
-            "tree": [{
-                "code": "SEC-1",
-                "name": "一标段",
-                "unit_projects": [{
-                    "code": "DW-ROAD",
-                    "name": "人民路",
-                    "parts": [{
-                        "code": "FB-BASE",
-                        "name": "路基",
-                        "items": [{"item_code": "FX-001", "name": "清表", "division_type": "item"}],
-                    }],
-                }],
-            }],
             "requirements": [{
                 "template_code": "SZ-ROAD-HIDE",
                 "industry": "市政工程",
@@ -532,6 +627,37 @@ class MunicipalServerRoundtripTest(unittest.TestCase):
                 "min_photo_count": 1,
             }],
         }
+        # Exercise the desktop snapshot builder before the real HTTP/storage/tree
+        # roundtrip, including sibling sub-parts and a direct child of their part.
+        import mobile_sync
+
+        records = {}
+        for code, sub_code in (("FX-001", ""), ("FX-002", "ZFB-A"), ("FX-003", "ZFB-B")):
+            records[code] = {
+                "project_code": code,
+                "project_name": "清表" if not sub_code else sub_code,
+                "source_fields": {"标段编码": "SEC-1"},
+                "hierarchy": {
+                    "contract_name": "一标段",
+                    "unit_project_code": "DW-ROAD",
+                    "unit_project_name": "人民路",
+                    "part_code": "FB-BASE",
+                    "part_name": "路基",
+                    "sub_part_code": sub_code,
+                    "sub_part_name": sub_code,
+                    "node_kind": "item",
+                    "item_code": code,
+                    "item_name": "清表" if not sub_code else sub_code,
+                },
+            }
+        manager = Mock()
+        manager.list_projects.return_value = list(records.values())
+        manager.get_project.side_effect = records.__getitem__
+        manager.project_hierarchy.side_effect = lambda record: record["hierarchy"]
+        snapshot["tree"] = mobile_sync.build_project_snapshot(
+            manager, snapshot["project"], {"nodes": []}, "MACHINE-M",
+        )["tree"]
+        self.assertEqual(len(snapshot["tree"][0]["unit_projects"][0]["parts"]), 1)
         saved = client.post("/api/desktop/v1/project-snapshot", json=snapshot, headers={"Authorization": "Bearer " + desktop})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         login = client.post("/api/mobile/v1/auth/wechat-login", json={"code": "muni-wechat", "app_id": "wx-muni"})
@@ -546,6 +672,19 @@ class MunicipalServerRoundtripTest(unittest.TestCase):
         flat = json.dumps(tree.get_json()["tree"], ensure_ascii=False)
         self.assertIn("FX-001", flat)
         self.assertIn("item", flat)
+        returned_nodes = {}
+        def collect_nodes(nodes):
+            for node in nodes:
+                self.assertNotIn(node["code"], returned_nodes)
+                returned_nodes[node["code"]] = node
+                collect_nodes(node["children"])
+        collect_nodes(tree.get_json()["tree"])
+        self.assertEqual(returned_nodes["FX-001"]["parent_code"], "FB-BASE")
+        self.assertEqual(returned_nodes["FX-002"]["parent_code"], "ZFB-A")
+        self.assertEqual(returned_nodes["FX-003"]["parent_code"], "ZFB-B")
+        self.assertEqual(returned_nodes["ZFB-A"]["parent_code"], "FB-BASE")
+        self.assertEqual(returned_nodes["ZFB-B"]["parent_code"], "FB-BASE")
+        self.assertEqual(tree.get_json()["project"]["metadata"]["item_count"], 3)
         rules = client.get("/api/mobile/v1/projects/municipal-1/requirements", headers={"Authorization": "Bearer " + mobile}).get_json()
         self.assertEqual(rules["requirements"][0]["rule_level"], "national_mandatory")
         missing = client.post("/api/mobile/v1/batches", json={
@@ -586,6 +725,78 @@ class MunicipalServerRoundtripTest(unittest.TestCase):
         self.assertEqual(assignment["archive"]["times"]["exif_original"], "2026:11:02 07:00:00")
         self.assertEqual(assignment["spatial"]["stake_start"], "K0+120")
         self.assertEqual(assignment["gps"]["status"] if False else assignment["archive"]["gps"]["status"], "denied")
+        photo_uuid = str(uuid.uuid4())
+        raw = _jpeg_bytes()
+        uploaded = client.post(
+            f"/api/mobile/v1/batches/{batch.get_json()['batch']['batch_id']}/photos",
+            data={
+                "file": (io.BytesIO(raw), "原件.jpg"),
+                "photo_uuid": photo_uuid,
+                "sha256": __import__("hashlib").sha256(raw).hexdigest(),
+                "original_size_bytes": str(len(raw)),
+                "original_filename": "原件.jpg",
+            },
+            headers={"Authorization": "Bearer " + mobile},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.get_json())
+
+        # Older desktop clients may repeat an identical parent. Accept and
+        # deduplicate those rows while retaining every leaf and stable code.
+        repeated = copy.deepcopy(snapshot)
+        repeated.update(snapshot_id=str(uuid.uuid4()), revision=4)
+        repeated_unit = repeated["tree"][0]["unit_projects"][0]
+        repeated_unit["parts"].append(copy.deepcopy(repeated_unit["parts"][0]))
+        repeated_saved = client.post(
+            "/api/desktop/v1/project-snapshot", json=repeated,
+            headers={"Authorization": "Bearer " + desktop},
+        )
+        self.assertEqual(repeated_saved.status_code, 200, repeated_saved.get_json())
+        repeated_tree = client.get(
+            "/api/mobile/v1/projects/municipal-1/tree", headers={"Authorization": "Bearer " + mobile},
+        ).get_json()
+        self.assertEqual(repeated_tree["tree"], tree.get_json()["tree"])
+        self.assertEqual(repeated_tree["project"]["metadata"]["item_count"], 3)
+
+        def stored_state():
+            conn = db.connect()
+            try:
+                rows = {
+                    table: [tuple(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY rowid")]
+                    for table in (
+                        "cloud_units", "cloud_engineering_projects", "cloud_photos",
+                        "cloud_project_requirements", "desktop_sync_cursors", "mobile_batches",
+                    )
+                }
+            finally:
+                conn.close()
+            objects = {
+                str(path.relative_to(config.MOBILE_STORAGE_DIR)): path.read_bytes()
+                for path in config.MOBILE_STORAGE_DIR.rglob("*") if path.is_file()
+            }
+            return rows, objects
+
+        before_conflict = stored_state()
+        parent_conflict = copy.deepcopy(snapshot)
+        parent_conflict["tree"][0]["unit_projects"][0]["parts"].append({
+            "code": "FB-OTHER", "name": "另一分部",
+            "sub_parts": [{"code": "ZFB-A", "name": "编码重复的子分部", "items": []}],
+        })
+        type_conflict = copy.deepcopy(snapshot)
+        type_conflict["tree"][0]["unit_projects"][0]["parts"][0]["items"].append({
+            "item_code": "FB-BASE", "name": "与分部编码相同的分项",
+        })
+        for label, conflicting in (("different_parent", parent_conflict), ("different_type", type_conflict)):
+            with self.subTest(snapshot_conflict=label):
+                conflicting.update(snapshot_id=str(uuid.uuid4()), revision=5)
+                rejected = client.post(
+                    "/api/desktop/v1/project-snapshot", json=conflicting,
+                    headers={"Authorization": "Bearer " + desktop},
+                )
+                self.assertEqual(rejected.status_code, 409, rejected.get_json())
+                self.assertEqual(rejected.get_json()["code"], "conflicting_snapshot_node")
+                self.assertIn("未写入", rejected.get_json()["error"])
+                self.assertEqual(stored_state(), before_conflict)
         other_view = client.get("/api/mobile/v1/projects/municipal-1/tree", headers={"Authorization": "Bearer " + other})
         self.assertIn(other_view.status_code, {403, 404})
         other_snapshot = client.post("/api/desktop/v1/project-snapshot", json={

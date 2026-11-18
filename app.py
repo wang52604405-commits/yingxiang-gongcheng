@@ -2842,6 +2842,8 @@ class AlbumManager:
                 "stored_bytes": int(target.stat().st_size),
                 "optimized": bool(photo.get("optimized")),
                 "original_backup": filename if target_backup.exists() else "",
+                "archive": copy.deepcopy(photo.get("archive") or {}),
+                "spatial": copy.deepcopy(photo.get("spatial") or {}),
             }
             data["photos"].append(item)
             added.append(self._photo_item(data, item))
@@ -2885,9 +2887,16 @@ class AlbumManager:
                     if isinstance(updates.get("archive"), dict) or isinstance(updates.get("spatial"), dict):
                         current_archive = photo.get("archive") if isinstance(photo.get("archive"), dict) else {}
                         incoming_archive = updates.get("archive") if isinstance(updates.get("archive"), dict) else {}
-                        merged_archive = municipal_rules.sanitize_archive({**current_archive, **incoming_archive})
-                        if current_archive.get("original") and not incoming_archive.get("original"):
-                            merged_archive["original"] = current_archive.get("original")
+                        archive_payload = {**current_archive, **incoming_archive}
+                        # Caption edits only submit the nested fields shown by the
+                        # editor. Preserve omitted provenance/acceptance details;
+                        # an explicitly supplied empty field can still clear it.
+                        for field in ("acceptance", "times", "gps", "original"):
+                            previous = current_archive.get(field)
+                            incoming = incoming_archive.get(field)
+                            if isinstance(previous, dict) and isinstance(incoming, dict):
+                                archive_payload[field] = {**previous, **incoming}
+                        merged_archive = municipal_rules.sanitize_archive(archive_payload)
                         photo["archive"] = merged_archive
                         photo["spatial"] = municipal_rules.sanitize_spatial(
                             updates.get("spatial") if isinstance(updates.get("spatial"), dict) else photo.get("spatial")

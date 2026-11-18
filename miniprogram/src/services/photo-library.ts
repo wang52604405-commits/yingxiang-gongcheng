@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { CloudPhoto } from '@/types/domain'
+import type { Assignment, CloudPhoto } from '@/types/domain'
 
 export interface LibraryPhotoQuery {
   project_id: string
@@ -22,6 +22,12 @@ export function destinationPhotoQuery(
   if (assignment.item_code) return { item_code: assignment.item_code }
   return { unit_code: assignment.unit_code || undefined }
 }
+
+export function destinationPhotoLabel(assignment: Assignment): string {
+  return assignment.item_name || assignment.item_code || assignment.unit_name || assignment.unit_code
+    || assignment.other_node_name || assignment.other_node_code || ''
+}
+
 export interface LibraryPhotoPage { photos: CloudPhoto[]; total: number; next_cursor: string }
 
 /** One paging session per account, project and filter; old responses never cross sessions. */

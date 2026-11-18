@@ -12,7 +12,7 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
-import { createPhotoLibrary, destinationPhotoQuery } from '@/services/photo-library'
+import { createPhotoLibrary, destinationPhotoLabel, destinationPhotoQuery } from '@/services/photo-library'
 import type { PhotoCategory, Scope } from '@/types/domain'
 import { shortDate } from '@/utils/format'
 
@@ -148,7 +148,7 @@ onReachBottom(() => { void loadPhotos(false) })
 
       <view v-if="scope !== 'all'" class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? activeDestination.assignment.unit_name || activeDestination.assignment.other_node_name : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? destinationPhotoLabel(activeDestination.assignment) : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
       <button v-if="activeDestination" class="clear-filter pressable" @tap="clearDestination">查看全部</button>

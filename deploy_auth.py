@@ -35,11 +35,7 @@ DEFAULT_SERVER_HOST = "root@47.95.221.66"
 REMOTE_SERVER_DIR = "/opt/album-auth/server"
 REMOTE_PYTHON = "/opt/album-auth/venv/bin/python"
 SERVICE_NAME = "album-auth"
-# 每次部署都会在 backups/ 和 releases/ 下留一份完整快照（代码 + 线上库副本）。
-# 没有上限时它们会持续堆积并写满系统盘：SQLite 无法写 WAL，所有读库接口都会
-# 以 500 失败。2026-09-15 的线上故障就是这样发生的。因此部署前后都强制清理最旧
-# 的部署快照，并在系统盘可用空间低于安全下限时直接拒绝部署。
-BACKUP_RETAIN_COUNT = 2
+# 部署不自动删除历史快照。空间不足时停止，由运维核实独立备份和保留要求后处理。
 MIN_FREE_SPACE_KB = 3 * 1024 * 1024
 # 线上遗留的 no-control-socket.conf 会按字典序在数字前缀之后加载。
 # 使用 zz 前缀才能保证移动端要求的单 worker/gthread 配置最终生效。
@@ -275,26 +271,29 @@ def ssh_python(source: str, *args: str, check=True):
     return ssh(command, check=check)
 
 
-def prune_remote_snapshots(keep: int = BACKUP_RETAIN_COUNT) -> list[str]:
-    """只保留最近 keep 个部署快照，返回被清理的目录列表。
-
-    每日数据库备份目录 backups/database/ 以及非 deploy-* 的人工快照一律不动。
-    """
-    script = (
-        "for root in /opt/album-auth/backups /opt/album-auth/releases; do "
-        "find \"$root\" -maxdepth 1 -mindepth 1 -type d -name 'deploy-*' -printf '%f\\n' "
-        f"| sort | head -n -{keep} "
-        "| while IFS= read -r name; do "
-        "if rm -rf -- \"$root/$name\"; then echo \"已清理 $root/$name\"; fi; "
-        "done; "
-        "done; echo prune_done"
+def managed_server_files() -> list[str]:
+    """仅列出本发布器覆盖的文件；数据、影像和临时上传不属于代码回滚。"""
+    return (
+        list(CODE_FILES)
+        + [f"templates/{name}" for name in TEMPLATE_FILES]
+        + [f"deploy/{name}" for name in DEPLOY_FILES]
     )
-    result = ssh(script, check=False)
-    return [
-        line.strip()
-        for line in (result.stdout or "").splitlines()
-        if line.strip().startswith("已清理")
-    ]
+
+
+def managed_files_rollback_command(backup: str, destination: str, names: list[str]) -> str:
+    """恢复白名单文件，绝不把整个旧目录同步回正在接收新数据的生产目录。"""
+    commands = []
+    for name in names:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError(f"不安全的发布文件路径：{name}")
+        source = shlex.quote(f"{backup}/{name}")
+        target = shlex.quote(f"{destination}/{name}")
+        commands.append(
+            f"if test -f {source}; then install -D -m 0644 {source} {target}; "
+            f"else rm -f -- {target}; fi"
+        )
+    return " && ".join(commands)
 
 
 def remote_free_space_kb() -> int:
@@ -313,7 +312,7 @@ def require_free_space() -> int:
         raise SystemExit(
             f"服务器系统盘可用空间仅 {free_kb / 1024 / 1024:.2f} GB，"
             f"低于安全下限 {MIN_FREE_SPACE_KB / 1024 / 1024:.0f} GB；"
-            "已清理最旧的部署快照仍不足，请先人工清理磁盘再部署。"
+            "历史快照均已保留，请先核实备份和磁盘空间再部署。"
         )
     return free_kb
 
@@ -396,11 +395,7 @@ def main() -> int:
     # 依赖安装、服务或 nginx 变更都必须等微信密钥文件通过检查后才能发生。
     require_mobile_environment()
 
-    # 先按保留上限清理历史部署快照，再确认系统盘余量；空间不足时宁可停下，
-    # 也不要在写满的磁盘上继续部署（写满会让 SQLite 与整个 API 一起失效）。
-    pruned_before = prune_remote_snapshots()
-    if pruned_before:
-        print(f"  + 已清理 {len(pruned_before)} 个最旧的部署快照")
+    # 只读确认系统盘余量；保留所有历史快照，空间不足时停止。
     free_kb = require_free_space()
     print(f"  + 部署前系统盘可用空间 {free_kb / 1024 / 1024:.2f} GB")
 
@@ -420,9 +415,19 @@ def main() -> int:
 
     print("[1/9] 先备份线上代码并创建灰度目录")
     ssh(f"mkdir -p {stage_templates} {stage_deploy}")
-    ssh(f"install -d -m 0700 {backup} {backup}/server")
+    ssh(f"test ! -e {backup} && install -d -m 0700 {backup} {backup}/server")
     ssh(f"install -d -m 0700 {validation_root}")
     ssh(f"cp -a {REMOTE_SERVER_DIR}/. {backup}/server/")
+    # 必须先完成运行依赖的快照，才允许服务配置或代码变更。
+    # ready 标记区分“原文件不存在”和“尚未完成备份”，避免失败时误删线上文件。
+    runtime_backup = " && ".join(
+        f"if test -f /opt/album-auth/{name}; then install -D -m 0644 /opt/album-auth/{name} {backup}/runtime/{name}; fi"
+        for _, name in ROOT_RUNTIME_FILES
+    )
+    ssh(
+        f"install -d -m 0700 {backup}/runtime && "
+        f"{runtime_backup} && touch {backup}/runtime/.snapshot-ready"
+    )
     domain_nginx_state = ssh(
         f"if test -f {DOMAIN_NGINX_TARGET}; then "
         f"cp -a {DOMAIN_NGINX_TARGET} {backup}/previous-domain-nginx.conf && printf present; "
@@ -494,6 +499,8 @@ def main() -> int:
     if dropin_state not in {"present", "absent"}:
         raise SystemExit(f"无法确认原 systemd drop-in 状态：{dropin_state!r}")
 
+    code_replacement_started = False
+
     def restore_code_and_service() -> None:
         if dropin_state == "present":
             restore_dropin = (
@@ -512,16 +519,23 @@ def main() -> int:
             restore_backup_cron = f"cp -a {backup}/previous-backup.cron {BACKUP_CRON_TARGET}"
         else:
             restore_backup_cron = f"rm -f {BACKUP_CRON_TARGET}"
-        runtime_rollback = " && ".join(
-            f"if test -f {backup}/runtime/{name}; then install -D -m 0644 {backup}/runtime/{name} /opt/album-auth/{name}; "
-            f"else rm -f -- /opt/album-auth/{name}; fi"
-            for _, name in ROOT_RUNTIME_FILES
-        )
+        code_rollback = ":"
+        if code_replacement_started:
+            server_rollback = managed_files_rollback_command(
+                f"{backup}/server", REMOTE_SERVER_DIR, managed_server_files()
+            )
+            runtime_rollback = managed_files_rollback_command(
+                f"{backup}/runtime", "/opt/album-auth",
+                [name for _, name in ROOT_RUNTIME_FILES],
+            )
+            code_rollback = (
+                f"test -f {backup}/runtime/.snapshot-ready && "
+                f"{server_rollback} && {runtime_rollback}"
+            )
         restored = ssh(
             f"test \"$(readlink -f -- {backup}/server)\" = \"{backup}/server\" && "
             f"test \"$(readlink -f -- {REMOTE_SERVER_DIR})\" = \"{REMOTE_SERVER_DIR}\" && "
-            f"rsync -a --delete -- {backup}/server/ {REMOTE_SERVER_DIR}/ && "
-            f"{runtime_rollback} && "
+            f"{code_rollback} && "
             f"{restore_dropin} && {restore_domain_nginx} && {restore_backup_cron} && "
             f"systemctl daemon-reload && systemctl restart {SERVICE_NAME} && "
             "nginx -t && systemctl reload nginx",
@@ -556,16 +570,12 @@ def main() -> int:
         raise SystemExit(f"systemd drop-in 安装失败，已恢复原配置：{install_dropin.stderr}")
 
     print("[7/9] 替换代码、重启并检查旧接口和移动端接口")
-    runtime_backup = " && ".join(
-        f"if test -f /opt/album-auth/{name}; then install -D -m 0644 /opt/album-auth/{name} {backup}/runtime/{name}; fi"
-        for _, name in ROOT_RUNTIME_FILES
-    )
     runtime_install = " && ".join(
         f"install -D -m 0644 {release_root}/{name} /opt/album-auth/{name}"
         for _, name in ROOT_RUNTIME_FILES
     )
+    code_replacement_started = True
     replacement = ssh(
-        f"{runtime_backup} && "
         f"cp -a {stage_server}/. {REMOTE_SERVER_DIR}/ && "
         f"{runtime_install} && "
         f"systemctl restart {SERVICE_NAME} && sleep 3",
@@ -602,10 +612,6 @@ def main() -> int:
         f"  部署成功：backup={backup} database_backup={live_db_backup} "
         f"{public_detail}"
     )
-    # 本次部署刚写入一份新快照，这里再收敛一次，保证长期只保留最近两个。
-    pruned_after = prune_remote_snapshots()
-    if pruned_after:
-        print(f"  + 已清理 {len(pruned_after)} 个历史部署快照")
     free_after_kb = remote_free_space_kb()
     if free_after_kb >= 0:
         print(f"  + 部署后系统盘可用空间 {free_after_kb / 1024 / 1024:.2f} GB")

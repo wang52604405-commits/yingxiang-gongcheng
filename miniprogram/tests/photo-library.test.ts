@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createPhotoLibrary, destinationPhotoQuery, type LibraryPhotoPage, type LibraryPhotoQuery } from '@/services/photo-library'
+import { createPhotoLibrary, destinationPhotoLabel, destinationPhotoQuery, type LibraryPhotoPage, type LibraryPhotoQuery } from '@/services/photo-library'
 import type { CloudPhoto } from '@/types/domain'
 
 function photo(id: number): CloudPhoto { return { photo_uuid: String(id) } as CloudPhoto }
@@ -10,6 +10,13 @@ describe('归档位置筛选', () => {
     expect(destinationPhotoQuery('engineering', { item_code: 'FX-001', unit_code: '' })).toEqual({ item_code: 'FX-001' })
     expect(destinationPhotoQuery('engineering', { unit_code: 'DY-001' })).toEqual({ unit_code: 'DY-001' })
     expect(destinationPhotoQuery('other', { other_node_code: 'QT-1' })).toEqual({ other_node_code: 'QT-1' })
+  })
+
+  it('所选市政分项显示名称，缺名时显示当前筛选的编码，并保留水利和其它目录名称', () => {
+    expect(destinationPhotoLabel({ item_code: 'FX-001', item_name: '道路基层' })).toBe('道路基层')
+    expect(destinationPhotoLabel({ item_code: 'FX-001', unit_name: '旧单元' })).toBe('FX-001')
+    expect(destinationPhotoLabel({ unit_code: 'DY-001', unit_name: '闸室段' })).toBe('闸室段')
+    expect(destinationPhotoLabel({ other_node_code: 'QT-1', other_node_name: '现场全貌' })).toBe('现场全貌')
   })
 })
 
