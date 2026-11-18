@@ -67,6 +67,8 @@ $oldOut=Join-Path $installDir 'server.out.log';$oldErr=Join-Path $installDir 'se
 [IO.File]::WriteAllText($oldOut,'previous stdout evidence')
 [IO.File]::WriteAllText($oldErr,'previous stderr evidence')
 $script:payloads=@()
+$script:launcherPids=@()
+$script:launcherProcesses=@()
 # Observe the real command, then execute the production WMI call unchanged.
 function Invoke-CimMethod {
  param($ClassName,$MethodName,$Arguments)
@@ -74,7 +76,18 @@ function Invoke-CimMethod {
  $launcher=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
  if ($launcher -notmatch "FromBase64String\('([A-Za-z0-9+/=]+)'\)") { throw 'Missing literal JSON payload' }
  $script:payloads+=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Matches[1]))|ConvertFrom-Json)
- CimCmdlets\Invoke-CimMethod -ClassName $ClassName -MethodName $MethodName -Arguments $Arguments
+ $created=CimCmdlets\Invoke-CimMethod -ClassName $ClassName -MethodName $MethodName -Arguments $Arguments
+ if ($created.ReturnValue -eq 0) {
+  $script:launcherPids+=[int]$created.ProcessId
+  # Keep a process handle, not just a PID that could later be reused.
+  try {
+   $launcherProcess=[Diagnostics.Process]::GetProcessById([int]$created.ProcessId)
+   $null=$launcherProcess.Handle
+   $script:launcherProcesses+=$launcherProcess
+  }
+  catch [ArgumentException] { } # Launcher already exited normally.
+ }
+ return $created
 }
 function Stop-Fixture {
  $processes=@(Get-CimInstance Win32_Process -Filter "Name='album_server.exe'" | Where-Object {$_.ExecutablePath -eq $exe})
@@ -86,6 +99,24 @@ function Stop-Fixture {
    Wait-Process -Id $current.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
   }
  }
+ # Start-Process drains redirected streams asynchronously. The GUI child can
+ # be gone while the WMI PowerShell launcher still owns the output files.
+ # Only wait for our recorded launcher handles; never stop unrelated processes.
+ foreach($launcherProcess in $script:launcherProcesses) {
+  if(-not $launcherProcess.WaitForExit(10000)) { throw 'Fixture WMI launcher did not exit after its GUI child' }
+ }
+}
+function Wait-FixtureLogs($payload) {
+ $deadline=[DateTime]::UtcNow.AddSeconds(10)
+ do {
+  try {
+   $out=[IO.File]::ReadAllText($payload.outLog)
+   $err=[IO.File]::ReadAllText($payload.errLog)
+   if($out -match 'NATIVE_STDOUT_READY' -and $err -match 'NATIVE_STDERR_READY') { return }
+  } catch [IO.IOException] { }
+  Start-Sleep -Milliseconds 100
+ } while([DateTime]::UtcNow -lt $deadline)
+ throw 'Native output files were not released and flushed within the bounded wait'
 }
 try {
  $env:ALBUM_CLOUD_AUTO_USER='fixture user & literal'
@@ -101,6 +132,7 @@ try {
   if(-not $healthy) { Stop-Fixture; Get-ChildItem $installDir,$dataDir -File | ForEach-Object { if ($_.Extension -ne '.exe') { Write-Output ($_.FullName+': '+[IO.File]::ReadAllText($_.FullName)) } }; throw 'Real GUI fixture never served its health endpoint' }
   Stop-Fixture
   $payload=$script:payloads[-1]
+  Wait-FixtureLogs $payload
   if([IO.File]::ReadAllText($payload.outLog) -notmatch 'NATIVE_STDOUT_READY') { throw 'Missing native stdout' }
   if([IO.File]::ReadAllText($payload.errLog) -notmatch 'NATIVE_STDERR_READY') { throw 'Missing native stderr' }
   $environment=[IO.File]::ReadAllLines((Join-Path $dataDir 'environment'))
@@ -111,6 +143,7 @@ try {
  foreach($payload in $script:payloads) {
   if([IO.File]::ReadAllText($payload.outLog) -notmatch 'NATIVE_STDOUT_READY' -or [IO.File]::ReadAllText($payload.errLog) -notmatch 'NATIVE_STDERR_READY') { throw 'Earlier launch logs lost after later launch' }
  }
+ if($script:launcherPids.Count -ne 2) { throw 'Expected two real WMI launcher PIDs' }
  Write-Output 'REAL_GUI_NATIVE_STREAMS_PASSED'
 } finally { Stop-Fixture }
 '''
