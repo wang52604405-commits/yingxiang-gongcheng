@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import importlib.util
 import json
 import os
@@ -40,9 +41,10 @@ class ManualCodeRollbackTest(unittest.TestCase):
         self.write(self.backup / "runtime/.snapshot-ready", b"")
         self.database = self.app / "server/data/server.db"
         self.database.parent.mkdir(parents=True)
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("CREATE TABLE records (id INTEGER PRIMARY KEY, text TEXT)")
             connection.execute("INSERT INTO records VALUES (1, 'original')")
+        self.assert_connection_closed(connection)
         for name in (
             "server/data/mobile_objects/original.jpg", "server/data/previews/image.jpg",
             "server/data/mobile_chunks/upload.part", "data/mobile_objects/other-original.jpg",
@@ -58,6 +60,10 @@ class ManualCodeRollbackTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
+    def assert_connection_closed(self, connection):
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
     def business_bytes(self):
         return {
             str(path.relative_to(self.app)): path.read_bytes()
@@ -67,13 +73,15 @@ class ManualCodeRollbackTest(unittest.TestCase):
         }
 
     def add_business_record(self, number: int):
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("INSERT INTO records VALUES (?, ?)", (number, f"new-{number}"))
+        self.assert_connection_closed(connection)
         self.write(self.app / f"server/data/mobile_objects/new-{number}.jpg", f"original-{number}".encode())
 
     def assert_records(self, expected):
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             self.assertEqual(connection.execute("SELECT id FROM records ORDER BY id").fetchall(), [(value,) for value in expected])
+        self.assert_connection_closed(connection)
 
     def test_success_then_recovery_preserves_new_rows_originals_previews_and_chunks(self):
         rollback.prepare(self.app, self.backup, self.state)
