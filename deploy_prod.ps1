@@ -370,12 +370,15 @@ function Install-NewProgramFiles($snapshotPath) {
 function Start-InstalledProgram {
     # WMI detaches from the runner Job Object. Paths and credentials stay JSON
     # data inside an encoded command, rather than cmd.exe command fragments.
+    # Each launch retains separate evidence; native redirect opens rather than appends.
+    $logTag = "server-launch-" + [guid]::NewGuid().ToString("N")
     $launchData = @{
         executable = (Join-Path $installDir "album_server.exe")
+        workingDirectory = $installDir
         dataDir = $dataDir; port = [string]$port
         licenseFile = (Join-Path $installDir "license.dat")
-        outLog = (Join-Path $installDir "server.out.log")
-        errLog = (Join-Path $installDir "server.err.log")
+        outLog = (Join-Path $installDir ($logTag + ".out.log"))
+        errLog = (Join-Path $installDir ($logTag + ".err.log"))
         cloudUser = [string]$env:ALBUM_CLOUD_AUTO_USER
         cloudPass = [string]$env:ALBUM_CLOUD_AUTO_PASS
     }
@@ -392,7 +395,9 @@ if ($launch.cloudUser) {
     $env:ALBUM_CLOUD_AUTO_USER = [string]$launch.cloudUser
     $env:ALBUM_CLOUD_AUTO_PASS = [string]$launch.cloudPass
 }
-& ([string]$launch.executable) >> ([string]$launch.outLog) 2>> ([string]$launch.errLog)
+# A frozen windowed executable needs native inherited standard handles.
+# PowerShell's & / >> redirection leaves this launch unable to start Flask.
+Start-Process -FilePath ([string]$launch.executable) -WorkingDirectory ([string]$launch.workingDirectory) -WindowStyle Hidden -RedirectStandardOutput ([string]$launch.outLog) -RedirectStandardError ([string]$launch.errLog)
 '@
     $launcher = $launcher.Replace('__PAYLOAD__', $payload)
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcher))
