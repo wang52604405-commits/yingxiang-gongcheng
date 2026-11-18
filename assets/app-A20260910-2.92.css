@@ -1101,7 +1101,7 @@
       font-size: 11px;
       color: var(--muted);
     }
-    .recent-upload-unit::before { content: "单元 · "; color: var(--muted); }
+    .recent-upload-unit::before { content: "单位工程 · "; color: var(--muted); }
     .recent-upload-part::before { content: "分部 · "; color: var(--muted); }
     .recent-upload-info {
       flex: 0 0 auto;

@@ -38,7 +38,7 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn('selectPrintStyle("sidelabel")', js)
         self.assertIn("照片号", print_html)
         self.assertIn("<b>题名</b>", print_html)
-        self.assertIn("单元工程名称", print_html)
+        self.assertIn("slip.unit_name_label or print_leaf_name_label(project)", print_html)
         self.assertIn("拍摄时间", print_html)
         self.assertIn("摄影者", print_html)
         self.assertIn("地点", print_html)
@@ -73,7 +73,7 @@ class PrintLayoutSourceContractTest(unittest.TestCase):
         self.assertIn("object-fit: cover;", side_img_css)
         self.assertIn(".side-photo .photo-frame img.pr-90", print_html)
         self.assertIn(".side-photo .photo-frame img.pr-270", print_html)
-        label_order = ["题名", "照片号", "单元工程名称", "拍摄时间", "摄影者", "地点"]
+        label_order = ["题名", "照片号", "{{ slip.unit_name_label or print_leaf_name_label(project) }}", "拍摄时间", "摄影者", "地点"]
         positions = [print_html.index(f"<b>{name}</b>") for name in label_order]
         self.assertEqual(positions, sorted(positions))
         slip_v = print_html.split(".slip-v {", 1)[1].split("}", 1)[0]

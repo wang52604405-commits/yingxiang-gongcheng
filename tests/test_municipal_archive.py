@@ -72,6 +72,15 @@ class MunicipalRuleContractTest(unittest.TestCase):
         self.assertTrue(all("55032" not in row["standard_source"] for row in suggested))
         self.assertIn(municipal_rules.RULE_VERSION, rows[0]["rule_version"])
 
+    def test_spatial_free_text_survives_repeated_sanitization_and_clear(self):
+        for project_type in ("", "城镇道路", "排水管道"):
+            raw = {"text": "示例段 K0+000—K0+020", "well_from": "W01"}
+            cleaned = municipal_rules.sanitize_spatial(raw, project_type)
+            self.assertEqual(cleaned["text"], raw["text"])
+            self.assertEqual(municipal_rules.sanitize_spatial(cleaned, project_type), cleaned)
+            cleaned["text"] = ""
+            self.assertEqual(municipal_rules.sanitize_spatial(cleaned, project_type)["text"], "")
+
     def test_spatial_text_keeps_well_numbers_and_stake_text(self):
         spatial = municipal_rules.sanitize_spatial(
             {"well_from": "W01", "well_to": "W02", "pipe_system": "雨水", "stake_start": "K0+120"},
@@ -400,6 +409,18 @@ class MunicipalDesktopFlowTest(unittest.TestCase):
         self.assertEqual(patched.status_code, 200, patched.get_json())
         self.assertEqual(patched.get_json()["photo"]["spatial"]["well_from"], "J01")
         self.assertEqual(patched.get_json()["photo"]["id"], photo["id"])
+        for spatial_text in ("示例段 K0+000—K0+020", "修改为 W01 至 W02", ""):
+            changed = self.client.patch(f"/api/photos/{item_code}/{photo['id']}", json={
+                "photo_uuid": photo["photo_uuid"], "photo_date": "2026-11-01",
+                "spatial": {"well_from": "J01", "well_to": "J02", "pipe_system": "给水", "text": spatial_text},
+                "archive": photo["archive"],
+            })
+            self.assertEqual(changed.status_code, 200, changed.get_json())
+            reopened = next(p for p in self.desktop.manager.get_photos(item_code) if p["photo_uuid"] == photo["photo_uuid"])
+            self.assertEqual(reopened["spatial"]["text"], spatial_text)
+            self.assertEqual(reopened["spatial"]["well_from"], "J01")
+            self.assertEqual(reopened["spatial"]["well_to"], "J02")
+            self.assertEqual(reopened["archive"]["location_text"], "人民路")
         snapshot = self.desktop.mobile_sync.build_project_snapshot(
             self.desktop.manager,
             self.desktop.current_engineering_project(),

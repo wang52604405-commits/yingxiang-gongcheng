@@ -4807,12 +4807,39 @@ def restore_last_print_groups(print_settings):
     return project_groups, job
 
 
+def print_leaf_label(project=None):
+    """Printed leaf terminology follows the stored node, not a changed specialty."""
+    project = project if isinstance(project, dict) else {}
+    fields = project.get("source_fields") or {}
+    kind = fields.get("节点类型") or project.get("division_type") or (project.get("hierarchy") or {}).get("node_kind")
+    if not kind:
+        if fields.get("单元工程编码"):
+            kind = "unit"
+        elif fields.get("检验批编码"):
+            kind = "batch"
+        elif fields.get("分项工程编码"):
+            kind = "item"
+    if kind in {"unit", "item", "batch"}:
+        return {"unit": "单元", "item": "分项", "batch": "检验批"}[kind]
+    industry = current_engineering_project().get("industry")
+    return "工程节点" if municipal_rules.is_municipal_name(industry) else "分项" if highway_rules.is_highway_name(industry) else "单元"
+
+
+def print_leaf_name_label(project=None):
+    leaf = print_leaf_label(project)
+    return leaf + ("工程名称" if leaf in {"单元", "分项"} else "名称")
+
+
+app.jinja_env.globals.update(print_leaf_label=print_leaf_label, print_leaf_name_label=print_leaf_name_label)
+
+
 def _print_photo_source(project, photo):
     """合并照片与工程层级，供打印信息字段稳定读取。"""
     source = {}
     source.update(project.get("source_fields", {}) if isinstance(project, dict) else {})
     source.update(project or {})
     source.update(photo or {})
+    source["project_name"] = side_label_unit_name(project) or str(project.get("project_name") or "")
     if not str(source.get("part_name") or "").strip():
         source["part_name"] = str(
             source.get("分部工程名称")
@@ -4830,6 +4857,8 @@ def photo_detail_rows(project, photo, print_settings=None):
     for field in fields:
         label = str(field.get("label") or "").strip()
         key = str(field.get("source") or "").strip()
+        if key == "project_name" and label in {"单元工程", "单元工程名称"}:
+            label = print_leaf_name_label(project)
         if not label:
             continue
         value = str(field.get("value") or "").strip() if key == "custom" else str(source.get(key) or "").strip()
@@ -4849,7 +4878,7 @@ def photo_detail_rows(project, photo, print_settings=None):
     source_labels = {
         "title": "题名",
         "id": "编号",
-        "project_name": "单元工程",
+        "project_name": print_leaf_name_label(project),
         "part_name": "分部工程",
         "photo_date": "拍摄日期",
         "photographer": "摄影人",
@@ -5091,7 +5120,9 @@ def side_label_unit_name(unit_project):
         hierarchy = manager.project_hierarchy(unit_project)
     except Exception:
         hierarchy = {}
-    return str((hierarchy or {}).get("unit_name") or "").strip()
+    kind = (hierarchy or {}).get("node_kind") or unit_project.get("division_type")
+    field = "batch_name" if kind == "batch" else "item_name" if kind == "item" else "unit_name"
+    return str((hierarchy or {}).get(field) or unit_project.get("project_name") or "").strip()
 
 
 def side_label_for_photo(photo, place="", unit_project=None):
@@ -5101,6 +5132,7 @@ def side_label_for_photo(photo, place="", unit_project=None):
         "title": side_label_photo_title(photo),
         "photo_no": side_label_photo_no(photo),
         "unit_name": side_label_unit_name(unit_project),
+        "unit_name_label": print_leaf_name_label(unit_project),
         "shot_at": format_side_label_date(photo.get("photo_date")),
         "photographer": str(photo.get("photographer") or "").strip(),
         "place": str(place or "").strip(),
@@ -9675,12 +9707,12 @@ def print_album_category_batch(category):
             # 兼容新参数：单元编码从 units/processes 汇总，同样保持勾选顺序
             codes = ordered_unique_codes(raw_units, raw_processes)
         if not codes:
-            return "请选择要打印的单元工程", 400
+            return "请选择要打印的工程节点", 400
         # 单元照片与工序照片分别成册：各册内部按单元顺序排，页码各自连续
-        unit_book = {"level": "单元照片", "pages": []}
+        unit_book = {"level": print_leaf_label() + "照片", "pages": []}
         process_book = {"level": "工序照片", "pages": []}
         last_print_groups = [
-            {"level": "单元照片", "items": []},
+            {"level": print_leaf_label() + "照片", "items": []},
             {"level": "工序照片", "items": []},
         ]
         for code in codes[:300]:
@@ -9768,13 +9800,13 @@ def print_album_category(category, project_code):
                 project_groups.append({
                     "project_code": project.get("project_code") or project_code,
                     "project_name": project.get("project_name") or project.get("name") or "",
-                    "level": "单元照片",
+                    "level": print_leaf_label(project) + "照片",
                     "photos": unit_photos,
                     "pages": layout_print_pages(unit_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings, unit_project=project),
                 })
                 last_item = _last_print_item(project, unit_photos, category)
                 if last_item:
-                    last_print_groups.append({"level": "单元照片", "items": [last_item]})
+                    last_print_groups.append({"level": print_leaf_label(project) + "照片", "items": [last_item]})
             project_groups.append({
                 "project_code": project.get("project_code") or project_code,
                 "project_name": project.get("project_name") or project.get("name") or "",

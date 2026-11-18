@@ -1294,6 +1294,18 @@ const $ = (selector) => document.querySelector(selector);
         fields["分项工程名称"] || hierarchy.item_name || project?.parent_item_name].filter(Boolean).join(" ");
     }
 
+    function spatialEditorText(spatial) {
+      const value = spatial || {};
+      return Object.prototype.hasOwnProperty.call(value, "text") ? String(value.text || "") : Object.values(value).filter(Boolean).join(" ");
+    }
+
+    function spatialEditorValue(spatial, text) {
+      // Keep imported structured fields intact; this editor changes only free text.
+      const value = { ...(spatial || {}) };
+      if (text !== spatialEditorText(value)) value.text = text;
+      return value;
+    }
+
     function photoMoveTargetLabel(project) {
       const fields = project?.source_fields || {};
       const hierarchy = project?.hierarchy || {};
@@ -4201,7 +4213,7 @@ const $ = (selector) => document.querySelector(selector);
       if ($("#photoEditConcealmentInput")) $("#photoEditConcealmentInput").value = archive.concealment || "";
       if ($("#photoEditProcessEventInput")) $("#photoEditProcessEventInput").value = archive.process_event || "";
       if ($("#photoEditLocationInput")) $("#photoEditLocationInput").value = archive.location_text || "";
-      if ($("#photoEditSpatialInput")) $("#photoEditSpatialInput").value = archive.location_text ? "" : Object.values(spatial).filter(Boolean).join(" ");
+      if ($("#photoEditSpatialInput")) $("#photoEditSpatialInput").value = spatialEditorText(spatial);
       if ($("#photoEditAcceptanceInput")) $("#photoEditAcceptanceInput").value = archive.acceptance?.record_no || "";
       if ($("#photoEditTemplateInput")) $("#photoEditTemplateInput").value = archive.template_code || "";
       const processSelect = $("#photoEditProcessInput");
@@ -4446,7 +4458,7 @@ const $ = (selector) => document.querySelector(selector);
         phase: $("#photoEditPhaseInput")?.value || "",
         concealment: $("#photoEditConcealmentInput")?.value || "",
         process_event: $("#photoEditProcessEventInput")?.value.trim() || "",
-        location_text: $("#photoEditLocationInput")?.value.trim() || $("#photoEditSpatialInput")?.value.trim() || "",
+        location_text: $("#photoEditLocationInput")?.value.trim() || "",
         acceptance: { record_no: $("#photoEditAcceptanceInput")?.value.trim() || "" },
         times: {
           confirmed_capture: photoDate,
@@ -4456,10 +4468,7 @@ const $ = (selector) => document.querySelector(selector);
         original: currentPhoto.archive?.original || {}
       };
       const spatialText = $("#photoEditSpatialInput")?.value.trim() || "";
-      const spatial = { ...(currentPhoto.spatial || {}) };
-      if (spatialText && !spatial.stake_start && !spatial.well_from && !spatial.pier_no) {
-        spatial.stake_start = spatialText;
-      }
+      const spatial = spatialEditorValue(currentPhoto.spatial, spatialText);
       if (!photoDate && !["市政工程", "公路工程"].includes(state.projectInfo?.industry)) {
         showNotice("请填写照片日期。", true);
         return;

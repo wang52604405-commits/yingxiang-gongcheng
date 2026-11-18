@@ -365,11 +365,12 @@ def sanitize_spatial(payload, project_type: str = "") -> dict:
         found = subtype_by_name(project_type)
         if found:
             allowed = {field["key"] for field in SPATIAL_FIELDS[found["code"]]}
+    allowed.add("text")  # Free-form desktop description; retain typed imported fields separately.
     cleaned = {}
     for key, value in raw.items():
         if key not in allowed:
             continue
-        cleaned[key] = preserve_code_text(value)[:120]
+        cleaned[key] = preserve_code_text(value)[:200 if key == "text" else 120]
     return cleaned
 
 

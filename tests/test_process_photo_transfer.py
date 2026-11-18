@@ -116,7 +116,7 @@ class ProcessPhotoTransferTest(unittest.TestCase):
     def test_desktop_move_dialog_exposes_current_unit_for_process_transfer(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "templates" / "index.html").read_text(encoding="utf-8")
-        asset = re.search(r'<script\s+defer\s+src="/assets/(app-A[^"]+\.js)"></script>', html)
+        asset = re.search(r'<script\s+defer\s+src="/assets/(app-A[^"]+\.js)(?:\?v=[^"\s]+)?"></script>', html)
         self.assertIsNotNone(asset)
         js = (root / "assets" / asset.group(1)).read_text(encoding="utf-8")
         self.assertIn('projectCode(project) === state.selectedCode', js)
