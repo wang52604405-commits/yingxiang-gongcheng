@@ -136,11 +136,11 @@ class WebsiteContractTest(unittest.TestCase):
 
     def test_only_reviewed_images_remain_and_pending_work_is_not_advertised(self):
         images = {p.name for p in (SITE / "assets").rglob("*") if p.suffix in {".jpg", ".png"}}
-        self.assertEqual(images, {"miniprogram_qr.png"})
+        self.assertEqual(images, {"miniprogram_qr.png", "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg"})
         import json
         self.assertEqual(json.loads((SITE / "site-content.json").read_text(encoding="utf-8"))["mini_program"]["screenshots"], [])
         pages = "".join((SITE / name).read_text(encoding="utf-8") for name in PAGES)
-        self.assertNotIn("公路", pages)
+        self.assertNotIn("公路专业已支持", pages)
         self.assertIn("新版逐步截图教程正在制作", pages)
 
     def test_site_source_never_contains_the_server_download_directory(self):

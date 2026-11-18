@@ -61,6 +61,7 @@ def validate_site(site: Path = SITE) -> None:
     # New screenshots require an explicit review and an updated allowlist.
     approved_assets = {
         "favicon.svg", "miniprogram_qr.png", "style.css", "restructure.css", "site.js",
+        "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg",
     }
     approved_roots = {*PAGES, "site-content.json", "README.md", "assets", "tutorial"}
     for child in site.iterdir():
