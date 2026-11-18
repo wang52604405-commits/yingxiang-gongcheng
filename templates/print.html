@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 {% set code = project.project_code or project.code %}
 {% set name = project.project_name or project.name %}
-{% set leaf_label = print_leaf_label(project) %}
+{% set leaf_label = leaf_label_override|default(print_leaf_label(project), true) %}
 {% set label = (category_label or "影像资料")|replace("单元", leaf_label) %}
 {% set print_style = print_style|default(request.args.get("style", ""), true)|string|trim|lower %}
 {% set layout = print_layout or request.args.get("layout", "landscape") %}

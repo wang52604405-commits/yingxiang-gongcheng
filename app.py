@@ -8411,7 +8411,7 @@ def api_recent_uploads():
             except Exception:
                 continue
             hierarchy = manager.project_hierarchy(project)
-            unit_name = hierarchy.get("unit_project_name") or project.get("project_name") or ""
+            unit_name = hierarchy.get("unit_project_name") or ""
             part_name = hierarchy.get("part_name") or ""
             for photo in data.get("photos", []):
                 if not photo.get("upload_time"):
@@ -9715,6 +9715,8 @@ def print_album_category_batch(category):
             {"level": print_leaf_label() + "照片", "items": []},
             {"level": "工序照片", "items": []},
         ]
+        printed_leaf_labels = set()
+        unit_leaf_labels = set()
         for code in codes[:300]:
             project = manager.get_project(code)
             project_photos = [
@@ -9727,8 +9729,11 @@ def print_album_category_batch(category):
             unit_photos, process_photos = split_photos_by_level(project, enriched)
             want_unit = not has_level_selection or code in unit_code_set
             want_process = not has_level_selection or code in process_code_set
+            if (want_unit and unit_photos) or (want_process and process_photos):
+                printed_leaf_labels.add(print_leaf_label(project))
             name = project.get("project_name") or project.get("name") or code
             if want_unit and unit_photos:
+                unit_leaf_labels.add(print_leaf_label(project))
                 last_item = _last_print_item(project, unit_photos, category)
                 if last_item:
                     last_print_groups[0]["items"].append(last_item)
@@ -9740,6 +9745,9 @@ def print_album_category_batch(category):
                     last_print_groups[1]["items"].append(last_item)
                 for page in layout_print_pages(process_photos, layout, page_size, photo_width_mm, photo_height_mm, print_settings, unit_project=project):
                     process_book["pages"].append({"unit_name": name, "items": page})
+        unit_book["level"] = (next(iter(unit_leaf_labels)) if len(unit_leaf_labels) == 1 else "工程节点") + "照片"
+        last_print_groups[0]["level"] = unit_book["level"]
+        printed_leaf_label = next(iter(printed_leaf_labels)) if len(printed_leaf_labels) == 1 else "工程节点"
         project_groups = []
         if unit_book["pages"]:
             project_groups.append(unit_book)
@@ -9761,6 +9769,7 @@ def print_album_category_batch(category):
             photos=[],
             project_groups=project_groups,
             category=category,
+            leaf_label_override=printed_leaf_label,
             print_layout=layout,
             print_page_size=page_size,
             print_settings=print_settings,
