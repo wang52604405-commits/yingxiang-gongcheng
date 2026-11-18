@@ -88,6 +88,17 @@ describe('desktop specialty labels preserve original node identity', () => {
     expect(source).toContain('const targetLabel = photoMoveTargetLabel(targetProject')
     expect(source).not.toContain('或手动补录单元工程')
   })
+  it('keeps long batch titles and parent names in separate unclipped rows', () => {
+    const css = readFileSync(new URL('../../assets/app-A20260910-2.92.css', import.meta.url), 'utf8')
+    const block = (selector: string) => css.split(selector + ' {')[1].split('}')[0]
+    expect(block('.unit-card-main')).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(block('.unit-card')).toContain('grid-template-rows: auto auto auto;')
+    expect(block('.unit-card-main .unit-card-photo-counts')).toContain('margin-top: 0;')
+    expect(block('.unit-card-parent')).toContain('white-space: normal;')
+    expect(block('.unit-card-parent')).toContain('overflow-wrap: anywhere;')
+    expect(block('.unit-card-main > strong')).not.toMatch(/line-clamp|ellipsis|max-height/)
+    expect(block('.unit-card-parent')).not.toMatch(/line-clamp|ellipsis|max-height/)
+  })
   it('keeps legacy water units despite a specialty change', () => {
     expect(context('公路工程', { division_type: 'unit' }).nodePhotoLabel()).toBe('单元照片')
     expect(context('市政工程', { source_fields: { 单元工程编码: '001' } }).nodePhotoLabel()).toBe('单元照片')
