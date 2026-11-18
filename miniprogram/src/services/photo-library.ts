@@ -1,15 +1,33 @@
 import { reactive } from 'vue'
-import type { CloudPhoto } from '@/types/domain'
+import type { Assignment, CloudPhoto } from '@/types/domain'
 
 export interface LibraryPhotoQuery {
   project_id: string
   scope?: string
   category?: string
   unit_code?: string
+  item_code?: string
   other_node_code?: string
   cursor?: string
   limit?: number
 }
+
+/** 市政分项用 item_code 筛选；水利单元仍用 unit_code。两者不要同时发出空条件。 */
+export function destinationPhotoQuery(
+  scope: string | undefined,
+  assignment?: { unit_code?: string; item_code?: string; other_node_code?: string },
+): Pick<LibraryPhotoQuery, 'unit_code' | 'item_code' | 'other_node_code'> {
+  if (scope === 'other') return { other_node_code: assignment?.other_node_code || undefined }
+  if (scope !== 'engineering' || !assignment) return {}
+  if (assignment.item_code) return { item_code: assignment.item_code }
+  return { unit_code: assignment.unit_code || undefined }
+}
+
+export function destinationPhotoLabel(assignment: Assignment): string {
+  return assignment.item_name || assignment.item_code || assignment.unit_name || assignment.unit_code
+    || assignment.other_node_name || assignment.other_node_code || ''
+}
+
 export interface LibraryPhotoPage { photos: CloudPhoto[]; total: number; next_cursor: string }
 
 /** One paging session per account, project and filter; old responses never cross sessions. */

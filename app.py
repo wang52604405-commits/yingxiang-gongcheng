@@ -35,6 +35,8 @@ import mobile_sync
 import tamper_guard
 import tls_compat
 import watermark_ocr
+import municipal_export
+import municipal_rules
 import professional_templates
 from server import mobile_recognition
 
@@ -1414,14 +1416,28 @@ class AlbumManager:
         part_combined = self._hierarchy_field(fields, ["分部工程名称及编码", "分部工程", "分项工程"])
         unit_fallback_name, unit_fallback_code = self._split_hierarchy_name_code(unit_combined)
         part_fallback_name, part_fallback_code = self._split_hierarchy_name_code(part_combined)
+        item_code = self._hierarchy_field(fields, ["分项工程编码", "分项工程编号"])
+        explicit_unit_code = self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"])
+        node_kind = self._hierarchy_field(fields, ["节点类型"])
+        if not node_kind:
+            node_kind = "item" if item_code and not explicit_unit_code else "unit"
+        unit_name_fallback = "" if node_kind == "item" else project.get("project_name")
+        unit_code_fallback = "" if node_kind == "item" else (project.get("display_project_code") or project.get("project_code"))
         return {
-            "contract_name": self._hierarchy_field(fields, ["合同工程名称"]),
+            "contract_name": self._hierarchy_field(fields, ["合同工程名称", "合同或标段名称", "标段名称"]),
             "unit_project_name": self._hierarchy_field(fields, ["单位工程名称"], unit_fallback_name),
             "unit_project_code": self._hierarchy_field(fields, ["单位工程编码", "单位工程编号"], unit_fallback_code),
+            "sub_unit_name": self._hierarchy_field(fields, ["子单位工程名称"]),
+            "sub_unit_code": self._hierarchy_field(fields, ["子单位工程编码", "子单位工程编号"]),
             "part_name": self._hierarchy_field(fields, ["分部工程名称", "分项工程名称"], part_fallback_name),
             "part_code": self._hierarchy_field(fields, ["分部工程编码", "分部工程编号", "分项工程编码"], part_fallback_code),
-            "unit_name": self._hierarchy_field(fields, ["单元工程名称", "单元名称"], project.get("project_name")),
-            "unit_code": self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"], project.get("display_project_code") or project.get("project_code")),
+            "sub_part_name": self._hierarchy_field(fields, ["子分部工程名称"]),
+            "sub_part_code": self._hierarchy_field(fields, ["子分部工程编码", "子分部工程编号"]),
+            "item_name": self._hierarchy_field(fields, ["分项工程名称"]),
+            "item_code": item_code,
+            "node_kind": node_kind,
+            "unit_name": self._hierarchy_field(fields, ["单元工程名称", "单元名称"], unit_name_fallback),
+            "unit_code": self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"], unit_code_fallback),
         }
 
     def part_key(self, hierarchy):
@@ -1433,6 +1449,10 @@ class AlbumManager:
             hierarchy.get("part_name", ""),
             hierarchy.get("part_code", ""),
         ]
+        for optional_key in ("sub_unit_name", "sub_unit_code", "sub_part_name", "sub_part_code"):
+            optional_value = str(hierarchy.get(optional_key) or "")
+            if optional_value:
+                identity.append(optional_value)
         return hashlib.sha256(json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:20]
 
     def slim_project(self, project):
@@ -1447,16 +1467,30 @@ class AlbumManager:
             "latest_upload": project.get("latest_upload", ""),
             "project_order": project.get("project_order"),
             "part_key": self.part_key(hierarchy),
-            "source_fields": {
-                "合同工程名称": hierarchy["contract_name"],
-                "单位工程名称": hierarchy["unit_project_name"],
-                "单位工程编码": hierarchy["unit_project_code"],
-                "分部工程名称": hierarchy["part_name"],
-                "分部工程编码": hierarchy["part_code"],
-                "单元工程名称": hierarchy["unit_name"],
-                "单元工程编码": hierarchy["unit_code"],
-            },
+            "source_fields": self._public_source_fields(hierarchy),
         }
+
+    def _public_source_fields(self, hierarchy):
+        fields = {
+            "合同工程名称": hierarchy["contract_name"],
+            "单位工程名称": hierarchy["unit_project_name"],
+            "单位工程编码": hierarchy["unit_project_code"],
+            "分部工程名称": hierarchy["part_name"],
+            "分部工程编码": hierarchy["part_code"],
+            "单元工程名称": hierarchy["unit_name"],
+            "单元工程编码": hierarchy["unit_code"],
+        }
+        if hierarchy.get("node_kind") == "item":
+            fields.update({
+                "子单位工程名称": hierarchy.get("sub_unit_name", ""),
+                "子单位工程编码": hierarchy.get("sub_unit_code", ""),
+                "子分部工程名称": hierarchy.get("sub_part_name", ""),
+                "子分部工程编码": hierarchy.get("sub_part_code", ""),
+                "分项工程名称": hierarchy.get("item_name", ""),
+                "分项工程编码": hierarchy.get("item_code", ""),
+                "节点类型": "item",
+            })
+        return fields
 
     def hierarchy_snapshot(self):
         cache_key = active_engineering_project_id()
@@ -1477,15 +1511,27 @@ class AlbumManager:
                 "name": hierarchy["contract_name"], "photo_count": 0, "construction_photo_count": 0,
                 "supervision_photo_count": 0, "unit_count": 0, "units": {},
             })
-            unit_identity = (hierarchy["unit_project_name"], hierarchy["unit_project_code"])
+            unit_identity = (
+                hierarchy["unit_project_name"], hierarchy["unit_project_code"],
+                hierarchy.get("sub_unit_name", ""), hierarchy.get("sub_unit_code", ""),
+            )
+            unit_label = " / ".join(
+                part for part in (hierarchy["unit_project_name"], hierarchy.get("sub_unit_name", "")) if part
+            )
             unit = contract["units"].setdefault(unit_identity, {
-                "name": hierarchy["unit_project_name"], "code": hierarchy["unit_project_code"],
+                "name": unit_label, "code": hierarchy["unit_project_code"],
                 "photo_count": 0, "construction_photo_count": 0, "supervision_photo_count": 0,
                 "unit_count": 0, "parts": {},
             })
-            part_identity = (hierarchy["part_name"], hierarchy["part_code"])
+            part_identity = (
+                hierarchy["part_name"], hierarchy["part_code"],
+                hierarchy.get("sub_part_name", ""), hierarchy.get("sub_part_code", ""),
+            )
+            part_label = " / ".join(
+                part for part in (hierarchy["part_name"], hierarchy.get("sub_part_name", "")) if part
+            )
             part = unit["parts"].setdefault(part_identity, {
-                "name": hierarchy["part_name"], "code": hierarchy["part_code"],
+                "name": part_label, "code": hierarchy["part_code"],
                 "part_key": self.part_key(hierarchy), "photo_count": 0,
                 "construction_photo_count": 0, "supervision_photo_count": 0, "unit_count": 0,
             })
@@ -1839,6 +1885,7 @@ class AlbumManager:
                 temp_backup = backup_path.with_suffix(backup_path.suffix + ".tmp")
                 temp_backup.write_bytes(raw)
                 os.replace(temp_backup, backup_path)
+            intake_sha256 = hashlib.sha256(raw).hexdigest()
 
             with Image.open(io.BytesIO(raw)) as opened:
                 image = ImageOps.exif_transpose(opened)
@@ -1865,6 +1912,7 @@ class AlbumManager:
                 "pixel_width": pixel_size[0],
                 "pixel_height": pixel_size[1],
                 "original_backup": backup_path.name,
+                "intake_sha256": intake_sha256,
             }
         except Exception:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1893,6 +1941,8 @@ class AlbumManager:
             "stored_bytes": len(raw),
             "optimized": False,
             "original_backup": "",
+            "intake_sha256": hashlib.sha256(raw).hexdigest(),
+            "exact_original": True,
         }
 
     def repair_mobile_original(self, project_code, photo_uuid, raw, details, original_name=""):
@@ -2330,24 +2380,42 @@ class AlbumManager:
         data["project_name"] = str(project_name or data.get("project_name") or safe_code).strip()
         data["keywords"] = str(keywords or data.get("keywords") or "").strip()
         data["engineering_project_id"] = active_engineering_project_id()
-        match = match_standard_unit(data["project_name"])
-        if source_fields:
-            match["standard_unit_name"] = source_fields.get("匹配标准单元") or match.get("standard_unit_name", "")
-        data["standard_unit_name"] = match.get("standard_unit_name", "")
-        data["division_type"] = "unit"
-        data["processes"] = []
+        municipal = municipal_rules.is_municipal_name(current_engineering_project().get("industry"))
+        source_fields = dict(source_fields or data.get("source_fields") or {})
+        legacy_unit = str(data.get("division_type") or "") == "unit" and bool(
+            (data.get("source_fields") or {}).get("单元工程编码") or data.get("photos")
+        )
+        if municipal and legacy_unit:
+            return data
+        if municipal or str(source_fields.get("节点类型") or "") == "item":
+            data["standard_unit_name"] = ""
+            data["division_type"] = "item"
+            data["processes"] = []
+            source_fields["节点类型"] = "item"
+            source_fields["工程专业"] = municipal_rules.INDUSTRY_NAME
+            source_fields["分项工程编码"] = source_fields.get("分项工程编码") or original_code
+            source_fields["分项工程名称"] = source_fields.get("分项工程名称") or data["project_name"]
+            source_fields.pop("匹配标准单元", None)
+            source_fields["划分类型"] = "分项工程"
+            source_fields["工序名称列表"] = ""
+        else:
+            match = match_standard_unit(data["project_name"])
+            if source_fields:
+                match["standard_unit_name"] = source_fields.get("匹配标准单元") or match.get("standard_unit_name", "")
+            data["standard_unit_name"] = match.get("standard_unit_name", "")
+            data["division_type"] = "unit"
+            data["processes"] = []
+            source_fields.setdefault("单元工程编码", original_code)
+            source_fields["划分类型"] = "不划分工序单元"
+            source_fields["工序名称列表"] = ""
         if project_order is not None:
             try:
                 data["project_order"] = int(project_order)
             except (TypeError, ValueError):
                 pass
-        source_fields = dict(source_fields or data.get("source_fields") or {})
-        source_fields.setdefault("单元工程编码", original_code)
         source_fields["内部项目编码"] = safe_code
         source_fields["工程项目ID"] = active_engineering_project_id()
         source_fields["工程项目名称"] = current_engineering_project().get("project_name", "")
-        source_fields["划分类型"] = "不划分工序单元"
-        source_fields["工序名称列表"] = ""
         data["source_fields"] = source_fields
         data.setdefault("photos", [])
         self._write_metadata(safe_code, data)
@@ -2559,6 +2627,33 @@ class AlbumManager:
             self._write_metadata(project_code, data)
             return self._photo_item(data, photo)
 
+    def _photo_archive_record(self, meta, compression, uploaded_by):
+        meta = meta if isinstance(meta, dict) else {}
+        compression = compression if isinstance(compression, dict) else {}
+        incoming = meta.get("archive") if isinstance(meta.get("archive"), dict) else {}
+        derived = bool(meta.get("mobile_compressed_200k")) or (
+            bool(compression.get("optimized")) and not compression.get("exact_original") and not compression.get("original_backup")
+        )
+        if meta.get("preserve_mobile_original") or compression.get("exact_original") or compression.get("original_backup"):
+            derived = bool(meta.get("mobile_compressed_200k"))
+        raw_status = incoming.get("original") if isinstance(incoming.get("original"), dict) else {}
+        if not raw_status.get("sha256"):
+            raw_status = {
+                **raw_status,
+                "sha256": compression.get("intake_sha256") or meta.get("sha256") or "",
+                "size_bytes": compression.get("original_bytes") or 0,
+                "filename": meta.get("source_original_name") or meta.get("original_name") or "",
+                "source": meta.get("capture_source") or "desktop",
+                "status": "derived" if derived else ("preserved" if compression.get("intake_sha256") or compression.get("original_backup") or compression.get("exact_original") else "missing"),
+                "warning": "手机或桌面只留下压缩/叠字副本，不能把日常使用图标成原片。" if derived else "",
+            }
+        archive = municipal_rules.sanitize_archive({**incoming, "original": raw_status})
+        if not archive["times"]["uploaded_at"]:
+            archive["times"]["uploaded_at"] = now_text()
+        if uploaded_by and not archive["original"]["source"]:
+            archive["original"]["source"] = str(uploaded_by)
+        return archive
+
     def add_photos(self, project_code, files, category="construction", title="", photo_date="", photographer="", description="", uploaded_by="", orientation="landscape", process_name="", process_code="", per_file_meta=None):
         with self._project_write_lock(project_code):
             return self._add_photos_locked(project_code, files, category, title, photo_date, photographer, description, uploaded_by, orientation, process_name, process_code, per_file_meta)
@@ -2638,6 +2733,10 @@ class AlbumManager:
                 ) if meta.get("mobile_original_received") else 0,
                 "client_captured_at": str(meta.get("client_captured_at") or "").strip(),
                 "sha256": str(meta.get("sha256") or "").strip().lower(),
+                "archive": self._photo_archive_record(meta, compression, uploaded_by),
+                "spatial": municipal_rules.sanitize_spatial(
+                    meta.get("spatial") or (meta.get("archive") or {}).get("spatial")
+                ),
                 "pixel_width": int(meta.get("pixel_width") or compression.get("pixel_width") or 0),
                 "pixel_height": int(meta.get("pixel_height") or compression.get("pixel_height") or 0),
             }
@@ -2743,6 +2842,8 @@ class AlbumManager:
                 "stored_bytes": int(target.stat().st_size),
                 "optimized": bool(photo.get("optimized")),
                 "original_backup": filename if target_backup.exists() else "",
+                "archive": copy.deepcopy(photo.get("archive") or {}),
+                "spatial": copy.deepcopy(photo.get("spatial") or {}),
             }
             data["photos"].append(item)
             added.append(self._photo_item(data, item))
@@ -2783,6 +2884,25 @@ class AlbumManager:
                         photo["orientation_label"] = PHOTO_ORIENTATION_LABELS[orientation]
                     if "rotation" in updates:
                         photo["rotation"] = normalize_photo_rotation(updates.get("rotation"))
+                    if isinstance(updates.get("archive"), dict) or isinstance(updates.get("spatial"), dict):
+                        current_archive = photo.get("archive") if isinstance(photo.get("archive"), dict) else {}
+                        incoming_archive = updates.get("archive") if isinstance(updates.get("archive"), dict) else {}
+                        archive_payload = {**current_archive, **incoming_archive}
+                        # Caption edits only submit the nested fields shown by the
+                        # editor. Preserve omitted provenance/acceptance details;
+                        # an explicitly supplied empty field can still clear it.
+                        for field in ("acceptance", "times", "gps", "original"):
+                            previous = current_archive.get(field)
+                            incoming = incoming_archive.get(field)
+                            if isinstance(previous, dict) and isinstance(incoming, dict):
+                                archive_payload[field] = {**previous, **incoming}
+                        merged_archive = municipal_rules.sanitize_archive(archive_payload)
+                        photo["archive"] = merged_archive
+                        photo["spatial"] = municipal_rules.sanitize_spatial(
+                            updates.get("spatial") if isinstance(updates.get("spatial"), dict) else photo.get("spatial")
+                        )
+                        if merged_archive.get("times", {}).get("confirmed_capture") and "photo_date" not in updates:
+                            photo["photo_date"] = merged_archive["times"]["confirmed_capture"]
                     # The browser sends process_name even when only a caption changed.
                     # Keep pile sorting and all scope changes exactly as before. Ordinary
                     # canonical units need just one durable metadata write, not a full
@@ -3292,7 +3412,90 @@ class AlbumManager:
             raise ValueError("没有匹配到项目，请先导入项目划分表或换一个提示词")
         return {"project": best, "score": best_score}
 
+    def import_municipal_records(self, records, source_label="市政划分导入"):
+        if not municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
+            raise ValueError("当前工程不是市政工程，不能按市政分项表导入。")
+        created = 0
+        skipped = 0
+        kept_legacy = 0
+        seen_codes = self._existing_project_code_keys()
+        import_order = 0
+        records = list(records or [])
+        headers_seen = set()
+        for raw_fields in records:
+            for header in dict(raw_fields or {}):
+                headers_seen.add(str(header or "").replace(" ", ""))
+        joined = "".join(headers_seen)
+        if "单元工程" in joined and "分项工程" not in joined:
+            raise ValueError("市政划分要有分项工程名称和分项工程编码。不能把水利单元工程表直接当成市政分项。")
+        for row_number, raw_fields in enumerate(records, start=2):
+            fields = {}
+            for header, value in dict(raw_fields or {}).items():
+                header_text = str(header or "").strip().lstrip("\ufeff").replace(" ", "")
+                if header_text:
+                    fields[header_text] = municipal_rules.preserve_code_text(value)
+            item_code = fields.get("分项工程编码") or fields.get("分项工程编号") or ""
+            item_name = fields.get("分项工程名称") or ""
+            if not item_code or not item_name:
+                skipped += 1
+                continue
+            try:
+                safe_code = self._safe_code(item_code)
+            except ValueError:
+                skipped += 1
+                continue
+            if self._name_key(safe_code) in seen_codes:
+                skipped += 1
+                continue
+            import_order += 1
+            fields.update({
+                "节点类型": "item",
+                "工程专业": municipal_rules.INDUSTRY_NAME,
+                "分项工程编码": item_code,
+                "分项工程名称": item_name,
+                "合同工程名称": fields.get("合同或标段名称") or fields.get("合同工程名称") or current_engineering_project().get("project_name", ""),
+                "项目划分顺序": str(import_order),
+                "项目划分行号": str(row_number),
+                "项目划分来源表": source_label,
+            })
+            before = self._metadata_path(safe_code).exists()
+            saved = self.create_project(safe_code, item_name, " ".join(fields.values()), fields, import_order)
+            if before and str(saved.get("division_type") or "") == "unit":
+                kept_legacy += 1
+            else:
+                created += 1
+            seen_codes.add(self._name_key(safe_code))
+        return {"created": created, "skipped": skipped, "kept_legacy_units": kept_legacy, "updated": 0, "total": created, "source": source_label}
+
+    def import_municipal_file(self, source):
+        path = Path(source)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            text = read_text_with_fallback(path)
+            delimiter = "\t" if text.count("\t") >= text.count(",") else ","
+            return self.import_municipal_records(list(csv.DictReader(io.StringIO(text), delimiter=delimiter)), path.name)
+        if load_workbook is None:
+            raise RuntimeError("缺少 openpyxl，请先运行：pip install -r requirements.txt")
+        workbook = load_workbook(path, data_only=True)
+        records = []
+        for sheet in workbook.worksheets:
+            rows = list(sheet.iter_rows(values_only=True))
+            if not rows:
+                continue
+            headers = [self._cell_text(value).replace(" ", "") for value in rows[0]]
+            for raw in rows[1:]:
+                if not any(self._cell_text(value) for value in raw):
+                    continue
+                records.append({
+                    header: municipal_rules.preserve_code_text(raw[index]) if index < len(raw) else ""
+                    for index, header in enumerate(headers)
+                    if header
+                })
+        return self.import_municipal_records(records, path.name)
+
     def import_projects_from_xlsx(self, source):
+        if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
+            return self.import_municipal_file(source)
         if load_workbook is None:
             raise RuntimeError("缺少 openpyxl，请先运行：pip install -r requirements.txt")
 
@@ -3385,6 +3588,8 @@ class AlbumManager:
         }
 
     def import_projects_from_xls(self, source):
+        if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
+            raise ValueError("市政划分请使用 csv 或 xlsx，并包含分项工程列。旧版 xls 仍只识别水利单元工程表。")
         """读取客户常用的旧版 Excel 文件，并自动识别项目划分层级。"""
         if xlrd is None:
             raise RuntimeError("缺少旧版 Excel 读取组件，请重新安装最新版软件")
@@ -3513,6 +3718,8 @@ class AlbumManager:
         return records
 
     def import_projects_from_records(self, records, source_label="粘贴导入"):
+        if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
+            return self.import_municipal_records(records, source_label)
         created = 0
         skipped = 0
         seen_codes = self._existing_project_code_keys()
@@ -4491,7 +4698,13 @@ def photo_detail_rows(project, photo, print_settings=None):
 
 
 def is_pile_unit(data):
-    """判断是否为灌注桩类单元（如 钻孔灌注桩单元工程），用于连体排序。"""
+    """水利灌注桩单元沿用连体排序。市政分项即使名称里有灌注桩，也不走这套排序。"""
+    data = data if isinstance(data, dict) else {}
+    fields = data.get("source_fields") if isinstance(data.get("source_fields"), dict) else {}
+    if str(fields.get("节点类型") or data.get("division_type") or "") == "item":
+        return False
+    if municipal_rules.is_municipal_name(fields.get("工程专业", "")):
+        return False
     text = " ".join([
         str(data.get("standard_unit_name") or ""),
         str(data.get("project_name") or ""),
@@ -5714,6 +5927,9 @@ def default_engineering_project():
         or "水利工程（沿用项目划分）",
         "region": info.get("region", ""),
         "template_version": info.get("template_version", "V1.0") or "V1.0",
+        "rule_version": "",
+        "industry_code": "",
+        "project_type_code": "",
         "cloud_owner_id": "",
         "cloud_owner_username": "",
         "cloud_owner_claimed_at": "",
@@ -7519,15 +7735,25 @@ def api_professional_template_catalog():
 def api_professional_template_requirements():
     industry = str(request.args.get("industry") or "").strip()
     project_type = str(request.args.get("project_type") or "").strip()
+    try:
+        summary = professional_templates.plan_summary(industry, project_type)
+        rows = professional_templates.requirements(industry, project_type)
+    except municipal_rules.MunicipalRuleError as exc:
+        return json_error(str(exc), 400)
     return jsonify(
         {
             "ok": True,
             "industry": industry,
             "project_type": project_type,
-            "summary": professional_templates.plan_summary(industry, project_type),
-            "requirements": professional_templates.requirements(industry, project_type),
+            "summary": summary,
+            "requirements": rows,
         }
     )
+
+
+@app.route("/api/municipal/template", methods=["GET"])
+def api_municipal_template():
+    return jsonify({"ok": True, **professional_templates.municipal_template_document()})
 
 
 @app.route("/api/project-info", methods=["GET"])
@@ -7539,6 +7765,27 @@ def api_project_info():
         "engineering_projects": [_public_project(p) for p in data.get("projects", [])],
         "active_engineering_project_id": data.get("active_id"),
     })
+
+
+def _truthy(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_project_specialty(payload, existing=None):
+    existing = existing or {}
+    industry = str(payload.get("industry") or existing.get("industry") or "水利工程").strip() or "水利工程"
+    project_type = str(payload.get("project_type") or "").strip()
+    if municipal_rules.is_municipal_name(industry):
+        industry = municipal_rules.INDUSTRY_NAME
+        if not project_type:
+            raise municipal_rules.MunicipalRuleError("project_type_required", "请选择市政工程类型。未知类型不会自动改成第一项，也不会套用全部拍摄清单。")
+        project_type = municipal_rules.canonical_project_type(project_type)
+        rule_version = str(existing.get("rule_version") or municipal_rules.RULE_VERSION)
+        if _truthy(payload.get("confirm_template_upgrade")):
+            rule_version = municipal_rules.RULE_VERSION
+    else:
+        rule_version = str(existing.get("rule_version") or "")
+    return industry, project_type, rule_version
 
 
 @app.route("/api/project-info", methods=["POST"])
@@ -7559,6 +7806,18 @@ def api_save_project_info():
             None,
         )
         existing_hash = str((existing_project or {}).get("delete_password_hash") or "")
+        try:
+            normalized_industry, normalized_project_type, normalized_rule_version = _normalize_project_specialty(payload, existing_project)
+        except municipal_rules.MunicipalRuleError as exc:
+            return json_error(str(exc), 400)
+        if existing_project and (
+            str(existing_project.get("industry") or "") != normalized_industry
+            or str(existing_project.get("project_type") or "") != normalized_project_type
+        ) and manager.list_projects() and not _truthy(payload.get("confirm_industry_change")):
+            return json_error(
+                "当前工程已有项目划分或照片。更换专业或类型不会删除节点、不会停用在途照片，也不会重编号。确认后只更新专业信息。",
+                409,
+            )
         new_pwd = str(payload.get("delete_password") or "").strip()
         if not existing_hash and not new_pwd:
             return json_error("当前工程尚未设置删除密码，请先设置独立的工程删除密码", 400)
@@ -7577,14 +7836,17 @@ def api_save_project_info():
             "location": str(payload.get("location") or "").strip(),
             "start_date": str(payload.get("start_date") or "").strip(),
             "description": str(payload.get("description") or "").strip(),
-            "industry": str(payload.get("industry") or "水利工程").strip(),
-            "project_type": str(payload.get("project_type") or "").strip(),
+            "industry": normalized_industry,
+            "project_type": normalized_project_type,
             "region": str(payload.get("region") or "").strip(),
             "template_version": str(
-                payload.get("template_version")
+                (existing_project or {}).get("template_version")
                 or professional_templates.catalog().get("version")
                 or "V1.0"
             ).strip(),
+            "rule_version": normalized_rule_version,
+            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else "",
+            "project_type_code": municipal_rules.subtype_code(normalized_project_type) if municipal_rules.is_municipal_name(normalized_industry) else "",
             "cloud_owner_id": str((existing_project or {}).get("cloud_owner_id") or ""),
             "cloud_owner_username": str(
                 (existing_project or {}).get("cloud_owner_username") or ""
@@ -7645,6 +7907,10 @@ def api_create_engineering_project():
         project_code = str(payload.get("project_code") or "").strip()
         if not project_name:
             return json_error("请输入工程名称", 400)
+        try:
+            normalized_industry, normalized_project_type, normalized_rule_version = _normalize_project_specialty(payload)
+        except municipal_rules.MunicipalRuleError as exc:
+            return json_error(str(exc), 400)
         delete_password = validate_engineering_delete_password(payload.get("delete_password"))
         data = read_engineering_projects()
         # 中文工程名没有 ASCII 编号时，生成内部 ID；用户看到的名称和工程编号保持原样。
@@ -7678,12 +7944,15 @@ def api_create_engineering_project():
             "location": str(payload.get("location") or "").strip(),
             "start_date": str(payload.get("start_date") or "").strip(),
             "description": str(payload.get("description") or "").strip(),
-            "industry": str(payload.get("industry") or "水利工程").strip() or "水利工程",
-            "project_type": str(payload.get("project_type") or "").strip(),
+            "industry": normalized_industry,
+            "project_type": normalized_project_type,
             "region": str(payload.get("region") or "").strip(),
             "template_version": str(
                 professional_templates.catalog().get("version") or "V1.0"
             ).strip(),
+            "rule_version": normalized_rule_version,
+            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else "",
+            "project_type_code": municipal_rules.subtype_code(normalized_project_type) if municipal_rules.is_municipal_name(normalized_industry) else "",
             "delete_password_hash": generate_password_hash(delete_password),
             # 新工程直接归属当前已登录的主账号。否则它只能留在电脑本地，
             # 小程序看不到，也会误以为终身会员切换工程后失去上传权限。
@@ -8134,6 +8403,164 @@ def api_import_projects():
     finally:
         if temp_path and temp_path.exists():
             temp_path.unlink(missing_ok=True)
+
+
+@app.route("/api/municipal/division-template.csv")
+def api_municipal_division_template():
+    project_type = str(request.args.get("project_type") or current_engineering_project().get("project_type") or "").strip()
+    try:
+        rows = municipal_rules.skeleton_rows(project_type, current_engineering_project().get("project_name", ""))
+    except municipal_rules.MunicipalRuleError as exc:
+        return json_error(str(exc), 400)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=list(municipal_rules.MUNICIPAL_IMPORT_HEADERS))
+    writer.writeheader()
+    writer.writerows(rows)
+    memory = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    return send_file(memory, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="市政工程划分模板.csv")
+
+
+@app.route("/api/engineering-division.csv")
+def api_export_engineering_division():
+    output = io.StringIO()
+    municipal = municipal_rules.is_municipal_name(current_engineering_project().get("industry"))
+    headers = list(municipal_rules.MUNICIPAL_IMPORT_HEADERS) if municipal else list(PROJECT_TEMPLATE_HEADERS)
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    for project in manager.list_projects():
+        fields = project.get("source_fields") or {}
+        if municipal and str(fields.get("节点类型") or project.get("division_type") or "") != "item":
+            continue
+        if municipal:
+            writer.writerow([fields.get(header, "") for header in headers])
+        else:
+            writer.writerow([
+                fields.get("合同工程名称", ""),
+                fields.get("单位工程名称", ""),
+                fields.get("单位工程编码", ""),
+                fields.get("分部工程名称", ""),
+                fields.get("分部工程编码", ""),
+                fields.get("单元工程名称", "") or project.get("project_name", ""),
+                fields.get("单元工程编码", "") or project.get("display_project_code", ""),
+                project.get("keywords", ""),
+            ])
+    memory = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    return send_file(memory, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="当前项目划分.csv")
+
+
+def _selected_archive_photos(photo_ids):
+    wanted = {str(item).strip() for item in photo_ids if str(item).strip()}
+    chosen = []
+    originals = {}
+    for project in manager.list_projects(include_other=True):
+        code = project.get("project_code")
+        data = manager.get_project(code)
+        hierarchy = manager.project_hierarchy(data)
+        for photo in data.get("photos") or []:
+            keys = {str(photo.get("id") or ""), str(photo.get("photo_uuid") or "")}
+            if wanted and not (keys & wanted):
+                continue
+            if not wanted:
+                continue
+            photo = dict(photo)
+            photo["leaf"] = hierarchy
+            archive = photo.get("archive") if isinstance(photo.get("archive"), dict) else {}
+            original = archive.get("original") if isinstance(archive.get("original"), dict) else {}
+            backup_name = str(photo.get("original_backup") or "")
+            raw = b""
+            if original.get("status") == "preserved" and backup_name:
+                backup_path = manager._original_path(code, backup_name)
+                if backup_path.is_file():
+                    raw = backup_path.read_bytes()
+            elif original.get("status") == "preserved" and photo.get("filename"):
+                direct = manager._photos_dir(code) / str(photo.get("filename"))
+                if direct.is_file() and not photo.get("optimized"):
+                    raw = direct.read_bytes()
+            originals[str(photo.get("photo_uuid") or "")] = raw
+            chosen.append(photo)
+    return chosen, originals
+
+
+@app.route("/api/archive/search")
+def api_archive_search():
+    keyword = str(request.args.get("q") or "").strip().lower()
+    phase = str(request.args.get("phase") or "").strip()
+    template_code = str(request.args.get("template_code") or "").strip()
+    stake = str(request.args.get("stake") or "").strip()
+    well = str(request.args.get("well") or "").strip()
+    matches = []
+    for project in manager.list_projects(include_other=True):
+        data = manager.get_project(project.get("project_code"))
+        hierarchy = manager.project_hierarchy(data)
+        for photo in data.get("photos") or []:
+            archive = photo.get("archive") if isinstance(photo.get("archive"), dict) else {}
+            spatial = photo.get("spatial") if isinstance(photo.get("spatial"), dict) else {}
+            if phase and archive.get("phase") != phase:
+                continue
+            if template_code and archive.get("template_code") != template_code:
+                continue
+            spatial_text = json.dumps(spatial, ensure_ascii=False)
+            if stake and stake not in spatial_text and stake not in str(archive.get("location_text") or ""):
+                continue
+            if well and well not in spatial_text:
+                continue
+            blob = json.dumps({"photo": photo, "leaf": hierarchy}, ensure_ascii=False).lower()
+            if keyword and keyword not in blob:
+                continue
+            matches.append({
+                "project_code": data.get("project_code"),
+                "id": photo.get("id"),
+                "photo_uuid": photo.get("photo_uuid"),
+                "title": photo.get("title"),
+                "photo_date": photo.get("photo_date"),
+                "upload_time": photo.get("upload_time"),
+                "archive": archive,
+                "spatial": spatial,
+                "leaf": {
+                    "node_kind": hierarchy.get("node_kind"),
+                    "item_code": hierarchy.get("item_code"),
+                    "item_name": hierarchy.get("item_name"),
+                    "unit_code": hierarchy.get("unit_code"),
+                    "unit_name": hierarchy.get("unit_name"),
+                },
+            })
+    return jsonify({"ok": True, "photos": matches})
+
+
+@app.route("/api/archive-packages", methods=["POST"])
+def api_archive_package():
+    user, error = login_required_json()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    photo_ids = payload.get("photo_ids") or payload.get("photo_uuids") or []
+    if isinstance(photo_ids, str):
+        photo_ids = [item.strip() for item in photo_ids.splitlines() if item.strip()]
+    photos, originals = _selected_archive_photos(photo_ids)
+    if not photos:
+        return json_error("请选择要整理的照片。照片组不从整棵工程树自动生成。", 400)
+    group_id = str(payload.get("group_id") or uuid.uuid4().hex[:12])
+    project_id = active_engineering_project_id()
+    municipal_export.upsert_group(
+        DATA_DIR,
+        project_id,
+        group_id,
+        str(payload.get("title") or "照片组"),
+        [{"project_code": item.get("leaf", {}).get("item_code") or item.get("project_code"), "photo_uuid": item.get("photo_uuid")} for item in photos],
+    )
+    package = municipal_export.build_package(
+        str(payload.get("title") or "照片组"),
+        photos,
+        originals,
+        expect_concealment=_truthy(payload.get("expect_concealment")),
+        local_profile=str(payload.get("local_profile") or ""),
+    )
+    return send_file(
+        io.BytesIO(package),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="市政照片整理包.zip",
+    )
 
 
 @app.route("/api/project-template.csv")
@@ -8706,8 +9133,11 @@ def api_update_photo(project_code, photo_id):
     data = request.get_json(silent=True) or request.form
     try:
         photo_date = str(data.get("photo_date") or "").strip()
-        if not photo_date:
+        archive_payload = data.get("archive") if isinstance(data.get("archive"), dict) else None
+        if not photo_date and archive_payload is None:
             return json_error("请填写照片日期", 400)
+        if not photo_date and archive_payload is not None:
+            photo_date = str(((archive_payload.get("times") or {}).get("confirmed_capture")) or "").strip()
         updates = {
             "photo_uuid": str(data.get("photo_uuid") or "").strip(),
             "title": data.get("title", ""),
@@ -8717,6 +9147,10 @@ def api_update_photo(project_code, photo_id):
             "process_name": data.get("process_name", ""),
             "process_code": data.get("process_code", ""),
         }
+        if archive_payload is not None:
+            updates["archive"] = archive_payload
+        if isinstance(data.get("spatial"), dict):
+            updates["spatial"] = data.get("spatial")
         # 编辑题名、日期等普通信息时，不得把已识别的竖图方向重置为横图。
         # 老客户端可能不发送 orientation / rotation，因此仅在明确提供时更新。
         if "orientation" in data:

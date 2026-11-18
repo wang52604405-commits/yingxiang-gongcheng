@@ -429,6 +429,12 @@ def _requirement_payload(row) -> dict:
         "description_template": item.get("description_template", ""),
         "standard_source": item.get("standard_source", ""),
         "template_version": item.get("template_version", "V1.0"),
+        "rule_level": "national_mandatory" if "55032" in str(item.get("standard_source") or "") else "product_default",
+        "rule_nature": (
+            "隐蔽工程在隐蔽前应留存现场影像，并形成验收文件。照片不代替验收记录。"
+            if "55032" in str(item.get("standard_source") or "")
+            else "软件建议，不是国家强制必拍，也不代表验收通过。"
+        ),
     }
 
 
@@ -485,6 +491,12 @@ def _photo_payload(row, download_url="", *, conn=None) -> dict:
             "part_name": assignment.get("part_name", ""),
             "unit_code": assignment.get("unit_code", ""),
             "unit_name": assignment.get("unit_name", ""),
+            "item_code": assignment.get("item_code", ""),
+            "item_name": assignment.get("item_name", ""),
+            "sub_unit_code": assignment.get("sub_unit_code", ""),
+            "sub_unit_name": assignment.get("sub_unit_name", ""),
+            "sub_part_code": assignment.get("sub_part_code", ""),
+            "sub_part_name": assignment.get("sub_part_name", ""),
             "process_code": assignment.get("process_code", ""),
             "process_name": assignment.get("process_name", ""),
             "other_node_code": assignment.get("other_node_code", ""),
@@ -498,6 +510,8 @@ def _photo_payload(row, download_url="", *, conn=None) -> dict:
         "part_name": assignment.get("part_name", ""),
         "unit_code": assignment.get("unit_code", ""),
         "unit_name": assignment.get("unit_name", ""),
+        "item_code": assignment.get("item_code", ""),
+        "item_name": assignment.get("item_name", ""),
         "process_code": assignment.get("process_code", ""),
         "process_name": assignment.get("process_name", ""),
         "other_node_code": assignment.get("other_node_code", ""),
@@ -597,6 +611,7 @@ def _tree_from_rows(rows) -> list[dict]:
 def _node_code(node: dict, node_type: str, parent: str, index: int) -> str:
     raw = (
         node.get("node_code")
+        or node.get("item_code")
         or node.get("unit_code")
         or node.get("code")
         or node.get("internal_project_code")
@@ -653,19 +668,40 @@ def _flatten_snapshot(tree, other_tree):
             unit_project = unit_project if isinstance(unit_project, dict) else {"name": unit_project}
             unit_project_code = _node_code(unit_project, "unit_project", contract_code, unit_index)
             add({**unit_project, "node_code": unit_project_code}, "engineering", "unit_project", contract_code, unit_index, "__none__")
-            for part_index, part in enumerate(unit_project.get("parts") or unit_project.get("children") or []):
+            def add_part(part, parent_code, part_index):
                 part = part if isinstance(part, dict) else {"name": part}
-                part_code = _node_code(part, "part", unit_project_code, part_index)
-                add({**part, "node_code": part_code}, "engineering", "part", unit_project_code, part_index, "__none__")
-                for leaf_index, unit in enumerate(part.get("units") or part.get("children") or []):
+                part_code = _node_code(part, "part", parent_code, part_index)
+                add({**part, "node_code": part_code}, "engineering", "part", parent_code, part_index, "__none__")
+                for sub_index, sub_part in enumerate(part.get("sub_parts") or []):
+                    sub_part = sub_part if isinstance(sub_part, dict) else {"name": sub_part}
+                    sub_code = _node_code(sub_part, "sub_part", part_code, sub_index)
+                    add({**sub_part, "node_code": sub_code}, "engineering", "sub_part", part_code, sub_index, "__none__")
+                    add_leaves(sub_part, sub_code)
+                add_leaves(part, part_code)
+
+            def add_leaves(node, parent_code):
+                for leaf_index, unit in enumerate(node.get("units") if node.get("units") is not None else (node.get("children") or [])):
                     unit = unit if isinstance(unit, dict) else {"name": unit}
-                    unit_code = _node_code(unit, "unit", part_code, leaf_index)
-                    add({**unit, "node_code": unit_code}, "engineering", "unit", part_code, leaf_index, "__none__")
+                    unit_code = _node_code(unit, "unit", parent_code, leaf_index)
+                    add({**unit, "node_code": unit_code}, "engineering", "unit", parent_code, leaf_index, "__none__")
                     for process_index, process in enumerate(unit.get("processes") or []):
                         process = process if isinstance(process, dict) else {"name": process}
                         process_name = _safe_text(process.get("name"), 200)
                         process_code = f"{unit_code}::process::{hashlib.sha1(process_name.encode('utf-8')).hexdigest()[:12]}"
                         add({**process, "node_code": process_code}, "engineering", "process", unit_code, process_index, "__none__")
+                for item_index, item_node in enumerate(node.get("items") or []):
+                    item_node = item_node if isinstance(item_node, dict) else {"name": item_node}
+                    item_code = _node_code(item_node, "item", parent_code, item_index)
+                    add({**item_node, "node_code": item_code}, "engineering", "item", parent_code, item_index, "__none__")
+
+            for part_index, part in enumerate(unit_project.get("parts") or []):
+                add_part(part, unit_project_code, part_index)
+            for sub_index, sub_unit in enumerate(unit_project.get("sub_units") or []):
+                sub_unit = sub_unit if isinstance(sub_unit, dict) else {"name": sub_unit}
+                sub_code = _node_code(sub_unit, "sub_unit", unit_project_code, sub_index)
+                add({**sub_unit, "node_code": sub_code}, "engineering", "sub_unit", unit_project_code, sub_index, "__none__")
+                for part_index, part in enumerate(sub_unit.get("parts") or []):
+                    add_part(part, sub_code, part_index)
 
     def add_other(node, parent, index):
         if isinstance(node, str):
@@ -680,6 +716,30 @@ def _flatten_snapshot(tree, other_tree):
     for other_index, other_node in enumerate(other_tree or []):
         add_other(other_node, "", other_index)
     return result
+
+
+def _validated_snapshot_nodes(nodes):
+    """Reject ambiguous identities before replacing any stored project data."""
+    unique = {}
+    for node in nodes:
+        key = (node["scope"], node["node_code"])
+        previous = unique.get(key)
+        if previous is not None:
+            if (
+                previous["parent_code"] != node["parent_code"]
+                or previous["node_type"] != node["node_type"]
+            ):
+                raise ApiProblem(
+                    "conflicting_snapshot_node",
+                    f"工程划分编码 {node['node_code']} 对应不同上级或层级，请先核对重复编码。"
+                    "本次同步未写入，已有工程划分、照片及其归属保持不变。",
+                    409,
+                )
+            # Old desktop snapshots may repeat a parent while listing its
+            # children separately. Flattened children remain in this sequence.
+            continue
+        unique[key] = node
+    return list(unique.values())
 
 
 def _exchange_wechat_code(code: str, app_id: str) -> dict:
@@ -741,6 +801,79 @@ def _assignment_node(
     ).fetchone()
 
 
+def _attach_capture_fields(resolved: dict, raw: dict) -> dict:
+    import municipal_rules
+
+    archive = municipal_rules.sanitize_archive(raw.get("archive") if isinstance(raw.get("archive"), dict) else {})
+    spatial = municipal_rules.sanitize_spatial(raw.get("spatial") if isinstance(raw.get("spatial"), dict) else {})
+    if any(archive.values()) if False else True:
+        resolved = dict(resolved)
+        if archive.get("template_code") or archive.get("phase") or archive.get("concealment") or archive.get("location_text") or archive.get("original", {}).get("sha256") or archive.get("times", {}).get("confirmed_capture") or archive.get("times", {}).get("exif_original"):
+            resolved["archive"] = archive
+        elif isinstance(raw.get("archive"), dict):
+            resolved["archive"] = archive
+        if spatial:
+            resolved["spatial"] = spatial
+    return resolved
+
+
+def _municipal_item_assignment(conn, account_id, project_id, assignment, *, active_only: bool, strict: bool):
+    item_code = _safe_text(assignment.get("item_code"), 160)
+    item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "item", active_only=active_only)
+    if not item and not active_only:
+        item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "item", active_only=False)
+    if not item:
+        if strict:
+            raise ApiProblem(
+                "item_not_found",
+                "分项工程不存在或已不在当前划分中。照片仍留在手机队列，不会被删除；请在电脑上确认这个分项后再传。",
+                404,
+            )
+        return None
+    chain = []
+    parent_code = item["parent_code"]
+    seen = set()
+    while parent_code and parent_code not in seen:
+        seen.add(parent_code)
+        parent = _assignment_node(conn, account_id, project_id, "engineering", parent_code, "", active_only=active_only)
+        if not parent:
+            break
+        chain.append(parent)
+        parent_code = parent["parent_code"]
+    by_type = {}
+    for node in chain:
+        by_type.setdefault(node["node_type"], node)
+    part = by_type.get("part")
+    unit_project = by_type.get("unit_project")
+    if strict and (not part or not unit_project):
+        raise ApiProblem(
+            "item_hierarchy_incomplete",
+            "该分项缺少单位工程或分部工程。照片仍保留，请先从电脑同步完整划分。",
+            409,
+        )
+    sub_unit = by_type.get("sub_unit")
+    sub_part = by_type.get("sub_part")
+    section = by_type.get("contract")
+    return {
+        "contract_code": section["node_code"] if section else "",
+        "contract_name": section["name"] if section else "",
+        "unit_project_code": unit_project["node_code"] if unit_project else "",
+        "unit_project_name": unit_project["name"] if unit_project else "",
+        "sub_unit_code": sub_unit["node_code"] if sub_unit else "",
+        "sub_unit_name": sub_unit["name"] if sub_unit else "",
+        "part_code": part["node_code"] if part else "",
+        "part_name": part["name"] if part else "",
+        "sub_part_code": sub_part["node_code"] if sub_part else "",
+        "sub_part_name": sub_part["name"] if sub_part else "",
+        "item_code": item["node_code"],
+        "item_name": item["name"],
+        "unit_code": "",
+        "unit_name": "",
+        "process_code": "",
+        "process_name": _safe_text(assignment.get("process_name"), 200),
+    }
+
+
 def _engineering_assignment(
     conn,
     account_id: int,
@@ -751,10 +884,16 @@ def _engineering_assignment(
     strict: bool,
     require_process: bool = False,
 ) -> dict | None:
+    assignment = assignment if isinstance(assignment, dict) else {}
+    if _safe_text(assignment.get("item_code"), 160):
+        resolved = _municipal_item_assignment(
+            conn, account_id, project_id, assignment, active_only=active_only, strict=strict
+        )
+        return _attach_capture_fields(resolved, assignment) if resolved else None
     unit_code = _safe_text(assignment.get("unit_code"), 160)
     if not unit_code:
         if strict:
-            raise ApiProblem("assignment_required", "请选择单元工程")
+            raise ApiProblem("assignment_required", "请选择单元工程或市政分项。照片不会因此被删除。")
         return None
     unit = _assignment_node(
         conn,
@@ -767,7 +906,11 @@ def _engineering_assignment(
     )
     if not unit:
         if strict:
-            raise ApiProblem("unit_not_found", "单元工程不存在或已停用", 404)
+            raise ApiProblem(
+                "unit_not_found",
+                "单元工程不存在或已不在当前划分中。这张照片仍留在手机队列，不会被删除；请在电脑确认原目标后再传。",
+                404,
+            )
         return None
 
     part = _assignment_node(
@@ -861,7 +1004,7 @@ def _engineering_assignment(
     def name(row):
         return row["name"] if row else ""
 
-    return {
+    return _attach_capture_fields({
         "contract_code": code(contract),
         "contract_name": name(contract),
         "unit_project_code": code(unit_project),
@@ -872,7 +1015,7 @@ def _engineering_assignment(
         "unit_name": unit["name"],
         "process_code": process_code,
         "process_name": process_name,
-    }
+    }, assignment)
 
 
 def _hydrate_assignment(conn, row, assignment: dict) -> dict:
@@ -3238,6 +3381,13 @@ def register_mobile_api(
         finally:
             conn.close()
 
+    @blueprint.get("/api/mobile/v1/municipal-template")
+    def mobile_municipal_template():
+        import professional_templates
+
+        user()
+        return jsonify({"ok": True, **professional_templates.municipal_template_document()})
+
     @blueprint.get("/api/mobile/v1/projects/<project_id>/requirements")
     def project_requirements(project_id):
         current = user()
@@ -3321,6 +3471,7 @@ def register_mobile_api(
         scope = _safe_text(request.args.get("scope"), 20)
         category = _safe_text(request.args.get("category"), 20)
         unit_code = _safe_text(request.args.get("unit_code"), 160)
+        item_code = _safe_text(request.args.get("item_code"), 160)
         other_node_code = _safe_text(request.args.get("other_node_code"), 160)
         if scope and scope not in SCOPES:
             raise ApiProblem("invalid_scope", "影像范围无效")
@@ -3361,6 +3512,9 @@ def register_mobile_api(
         if unit_code:
             clauses.append("json_extract(assignment_json, '$.unit_code') = ?")
             params.append(unit_code)
+        if item_code:
+            clauses.append("json_extract(assignment_json, '$.item_code') = ?")
+            params.append(item_code)
         if other_node_code:
             clauses.append("json_extract(assignment_json, '$.other_node_code') = ?")
             params.append(other_node_code)
@@ -5674,7 +5828,7 @@ def register_mobile_api(
         requirements = data.get("requirements") if requirements_supplied else []
         if len(requirements) > 5000:
             raise ApiProblem("too_many_requirements", "专业采集规则超过单工程 5000 条上限")
-        nodes = _flatten_snapshot(tree, other_tree)
+        nodes = _validated_snapshot_nodes(_flatten_snapshot(tree, other_tree))
         conn = db.connect()
         try:
             _require_active_machine(conn, current["id"], desktop_machine_id)
@@ -5726,7 +5880,7 @@ def register_mobile_api(
                     str(node.get("node_code") or "").strip()
                     for node in nodes
                     if node.get("scope") == "engineering"
-                    and node.get("node_type") == "unit"
+                    and node.get("node_type") in {"unit", "item"}
                 }
                 incoming_processes = {
                     (
@@ -5753,11 +5907,13 @@ def register_mobile_api(
                         assignment = _json(pending["assignment_json"], {})
                         if pending["scope"] == "engineering":
                             unit_code = _safe_text(assignment.get("unit_code"), 160)
+                            item_code = _safe_text(assignment.get("item_code"), 160)
                             process_name = _safe_text(assignment.get("process_name"), 160)
-                            if not unit_code or unit_code not in incoming_units:
+                            leaf_code = item_code or unit_code
+                            if not leaf_code or leaf_code not in incoming_units:
                                 takeover_allowed = False
                                 break
-                            if process_name and (unit_code, process_name) not in incoming_processes:
+                            if unit_code and not item_code and process_name and (unit_code, process_name) not in incoming_processes:
                                 takeover_allowed = False
                                 break
                         elif pending["scope"] == "other":
@@ -5828,6 +5984,7 @@ def register_mobile_api(
                 if existing
                 else {}
             )
+            stored_rule_version = str(metadata.get("rule_version") or "")
             metadata.update({
                 key: value
                 for key, value in project.items()
@@ -5842,6 +5999,20 @@ def register_mobile_api(
             metadata["other_node_count"] = sum(
                 1 for node in nodes if node["scope"] == "other"
             )
+            metadata["item_count"] = sum(1 for node in nodes if node["node_type"] == "item")
+            incoming_rule = str((project or {}).get("rule_version") or "")
+            stored_rule = stored_rule_version
+            if (
+                requirements_supplied
+                and stored_rule
+                and incoming_rule
+                and stored_rule != incoming_rule
+                and not data.get("confirm_rule_upgrade")
+            ):
+                requirements_supplied = False
+                metadata["rule_lock_warning"] = "规则版本已锁定。未确认前不替换拍摄清单，也不改已有编号。"
+            elif incoming_rule:
+                metadata["rule_version"] = incoming_rule
             if requirements_supplied:
                 metadata["requirement_count"] = len(
                     [
@@ -6680,7 +6851,11 @@ def register_mobile_api(
                 raise ApiProblem("photo_not_found", "照片不存在或不属于当前归档电脑", 404)
             if row["status"] != "desktop_imported":
                 raise ApiProblem("photo_not_imported", "请先将照片完整保存到电脑", 409)
-            assignment = _validate_assignment(conn, current["id"], project["project_id"], "engineering", {"unit_code": data.get("unit_code"), "process_name": data.get("process_name", "")}, require_process=False)
+            assignment = _validate_assignment(
+                conn, current["id"], project["project_id"], "engineering",
+                {key: data[key] for key in ("unit_code", "item_code", "process_name", "archive", "spatial") if key in data},
+                require_process=False,
+            )
             match = _json(row["match_json"], {})
             idempotent = row["scope"] == "engineering" and row["category"] == category and _json(row["assignment_json"], {}) == assignment and not match.get("manual_review_required") and row["local_project_code"] == local_project_code and row["local_photo_id"] == local_photo_id
             if not idempotent:
@@ -6717,10 +6892,15 @@ def register_mobile_api(
             category = ""
         assignment = {
             "unit_code": request.form.get("unit_code", ""),
+            "item_code": request.form.get("item_code", ""),
             "process_name": request.form.get("process_name", ""),
         } if scope == "engineering" else {
             "other_node_code": request.form.get("other_node_code", "")
         }
+        if scope == "engineering":
+            for key in ("archive", "spatial"):
+                if request.form.get(key):
+                    assignment[key] = _json(request.form.get(key), {})
         row, idempotent = insert_photo(
             current_user=current,
             photo_uuid=_uuid(request.form.get("photo_uuid"), "photo_uuid"),

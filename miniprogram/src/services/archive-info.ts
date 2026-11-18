@@ -46,7 +46,11 @@ export function archiveInfoIssues(draft: UploadDraft): ArchiveInfoIssue[] {
   if (!present(assignment?.part_code) || !present(assignment?.part_name)) {
     issues.push({ field: 'part', label: '分部工程' })
   }
-  if (!present(assignment?.unit_code) || !present(assignment?.unit_name)) {
+  if (present(assignment?.item_code) || present(assignment?.item_name)) {
+    if (!present(assignment?.item_code) || !present(assignment?.item_name)) {
+      issues.push({ field: 'unit', label: '分项工程' })
+    }
+  } else if (!present(assignment?.unit_code) || !present(assignment?.unit_name)) {
     issues.push({ field: 'unit', label: '单元工程' })
   }
   if (assignment?.process_required && !present(assignment.process_name)) {
@@ -66,11 +70,13 @@ export function archiveInfoMessage(draft: UploadDraft): string {
 
 export function hasCompleteEngineeringHierarchy(assignment: Assignment | undefined): boolean {
   if (!assignment) return false
+  const leafReady = present(assignment.item_code) && present(assignment.item_name)
+    ? true
+    : present(assignment.unit_code) && present(assignment.unit_name)
   return present(assignment.unit_project_code)
     && present(assignment.unit_project_name)
     && present(assignment.part_code)
     && present(assignment.part_name)
-    && present(assignment.unit_code)
-    && present(assignment.unit_name)
+    && leafReady
     && (!assignment.process_required || present(assignment.process_name))
 }

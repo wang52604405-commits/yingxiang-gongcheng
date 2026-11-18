@@ -98,18 +98,39 @@ class ServerProductContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(prefix="album-server-test-")
-        os.environ["ALBUM_SERVER_DATA"] = cls.temp.name
-        os.environ["ALBUM_SERVER_DB"] = str(Path(cls.temp.name) / "server.db")
-        os.environ["ALBUM_ADMIN_USER"] = "test_admin"
-        os.environ["ALBUM_ADMIN_PASS"] = "TestAdmin2026Secure"
-        from server.app import create_app
+        cls.addClassCleanup(cls.temp.cleanup)
+        root = Path(cls.temp.name)
+        environment = patch.dict(os.environ, {
+            "ALBUM_SERVER_DATA": str(root),
+            "ALBUM_SERVER_DB": str(root / "server.db"),
+            "ALBUM_ADMIN_USER": "test_admin",
+            "ALBUM_ADMIN_PASS": "TestAdmin2026Secure",
+        })
+        environment.start()
+        cls.addClassCleanup(environment.stop)
+        from server import app as server_app, config
 
-        cls.app = create_app()
+        # unittest discovery imports other server tests first. Environment changes
+        # cannot update the already loaded config module; patch its effective
+        # values too, and restore both layers before the next contract class.
+        configured = patch.multiple(config,
+            DATA_DIR=root,
+            DB_PATH=root / "server.db",
+            ADMIN_USERNAME="test_admin",
+            ADMIN_PASSWORD="TestAdmin2026Secure",
+            MOBILE_STORAGE_BACKEND="local",
+            MOBILE_STORAGE_DIR=root / "objects",
+            MOBILE_CHUNK_DIR=root / "chunks",
+        )
+        configured.start()
+        cls.addClassCleanup(configured.stop)
+        cls.server_app = server_app
+        cls.app = server_app.create_app()
+        cls.app.config["TESTING"] = True
         cls.client = cls.app.test_client()
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.temp.cleanup()
+    def setUp(self):
+        self.server_app._rate_hits.clear()
 
     def post(self, path, data, token=""):
         headers = {"Authorization": "Bearer " + token} if token else {}
@@ -121,6 +142,11 @@ class ServerProductContractTest(unittest.TestCase):
         return response.get_json()["token"]
 
     def test_login_and_me_return_same_stable_account_id(self):
+        wrong_password = self.post(
+            "/api/login",
+            {"username": "test_admin", "password": "WrongAdmin2026"},
+        )
+        self.assertEqual(wrong_password.status_code, 401, wrong_password.get_json())
         response = self.post(
             "/api/login",
             {"username": "test_admin", "password": "TestAdmin2026Secure"},

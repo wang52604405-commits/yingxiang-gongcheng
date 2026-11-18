@@ -50,12 +50,8 @@ PUBLIC_UPDATE_BASE = os.environ.get(
 
 INSTALLER = build_all.INSTALLER  # 客户可发送安装包-Win10/发给客户/安装程序.exe
 
-# 每次发布都会把上一版安装包另存为 <名称>.bak-<版本>，每个约 90MB。没有上限时
-# 它们会一直堆积并写满系统盘：磁盘写满会让 SQLite 无法写 WAL，进而使整个线上
-# API 返回 500（2026-09-15 的事故就是这样发生的）。因此发布前后都把旧备份收敛
-# 到最近 INSTALLER_BACKUP_RETAIN 个；正式安装包、version.json 和官网下载副本
-# 都不在清理范围内。
-INSTALLER_BACKUP_RETAIN = 2
+# 发布保留全部历史安装包。空间不足时停止，不自动删除恢复所需的文件。
+MIN_FREE_BYTES = 128 * 1024 * 1024
 
 SSH_OPTIONS = [
     "-o", "BatchMode=yes",
@@ -146,26 +142,44 @@ def backup_remote_installer() -> str:
     r = ssh_cmd(["test", "-f", old], check=False)
     if r.returncode != 0:
         return ""
-    backup = f"{old}.bak-{current_remote_version() or 'unknown'}"
+    # 用远端独占创建的目录避免重发同版本时覆盖已有备份；不把远端版本
+    # 文本拼入命令或文件名。
     if DRY_RUN:
-        return backup
-    ssh_cmd(["cp", old, backup])
-    return backup
-
-
-def prune_installer_backups(keep: int = INSTALLER_BACKUP_RETAIN) -> list[str]:
-    """只保留最近 keep 个旧安装包备份，返回被删除的文件名。"""
+        return f"{REMOTE_UPDATES}/installer-backup-<unique>/{REMOTE_EXE_NAME}"
     script = (
-        f"cd {REMOTE_UPDATES} || exit 0; "
-        f"ls -1t {REMOTE_EXE_NAME}.bak-* 2>/dev/null | tail -n +{keep + 1} | "
-        'while IFS= read -r name; do rm -f -- "$name" && echo "已清理 $name"; done'
+        "set -eu; umask 077; "
+        f"backup_dir=$(mktemp -d {shlex.quote(REMOTE_UPDATES + '/installer-backup-XXXXXXXX')}); "
+        f"cp -- {shlex.quote(old)} \"$backup_dir/{REMOTE_EXE_NAME}\"; "
+        f"printf '%s\\n' \"$backup_dir/{REMOTE_EXE_NAME}\""
     )
-    result = ssh_cmd(["bash", "-lc", shlex.quote(script)], check=False)
-    return [
-        line.strip()
-        for line in (result.stdout or "").splitlines()
-        if line.strip().startswith("已清理")
-    ]
+    return ssh_cmd(["bash", "-lc", shlex.quote(script)]).stdout.strip()
+
+
+def check_remote_capacity() -> None:
+    """只读检查最坏情况下的备份和上传空间；未知容量也停止发布。"""
+    if DRY_RUN:
+        return
+    # 更新目录需要旧包副本和上传临时文件，官网可能位于同一文件系统，
+    # 因此两个目录都按总额预留，避免共享分区时重复计算可用空间。
+    old = f"{REMOTE_UPDATES}/{REMOTE_EXE_NAME}"
+    result = ssh_cmd(["bash", "-lc", shlex.quote(
+        f"if [ -f {shlex.quote(old)} ]; then stat -c %s -- {shlex.quote(old)}; else echo 0; fi"
+    )])
+    try:
+        old_size = int(result.stdout.strip())
+        if old_size < 0:
+            raise ValueError
+    except ValueError as exc:
+        raise SystemExit("无法确认旧安装包大小，已停止发布并保留历史备份") from exc
+    required = old_size + 2 * INSTALLER.stat().st_size + MIN_FREE_BYTES
+    for directory in (REMOTE_UPDATES, REMOTE_SITE_DOWNLOAD):
+        result = ssh_cmd(["df", "-Pk", directory])
+        try:
+            available = int(result.stdout.splitlines()[-1].split()[3]) * 1024
+        except (IndexError, ValueError) as exc:
+            raise SystemExit("无法确认服务器可用空间，已停止发布并保留历史备份") from exc
+        if available < required:
+            raise SystemExit(f"{directory} 可用空间不足，已停止发布并保留全部历史备份")
 
 
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
@@ -253,18 +267,30 @@ def write_remote_version(new_version: str, note: str) -> None:
 
 
 def verify_remote() -> None:
-    """curl 服务器 version.json 验证。"""
+    """确认公网清单指向本次构建；读取失败或旧清单不能当成发布通过。"""
+    if DRY_RUN:
+        print("[DRY_RUN] 跳过公网发布验证")
+        return
     import json as _json
     try:
         result = subprocess.run(
-            ["curl", "-s", "-m", "10", f"{PUBLIC_UPDATE_BASE}/version.json"],
-            capture_output=True, text=True, encoding="utf-8")
+            ["curl", "--fail", "--silent", "--show-error", "--max-time", "10", f"{PUBLIC_UPDATE_BASE}/version.json"],
+            capture_output=True, text=True, encoding="utf-8", timeout=15)
+        if result.returncode:
+            raise ValueError("更新清单请求失败")
         data = _json.loads(result.stdout)
+        expected = {
+            "version": _local_version(),
+            "sha256": hashlib.sha256(INSTALLER.read_bytes()).hexdigest(),
+            "size": INSTALLER.stat().st_size,
+        }
+        if not isinstance(data, dict) or any(data.get(key) != value for key, value in expected.items()):
+            raise ValueError("公网清单的版本、大小或 SHA-256 与本次安装包不一致")
         print("\n=== 服务器 version.json 当前内容 ===")
         print(_json.dumps(data, ensure_ascii=False, indent=2))
         print("=====================================")
     except Exception as exc:
-        print(f"[!] 验证失败: {exc}")
+        raise SystemExit(f"公网发布验证未通过，请保留备份并检查发布状态：{exc}") from exc
 
 
 def main() -> int:
@@ -293,10 +319,7 @@ def main() -> int:
         print(f"[ERR] 安装程序未生成: {INSTALLER}")
         return 1
 
-    # 先收敛旧安装包备份再备份本版：这一版上传要额外 90MB，磁盘紧张时先腾地方。
-    pruned_before = prune_installer_backups()
-    if pruned_before:
-        print(f"[清理] 已删除 {len(pruned_before)} 个旧安装包备份")
+    check_remote_capacity()
 
     # 上传前备份旧版
     backup = backup_remote_installer()
@@ -311,10 +334,6 @@ def main() -> int:
     write_remote_version(new_ver, note)
 
     verify_remote()
-    # 本版刚写入一份新备份，这里再收敛一次，保证长期只保留最近几个。
-    pruned_after = prune_installer_backups()
-    if pruned_after:
-        print(f"[清理] 已删除 {len(pruned_after)} 个旧安装包备份")
     print("\n[完成] 新版本已发布。客户启动时将自动提示更新。")
     return 0
 

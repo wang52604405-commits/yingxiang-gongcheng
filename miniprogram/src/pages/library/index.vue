@@ -12,7 +12,7 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { launchCapture } from '@/services/capture-entry'
 import { syncTabBar } from '@/services/navigation'
 import { selectionStorage } from '@/stores/selection'
-import { createPhotoLibrary } from '@/services/photo-library'
+import { createPhotoLibrary, destinationPhotoLabel, destinationPhotoQuery } from '@/services/photo-library'
 import type { PhotoCategory, Scope } from '@/types/domain'
 import { shortDate } from '@/utils/format'
 
@@ -33,8 +33,7 @@ const library = createPhotoLibrary(() => ({
     project_id: selectionStorage.getProject().id,
     scope: scope.value === 'all' ? undefined : scope.value,
     category: scope.value === 'engineering' && category.value !== 'all' ? category.value : undefined,
-    unit_code: scope.value === 'engineering' ? activeDestination.value?.assignment.unit_code : undefined,
-    other_node_code: scope.value === 'other' ? activeDestination.value?.assignment.other_node_code : undefined,
+    ...destinationPhotoQuery(scope.value, activeDestination.value?.assignment),
   },
 }), mobileApi.photos)
 const { photos, loading, loadingMore, nextCursor, totalCount, error } = toRefs(library.state)
@@ -109,7 +108,7 @@ onShow(() => {
   if (choosingDestination && selectedDestination.value && selectedDestination.value.project_id === project.value.id) {
     scope.value = selectedDestination.value.scope
     unitSearch.value = selectedDestination.value.scope === 'engineering'
-      ? String(selectedDestination.value.assignment.unit_name || selectedDestination.value.assignment.unit_code || '')
+      ? String(selectedDestination.value.assignment.item_name || selectedDestination.value.assignment.item_code || selectedDestination.value.assignment.unit_name || selectedDestination.value.assignment.unit_code || '')
       : ''
   }
   choosingDestination = false
@@ -149,7 +148,7 @@ onReachBottom(() => { void loadPhotos(false) })
 
       <view v-if="scope !== 'all'" class="path-row">
       <button class="path-card pressable" @tap="chooseDestination">
-        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? activeDestination.assignment.unit_name || activeDestination.assignment.other_node_name : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
+        <view class="path-copy"><UiIcon name="folder" :size="18" /><text class="path-title">{{ activeDestination ? destinationPhotoLabel(activeDestination.assignment) : scope === 'engineering' ? '所有单元 · 点此筛选' : '所有目录 · 点此筛选' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
       <button v-if="activeDestination" class="clear-filter pressable" @tap="clearDestination">查看全部</button>

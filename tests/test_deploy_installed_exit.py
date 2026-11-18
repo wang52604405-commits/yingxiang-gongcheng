@@ -50,6 +50,11 @@ $script:stopped=@(); $script:reused=$true
 $blocked=$false
 try { Stop-InstalledAppProcesses } catch { $blocked=$true }
 if (-not $blocked -or $script:stopped.Count) { throw 'Reused PID was not rejected' }
+$script:fixtures=@((Fixture 901 'C:\album-owned\album_server.exe' $null))
+$script:stopped=@(); $script:reused=$false
+$blocked=$false
+try { Stop-InstalledAppProcesses } catch { $blocked=$true }
+if (-not $blocked -or $script:stopped.Count) { throw 'Missing process creation identity was not rejected' }
 $script:fixtures=@(); $script:reused=$false
 Stop-InstalledAppProcesses
 if ($script:stopped.Count) { throw 'Empty inventory caused a stop' }

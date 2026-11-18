@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """多专业工程影像采集模板读取服务。
 
-模板保持为数据文件，桌面端只保存工程专业、工程类型、地区和模板版本；
-具体采集清单由模板动态生成，便于后续按地区、业主或项目覆盖。
+模板保持为数据文件。市政规则以 municipal_rules 为唯一来源，
+桌面、服务端和小程序都读这里，不再各写一份中文清单。
 """
 from __future__ import annotations
 
 import json
 from functools import lru_cache
 from pathlib import Path
+
+import municipal_rules
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,6 +19,7 @@ TEMPLATE_PATH = BASE_DIR / "assets" / "professional_templates.json"
 INDUSTRY_ALIASES = {
     "水利": "水利工程",
     "房建": "房屋建筑工程",
+    "房屋建筑": "房屋建筑工程",
     "市政": "市政工程",
     "电力": "电力工程",
 }
@@ -35,6 +38,7 @@ def load_template_db() -> dict:
     ]
     raw["templates"] = templates
     raw["count"] = len(templates)
+    raw["municipal_rule_version"] = municipal_rules.RULE_VERSION
     return raw
 
 
@@ -50,12 +54,18 @@ def catalog() -> dict:
         grouped.setdefault(_norm(item.get("industry")), set()).add(
             str(item.get("project_type") or "通用工程").strip()
         )
-    # 当前水利项目沿用用户现有项目划分，不强制套用通用照片清单。
     grouped.setdefault("水利工程", set()).add("水利工程（沿用项目划分）")
+    for subtype in municipal_rules.SUBTYPES:
+        grouped.setdefault(municipal_rules.INDUSTRY_NAME, set()).add(subtype["name"])
     return {
         "version": str(template_db.get("version") or "V1.0"),
+        "municipal_rule_version": municipal_rules.RULE_VERSION,
         "industries": [
-            {"name": industry, "project_types": sorted(types)}
+            {
+                "name": industry,
+                "project_types": sorted(types),
+                "subtypes": municipal_rules.subtype_catalog() if industry == municipal_rules.INDUSTRY_NAME else [],
+            }
             for industry, types in grouped.items()
             if industry
         ],
@@ -67,6 +77,16 @@ def requirements(industry: str, project_type: str = "") -> list[dict]:
     normalized_project_type = str(project_type or "").strip()
     if normalized_industry == "水利工程":
         return []
+    if normalized_industry == municipal_rules.INDUSTRY_NAME:
+        rows = [
+            item
+            for item in load_template_db()["templates"]
+            if _norm(item.get("industry")) == municipal_rules.INDUSTRY_NAME
+        ]
+        if normalized_project_type:
+            canonical = municipal_rules.canonical_project_type(normalized_project_type)
+            normalized_project_type = canonical
+        return municipal_rules.filter_requirements(rows, normalized_project_type)
     rows = [
         item
         for item in load_template_db()["templates"]
@@ -84,7 +104,24 @@ def requirements(industry: str, project_type: str = "") -> list[dict]:
 
 
 def plan_summary(industry: str, project_type: str = "") -> dict:
-    rows = requirements(industry, project_type)
+    normalized_industry = _norm(industry)
+    checklist_status = "ready"
+    support_note = ""
+    try:
+        rows = requirements(industry, project_type)
+    except municipal_rules.MunicipalRuleError as exc:
+        if normalized_industry == municipal_rules.INDUSTRY_NAME and exc.code == "project_type_required":
+            rows = []
+            checklist_status = "type_required"
+            support_note = str(exc)
+        else:
+            raise
+    if normalized_industry == municipal_rules.INDUSTRY_NAME and project_type:
+        found = municipal_rules.subtype_by_name(project_type)
+        if found and found["photo_checklist"] != "curated":
+            checklist_status = "project_config"
+            support_note = found.get("support_note", "")
+            rows = []
     counts = {"required": 0, "conditional": 0, "recommended": 0}
     for row in rows:
         key = str(row.get("required_type") or "recommended")
@@ -95,4 +132,26 @@ def plan_summary(industry: str, project_type: str = "") -> dict:
         "conditional": counts.get("conditional", 0),
         "recommended": counts.get("recommended", 0),
         "template_version": str(load_template_db().get("version") or "V1.0"),
+        "rule_version": municipal_rules.RULE_VERSION if normalized_industry == municipal_rules.INDUSTRY_NAME else "",
+        "checklist_status": checklist_status,
+        "support_note": support_note,
+        "rule_notice": "软件建议不能当成国家强制。隐蔽前现场影像的依据是 GB 55032-2022 第3.3.4条第4款，照片不代替验收文件。",
+    }
+
+
+def municipal_template_document() -> dict:
+    return {
+        "rule_version": municipal_rules.RULE_VERSION,
+        "industry": municipal_rules.INDUSTRY_NAME,
+        "industry_code": municipal_rules.INDUSTRY_CODE,
+        "transfer_timing": municipal_rules.TRANSFER_TIMING_TEXT,
+        "concealment_clause": municipal_rules.CONCEALMENT_CLAUSE,
+        "concealment_text": municipal_rules.CONCEALMENT_TEXT,
+        "hash_limitation": municipal_rules.HASH_LIMITATION_TEXT,
+        "precheck_statement": municipal_rules.PRECHECK_STATEMENT,
+        "local_profiles_enabled": [],
+        "subtypes": municipal_rules.subtype_catalog(),
+        "import_headers": list(municipal_rules.MUNICIPAL_IMPORT_HEADERS),
+        "phases": municipal_rules.PHASES,
+        "concealment_states": municipal_rules.CONCEALMENT_STATES,
     }

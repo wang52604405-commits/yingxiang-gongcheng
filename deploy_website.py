@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """Safely validate and deploy the static marketing website.
 
-The server's download/ directory is excluded from the page bundle and from
-rollback, so the published installer is never replaced or deleted here.
-The Word tutorial is copied into that directory on its own.
+The installer and unknown website files are excluded. Previous managed content,
+including both tutorial locations, and failed content are retained in a new backup.
 """
 
 from __future__ import annotations
@@ -17,9 +16,9 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from datetime import datetime
+import uuid
 from html.parser import HTMLParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parent
@@ -164,15 +163,122 @@ def _stamp_published_version(site: Path) -> str:
     return version
 
 
+def build_allocation_script(stage: str, backup: str) -> str:
+    """Create exclusive transaction directories before uploading any payload."""
+    return (
+        "set -Eeuo pipefail; umask 077; "
+        f"mkdir -m 0700 -- {shlex.quote(stage)}; "
+        f"mkdir -p -- {shlex.quote(PurePosixPath(backup).parent.as_posix())}; "
+        f"mkdir -m 0700 -- {shlex.quote(backup)}"
+    )
+
+
+def build_remote_script(stage: str, backup: str, archive: str, root: str = REMOTE_ROOT) -> str:
+    """Bash transaction over a fixed set of website paths; retain every displaced item."""
+    managed = (*PAGES, "site-content.json", "assets", "tutorial")
+    published = (*PAGES, "site-content.json", "assets")
+    managed_q = " ".join(shlex.quote(name) for name in managed)
+    published_q = " ".join(shlex.quote(name) for name in published)
+    pages_q = " ".join(shlex.quote(name) for name in PAGES)
+    return f"""set -Eeuo pipefail
+umask 077
+ROOT={shlex.quote(root)}
+STAGE={shlex.quote(stage)}
+BACKUP={shlex.quote(backup)}
+ARCHIVE={shlex.quote(archive)}
+TUTORIAL_NAME={shlex.quote(TUTORIAL_NAME)}
+INSTALLER_NAME={shlex.quote(INSTALLER_NAME)}
+MANAGED=({managed_q})
+PUBLISHED=({published_q})
+SITE="$STAGE/site"
+test -d "$ROOT" && test ! -L "$ROOT"
+test -d "$ROOT/download" && test ! -L "$ROOT/download"
+test -s "$ROOT/download/$INSTALLER_NAME"
+mkdir -m 0700 -- "$SITE" "$BACKUP/original" "$BACKUP/displaced" "$BACKUP/failed"
+tar -xzf "$ARCHIVE" -C "$SITE"
+for name in {pages_q} site-content.json; do test -s "$SITE/$name"; done
+test -s "$SITE/assets/style.css" && test -s "$SITE/assets/site.js"
+test -s "$SITE/tutorial/$TUTORIAL_NAME"
+test -z "$(find "$SITE" -type l -print -quit)"
+grep -q '四大专业' "$SITE/index.html"
+: > "$BACKUP/present.txt"
+for name in "${{MANAGED[@]}}"; do
+    if [ -e "$ROOT/$name" ] || [ -L "$ROOT/$name" ]; then
+        cp -a -- "$ROOT/$name" "$BACKUP/original/$name"
+        printf '%s\\n' "$name" >> "$BACKUP/present.txt"
+    fi
+done
+if [ -e "$ROOT/download/$TUTORIAL_NAME" ] || [ -L "$ROOT/download/$TUTORIAL_NAME" ]; then
+    cp -a -- "$ROOT/download/$TUTORIAL_NAME" "$BACKUP/original/download-tutorial"
+    printf '%s\\n' download-tutorial >> "$BACKUP/present.txt"
+fi
+touch "$BACKUP/snapshot-ready"
+rollback() {{
+    status=$?
+    trap - ERR
+    recovery_failed=0
+    for name in "${{MANAGED[@]}}"; do
+        if [ -e "$ROOT/$name" ] || [ -L "$ROOT/$name" ]; then
+            if ! mv -- "$ROOT/$name" "$BACKUP/failed/$name"; then
+                recovery_failed=1
+                continue
+            fi
+        fi
+        if grep -Fxq -- "$name" "$BACKUP/present.txt"; then
+            cp -a -- "$BACKUP/original/$name" "$ROOT/$name" || recovery_failed=1
+        fi
+    done
+    download_cleared=1
+    if [ -e "$ROOT/download/$TUTORIAL_NAME" ] || [ -L "$ROOT/download/$TUTORIAL_NAME" ]; then
+        mv -- "$ROOT/download/$TUTORIAL_NAME" "$BACKUP/failed/download-tutorial" || download_cleared=0
+    fi
+    if [ "$download_cleared" -eq 1 ]; then
+        if grep -Fxq download-tutorial "$BACKUP/present.txt"; then
+            cp -a -- "$BACKUP/original/download-tutorial" "$ROOT/download/$TUTORIAL_NAME" || recovery_failed=1
+        fi
+    else
+        recovery_failed=1
+    fi
+    if [ "$recovery_failed" -ne 0 ]; then
+        printf '%s\\n' "Website rollback incomplete; retained evidence: $BACKUP" >&2
+    else
+        printf '%s\\n' "Website publish failed; previous managed content restored: $BACKUP" >&2
+    fi
+    exit "$status"
+}}
+trap rollback ERR
+for name in "${{PUBLISHED[@]}}"; do
+    if [ -e "$ROOT/$name" ] || [ -L "$ROOT/$name" ]; then
+        mv -- "$ROOT/$name" "$BACKUP/displaced/$name"
+    fi
+    cp -a -- "$SITE/$name" "$ROOT/$name"
+done
+if [ -e "$ROOT/tutorial" ] || [ -L "$ROOT/tutorial" ]; then
+    mv -- "$ROOT/tutorial" "$BACKUP/displaced/tutorial"
+fi
+if [ -e "$ROOT/download/$TUTORIAL_NAME" ] || [ -L "$ROOT/download/$TUTORIAL_NAME" ]; then
+    mv -- "$ROOT/download/$TUTORIAL_NAME" "$BACKUP/displaced/download-tutorial"
+fi
+cp -a -- "$SITE/tutorial/$TUTORIAL_NAME" "$ROOT/download/$TUTORIAL_NAME"
+for name in "${{PUBLISHED[@]}}"; do chown -R www-data:www-data "$ROOT/$name"; done
+chown www-data:www-data "$ROOT/download/$TUTORIAL_NAME"
+test -s "$ROOT/download/$INSTALLER_NAME" && test -s "$ROOT/download/$TUTORIAL_NAME"
+curl -fsSL --max-time 15 --output "$BACKUP/health-index.html" -H 'Host: shuiliyingxiang.cn' http://127.0.0.1/
+grep -q '四大专业' "$BACKUP/health-index.html"
+trap - ERR
+printf '%s\\n' "$BACKUP"
+"""
+
+
 def deploy() -> None:
     validate_site()
     if not SSH_KEY.is_file():
         raise SystemExit(f"缺少服务器 SSH 私钥：{SSH_KEY}")
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    remote_archive = f"/var/tmp/album-site-{timestamp}.tar.gz"
-    remote_stage = f"/var/tmp/album-site-{timestamp}"
-    remote_backup = f"/var/backups/shuiliyingxiang/pre-site-{timestamp}"
+    identifier = uuid.uuid4().hex
+    remote_stage = f"/var/tmp/album-site-{identifier}"
+    remote_archive = f"{remote_stage}/payload.tar.gz"
+    remote_backup = f"/var/backups/shuiliyingxiang/pre-site-{identifier}"
 
     with tempfile.TemporaryDirectory(prefix="album-site-release-") as temp_dir:
         staged_site = Path(temp_dir) / "site"
@@ -184,10 +290,10 @@ def deploy() -> None:
             print("没有读到安装包版本，页面只保留 Windows 说明")
         archive = Path(temp_dir) / "website.tar.gz"
         with tarfile.open(archive, "w:gz") as bundle:
-            for item in staged_site.iterdir():
-                if item.name == "download":
-                    continue
-                bundle.add(item, arcname=item.name)
+            for name in (*PAGES, "site-content.json", "assets", "tutorial"):
+                bundle.add(staged_site / name, arcname=name)
+        allocation = build_allocation_script(remote_stage, remote_backup)
+        _ssh("bash -c " + shlex.quote(allocation))
         _run(
             [
                 "scp",
@@ -203,45 +309,8 @@ def deploy() -> None:
             ]
         )
 
-    root = shlex.quote(REMOTE_ROOT)
-    archive_q = shlex.quote(remote_archive)
-    stage = shlex.quote(remote_stage)
-    backup = shlex.quote(remote_backup)
-    pages = " ".join(shlex.quote(name) for name in PAGES)
-    tutorial_stage = shlex.quote(f"{remote_stage}/tutorial/{TUTORIAL_NAME}")
-    tutorial_dest = shlex.quote(f"{REMOTE_ROOT}/download/{TUTORIAL_NAME}")
-    installer_dest = shlex.quote(f"{REMOTE_ROOT}/download/{INSTALLER_NAME}")
-    download_dir = shlex.quote(f"{REMOTE_ROOT}/download")
-    tutorial_public = shlex.quote(f"{REMOTE_ROOT}/tutorial")
-    remote_script = (
-        "set -eu; "
-        f"mkdir -p {stage} {backup}; tar -xzf {archive_q} -C {stage}; "
-        f"for f in {pages}; do test -s {stage}/$f; done; "
-        f"test -s {stage}/assets/style.css; test -s {stage}/assets/site.js; "
-        f"grep -q '四大专业' {stage}/index.html; "
-        f"for f in {pages} site-content.json assets; do "
-        f"if test -e {root}/$f; then cp -a {root}/$f {backup}/; fi; done; "
-        f"rollback() {{ rm -rf {root}/assets; rm -f "
-        + " ".join(f"{root}/{name}" for name in PAGES)
-        + f" {root}/site-content.json; cp -a {backup}/. {root}/; }}; "
-        f"trap 'rollback' ERR; cp -a {stage}/. {root}/; "
-        f"chown -R www-data:www-data {root}/assets "
-        + " ".join(f"{root}/{name}" for name in PAGES)
-        + f" {root}/site-content.json; "
-        f"test -s {tutorial_stage}; "
-        f"mkdir -p {download_dir}; "
-        f"cp -a {tutorial_stage} {tutorial_dest}; "
-        f"chown www-data:www-data {tutorial_dest}; "
-        f"rm -rf {tutorial_public}; "
-        f"test -s {installer_dest}; "
-        f"test -s {tutorial_dest}; "
-        "curl -fsSL --max-time 15 -H 'Host: shuiliyingxiang.cn' "
-        "http://127.0.0.1/ | grep -q '四大专业'; "
-        "trap - ERR; "
-        f"rm -rf {stage}; rm -f {archive_q}; "
-        f"printf '%s\\n' {backup}"
-    )
-    result = _ssh(remote_script)
+    remote_script = build_remote_script(remote_stage, remote_backup, remote_archive)
+    result = _ssh("bash -c " + shlex.quote(remote_script))
     print("宣传网站部署完成，服务器备份：" + result.stdout.strip())
 
 

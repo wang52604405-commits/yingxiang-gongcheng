@@ -1066,7 +1066,9 @@ const $ = (selector) => document.querySelector(selector);
             status: response.status
           }, "", response.status >= 500 ? "error" : "warning");
         }
-        throw new Error(detail || `请求失败（HTTP ${response.status}）`);
+        const failure = new Error(detail || `请求失败（HTTP ${response.status}）`);
+        failure.status = response.status;
+        throw failure;
       }
       return data;
     }
@@ -1192,11 +1194,28 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
+    async function fillNewEngineeringProjectTypes() {
+      const industry = $("#newEngineeringProjectIndustryInput")?.value || "水利工程";
+      const typeInput = $("#newEngineeringProjectTypeInput");
+      if (!typeInput) return;
+      const current = typeInput.value;
+      try {
+        const data = await apiJson("/api/professional-templates/catalog");
+        const group = (data.industries || []).find((item) => item.name === industry);
+        const types = group?.project_types || [];
+        typeInput.innerHTML = `<option value="">请选择工程类型</option>` + types.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("");
+        if (current && [...typeInput.options].some((option) => option.value === current)) typeInput.value = current;
+      } catch (error) {
+        typeInput.innerHTML = `<option value="">请选择工程类型</option>`;
+      }
+    }
+
     function openNewEngineeringProjectModal() {
       const form = $("#newEngineeringProjectForm");
       form?.reset();
       const industry = $("#newEngineeringProjectIndustryInput");
       if (industry) industry.value = "水利工程";
+      fillNewEngineeringProjectTypes().catch(() => {});
       $("#newEngineeringProjectModal").classList.add("open");
       $("#newEngineeringProjectModal").setAttribute("aria-hidden", "false");
       setTimeout(() => $("#newEngineeringProjectNameInput")?.focus(), 0);
@@ -1593,8 +1612,14 @@ const $ = (selector) => document.querySelector(selector);
           ? types.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join("")
           : `<option value="">通用/沿用项目划分</option>`;
         const wanted = preferredType || projectInfoValue("project_type");
-        if (wanted && types.includes(wanted)) typeInput.value = wanted;
-        else if (types.length) typeInput.value = types[0];
+        const placeholder = `<option value="">请选择工程类型</option>`;
+        if (wanted && !types.includes(wanted)) {
+          typeInput.innerHTML = `${placeholder}<option value="${escapeHtml(wanted)}">${escapeHtml(wanted)}（不在当前模板中）</option>` + typeInput.innerHTML;
+          typeInput.value = wanted;
+        } else {
+          typeInput.innerHTML = placeholder + typeInput.innerHTML;
+          typeInput.value = wanted && types.includes(wanted) ? wanted : "";
+        }
         await refreshProfessionalPlanSummary();
       } catch (error) {
         const fallback = preferredType || projectInfoValue("project_type") || "通用/沿用项目划分";
@@ -1609,6 +1634,10 @@ const $ = (selector) => document.querySelector(selector);
       if (!node) return;
       if (industry === "水利工程") {
         node.innerHTML = `<strong>水利工程 · 沿用现有项目划分</strong><p class="import-hint">水利模块继续使用你现有的单位工程—分部工程—单元工程体系，不改变既有照片和编码。</p>`;
+        return;
+      }
+      if (!projectType) {
+        node.innerHTML = `<strong>${escapeHtml(industry)}</strong><p class="import-hint">请选择工程类型。未选择时不会套用全部拍摄清单，也不会自动改成第一个类型。</p>`;
         return;
       }
       try {
@@ -1752,7 +1781,7 @@ const $ = (selector) => document.querySelector(selector);
       showNotice("照片编号规则已保存。新上传照片将按新规则编号。");
     }
 
-    async function saveProjectInfo(event) {
+    async function saveProjectInfo(event, confirmed) {
       event.preventDefault();
       if (!(await ensureAuthenticated("保存工程信息"))) return;
       const payload = {
@@ -1769,7 +1798,8 @@ const $ = (selector) => document.querySelector(selector);
         location: $("#projectInfoLocationInput").value.trim(),
         start_date: $("#projectInfoStartDateInput").value,
         delete_password: $("#projectInfoDeletePasswordInput").value.trim(),
-        description: $("#projectInfoDescriptionInput").value.trim()
+        description: $("#projectInfoDescriptionInput").value.trim(),
+        confirm_industry_change: Boolean(confirmed)
       };
       const photoFields = $("#settingsPhotoFieldsInput").value.split(/\r?\n/).map((line) => {
         const [label, ...rest] = line.split("=");
@@ -1819,11 +1849,19 @@ const $ = (selector) => document.querySelector(selector);
           }
         }
       };
-      const data = await apiJson("/api/project-info", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      let data;
+      try {
+        data = await apiJson("/api/project-info", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (error) {
+        if (error.status === 409 && !confirmed && window.confirm(error.message || "确认更换专业？已有划分和照片会保留，不会重编号。")) {
+          return saveProjectInfo(event, true);
+        }
+        throw error;
+      }
       state.projectInfo = data.project_info || {};
       state.engineeringProjects = data.engineering_projects || state.engineeringProjects;
       state.activeEngineeringProjectId = data.active_engineering_project_id || state.activeEngineeringProjectId;
@@ -4061,6 +4099,15 @@ const $ = (selector) => document.querySelector(selector);
       $("#photoEditPhotographerInput").value = photo.photographer || "";
       $("#photoEditRotationInput").value = String(Number(photo.rotation || 0) || 0);
       $("#photoEditDescriptionInput").value = photo.description || "";
+      const archive = photo.archive || {};
+      const spatial = photo.spatial || {};
+      if ($("#photoEditPhaseInput")) $("#photoEditPhaseInput").value = archive.phase || "";
+      if ($("#photoEditConcealmentInput")) $("#photoEditConcealmentInput").value = archive.concealment || "";
+      if ($("#photoEditProcessEventInput")) $("#photoEditProcessEventInput").value = archive.process_event || "";
+      if ($("#photoEditLocationInput")) $("#photoEditLocationInput").value = archive.location_text || "";
+      if ($("#photoEditSpatialInput")) $("#photoEditSpatialInput").value = archive.location_text ? "" : Object.values(spatial).filter(Boolean).join(" ");
+      if ($("#photoEditAcceptanceInput")) $("#photoEditAcceptanceInput").value = archive.acceptance?.record_no || "";
+      if ($("#photoEditTemplateInput")) $("#photoEditTemplateInput").value = archive.template_code || "";
       const processSelect = $("#photoEditProcessInput");
       if (processSelect) {
         const processes = isProcessProject() ? selectedProcesses() : [];
@@ -4296,12 +4343,31 @@ const $ = (selector) => document.querySelector(selector);
       const orientation = normalizePhotoOrientation(currentPhoto?.orientation);
       const rotation = Number($("#photoEditRotationInput").value || 0);
       const description = $("#photoEditDescriptionInput").value.trim();
-      if (!photoDate) {
+      const municipalArchive = {
+        template_code: $("#photoEditTemplateInput")?.value.trim() || "",
+        phase: $("#photoEditPhaseInput")?.value || "",
+        concealment: $("#photoEditConcealmentInput")?.value || "",
+        process_event: $("#photoEditProcessEventInput")?.value.trim() || "",
+        location_text: $("#photoEditLocationInput")?.value.trim() || $("#photoEditSpatialInput")?.value.trim() || "",
+        acceptance: { record_no: $("#photoEditAcceptanceInput")?.value.trim() || "" },
+        times: {
+          confirmed_capture: photoDate,
+          exif_original: currentPhoto.archive?.times?.exif_original || "",
+          uploaded_at: currentPhoto.upload_time || currentPhoto.archive?.times?.uploaded_at || ""
+        },
+        original: currentPhoto.archive?.original || {}
+      };
+      const spatialText = $("#photoEditSpatialInput")?.value.trim() || "";
+      const spatial = { ...(currentPhoto.spatial || {}) };
+      if (spatialText && !spatial.stake_start && !spatial.well_from && !spatial.pier_no) {
+        spatial.stake_start = spatialText;
+      }
+      if (!photoDate && state.projectInfo?.industry !== "市政工程") {
         showNotice("请填写照片日期。", true);
         return;
       }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(photoDate)) {
-        showNotice("日期格式应为 YYYY-MM-DD。", true);
+      if (photoDate && !/^\d{4}-\d{2}-\d{2}$/.test(photoDate)) {
+        showNotice("日期格式应为 YYYY-MM-DD。上传时间不能代替拍摄日期。", true);
         return;
       }
       const sourceCode = state.selectedCode;
@@ -4314,7 +4380,7 @@ const $ = (selector) => document.querySelector(selector);
         const data = await apiJson(`/api/photos/${encodeURIComponent(sourceCode)}/${encodeURIComponent(editing.photoId)}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ photo_uuid: editing.photoUuid, title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description })
+          body: JSON.stringify({ photo_uuid: editing.photoUuid, title, photo_date: photoDate, photographer, process_name: processName, process_code: processCode, orientation, rotation, description, archive: municipalArchive, spatial })
         });
         // A late response must not overwrite a different unit/engineering context.
         if (state.selectedCode !== sourceCode || state.activeEngineeringProjectId !== sourceEngineering) return;
@@ -5089,6 +5155,37 @@ const $ = (selector) => document.querySelector(selector);
       setActiveEngineeringProject(event.target.value).catch((error) => showNotice(error.message, true));
     });
     $("#newEngineeringProjectBtn")?.addEventListener("click", openNewEngineeringProjectModal);
+    $("#newEngineeringProjectIndustryInput")?.addEventListener("change", () => fillNewEngineeringProjectTypes().catch(() => {}));
+    $("#downloadMunicipalTemplateBtn")?.addEventListener("click", () => {
+      const projectType = $("#projectInfoProjectTypeInput")?.value || "";
+      window.location.href = `/api/municipal/division-template.csv?project_type=${encodeURIComponent(projectType)}`;
+    });
+    $("#exportDivisionBtn")?.addEventListener("click", () => { window.location.href = "/api/engineering-division.csv"; });
+    $("#exportArchivePackBtn")?.addEventListener("click", async () => {
+      const photoIds = ($("#archivePhotoIdsInput")?.value || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      const response = await fetch("/api/archive-packages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: $("#archiveGroupTitleInput")?.value || "照片组",
+          photo_ids: photoIds,
+          expect_concealment: Boolean($("#archiveExpectConcealmentInput")?.checked)
+        })
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        showNotice(data.error || "整理包导出失败", true);
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "市政照片整理包.zip";
+      link.click();
+      URL.revokeObjectURL(url);
+      showNotice("整理包已导出。预检通过不等于移交或验收通过。");
+    });
     $("#closeNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
     $("#cancelNewEngineeringProjectBtn")?.addEventListener("click", closeNewEngineeringProjectModal);
     $("#newEngineeringProjectForm")?.addEventListener("submit", (event) => {
