@@ -241,7 +241,7 @@ jobs:
                 $changed = $true
               } else {
                 $changed = $changedFiles |
-                  Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|municipal_rules\.py$|professional_templates\.py$|assets/professional_templates\.json$|\.github/workflows/deploy\.yml$)'
+                  Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|municipal_rules\.py$|highway_rules\.py$|professional_templates\.py$|assets/professional_templates\.json$|\.github/workflows/deploy\.yml$)'
               }
             }
           }

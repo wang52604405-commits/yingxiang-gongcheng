@@ -936,7 +936,7 @@
             <div class="project-settings-grid">
               <label>工程名称<input id="projectInfoNameInput" type="text" placeholder="请输入工程名称"></label>
               <label>工程编号<input id="projectInfoCodeInput" type="text" placeholder="可选"></label>
-              <label>工程专业<select id="projectInfoIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="电力工程">电力工程</option></select></label>
+              <label>工程专业<select id="projectInfoIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="公路工程">公路工程</option><option value="电力工程">电力工程</option></select></label>
               <label>工程类型<select id="projectInfoProjectTypeInput" class="orientation-select"><option value="">请选择工程类型</option></select></label>
               <label>归档地区<input id="projectInfoRegionInput" type="text" placeholder="省/市，可选；用于后续地区模板"></label>
               <label>建设单位<input id="projectInfoOwnerInput" type="text" placeholder="可选"></label>
@@ -964,8 +964,10 @@
                 <span>首次使用先下载 Excel 模板，填写后选择文件导入。导入前不会改动现有照片。</span>
               </div>
               <button class="secondary-tool" type="button" id="downloadProjectTemplateBtn">下载项目划分模板（Excel）</button>
+              <button class="secondary-tool" type="button" id="downloadHighwayTemplateBtn">下载公路划分模板（按批准划分填写）</button>
               <button class="secondary-tool" type="button" id="downloadMunicipalTemplateBtn">下载市政划分模板（按分项）</button>
               <button class="secondary-tool" type="button" id="exportDivisionBtn">导出当前划分</button>
+              <p class="import-hint" id="highwayDivisionHint">公路土建：按批准的单位—分部—分项划分填写，保留原编码。</p>
               <p class="import-hint" id="municipalDivisionHint">市政工程按单位、可选子单位、分部、可选子分部、分项导入。合同或标段只是管理层。不会把水利单元表改名当成市政分项，也不会按照片清单自动生成工程。</p>
               <label class="wide">照片组名称<input id="archiveGroupTitleInput" type="text" maxlength="80" placeholder="与工程树分开的整理组"></label>
               <label class="wide">照片编号或 UUID，每行一个<textarea id="archivePhotoIdsInput" placeholder="只导出这些照片"></textarea></label>
@@ -1019,32 +1021,32 @@
           <section class="project-settings-panel" data-project-settings-panel="numbering" data-project-settings-group="upload">
             <h4>编号规则</h4>
             <div class="project-settings-grid">
-              <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">按项目划分单元编码（默认）</option><option value="unit_order">按项目划分顺序号（001、002…）</option></select></label>
-              <label>单元排序编号位数<input id="settingsUnitOrderDigitsInput" type="number" min="1" max="8" step="1"></label>
-              <label class="wide">施工单元编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
-              <label class="wide">施工工序编号格式<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
+              <label>编号模式<select id="settingsNumberingModeInput" class="orientation-select"><option value="custom">按导入的工程节点编码（默认）</option><option value="unit_order">按项目划分顺序号（001、002…）</option></select></label>
+              <label>节点排序编号位数<input id="settingsUnitOrderDigitsInput" type="number" min="1" max="8" step="1"></label>
+              <label class="wide">施工照片编号格式<input id="settingsConstructionUnitTemplate" type="text" placeholder="【单元编号】-SY【流水号】"></label>
+              <label class="wide">施工工序照片编号格式（仅已有工序适用）<input id="settingsConstructionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-SY【流水号】"></label>
               <label>施工起始号<input id="settingsConstructionStart" type="number" min="1" step="1"></label>
               <label>施工流水位数<input id="settingsConstructionDigits" type="number" min="1" max="8" step="1"></label>
-              <label class="wide">监理单元编号格式<input id="settingsSupervisionUnitTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
-              <label class="wide">监理工序编号格式<input id="settingsSupervisionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-JY【流水号】"></label>
+              <label class="wide">监理照片编号格式<input id="settingsSupervisionUnitTemplate" type="text" placeholder="【单元编号】-JY【流水号】"></label>
+              <label class="wide">监理工序照片编号格式（仅已有工序适用）<input id="settingsSupervisionProcessTemplate" type="text" placeholder="【单元编号】-【工序编码】-JY【流水号】"></label>
               <label>监理起始号<input id="settingsSupervisionStart" type="number" min="1" step="1"></label>
               <label>监理流水位数<input id="settingsSupervisionDigits" type="number" min="1" max="8" step="1"></label>
             </div>
-            <p class="import-hint">软件默认使用导入表里的单元工程编码，单元照片和工序照片都以该编码开头；“按项目划分顺序号”才使用 001、002…作为前缀。保存后会立即重排本工程已有照片。</p>
+            <p class="import-hint">默认保留导入的工程节点编码；“按项目划分顺序号”才使用 001、002…作为前缀。保存后会立即重排本工程已有照片。</p>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="matching" data-project-settings-group="upload">
             <h4>导入匹配</h4>
             <div class="project-settings-card">
-              <strong>多重规则自动匹配单元</strong>
-              <p class="import-hint">优先读取照片水印“施工区域”，再结合文件夹名、文件名、水印工程名和项目划分层级匹配单位、分部、单元。</p>
+              <strong>多重规则匹配工程节点</strong>
+              <p class="import-hint">优先读取照片水印“施工区域”，再结合文件夹名、文件名、水印工程名和项目划分层级匹配工程节点（水利单元或市政、公路分项）。</p>
             </div>
             <div class="project-settings-card">
               <strong>先审核，后导入</strong>
-              <p class="import-hint">批量文件夹导入先显示施工区域、题名、候选单元、置信度和匹配依据。低置信度或多候选必须由客户确认。</p>
+              <p class="import-hint">批量文件夹导入先显示施工区域、题名、候选节点、置信度和匹配依据。低置信度或多候选必须由客户确认。</p>
             </div>
             <div class="project-settings-card">
-              <strong>单元与工序分层归档</strong>
-              <p class="import-hint">先匹配单元，再由上传面板明确选择“单元照片”或具体工序；系统不会根据模糊文字擅自创建工序。</p>
+              <strong>按实际工程节点归档</strong>
+              <p class="import-hint">确认工程节点后上传。市政、公路归入分项；已有水利单元及工序保持不变。</p>
             </div>
           </section>
           <section class="project-settings-panel" data-project-settings-panel="fields" data-project-settings-group="upload">
@@ -1163,7 +1165,7 @@
         <div class="new-engineering-project-grid">
           <label class="wide">工程名称<input id="newEngineeringProjectNameInput" type="text" maxlength="120" required placeholder="例如：某某水库除险加固工程"></label>
           <label>工程编号<input id="newEngineeringProjectCodeInput" type="text" maxlength="80" placeholder="可选；不填自动生成"></label>
-          <label>工程专业<select id="newEngineeringProjectIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="电力工程">电力工程</option></select></label>
+          <label>工程专业<select id="newEngineeringProjectIndustryInput" class="orientation-select"><option value="水利工程">水利工程</option><option value="房屋建筑工程">房屋建筑工程</option><option value="市政工程">市政工程</option><option value="公路工程">公路工程</option><option value="电力工程">电力工程</option></select></label>
           <label>工程类型<select id="newEngineeringProjectTypeInput" class="orientation-select"><option value="">请选择工程类型</option></select></label>
           <label>归档地区<input id="newEngineeringProjectRegionInput" type="text" maxlength="80" placeholder="可选"></label>
           <label class="wide">工程删除密码<input id="newEngineeringProjectDeletePasswordInput" type="password" minlength="6" maxlength="32" autocomplete="new-password" required placeholder="6–32 位；用于删除本工程"></label>

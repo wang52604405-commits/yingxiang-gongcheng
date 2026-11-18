@@ -28,7 +28,7 @@ export function resolvePhotoHierarchy(nodes: ProjectNode[], unitCode: string): P
 
   function visit(node: ProjectNode, ancestors: ProjectNode[]): PhotoHierarchy | null {
     const path = [...ancestors, node]
-    if (node.type === 'unit' && node.code === targetCode) {
+    if (['unit', 'item', 'batch'].includes(node.type) && node.code === targetCode) {
       return {
         unitProjectName: path.find((item) => item.type === 'unit_project')?.name,
         partName: path.find((item) => item.type === 'part')?.name,
@@ -85,7 +85,7 @@ export function buildPhotoDetailRows(input: {
     { key: 'category', label: '类别', value: photoCategoryLabel(scope, category) },
     scope === 'engineering' ? { key: 'unit_project', label: '单位工程', value: firstText(assignment?.unit_project_name, cloud?.unit_project_name, hierarchy.unitProjectName) } : null,
     scope === 'engineering' ? { key: 'part', label: '分部工程', value: firstText(assignment?.part_name, cloud?.part_name, hierarchy.partName) } : null,
-    scope === 'engineering' ? { key: 'unit', label: '单元工程', value: firstText(assignment?.unit_name, cloud?.unit_name, hierarchy.unitName) } : null,
+    scope === 'engineering' ? { key: 'unit', label: (assignment?.node_type || cloud?.node_type) === 'batch' ? '检验批' : (assignment?.item_code || cloud?.item_code) ? '分项工程' : '单元工程', value: firstText(assignment?.batch_name, cloud?.batch_name, assignment?.item_name, cloud?.item_name, assignment?.unit_name, cloud?.unit_name, hierarchy.unitName) } : null,
     scope === 'engineering' ? { key: 'process', label: '工序', value: firstText(assignment?.process_name, cloud?.process_name) } : null,
     scope === 'other' ? { key: 'directory', label: '归档目录', value: firstText(assignment?.other_node_name, cloud?.other_node_name) } : null,
     { key: 'captured_at', label: '拍摄时间', value: formatPhotoCapturedAt(firstText(local?.client_captured_at, cloud?.captured_at, local?.photo_date, cloud?.photo_date)) },

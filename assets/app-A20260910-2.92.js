@@ -385,7 +385,7 @@ const $ = (selector) => document.querySelector(selector);
             <thead>
               <tr>
                 <th>上传记录</th>
-                <th>单元编号</th>
+                <th>工程节点编号</th>
                 <th>影像日期</th>
                 <th>上传日期</th>
                 <th>上传账号</th>
@@ -1266,6 +1266,43 @@ const $ = (selector) => document.querySelector(selector);
       }
     }
 
+    function isItemProject(project = state.selectedProject) {
+      const fields = project?.source_fields || {};
+      // Actual node identity wins over project specialty after a specialty change.
+      const kind = project?.division_type || project?.hierarchy?.node_kind || fields["节点类型"];
+      if (kind) return ["item", "batch"].includes(kind);
+      if (fields["单元工程编码"]) return false;
+      if (fields["分项工程编码"]) return true;
+      return ["市政工程", "公路工程"].includes(state.projectInfo?.industry);
+    }
+
+    function nodePhotoLabel(project = state.selectedProject) {
+      const kind = project?.division_type || project?.hierarchy?.node_kind || project?.source_fields?.["节点类型"];
+      return kind === "batch" ? "检验批照片" : isItemProject(project) ? "分项照片" : "单元照片";
+    }
+
+    function projectLeafLabel(project) {
+      return nodePhotoLabel(project).replace("照片", "");
+    }
+
+    function batchParentLabel(project) {
+      if (projectLeafLabel(project) !== "检验批") return "";
+      const fields = project?.source_fields || {};
+      const hierarchy = project?.hierarchy || {};
+      return [fields["分项工程编码"] || hierarchy.item_code || project?.parent_item_code,
+        fields["分项工程名称"] || hierarchy.item_name || project?.parent_item_name].filter(Boolean).join(" ");
+    }
+
+    function refreshSpecialtyControls() {
+      const industry = $("#projectInfoIndustryInput")?.value || state.projectInfo?.industry;
+      for (const id of ["downloadHighwayTemplateBtn", "highwayDivisionHint"]) {
+        if ($(`#${id}`)) $(`#${id}`).hidden = industry !== "公路工程";
+      }
+      for (const id of ["downloadMunicipalTemplateBtn", "municipalDivisionHint"]) {
+        if ($(`#${id}`)) $(`#${id}`).hidden = industry !== "市政工程";
+      }
+    }
+
     const NUMBER_TEMPLATE_LABELS = [
       ["{unit_code}", "【单元编号】"],
       ["{unit_order}", "【单元顺序号】"],
@@ -1280,7 +1317,8 @@ const $ = (selector) => document.querySelector(selector);
       NUMBER_TEMPLATE_LABELS.forEach(([token, label]) => {
         value = value.split(token).join(label);
       });
-      return value;
+      return ["市政工程", "公路工程"].includes(state.projectInfo?.industry)
+        ? value.replaceAll("【单元编号】", "【节点编号】").replaceAll("【单元顺序号】", "【节点顺序号】") : value;
     }
 
     // 显示用：把等价的 {unit_code} 统一成 {code} 再转中文占位符，
@@ -1302,7 +1340,7 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function readableToNumberTemplate(template) {
-      let value = String(template || "").trim();
+      let value = String(template || "").trim().replaceAll("【节点编号】", "【单元编号】").replaceAll("【分项编号】", "【单元编号】").replaceAll("【节点顺序号】", "【单元顺序号】");
       NUMBER_TEMPLATE_LABELS.forEach(([token, label]) => {
         const normalizedToken = token === "{code}" ? "{unit_code}" : token;
         value = value.split(label).join(normalizedToken);
@@ -1628,12 +1666,17 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     async function refreshProfessionalPlanSummary() {
+      refreshSpecialtyControls();
       const node = $("#professionalPlanSummary");
       const industry = $("#projectInfoIndustryInput")?.value || "水利工程";
       const projectType = $("#projectInfoProjectTypeInput")?.value || "";
       if (!node) return;
       if (industry === "水利工程") {
         node.innerHTML = `<strong>水利工程 · 沿用现有项目划分</strong><p class="import-hint">水利模块继续使用你现有的单位工程—分部工程—单元工程体系，不改变既有照片和编码。</p>`;
+        return;
+      }
+      if (industry === "公路工程") {
+        node.innerHTML = `<strong>公路工程 · 土建范围</strong><p class="import-hint">请导入批准的单位—分部—分项工程划分。机电、养护不适用此模板。</p>`;
         return;
       }
       if (!projectType) {
@@ -1659,6 +1702,7 @@ const $ = (selector) => document.querySelector(selector);
       $("#projectInfoCodeInput").value = engineeringProjectDisplayCode(currentEngineeringProject());
       $("#projectInfoIndustryInput").value = projectInfoValue("industry") || "水利工程";
       $("#projectInfoRegionInput").value = projectInfoValue("region");
+      refreshSpecialtyControls();
       refreshProfessionalProjectTypes(projectInfoValue("project_type")).catch(() => {});
       $("#projectInfoOwnerInput").value = projectInfoValue("owner");
       $("#projectInfoContractorInput").value = projectInfoValue("contractor");
@@ -2284,7 +2328,7 @@ const $ = (selector) => document.querySelector(selector);
     }
 
     function projectCode(project) { return String(project?.project_code || "").trim(); }
-    function projectDisplayCode(project) { return String(project?.display_project_code || project?.source_fields?.["单元工程编码"] || project?.project_code || "").trim(); }
+    function projectDisplayCode(project) { return String(project?.display_project_code || project?.source_fields?.["检验批编码"] || project?.source_fields?.["分项工程编码"] || project?.source_fields?.["单元工程编码"] || project?.project_code || "").trim(); }
     function projectOrder(project) {
       const direct = Number(project?.project_order);
       if (Number.isFinite(direct) && direct > 0) return direct;
@@ -3181,7 +3225,7 @@ const $ = (selector) => document.querySelector(selector);
         if (uploadFilter === "uploaded" && total <= 0) return false;
         if (uploadFilter === "empty" && total > 0) return false;
         if (!unitQuery) return true;
-        const haystack = `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)}`.toLowerCase();
+        const haystack = `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)} ${batchParentLabel(project)}`.toLowerCase();
         return haystack.includes(unitQuery);
       });
       $("#partCount").textContent = rows.length === part.projects.length
@@ -3189,7 +3233,7 @@ const $ = (selector) => document.querySelector(selector);
         : `${rows.length} / ${part.projects.length} 条`;
       const unitRows = $("#unitRows");
       unitRows.className = "unit-card-grid";
-      $("#partSub").textContent = `${parentName}${part.code ? " / " + part.code : ""} · 统一卡片显示，点击单元进入详情`;
+      $("#partSub").textContent = `${parentName}${part.code ? " / " + part.code : ""} · 点击查看详情`;
       if (part.loading) {
         unitRows.innerHTML = `<div class="first-load-skeleton"><span></span><span></span><span></span><span></span></div>`;
         return;
@@ -3203,7 +3247,8 @@ const $ = (selector) => document.querySelector(selector);
         <button class="unit-card" type="button" data-unit-code="${escapeHtml(projectCode(project))}">
           <span class="code">${escapeHtml(projectDisplayCode(project))}</span>
           <span class="unit-card-main">
-            <strong>${escapeHtml(projectName(project))}</strong>
+            <strong>${escapeHtml(projectLeafLabel(project))} · ${escapeHtml(projectName(project))}</strong>
+            ${batchParentLabel(project) ? `<span class="unit-card-parent">所属分项：${escapeHtml(batchParentLabel(project))}</span>` : ""}
             <span class="unit-card-photo-counts" aria-label="施工和监理照片数量">
               <span><small>施工</small><b class="${Number(project.construction_photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.construction_photo_count || 0)}</b></span>
               <span><small>监理</small><b class="${Number(project.supervision_photo_count || 0) > 0 ? "has-photos" : ""}">${Number(project.supervision_photo_count || 0)}</b></span>
@@ -3294,8 +3339,8 @@ const $ = (selector) => document.querySelector(selector);
       if (!project) return;
       const hierarchy = getHierarchy(project);
       $("#unitTitle").textContent = projectName(project);
-      $("#unitSub").textContent = `${projectCode(project)} · ${state.projectInfo?.industry || "工程影像"}`;
-      $("#unitBreadcrumbs").textContent = [hierarchy.contractName, hierarchy.unitProjectName, hierarchy.partName, projectName(project)].filter(Boolean).join(" / ") || "工程影像 / 单元工程";
+      $("#unitSub").textContent = `${projectDisplayCode(project)} · ${state.projectInfo?.industry || "工程影像"}`;
+      $("#unitBreadcrumbs").textContent = [hierarchy.contractName, hierarchy.unitProjectName, hierarchy.partName, batchParentLabel(project) ? `分项 ${batchParentLabel(project)}` : "", `${projectLeafLabel(project)} ${projectDisplayCode(project)} ${projectName(project)}`].filter(Boolean).join(" / ") || "工程影像 / 单元工程";
       renderPhotos();
     }
 
@@ -3568,7 +3613,7 @@ const $ = (selector) => document.querySelector(selector);
       const renderLimit = Math.min(photos.length, Math.max(PHOTOS_BATCH, oldRendered));
       host.dataset.renderScope = renderScope;
       const categoryLabel = category === "supervision" ? "监理" : "施工";
-      const scopeLabel = processName || "单元照片";
+      const scopeLabel = processName || nodePhotoLabel();
 
       $("#unitCategoryConstructionBtn")?.classList.toggle("active", category === "construction");
       $("#unitCategorySupervisionBtn")?.classList.toggle("active", category === "supervision");
@@ -3578,7 +3623,7 @@ const $ = (selector) => document.querySelector(selector);
       if ($("#unitGalleryCount")) $("#unitGalleryCount").textContent = `${photos.length} 张`;
 
       const processTabs = $("#unitProcessTabs");
-      processTabs.innerHTML = [{ name: "", label: "单元照片" }, ...processList.map((name) => ({ name, label: name }))].map((item) => {
+      processTabs.innerHTML = [{ name: "", label: nodePhotoLabel() }, ...processList.map((name) => ({ name, label: name }))].map((item) => {
         const count = photosForSection(category, item.name).length;
         const manage = item.name
           ? `<span class="process-manage-actions"><button type="button" class="process-manage-btn" data-process-rename="${escapeHtml(item.name)}" title="重命名工序" aria-label="重命名工序">改</button><button type="button" class="process-manage-btn danger" data-process-delete="${escapeHtml(item.name)}" title="删除空工序" aria-label="删除空工序">删</button></span>`
@@ -3708,7 +3753,7 @@ const $ = (selector) => document.querySelector(selector);
       if (!select) return;
       const processes = state.selectedProject && Array.isArray(state.selectedProject.processes) ? state.selectedProject.processes : [];
       const wanted = preferredProcess === null ? select.value : String(preferredProcess || "");
-      select.innerHTML = `<option value="">单元照片</option>${processes.map((name) => `<option value="${escapeHtml(name)}">工序 · ${escapeHtml(name)}</option>`).join("")}`;
+      select.innerHTML = `<option value="">${nodePhotoLabel()}</option>${processes.map((name) => `<option value="${escapeHtml(name)}">工序 · ${escapeHtml(name)}</option>`).join("")}`;
       select.value = processes.includes(wanted) ? wanted : "";
     }
 
@@ -3723,7 +3768,7 @@ const $ = (selector) => document.querySelector(selector);
       const category = normalizePhotoCategory(state.uploadChoiceCategory) === "supervision" ? "监理" : "施工";
       const processName = $("#uploadProcessSelect")?.value || "";
       summary.classList.remove("is-empty");
-      summary.innerHTML = `<strong>${escapeHtml(projectName(state.selectedProject))}</strong><span>${escapeHtml(state.selectedCode)} · ${category} · ${escapeHtml(processName || "单元照片")}</span>`;
+      summary.innerHTML = `<strong>${escapeHtml(projectName(state.selectedProject))}</strong><span>${escapeHtml(projectDisplayCode(state.selectedProject))} · ${category} · ${escapeHtml(processName || nodePhotoLabel())}</span>`;
     }
 
     async function openUploadChoiceModal(category = null, processName = null, lockToCurrentUnit = false) {
@@ -3756,7 +3801,7 @@ const $ = (selector) => document.querySelector(selector);
 
     function openUnitUpload(category, processName = state.activeProcessName) {
       if (!state.selectedCode || !state.selectedProject) {
-        showNotice("请先选择单元工程。", true);
+        showNotice("请先选择工程节点。", true);
         return;
       }
       openUploadChoiceModal(normalizePhotoCategory(category), processName, true).catch((error) => showNotice(error.message, true));
@@ -3906,7 +3951,7 @@ const $ = (selector) => document.querySelector(selector);
 
     async function uploadCategoryFiles(key, files, sourceForm = null) {
       if (!state.selectedCode) {
-        showNotice("请先选择单元工程。", true);
+        showNotice("请先选择工程节点。", true);
         return;
       }
       if (!(await ensureAuthenticated("上传照片"))) return;
@@ -4080,7 +4125,7 @@ const $ = (selector) => document.querySelector(selector);
 
     async function openPhotoEdit(category, photoId) {
       if (!state.selectedCode) {
-        showNotice("请先选择单元工程。", true);
+        showNotice("请先选择工程节点。", true);
         return;
       }
       const context = navigationContext();
@@ -4111,7 +4156,7 @@ const $ = (selector) => document.querySelector(selector);
       const processSelect = $("#photoEditProcessInput");
       if (processSelect) {
         const processes = isProcessProject() ? selectedProcesses() : [];
-        processSelect.innerHTML = `<option value="">单元照片</option>` + processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+        processSelect.innerHTML = `<option value="">${nodePhotoLabel()}</option>` + processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
         processSelect.value = photo.process_name || "";
       }
       $("#photoEditSub").textContent = `${photo.id || ""} · ${batchLabel(category)}`;
@@ -4165,7 +4210,7 @@ const $ = (selector) => document.querySelector(selector);
       const query = String($("#photoMoveSearchInput")?.value || "").trim().toLowerCase();
       return (state.moveTargets || []).filter((project) => {
         if (!query) return true;
-        return `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)}`.toLowerCase().includes(query);
+        return `${projectDisplayCode(project)} ${projectCode(project)} ${projectName(project)} ${batchParentLabel(project)}`.toLowerCase().includes(query);
       });
     }
 
@@ -4181,7 +4226,7 @@ const $ = (selector) => document.querySelector(selector);
       if (processSelect) processSelect.disabled = true;
       if (!targetCode) {
         if (processSelect) processSelect.innerHTML = '<option value="">单元照片</option>';
-        if (summary) summary.textContent = "请选择目标单元。";
+        if (summary) summary.textContent = "请选择目标工程节点。";
         return;
       }
       const data = await apiJson(`/api/photos/${encodeURIComponent(targetCode)}`);
@@ -4189,7 +4234,7 @@ const $ = (selector) => document.querySelector(selector);
       const project = data.project || {};
       const processes = Array.isArray(project.processes) ? project.processes : [];
       if (processSelect) {
-        processSelect.innerHTML = ['<option value="">单元照片</option>', ...processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)].join("");
+        processSelect.innerHTML = [`<option value="">${nodePhotoLabel(project)}</option>`, ...processes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)].join("");
       }
       if (processSelect) processSelect.disabled = false;
       if (confirm) confirm.disabled = photoMovePending;
@@ -4242,7 +4287,7 @@ const $ = (selector) => document.querySelector(selector);
       }
       const targetProject = (state.moveTargets || []).find((project) => projectCode(project) === targetCode);
       const targetLabel = `${projectDisplayCode(targetProject || {}) || targetCode} · ${projectName(targetProject || {}) || "未命名单元"}`;
-      if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : "\n归属：单元照片"}？`)) return;
+      if (!window.confirm(`确认把照片“${photo.id}”移动到：\n${targetLabel}${targetProcess ? `\n工序：${targetProcess}` : `\n归属：${nodePhotoLabel(targetProject)}`}？`)) return;
       const context = navigationContext();
       photoMovePending = true;
       $("#confirmPhotoMoveBtn").disabled = true;
@@ -4362,7 +4407,7 @@ const $ = (selector) => document.querySelector(selector);
       if (spatialText && !spatial.stake_start && !spatial.well_from && !spatial.pier_no) {
         spatial.stake_start = spatialText;
       }
-      if (!photoDate && state.projectInfo?.industry !== "市政工程") {
+      if (!photoDate && !["市政工程", "公路工程"].includes(state.projectInfo?.industry)) {
         showNotice("请填写照片日期。", true);
         return;
       }
@@ -5156,6 +5201,9 @@ const $ = (selector) => document.querySelector(selector);
     });
     $("#newEngineeringProjectBtn")?.addEventListener("click", openNewEngineeringProjectModal);
     $("#newEngineeringProjectIndustryInput")?.addEventListener("change", () => fillNewEngineeringProjectTypes().catch(() => {}));
+    $("#downloadHighwayTemplateBtn")?.addEventListener("click", () => {
+      window.location.href = "/api/highway/division-template.csv";
+    });
     $("#downloadMunicipalTemplateBtn")?.addEventListener("click", () => {
       const projectType = $("#projectInfoProjectTypeInput")?.value || "";
       window.location.href = `/api/municipal/division-template.csv?project_type=${encodeURIComponent(projectType)}`;
@@ -5181,7 +5229,7 @@ const $ = (selector) => document.querySelector(selector);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "市政照片整理包.zip";
+      link.download = state.projectInfo?.industry === "公路工程" ? "公路照片整理包.zip" : "市政照片整理包.zip";
       link.click();
       URL.revokeObjectURL(url);
       showNotice("整理包已导出。预检通过不等于移交或验收通过。");
@@ -5775,7 +5823,7 @@ const $ = (selector) => document.querySelector(selector);
     });
     function requireSelected(action) {
       if (!state.selectedCode) {
-        showNotice("请先选择单元工程。", true);
+        showNotice("请先选择工程节点。", true);
         return;
       }
       action();
@@ -6386,7 +6434,7 @@ const $ = (selector) => document.querySelector(selector);
         {
           target: "#globalUploadBtn",
           title: "第六步：开始上传",
-          desc: "选择单元、施工或监理、单元照片或具体工序，确认目标后再加入照片；小程序也会同步使用同一工程划分。",
+          desc: "选择实际工程节点、施工或监理，确认归属后再加入照片；小程序也会同步使用同一工程划分。",
           placement: "bottom"
         }
       ];

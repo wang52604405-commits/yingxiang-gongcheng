@@ -23,7 +23,7 @@ SERVER_FILES = (
     "templates/member_center.html",
 )
 RUNTIME_FILES = (
-    "municipal_rules.py", "professional_templates.py", "assets/professional_templates.json",
+    "municipal_rules.py", "highway_rules.py", "professional_templates.py", "assets/professional_templates.json",
 )
 MANAGED_FILES = tuple(f"server/{name}" for name in SERVER_FILES) + RUNTIME_FILES
 REQUIRED_FILES = tuple(f"server/{name}" for name in SERVER_FILES)

@@ -37,6 +37,7 @@ import tls_compat
 import watermark_ocr
 import municipal_export
 import municipal_rules
+import highway_rules
 import professional_templates
 from server import mobile_recognition
 
@@ -1412,30 +1413,42 @@ class AlbumManager:
 
     def project_hierarchy(self, project):
         fields = project.get("source_fields") or {}
+        def code_field(aliases, fallback=""):
+            if fields.get("内部归档标识"):
+                for key in aliases:
+                    value = fields.get(key)
+                    if value is not None and str(value).strip():
+                        return str(value)
+                return str(fallback or "")
+            return self._hierarchy_field(fields, aliases, fallback)
         unit_combined = self._hierarchy_field(fields, ["单位工程名称及编码", "单位工程"])
         part_combined = self._hierarchy_field(fields, ["分部工程名称及编码", "分部工程", "分项工程"])
         unit_fallback_name, unit_fallback_code = self._split_hierarchy_name_code(unit_combined)
         part_fallback_name, part_fallback_code = self._split_hierarchy_name_code(part_combined)
-        item_code = self._hierarchy_field(fields, ["分项工程编码", "分项工程编号"])
+        item_code = code_field(["分项工程编码", "分项工程编号"])
         explicit_unit_code = self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"])
         node_kind = self._hierarchy_field(fields, ["节点类型"])
         if not node_kind:
             node_kind = "item" if item_code and not explicit_unit_code else "unit"
-        unit_name_fallback = "" if node_kind == "item" else project.get("project_name")
-        unit_code_fallback = "" if node_kind == "item" else (project.get("display_project_code") or project.get("project_code"))
+        unit_name_fallback = "" if node_kind in {"item", "batch"} else project.get("project_name")
+        unit_code_fallback = "" if node_kind in {"item", "batch"} else (project.get("display_project_code") or project.get("project_code"))
         return {
-            "contract_name": self._hierarchy_field(fields, ["合同工程名称", "合同或标段名称", "标段名称"]),
+            "contract_name": code_field(["合同工程名称", "合同或标段名称", "标段名称"]),
             "unit_project_name": self._hierarchy_field(fields, ["单位工程名称"], unit_fallback_name),
-            "unit_project_code": self._hierarchy_field(fields, ["单位工程编码", "单位工程编号"], unit_fallback_code),
+            "unit_project_code": code_field(["单位工程编码", "单位工程编号"], unit_fallback_code),
             "sub_unit_name": self._hierarchy_field(fields, ["子单位工程名称"]),
-            "sub_unit_code": self._hierarchy_field(fields, ["子单位工程编码", "子单位工程编号"]),
+            "sub_unit_code": code_field(["子单位工程编码", "子单位工程编号"]),
             "part_name": self._hierarchy_field(fields, ["分部工程名称", "分项工程名称"], part_fallback_name),
-            "part_code": self._hierarchy_field(fields, ["分部工程编码", "分部工程编号", "分项工程编码"], part_fallback_code),
+            "part_code": code_field(["分部工程编码", "分部工程编号", "分项工程编码"], part_fallback_code),
             "sub_part_name": self._hierarchy_field(fields, ["子分部工程名称"]),
-            "sub_part_code": self._hierarchy_field(fields, ["子分部工程编码", "子分部工程编号"]),
+            "sub_part_code": code_field(["子分部工程编码", "子分部工程编号"]),
             "item_name": self._hierarchy_field(fields, ["分项工程名称"]),
             "item_code": item_code,
             "node_kind": node_kind,
+            "batch_code": code_field(["检验批编码", "检验批编号"]),
+            "batch_name": self._hierarchy_field(fields, ["检验批名称"]),
+            "archive_id": str(fields.get("内部归档标识") or ""),
+            "parent_item_id": str(fields.get("父分项归档标识") or ""),
             "unit_name": self._hierarchy_field(fields, ["单元工程名称", "单元名称"], unit_name_fallback),
             "unit_code": self._hierarchy_field(fields, ["单元工程编码", "单元工程编号", "单元编码"], unit_code_fallback),
         }
@@ -1467,6 +1480,7 @@ class AlbumManager:
             "latest_upload": project.get("latest_upload", ""),
             "project_order": project.get("project_order"),
             "part_key": self.part_key(hierarchy),
+            "division_type": hierarchy.get("node_kind", "unit"),
             "source_fields": self._public_source_fields(hierarchy),
         }
 
@@ -1480,7 +1494,7 @@ class AlbumManager:
             "单元工程名称": hierarchy["unit_name"],
             "单元工程编码": hierarchy["unit_code"],
         }
-        if hierarchy.get("node_kind") == "item":
+        if hierarchy.get("node_kind") in {"item", "batch"}:
             fields.update({
                 "子单位工程名称": hierarchy.get("sub_unit_name", ""),
                 "子单位工程编码": hierarchy.get("sub_unit_code", ""),
@@ -1488,7 +1502,11 @@ class AlbumManager:
                 "子分部工程编码": hierarchy.get("sub_part_code", ""),
                 "分项工程名称": hierarchy.get("item_name", ""),
                 "分项工程编码": hierarchy.get("item_code", ""),
-                "节点类型": "item",
+                "节点类型": hierarchy.get("node_kind"),
+                "检验批名称": hierarchy.get("batch_name", ""),
+                "检验批编码": hierarchy.get("batch_code", ""),
+                "内部归档标识": hierarchy.get("archive_id", ""),
+                "父分项归档标识": hierarchy.get("parent_item_id", ""),
             })
         return fields
 
@@ -2197,9 +2215,19 @@ class AlbumManager:
         else:
             template = rule.get("process_template" if use_process else "unit_template") or rule.get("template") or DEFAULT_NUMBERING_RULES[category]["template"]
             unit_code = data.get("display_project_code") or data.get("project_code")
+        try:
+            photo_prefix = safe_project_code(unit_code)
+        except ValueError:
+            if not (data.get("source_fields") or {}).get("内部归档标识"):
+                raise
+            photo_prefix = safe_project_code(data["project_code"])
+        if (data.get("source_fields") or {}).get("内部归档标识") and len(photo_prefix) > 64:
+            # Keep room for the sequence suffix; filename sanitization must not
+            # truncate two distinct photo IDs to the same on-disk filename.
+            photo_prefix = photo_prefix[:40] + "-" + hashlib.sha256(str(unit_code).encode("utf-8")).hexdigest()[:16]
         return str(template).format(
-            code=safe_project_code(unit_code),
-            unit_code=safe_project_code(unit_code),
+            code=photo_prefix,
+            unit_code=photo_prefix,
             unit_order=unit_order,
             process_code=process_code,
             process_order=process_code,
@@ -2381,22 +2409,26 @@ class AlbumManager:
         data["keywords"] = str(keywords or data.get("keywords") or "").strip()
         data["engineering_project_id"] = active_engineering_project_id()
         municipal = municipal_rules.is_municipal_name(current_engineering_project().get("industry"))
+        highway = highway_rules.is_highway_name(current_engineering_project().get("industry"))
         source_fields = dict(source_fields or data.get("source_fields") or {})
         legacy_unit = str(data.get("division_type") or "") == "unit" and bool(
             (data.get("source_fields") or {}).get("单元工程编码") or data.get("photos")
         )
-        if municipal and legacy_unit:
+        if (municipal or highway) and legacy_unit:
             return data
-        if municipal or str(source_fields.get("节点类型") or "") == "item":
+        if municipal or highway or str(source_fields.get("节点类型") or "") in {"item", "batch"}:
             data["standard_unit_name"] = ""
-            data["division_type"] = "item"
+            kind = "batch" if source_fields.get("节点类型") == "batch" else "item"
+            data["division_type"] = kind
             data["processes"] = []
-            source_fields["节点类型"] = "item"
-            source_fields["工程专业"] = municipal_rules.INDUSTRY_NAME
+            source_fields["节点类型"] = kind
+            source_fields["工程专业"] = highway_rules.INDUSTRY_NAME if highway else municipal_rules.INDUSTRY_NAME
             source_fields["分项工程编码"] = source_fields.get("分项工程编码") or original_code
             source_fields["分项工程名称"] = source_fields.get("分项工程名称") or data["project_name"]
             source_fields.pop("匹配标准单元", None)
-            source_fields["划分类型"] = "分项工程"
+            source_fields["划分类型"] = "检验批" if kind == "batch" else "分项工程"
+            if source_fields.get("内部归档标识"):
+                data["display_project_code"] = source_fields.get("检验批编码") if kind == "batch" else source_fields.get("分项工程编码")
             source_fields["工序名称列表"] = ""
         else:
             match = match_standard_unit(data["project_name"])
@@ -2648,6 +2680,8 @@ class AlbumManager:
                 "warning": "手机或桌面只留下压缩/叠字副本，不能把日常使用图标成原片。" if derived else "",
             }
         archive = municipal_rules.sanitize_archive({**incoming, "original": raw_status})
+        if highway_rules.is_highway_name(current_engineering_project().get("industry")) and not incoming.get("template_version"):
+            archive["template_version"] = highway_rules.RULE_VERSION
         if not archive["times"]["uploaded_at"]:
             archive["times"]["uploaded_at"] = now_text()
         if uploaded_by and not archive["original"]["source"]:
@@ -3412,6 +3446,139 @@ class AlbumManager:
             raise ValueError("没有匹配到项目，请先导入项目划分表或换一个提示词")
         return {"project": best, "score": best_score}
 
+    def import_highway_records(self, records, source_label="公路划分导入"):
+        if not highway_rules.is_highway_name(current_engineering_project().get("industry")):
+            raise ValueError("当前工程不是公路工程，不能按公路分项表导入。")
+        prepared = []
+        for raw in records or []:
+            fields = dict(raw or {})
+            fields["合同或标段名称"] = fields.get("合同或标段名称") or fields.get("合同工程名称") or current_engineering_project().get("project_name", "")
+            prepared.append(fields)
+        records = highway_rules.validate_import_records(prepared)
+        # Original codes are display/numbering data, not filenames or global IDs.
+        # A stable scoped ID supports repeated local codes without renumbering.
+        seen = set()
+        parent_names = {}
+        item_names = {}
+
+        def register_parents(fields):
+            parent = (fields.get("合同或标段名称", ""),)
+            for level in ("单位", "分部", "子分部"):
+                code, name = fields.get(level + "工程编码", ""), fields.get(level + "工程名称", "")
+                if not code:
+                    continue
+                key = parent + (level, code)
+                if key in parent_names and parent_names[key] != name:
+                    raise ValueError(f"同一父路径下{level}工程编码对应不同名称，请核对原划分；现有资料未更改。")
+                parent_names[key] = name
+                parent = key
+
+        for existing in self.list_projects():
+            fields = dict(existing.get("source_fields") or {})
+            if highway_rules.is_highway_name(fields.get("工程专业")):
+                fields["合同或标段名称"] = fields.get("合同或标段名称") or fields.get("合同工程名称") or current_engineering_project().get("project_name", "")
+                identity = highway_rules.division_identity(fields)
+                seen.add(identity)
+                item_names[identity] = fields.get("分项工程名称", "")
+                register_parents(fields)
+        for fields in records:
+            register_parents(fields)
+            identity = highway_rules.division_identity(fields)
+            if identity in item_names and item_names[identity] != fields.get("分项工程名称", ""):
+                raise ValueError("同一父路径下分项工程编码对应不同名称，请核对原划分；现有资料未更改。")
+        planned = []
+        for fields in records:
+            identity = highway_rules.division_identity(fields)
+            if identity in seen:
+                continue
+            internal = highway_rules.storage_code(fields, active_engineering_project_id())
+            if self._metadata_path(internal).exists():
+                raise ValueError("内部归档标识已被占用，导入已停止，现有资料未更改。")
+            planned.append((fields, internal))
+        for row, (original, internal) in enumerate(planned, start=2):
+            fields = dict(original)
+            fields.update({"节点类型": "item", "工程专业": highway_rules.INDUSTRY_NAME,
+                "内部归档标识": internal, "合同工程名称": fields["合同或标段名称"],
+                "项目划分顺序": str(row - 1), "项目划分行号": str(row), "项目划分来源表": source_label})
+            saved = self.create_project(internal, fields["分项工程名称"], " ".join(fields.values()), fields, row - 1)
+            saved["display_project_code"] = fields["分项工程编码"]
+            self._write_metadata(internal, saved)
+        created = len(planned)
+        return {"created": created, "skipped": len(records) - created, "updated": 0, "total": created, "source": source_label}
+
+    def import_highway_file(self, source):
+        path = Path(source)
+        if path.suffix.lower() == ".csv":
+            text = read_text_with_fallback(path)
+            delimiter = "\t" if text.count("\t") >= text.count(",") else ","
+            return self.import_highway_records(list(csv.DictReader(io.StringIO(text), delimiter=delimiter)), path.name)
+        if path.suffix.lower() != ".xlsx":
+            raise ValueError("公路划分请使用 csv 或 xlsx 文件。")
+        if load_workbook is None:
+            raise RuntimeError("缺少 openpyxl，请先安装项目依赖。")
+        workbook = load_workbook(path, data_only=True)
+        records = []
+        try:
+            for sheet in workbook.worksheets:
+                rows = list(sheet.iter_rows(values_only=True))
+                if not rows:
+                    continue
+                headers = [self._cell_text(value).replace(" ", "") for value in rows[0]]
+                for raw in rows[1:]:
+                    if any(self._cell_text(value) for value in raw):
+                        records.append({h: raw[i] if i < len(raw) else "" for i, h in enumerate(headers) if h})
+        finally:
+            workbook.close()
+        return self.import_highway_records(records, path.name)
+
+    def import_municipal_batch_records(self, records, source_label):
+        normalized = []
+        for original in records:
+            fields = dict(original)
+            fields["合同或标段名称"] = fields.get("合同或标段名称") or fields.get("合同工程名称") or current_engineering_project().get("project_name", "")
+            normalized.append(fields)
+        records = municipal_rules.validate_batch_records(normalized)
+        existing = self.list_projects()
+        municipal_rules.validate_existing_names([p.get("source_fields") or {} for p in existing], records)
+        by_path = {municipal_rules.division_identity(p.get("source_fields") or {}, p.get("division_type") == "batch"): p for p in existing}
+        plans, skipped, parent_items_created = [], 0, 0
+        for index, original in enumerate(records, start=1):
+            fields = dict(original)
+            batch = fields.get("节点类型") == "batch"
+            key = municipal_rules.division_identity(fields, batch)
+            if key in by_path:
+                skipped += 1
+                continue
+            fields["合同工程名称"] = fields["合同或标段名称"]
+            code = municipal_rules.division_storage_code(fields, active_engineering_project_id(), batch)
+            if self._metadata_path(code).exists():
+                raise ValueError("内部归档标识已存在，请核查划分；不会覆盖原资料。")
+            parent_key = municipal_rules.division_identity(fields)
+            parent = by_path.get(parent_key)
+            if batch and parent is None:
+                parent_code = municipal_rules.division_storage_code(fields, active_engineering_project_id())
+                if self._metadata_path(parent_code).exists():
+                    raise ValueError("父分项内部归档标识已存在，不会覆盖原资料。")
+                parent_fields = {k: v for k, v in fields.items() if not k.startswith("检验批")}
+                parent_fields.update({"节点类型": "item", "工程专业": municipal_rules.INDUSTRY_NAME,
+                    "内部归档标识": parent_code, "项目划分来源表": source_label, "项目划分顺序": str(index)})
+                parent = {"project_code": parent_code, "source_fields": parent_fields}
+                by_path[parent_key] = parent
+                plans.append((parent_code, parent_fields, index))
+                parent_items_created += 1
+            parent_fields = (parent or {}).get("source_fields") or {}
+            parent_id = (parent_fields.get("内部归档标识") or parent_fields.get("分项工程编码") or parent.get("display_project_code")) if parent else municipal_rules.division_storage_code(fields, active_engineering_project_id())
+            fields.update({"工程专业": municipal_rules.INDUSTRY_NAME, "内部归档标识": code,
+                "父分项归档标识": parent_id,
+                "项目划分来源表": source_label, "项目划分顺序": str(index)})
+            plans.append((code, fields, index))
+            by_path[key] = {"project_code": code, "source_fields": fields}
+        # No write before every input and storage collision has passed validation.
+        for code, fields, index in plans:
+            name = fields["检验批名称"] if fields["节点类型"] == "batch" else fields["分项工程名称"]
+            self.create_project(code, name, " ".join(fields.values()), fields, index)
+        return {"created": len(plans) - parent_items_created, "parent_items_created": parent_items_created, "skipped": skipped, "updated": 0, "kept_legacy_units": 0, "total": len(plans), "source": source_label}
+
     def import_municipal_records(self, records, source_label="市政划分导入"):
         if not municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
             raise ValueError("当前工程不是市政工程，不能按市政分项表导入。")
@@ -3421,6 +3588,8 @@ class AlbumManager:
         seen_codes = self._existing_project_code_keys()
         import_order = 0
         records = list(records or [])
+        if any((p.get("source_fields") or {}).get("内部归档标识") for p in self.list_projects()) or any(any(str(k).strip() in {"检验批名称", "检验批编码", "检验批编号"} and str(v or "").strip() for k, v in dict(row).items()) for row in records):
+            return self.import_municipal_batch_records(records, source_label)
         headers_seen = set()
         for raw_fields in records:
             for header in dict(raw_fields or {}):
@@ -3494,6 +3663,8 @@ class AlbumManager:
         return self.import_municipal_records(records, path.name)
 
     def import_projects_from_xlsx(self, source):
+        if highway_rules.is_highway_name(current_engineering_project().get("industry")):
+            return self.import_highway_file(source)
         if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
             return self.import_municipal_file(source)
         if load_workbook is None:
@@ -3588,6 +3759,8 @@ class AlbumManager:
         }
 
     def import_projects_from_xls(self, source):
+        if highway_rules.is_highway_name(current_engineering_project().get("industry")):
+            raise ValueError("公路划分请使用 csv 或 xlsx，不套用水利单元表。")
         if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
             raise ValueError("市政划分请使用 csv 或 xlsx，并包含分项工程列。旧版 xls 仍只识别水利单元工程表。")
         """读取客户常用的旧版 Excel 文件，并自动识别项目划分层级。"""
@@ -3718,6 +3891,8 @@ class AlbumManager:
         return records
 
     def import_projects_from_records(self, records, source_label="粘贴导入"):
+        if highway_rules.is_highway_name(current_engineering_project().get("industry")):
+            return self.import_highway_records(records, source_label)
         if municipal_rules.is_municipal_name(current_engineering_project().get("industry")):
             return self.import_municipal_records(records, source_label)
         created = 0
@@ -4703,7 +4878,7 @@ def is_pile_unit(data):
     fields = data.get("source_fields") if isinstance(data.get("source_fields"), dict) else {}
     if str(fields.get("节点类型") or data.get("division_type") or "") == "item":
         return False
-    if municipal_rules.is_municipal_name(fields.get("工程专业", "")):
+    if municipal_rules.is_municipal_name(fields.get("工程专业", "")) or highway_rules.is_highway_name(fields.get("工程专业", "")):
         return False
     text = " ".join([
         str(data.get("standard_unit_name") or ""),
@@ -5743,6 +5918,7 @@ def match_folder_to_project(folder_name):
     best = None
     best_score = 0
     candidates = []
+    project_scores = {}
     for project in manager.list_projects():
         code = str(project.get("project_code") or "").strip()
         display_code = str(project.get("display_project_code") or "").strip()
@@ -5761,10 +5937,13 @@ def match_folder_to_project(folder_name):
                 score = base_score + min(len(key), len(folder_key)) * 10
             if score > 0:
                 candidates.append((raw, score))
+            project_scores[code] = max(project_scores.get(code, 0), score)
             if score > best_score:
                 best_score = score
                 best = project
     candidates.sort(key=lambda item: item[1], reverse=True)
+    if best_score and sum(value == best_score for value in project_scores.values()) > 1:
+        best = None  # Repeated local codes/names require an explicit destination.
     return best, [item[0] for item in candidates[:5]]
 
 
@@ -7738,7 +7917,7 @@ def api_professional_template_requirements():
     try:
         summary = professional_templates.plan_summary(industry, project_type)
         rows = professional_templates.requirements(industry, project_type)
-    except municipal_rules.MunicipalRuleError as exc:
+    except (municipal_rules.MunicipalRuleError, highway_rules.HighwayRuleError) as exc:
         return json_error(str(exc), 400)
     return jsonify(
         {
@@ -7749,6 +7928,19 @@ def api_professional_template_requirements():
             "requirements": rows,
         }
     )
+
+
+@app.route("/api/highway/template", methods=["GET"])
+def api_highway_template():
+    return jsonify({"ok": True, **highway_rules.template_document()})
+
+
+@app.route("/api/highway/division-template.csv")
+def api_highway_division_template():
+    output = io.StringIO()
+    csv.writer(output).writerow(highway_rules.IMPORT_HEADERS)
+    return send_file(io.BytesIO(output.getvalue().encode("utf-8-sig")), mimetype="text/csv; charset=utf-8",
+                     as_attachment=True, download_name="公路工程划分模板.csv")
 
 
 @app.route("/api/municipal/template", methods=["GET"])
@@ -7775,12 +7967,16 @@ def _normalize_project_specialty(payload, existing=None):
     existing = existing or {}
     industry = str(payload.get("industry") or existing.get("industry") or "水利工程").strip() or "水利工程"
     project_type = str(payload.get("project_type") or "").strip()
+    if highway_rules.is_highway_name(industry):
+        previous = existing.get("rule_version") if highway_rules.is_highway_name(existing.get("industry")) else ""
+        version = highway_rules.RULE_VERSION if _truthy(payload.get("confirm_template_upgrade")) else str(previous or highway_rules.RULE_VERSION)
+        return highway_rules.INDUSTRY_NAME, highway_rules.canonical_project_type(project_type), version
     if municipal_rules.is_municipal_name(industry):
         industry = municipal_rules.INDUSTRY_NAME
         if not project_type:
             raise municipal_rules.MunicipalRuleError("project_type_required", "请选择市政工程类型。未知类型不会自动改成第一项，也不会套用全部拍摄清单。")
         project_type = municipal_rules.canonical_project_type(project_type)
-        rule_version = str(existing.get("rule_version") or municipal_rules.RULE_VERSION)
+        rule_version = str((existing.get("rule_version") if municipal_rules.is_municipal_name(existing.get("industry")) else "") or municipal_rules.RULE_VERSION)
         if _truthy(payload.get("confirm_template_upgrade")):
             rule_version = municipal_rules.RULE_VERSION
     else:
@@ -7808,7 +8004,7 @@ def api_save_project_info():
         existing_hash = str((existing_project or {}).get("delete_password_hash") or "")
         try:
             normalized_industry, normalized_project_type, normalized_rule_version = _normalize_project_specialty(payload, existing_project)
-        except municipal_rules.MunicipalRuleError as exc:
+        except (municipal_rules.MunicipalRuleError, highway_rules.HighwayRuleError) as exc:
             return json_error(str(exc), 400)
         if existing_project and (
             str(existing_project.get("industry") or "") != normalized_industry
@@ -7845,7 +8041,7 @@ def api_save_project_info():
                 or "V1.0"
             ).strip(),
             "rule_version": normalized_rule_version,
-            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else "",
+            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else highway_rules.INDUSTRY_CODE if highway_rules.is_highway_name(normalized_industry) else "",
             "project_type_code": municipal_rules.subtype_code(normalized_project_type) if municipal_rules.is_municipal_name(normalized_industry) else "",
             "cloud_owner_id": str((existing_project or {}).get("cloud_owner_id") or ""),
             "cloud_owner_username": str(
@@ -7909,7 +8105,7 @@ def api_create_engineering_project():
             return json_error("请输入工程名称", 400)
         try:
             normalized_industry, normalized_project_type, normalized_rule_version = _normalize_project_specialty(payload)
-        except municipal_rules.MunicipalRuleError as exc:
+        except (municipal_rules.MunicipalRuleError, highway_rules.HighwayRuleError) as exc:
             return json_error(str(exc), 400)
         delete_password = validate_engineering_delete_password(payload.get("delete_password"))
         data = read_engineering_projects()
@@ -7951,7 +8147,7 @@ def api_create_engineering_project():
                 professional_templates.catalog().get("version") or "V1.0"
             ).strip(),
             "rule_version": normalized_rule_version,
-            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else "",
+            "industry_code": municipal_rules.INDUSTRY_CODE if municipal_rules.is_municipal_name(normalized_industry) else highway_rules.INDUSTRY_CODE if highway_rules.is_highway_name(normalized_industry) else "",
             "project_type_code": municipal_rules.subtype_code(normalized_project_type) if municipal_rules.is_municipal_name(normalized_industry) else "",
             "delete_password_hash": generate_password_hash(delete_password),
             # 新工程直接归属当前已登录的主账号。否则它只能留在电脑本地，
@@ -8071,6 +8267,8 @@ def api_projects():
     projects = manager.list_projects(query)
     if str(request.args.get("slim") or "").lower() in {"1", "true", "yes"}:
         hierarchy_keys = {
+            "节点类型", "工程专业", "内部归档标识", "父分项归档标识", "检验批名称", "检验批编码",
+            "子单位工程名称", "子单位工程编码", "子分部工程名称", "子分部工程编码",
             "合同工程名称",
             "单位工程名称",
             "单位工程编码",
@@ -8304,6 +8502,9 @@ def original_photo_file(project_code, photo_id):
 
 @app.route("/api/projects", methods=["POST"])
 def api_create_project():
+    industry = current_engineering_project().get("industry")
+    if municipal_rules.is_municipal_name(industry) or highway_rules.is_highway_name(industry):
+        return json_error("请通过项目划分表导入完整父级和原编码。", 400)
     data = request.get_json(silent=True) or request.form
     project_code = data.get("project_code") or data.get("code") or data.get("name")
     project_name = data.get("project_name") or data.get("name") or project_code
@@ -8410,7 +8611,7 @@ def api_municipal_division_template():
     project_type = str(request.args.get("project_type") or current_engineering_project().get("project_type") or "").strip()
     try:
         rows = municipal_rules.skeleton_rows(project_type, current_engineering_project().get("project_name", ""))
-    except municipal_rules.MunicipalRuleError as exc:
+    except (municipal_rules.MunicipalRuleError, highway_rules.HighwayRuleError) as exc:
         return json_error(str(exc), 400)
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=list(municipal_rules.MUNICIPAL_IMPORT_HEADERS))
@@ -8424,14 +8625,15 @@ def api_municipal_division_template():
 def api_export_engineering_division():
     output = io.StringIO()
     municipal = municipal_rules.is_municipal_name(current_engineering_project().get("industry"))
-    headers = list(municipal_rules.MUNICIPAL_IMPORT_HEADERS) if municipal else list(PROJECT_TEMPLATE_HEADERS)
+    highway = highway_rules.is_highway_name(current_engineering_project().get("industry"))
+    headers = list(highway_rules.IMPORT_HEADERS) if highway else list(municipal_rules.MUNICIPAL_IMPORT_HEADERS) if municipal else list(PROJECT_TEMPLATE_HEADERS)
     writer = csv.writer(output)
     writer.writerow(headers)
     for project in manager.list_projects():
         fields = project.get("source_fields") or {}
-        if municipal and str(fields.get("节点类型") or project.get("division_type") or "") != "item":
+        if (municipal or highway) and str(fields.get("节点类型") or project.get("division_type") or "") not in {"item", "batch"}:
             continue
-        if municipal:
+        if municipal or highway:
             writer.writerow([fields.get(header, "") for header in headers])
         else:
             writer.writerow([
@@ -8464,6 +8666,7 @@ def _selected_archive_photos(photo_ids):
                 continue
             photo = dict(photo)
             photo["leaf"] = hierarchy
+            photo["project_code"] = code
             archive = photo.get("archive") if isinstance(photo.get("archive"), dict) else {}
             original = archive.get("original") if isinstance(archive.get("original"), dict) else {}
             backup_name = str(photo.get("original_backup") or "")
@@ -8546,7 +8749,7 @@ def api_archive_package():
         project_id,
         group_id,
         str(payload.get("title") or "照片组"),
-        [{"project_code": item.get("leaf", {}).get("item_code") or item.get("project_code"), "photo_uuid": item.get("photo_uuid")} for item in photos],
+        [{"project_code": item.get("project_code"), "photo_uuid": item.get("photo_uuid")} for item in photos],
     )
     package = municipal_export.build_package(
         str(payload.get("title") or "照片组"),
@@ -8554,12 +8757,13 @@ def api_archive_package():
         originals,
         expect_concealment=_truthy(payload.get("expect_concealment")),
         local_profile=str(payload.get("local_profile") or ""),
+        rules=highway_rules if highway_rules.is_highway_name(current_engineering_project().get("industry")) else municipal_rules,
     )
     return send_file(
         io.BytesIO(package),
         mimetype="application/zip",
         as_attachment=True,
-        download_name="市政照片整理包.zip",
+        download_name="公路照片整理包.zip" if highway_rules.is_highway_name(current_engineering_project().get("industry")) else "市政照片整理包.zip",
     )
 
 

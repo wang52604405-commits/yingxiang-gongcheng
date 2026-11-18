@@ -24,7 +24,7 @@ export function destinationPhotoQuery(
 }
 
 export function destinationPhotoLabel(assignment: Assignment): string {
-  return assignment.item_name || assignment.item_code || assignment.unit_name || assignment.unit_code
+  return assignment.batch_name || assignment.item_name || assignment.display_code || assignment.item_display_code || assignment.item_code || assignment.unit_name || assignment.unit_code
     || assignment.other_node_name || assignment.other_node_code || ''
 }
 

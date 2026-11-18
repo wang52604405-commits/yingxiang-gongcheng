@@ -146,7 +146,7 @@ async function loadProjectDetails() {
   try {
     const response = await mobileApi.projectTree(projectId)
     projectName.value = response.project.name || projectName.value
-    const unitCode = local.value?.draft.assignment?.unit_code || cloud.value?.unit_code || ''
+    const unitCode = local.value?.draft.assignment?.item_code || cloud.value?.item_code || local.value?.draft.assignment?.unit_code || cloud.value?.unit_code || ''
     hierarchy.value = resolvePhotoHierarchy(response.nodes, unitCode)
   } catch {
     // 层级补全失败不影响本地照片和已有字段的查看。
@@ -197,10 +197,10 @@ function openWatermark() {
       capturedAt: local.value?.client_captured_at || cloud.value?.captured_at || '',
       unitProjectName: local.value?.draft.assignment?.unit_project_name || cloud.value?.unit_project_name || '',
       partName: local.value?.draft.assignment?.part_name || cloud.value?.part_name || '',
-      unitName: local.value?.draft.assignment?.unit_name || cloud.value?.unit_name || '',
+      unitName: local.value?.draft.assignment?.batch_name || cloud.value?.batch_name || local.value?.draft.assignment?.item_name || cloud.value?.item_name || local.value?.draft.assignment?.unit_name || cloud.value?.unit_name || '',
       scope: currentScope.value,
       category: local.value?.draft.category || cloud.value?.category,
-      sitePart: [local.value?.draft.assignment?.unit_name || cloud.value?.unit_name, local.value?.draft.assignment?.process_name || cloud.value?.process_name].filter(Boolean).join(' / '),
+      sitePart: [local.value?.draft.assignment?.batch_name || cloud.value?.batch_name || local.value?.draft.assignment?.item_name || cloud.value?.item_name || local.value?.draft.assignment?.unit_name || cloud.value?.unit_name, local.value?.draft.assignment?.process_name || cloud.value?.process_name].filter(Boolean).join(' / '),
       project: projectName.value,
       title: local.value?.title || cloud.value?.title || '',
       photographer: cloud.value?.photographer || local.value?.draft.photographer || '',
@@ -255,7 +255,7 @@ onLoad((query) => {
             <text class="date-arrow">›</text>
           </view>
         </picker>
-        <button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button>
+        <button class="secondary-button" :disabled="changing" @tap="chooseAssignment">{{ editForm.assignment?.batch_name || editForm.assignment?.item_name || editForm.assignment?.unit_name || editForm.assignment?.other_node_name || '更改工程部位' }}</button>
         <text v-if="editError" class="edit-error">{{ editError }}</text>
         <view class="photo-actions"><button :disabled="changing" @tap="editing = false">取消</button><button class="primary-button" :disabled="changing" @tap="saveInfo">{{ changing ? '保存中…' : '保存信息' }}</button></view>
       </view>

@@ -5,33 +5,33 @@ import type { SelectableDestination } from './destination-history'
 const key = (owner: string, project: string) => `engineering-image:watermark-division:v1:${encodeURIComponent(owner)}:${encodeURIComponent(project)}`
 
 export function matchesDivisionKeywords(node: SelectableDestination, keyword: string): boolean {
-  const text = [node.name, node.code, node.pathLabel, node.assignment.unit_project_code, node.assignment.part_code].join(' ').toLowerCase()
+  const text = [node.name, node.display_code, node.code, node.pathLabel, node.assignment.unit_project_code, node.assignment.part_code].join(' ').toLowerCase()
   return keyword.toLowerCase().trim().split(/\s+/).filter(Boolean).every(word => text.includes(word))
 }
 
 export function resolveWatermarkDivision(value: DestinationSelection, nodes: SelectableDestination[]): DestinationSelection | null {
   if (value.scope !== 'engineering') return null
   const a = value.assignment
-  const node = nodes.find(item => item.type === 'unit' && item.code === a.unit_code
+  const node = nodes.find(item => ((a.item_code && ['item', 'batch'].includes(item.type) && item.code === a.item_code) || (!a.item_code && item.type === 'unit' && item.code === a.unit_code))
     && (!a.part_code || item.assignment.part_code === a.part_code)
     && (!a.unit_project_code || item.assignment.unit_project_code === a.unit_project_code))
   return node ? { scope: 'engineering', assignment: { ...node.assignment, process_name: '' } } : null
 }
 
 export function watermarkDivisionFields(assignment: Assignment) {
-  return { unitProjectName: assignment.unit_project_name || '', partName: assignment.part_name || '', unitName: assignment.unit_name || '', unitCode: assignment.unit_code || '' }
+  return { unitProjectName: assignment.unit_project_name || '', partName: assignment.part_name || '', unitName: assignment.batch_name || assignment.item_name || assignment.unit_name || '', unitCode: assignment.display_code || assignment.item_display_code || assignment.batch_code || assignment.item_code || assignment.unit_code || '' }
 }
 
 export function beginWatermarkDivision(owner: string, project: string): void {
   uni.removeStorageSync(key(owner, project))
 }
 export function saveWatermarkDivision(owner: string, project: string, value: DestinationSelection): void {
-  if (!owner || !project || value.scope !== 'engineering' || !value.assignment.unit_code) return
+  if (!owner || !project || value.scope !== 'engineering' || !(value.assignment.unit_code || value.assignment.item_code)) return
   uni.setStorageSync(key(owner, project), { ...value, project_id: project })
 }
 export function consumeWatermarkDivision(owner: string, project: string): DestinationSelection | null {
   const name = key(owner, project)
   const result = uni.getStorageSync(name) as DestinationSelection | undefined
   uni.removeStorageSync(name)
-  return result?.project_id === project && result.scope === 'engineering' && result.assignment?.unit_code ? result : null
+  return result?.project_id === project && result.scope === 'engineering' && (result.assignment?.unit_code || result.assignment?.item_code) ? result : null
 }

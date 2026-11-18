@@ -493,6 +493,13 @@ def _photo_payload(row, download_url="", *, conn=None) -> dict:
             "unit_name": assignment.get("unit_name", ""),
             "item_code": assignment.get("item_code", ""),
             "item_name": assignment.get("item_name", ""),
+            "item_display_code": assignment.get("item_display_code", ""),
+            "node_type": assignment.get("node_type", ""),
+            "batch_code": assignment.get("batch_code", ""),
+            "batch_name": assignment.get("batch_name", ""),
+            "parent_item_id": assignment.get("parent_item_id", ""),
+            "parent_item_code": assignment.get("parent_item_code", ""),
+            "parent_item_name": assignment.get("parent_item_name", ""),
             "sub_unit_code": assignment.get("sub_unit_code", ""),
             "sub_unit_name": assignment.get("sub_unit_name", ""),
             "sub_part_code": assignment.get("sub_part_code", ""),
@@ -512,6 +519,13 @@ def _photo_payload(row, download_url="", *, conn=None) -> dict:
         "unit_name": assignment.get("unit_name", ""),
         "item_code": assignment.get("item_code", ""),
         "item_name": assignment.get("item_name", ""),
+        "item_display_code": assignment.get("item_display_code", ""),
+        "node_type": assignment.get("node_type", ""),
+        "batch_code": assignment.get("batch_code", ""),
+        "batch_name": assignment.get("batch_name", ""),
+        "parent_item_id": assignment.get("parent_item_id", ""),
+        "parent_item_code": assignment.get("parent_item_code", ""),
+        "parent_item_name": assignment.get("parent_item_name", ""),
         "process_code": assignment.get("process_code", ""),
         "process_name": assignment.get("process_name", ""),
         "other_node_code": assignment.get("other_node_code", ""),
@@ -596,6 +610,10 @@ def _tree_from_rows(rows) -> list[dict]:
             "metadata": _json(raw["metadata_json"], {}),
             "children": [],
         }
+        metadata = node["metadata"]
+        for key in ("display_code", "item_display_code", "batch_code", "batch_name", "parent_item_id", "parent_item_code", "parent_item_name", "internal_project_code"):
+            if key in metadata:
+                node[key] = metadata[key]
         nodes[raw["node_code"]] = node
         ordered.append(node)
     roots = []
@@ -640,7 +658,7 @@ def _flatten_snapshot(tree, other_tree):
             300,
         )
         excluded = {
-            "children", "unit_projects", "parts", "units", "processes",
+            "children", "unit_projects", "parts", "units", "processes", "batches",
             "node_code", "unit_code", "code", "name", "title",
         }
         metadata = {key: value for key, value in node.items() if key not in excluded}
@@ -693,6 +711,10 @@ def _flatten_snapshot(tree, other_tree):
                     item_node = item_node if isinstance(item_node, dict) else {"name": item_node}
                     item_code = _node_code(item_node, "item", parent_code, item_index)
                     add({**item_node, "node_code": item_code}, "engineering", "item", parent_code, item_index, "__none__")
+                    for batch_index, batch in enumerate(item_node.get("batches") or []):
+                        batch = batch if isinstance(batch, dict) else {"name": batch}
+                        batch_code = _node_code(batch, "batch", item_code, batch_index)
+                        add({**batch, "node_code": batch_code}, "engineering", "batch", item_code, batch_index, "__none__")
 
             for part_index, part in enumerate(unit_project.get("parts") or []):
                 add_part(part, unit_project_code, part_index)
@@ -819,10 +841,10 @@ def _attach_capture_fields(resolved: dict, raw: dict) -> dict:
 
 def _municipal_item_assignment(conn, account_id, project_id, assignment, *, active_only: bool, strict: bool):
     item_code = _safe_text(assignment.get("item_code"), 160)
-    item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "item", active_only=active_only)
+    item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "", active_only=active_only)
     if not item and not active_only:
-        item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "item", active_only=False)
-    if not item:
+        item = _assignment_node(conn, account_id, project_id, "engineering", item_code, "", active_only=False)
+    if not item or item["node_type"] not in {"item", "batch"}:
         if strict:
             raise ApiProblem(
                 "item_not_found",
@@ -851,6 +873,13 @@ def _municipal_item_assignment(conn, account_id, project_id, assignment, *, acti
             "该分项缺少单位工程或分部工程。照片仍保留，请先从电脑同步完整划分。",
             409,
         )
+    parent_item = by_type.get("item")
+    if item["node_type"] == "batch" and (not parent_item or item["parent_code"] != parent_item["node_code"]):
+        if strict:
+            raise ApiProblem("batch_hierarchy_incomplete", "检验批缺少所属分项，请先同步完整划分。", 409)
+        return None
+    metadata = _json(item["metadata_json"], {})
+    parent_metadata = _json(parent_item["metadata_json"], {}) if parent_item else {}
     sub_unit = by_type.get("sub_unit")
     sub_part = by_type.get("sub_part")
     section = by_type.get("contract")
@@ -867,6 +896,13 @@ def _municipal_item_assignment(conn, account_id, project_id, assignment, *, acti
         "sub_part_name": sub_part["name"] if sub_part else "",
         "item_code": item["node_code"],
         "item_name": item["name"],
+        "node_type": item["node_type"],
+        "item_display_code": metadata.get("display_code") or metadata.get("item_display_code") or item["node_code"],
+        "batch_code": metadata.get("batch_code", "") if item["node_type"] == "batch" else "",
+        "batch_name": item["name"] if item["node_type"] == "batch" else "",
+        "parent_item_id": parent_item["node_code"] if parent_item else "",
+        "parent_item_code": (parent_metadata.get("display_code") or parent_metadata.get("item_display_code") or parent_item["node_code"]) if parent_item else "",
+        "parent_item_name": parent_item["name"] if parent_item else "",
         "unit_code": "",
         "unit_name": "",
         "process_code": "",
@@ -893,7 +929,7 @@ def _engineering_assignment(
     unit_code = _safe_text(assignment.get("unit_code"), 160)
     if not unit_code:
         if strict:
-            raise ApiProblem("assignment_required", "请选择单元工程或市政分项。照片不会因此被删除。")
+            raise ApiProblem("assignment_required", "请选择单元工程或分项工程。照片不会因此被删除。")
         return None
     unit = _assignment_node(
         conn,
@@ -3380,6 +3416,12 @@ def register_mobile_api(
             return jsonify({"ok": True, "idempotent": False})
         finally:
             conn.close()
+
+    @blueprint.get("/api/mobile/v1/highway-template")
+    def mobile_highway_template():
+        import highway_rules
+        user()
+        return jsonify({"ok": True, **highway_rules.template_document()})
 
     @blueprint.get("/api/mobile/v1/municipal-template")
     def mobile_municipal_template():
@@ -5880,7 +5922,7 @@ def register_mobile_api(
                     str(node.get("node_code") or "").strip()
                     for node in nodes
                     if node.get("scope") == "engineering"
-                    and node.get("node_type") in {"unit", "item"}
+                    and node.get("node_type") in {"unit", "item", "batch"}
                 }
                 incoming_processes = {
                     (
