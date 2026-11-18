@@ -72,63 +72,56 @@ function Test-IsLegacySourceLauncherText($value) {
     return ([string]$value -match '(?i)(?:^|[\s"''\\/])(?:autostart_album\.ps1|start_album\.bat)(?:[\s"'']|$)')
 }
 
-function Disable-LegacySourceAutostart {
-    # 新版源码启动脚本读取此变量；同时写入当前进程和当前用户环境，防止后续新进程再次拉起源码版。
-    $env:ALBUM_ENABLE_SOURCE_AUTOSTART = "0"
-    try {
-        [Environment]::SetEnvironmentVariable("ALBUM_ENABLE_SOURCE_AUTOSTART", "0", "User")
-        Write-Host "    已关闭旧源码自启动环境开关"
-    } catch {
-        Write-Host "    [WARN] 无法写入旧源码自启动环境开关：$($_.Exception.Message)"
+function Get-LegacySourceAutostartEnvironmentValue($target) {
+    return [Environment]::GetEnvironmentVariable("ALBUM_ENABLE_SOURCE_AUTOSTART", $target)
+}
+
+function Assert-NoLegacySourceLauncherProcess {
+    # 这里只核查，绝不按脚本名批量停止进程。旧启动器仍在运行时先停止发布。
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    foreach ($process in $processes) {
+        if (Test-IsLegacySourceLauncherText ([string]$process.CommandLine)) {
+            throw "旧源码启动器仍在运行，发布已停止；未修改或停止该进程。"
+        }
+    }
+}
+
+function Assert-LegacySourceAutostartDisabled {
+    # 只读确认当前进程及当前用户持久化开关均已关闭，不修改任何环境变量。
+    foreach ($target in @("Process", "User")) {
+        $value = Get-LegacySourceAutostartEnvironmentValue $target
+        if ($value -cne "0") {
+            throw "旧源码自启动开关 $target 尚未明确关闭，发布已停止；未修改配置。"
+        }
     }
 
-    # 只删除明确指向两个历史启动器文件的 Run 注册表值；正式安装版工程影像管理平台.exe 启动项不受影响。
+    # 两处 Run 只读核查；正式安装版自启动项原样保留。无法读取时终止发布。
     foreach ($runPath in @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
     )) {
-        try {
-            $item = Get-ItemProperty -Path $runPath -ErrorAction SilentlyContinue
-            if (-not $item) { continue }
-            foreach ($property in @($item.PSObject.Properties)) {
-                if ($property.Name -like 'PS*') { continue }
-                $value = [string]$property.Value
-                if (Test-IsLegacySourceLauncherText $value) {
-                    Remove-ItemProperty -Path $runPath -Name $property.Name -Force -ErrorAction Stop
-                    Write-Host "    已移除旧源码 Run 启动项：$($property.Name)"
-                }
+        if (-not (Test-Path -LiteralPath $runPath -ErrorAction Stop)) { continue }
+        $item = Get-ItemProperty -LiteralPath $runPath -ErrorAction Stop
+        if ($null -eq $item) { throw "无法读取 Run 启动项，发布已停止。" }
+        foreach ($property in @($item.PSObject.Properties)) {
+            if (Test-IsLegacySourceLauncherText ([string]$property.Value)) {
+                throw "检测到旧源码 Run 启动项，发布已停止；未修改注册表。"
             }
-        } catch {
-            Write-Host "    [WARN] 检查 Run 启动项失败：$runPath $($_.Exception.Message)"
         }
     }
 
-    # 只停止并禁用 Action 明确引用两个历史启动器文件的计划任务。
-    try {
-        $tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue)
-        foreach ($task in $tasks) {
-            $actionText = (@($task.Actions) | ForEach-Object {
-                ([string]$_.Execute) + ' ' + ([string]$_.Arguments) + ' ' + ([string]$_.WorkingDirectory)
-            }) -join ' '
-            if (Test-IsLegacySourceLauncherText $actionText) {
-                Stop-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue
-                Disable-ScheduledTask -InputObject $task -ErrorAction SilentlyContinue | Out-Null
-                Write-Host "    已停用旧源码计划任务：$($task.TaskPath)$($task.TaskName)"
-            }
+    # 包括已禁用的历史任务；存在或无法读取均需人工处理，不在发布中修复。
+    $tasks = @(Get-ScheduledTask -ErrorAction Stop)
+    foreach ($task in $tasks) {
+        $actionText = (@($task.Actions) | ForEach-Object {
+            ([string]$_.Execute) + ' ' + ([string]$_.Arguments) + ' ' + ([string]$_.WorkingDirectory)
+        }) -join ' '
+        if (Test-IsLegacySourceLauncherText $actionText) {
+            throw "检测到旧源码计划任务，发布已停止；未停止或禁用任务。"
         }
-    } catch {
-        Write-Host "    [WARN] 检查旧源码计划任务失败：$($_.Exception.Message)"
     }
-
-    # 当前仍在运行的 powershell/cmd 等启动器，只在命令行明确命中历史脚本名时停止。
-    $launchers = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        Test-IsLegacySourceLauncherText ([string]$_.CommandLine)
-    })
-    foreach ($launcher in $launchers) {
-        if ([int]$launcher.ProcessId -eq $PID) { continue }
-        Write-Host "    停止旧源码启动器 PID $($launcher.ProcessId) $($launcher.Name)"
-        Stop-Process -Id ([int]$launcher.ProcessId) -Force -ErrorAction SilentlyContinue
-    }
+    Assert-NoLegacySourceLauncherProcess
+    Write-Host "    旧源码自启动只读核查通过，正式安装版自启动保持原样"
 }
 
 function Test-IsVerifiedLegacySourceAppProcess($process, $pythonExecutable, $expectedVersion, $listenPort) {
@@ -229,13 +222,14 @@ if ($LASTEXITCODE -ne 0) { throw "[4/7] 校验失败（退出码 $LASTEXITCODE�
 Write-Host ""
 Write-Host "[5/7] 停止 $port 与桌面启动器"
 
-Disable-LegacySourceAutostart
+Assert-LegacySourceAutostartDisabled
 
 # 把 5088 收口到“空闲”状态。每次只允许两类进程被关闭：
 # 1) 目标安装目录中的正式程序；2) 经 /api/bootstrap 产品签名验证的旧 python run.py。
 # 其它任何监听者均 fail-closed，不会按 Python 名称或端口做全局杀进程。
 $sourceStopDeadline = (Get-Date).AddSeconds(15)
 do {
+    Assert-NoLegacySourceLauncherProcess
     $listenerPids = @(Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue |
         ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
     if (-not $listenerPids) { break }
@@ -263,8 +257,7 @@ do {
                 Write-Host "    旧源码父进程 PID $($parent.ProcessId) Name=$($parent.Name)"
                 if ($parentCommandLine) { Write-Host "    旧源码父进程 CommandLine=$parentCommandLine" }
                 if (Test-IsLegacySourceLauncherText ([string]$parent.CommandLine)) {
-                    Write-Host "    停止明确命中旧启动器的父进程 PID $($parent.ProcessId)"
-                    Stop-Process -Id ([int]$parent.ProcessId) -Force -ErrorAction SilentlyContinue
+                    throw "旧源码启动器在核查后出现，发布已停止；未停止启动器或其源码实例。"
                 }
             }
             Write-Host "    识别并停止本项目旧源码实例 PID $listenerPid ($($owner.Name) run.py)"
@@ -302,6 +295,7 @@ try {
 # 等待目标安装目录中的旧进程完全退出并释放 DLL 句柄（最多 30 秒）。
 $alive = @()
 for ($i = 0; $i -lt 30; $i++) {
+    Assert-NoLegacySourceLauncherProcess
     $alive = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { Test-IsInstalledAppProcess $_ })
     if (-not $alive) { break }

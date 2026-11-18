@@ -4836,7 +4836,8 @@ class MobileServerContractTest(unittest.TestCase):
             "mobile_chunks.py",
         ):
             self.assertIn(filename, deploy_auth)
-        self.assertIn("pip install", deploy_auth)
+        self.assertNotIn("pip install", deploy_auth)
+        self.assertIn("check_dependencies.py", deploy_auth)
         self.assertIn("/api/mobile/v1/projects", deploy_auth)
         self.assertIn("BACKUP_LIVE_DB_SCRIPT", deploy_auth)
         self.assertIn("source_connection.backup", deploy_auth)

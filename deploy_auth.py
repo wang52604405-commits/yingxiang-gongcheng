@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """授权中心自动部署：上传 server/ 代码到阿里云并重启。
 
-流程：上传灰度代码 -> 在线备份 -> 只迁移副本 -> 安装依赖 ->
-单 worker 服务配置 -> 替换代码 -> 本机/备案域名健康检查。
+流程：只读核对现有配置 -> 上传灰度代码 -> 在线备份 -> 只迁移副本 ->
+只读校验现有依赖与配置 -> 替换代码 -> 本机/备案域名健康检查。
 
 安全：不含私钥 / 邮箱授权码（服务器的 systemd unit 只引用受限的
 /etc/album-auth/album-auth.env，本脚本不上传、不读取也不改写该文件）。
@@ -18,6 +18,7 @@ import sys
 import os
 import base64
 import hashlib
+import json
 import shlex
 import tarfile
 import tempfile
@@ -76,6 +77,8 @@ DEPLOY_FILES = [
     "album-auth.service",
     "album-auth-mobile-v1.conf",
     "backup.sh",
+    "check_dependencies.py",
+    "code_rollback.py",
     "deploy.sh",
     "enable-https-ip.sh",
     "inject_acme_location.py",
@@ -147,6 +150,26 @@ finally:
     source_connection.close()
 os.chmod(target, 0o600)
 print(f"SQLite 在线备份完成：{source} -> {target}")
+"""
+
+VERIFY_CONFIGURATION_SCRIPT = r"""
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+expected = json.loads(sys.argv[1])
+for record in expected["files"]:
+    path = Path(record["path"])
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(f"配置文件缺失或不是普通文件：{path}；未修改线上代码或配置")
+    if hashlib.sha256(path.read_bytes()).hexdigest() != record["sha256"]:
+        raise SystemExit(f"配置文件与本次模板不一致：{path}；未修改线上代码或配置")
+link = Path(expected["link"])
+if not link.is_symlink() or os.readlink(link) != expected["link_target"]:
+    raise SystemExit(f"nginx 启用链接与预期不一致：{link}；未修改线上代码或配置")
+print("已核对配置文件指纹及 nginx 启用链接；保留现有配置")
 """
 
 def _placeholder_server_host(host: str) -> bool:
@@ -228,6 +251,8 @@ def build_release_archive(target: Path, validator_source: Path) -> list[str]:
             members.append((source, f"server/{name}"))
     for name in DEPLOY_FILES:
         source = REPO / "server" / "deploy" / name
+        if name in {"check_dependencies.py", "code_rollback.py"} and not source.is_file():
+            raise SystemExit(f"发布缺少安全校验文件：server/deploy/{name}")
         if source.is_file():
             members.append((source, f"server/deploy/{name}"))
     for name in TEMPLATE_FILES:
@@ -335,6 +360,37 @@ def require_mobile_environment() -> None:
         )
 
 
+def require_existing_service_configuration(stage_deploy: str | None = None) -> None:
+    """仅核对现有配置；新装、模板差异或未加载的变更均停止发布。"""
+    files = []
+    for name, target in (
+        ("album-auth-mobile-v1.conf", DROPIN_TARGET),
+        ("nginx-domain.conf", DOMAIN_NGINX_TARGET),
+        ("album-auth-backup.cron", BACKUP_CRON_TARGET),
+    ):
+        source = REPO / "server" / "deploy" / name
+        if not source.is_file():
+            raise SystemExit(f"缺少配置核对模板：{source}")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        files.append({"path": target, "sha256": digest})
+        if stage_deploy is not None:
+            files.append({"path": f"{stage_deploy}/{name}", "sha256": digest})
+    ssh_python(
+        VERIFY_CONFIGURATION_SCRIPT,
+        json.dumps({"files": files, "link": DOMAIN_NGINX_LINK, "link_target": DOMAIN_NGINX_TARGET}),
+    )
+    effective = ssh(
+        f"systemctl show {SERVICE_NAME} -p NeedDaemonReload --value | grep -x 'no' >/dev/null && "
+        f"systemctl show {SERVICE_NAME} -p ExecStart --value | "
+        "grep -F -- '--worker-class gthread -w 1 --threads 4 --timeout 300' >/dev/null && "
+        f"systemctl show {SERVICE_NAME} -p EnvironmentFiles --value | "
+        "grep -F -- '/etc/album-auth/mobile.env' >/dev/null && nginx -t",
+        check=False,
+    )
+    if effective.returncode != 0:
+        raise SystemExit("现有服务或 nginx 配置未通过只读核对，停止发布；未修改线上代码或配置。")
+
+
 def production_health(*, include_https: bool = False) -> tuple[bool, str]:
     """同时验证服务、nginx 和关键旧/新接口；不读取任何凭据。"""
     checks = {
@@ -400,6 +456,7 @@ def main() -> int:
     # 只读确认系统盘余量；保留所有历史快照，空间不足时停止。
     free_kb = require_free_space()
     print(f"  + 部署前系统盘可用空间 {free_kb / 1024 / 1024:.2f} GB")
+    require_existing_service_configuration()
 
     stamp = ssh("date +%Y%m%d-%H%M%S").stdout.strip()
     release_root = f"/opt/album-auth/releases/deploy-{stamp}"
@@ -411,9 +468,6 @@ def main() -> int:
     validation_root = f"{release_root}/migration-validation"
     validation_copy = f"{validation_root}/database.sqlite3"
     stage_validator = f"{release_root}/validate_mobile_migration.py"
-    stage_dropin = f"{stage_deploy}/album-auth-mobile-v1.conf"
-    stage_domain_nginx = f"{stage_deploy}/nginx-domain.conf"
-    stage_backup_cron = f"{stage_deploy}/album-auth-backup.cron"
 
     print("[1/9] 先备份线上代码并创建灰度目录")
     ssh(f"mkdir -p {stage_templates} {stage_deploy}")
@@ -430,20 +484,6 @@ def main() -> int:
         f"install -d -m 0700 {backup}/runtime && "
         f"{runtime_backup} && touch {backup}/runtime/.snapshot-ready"
     )
-    domain_nginx_state = ssh(
-        f"if test -f {DOMAIN_NGINX_TARGET}; then "
-        f"cp -a {DOMAIN_NGINX_TARGET} {backup}/previous-domain-nginx.conf && printf present; "
-        "else printf absent; fi"
-    ).stdout.strip()
-    if domain_nginx_state not in {"present", "absent"}:
-        raise SystemExit(f"无法确认正式域名 nginx 状态：{domain_nginx_state!r}")
-    backup_cron_state = ssh(
-        f"if test -f {BACKUP_CRON_TARGET}; then "
-        f"cp -a {BACKUP_CRON_TARGET} {backup}/previous-backup.cron && printf present; "
-        "else printf absent; fi"
-    ).stdout.strip()
-    if backup_cron_state not in {"present", "absent"}:
-        raise SystemExit(f"无法确认自动备份计划状态：{backup_cron_state!r}")
 
     print("[2/9] 打包并上传白名单发布文件到灰度目录")
     remote_archive = f"{release_root}/payload.tar.gz"
@@ -486,41 +526,20 @@ def main() -> int:
     # 验证副本只用于本次迁移证明；稳定的 live-db.sqlite3 仍作为发布备份保留。
     ssh(f"rm -f -- {validation_copy} && rmdir -- {validation_root}")
 
-    print("[5/9] 在替换代码前安装并校验新增依赖")
-    ssh(
-        f"{REMOTE_PYTHON} -m pip install --disable-pip-version-check "
-        f"-r {stage_server}/requirements.txt"
+    print("[5/9] 只读校验线上依赖；需要安装或更新时停止发布")
+    dependency_result = ssh(
+        f"{REMOTE_PYTHON} -B {stage_deploy}/check_dependencies.py "
+        f"--requirements {stage_server}/requirements.txt "
+        f"--snapshot {backup}/dependency-versions.json"
     )
+    print("  " + dependency_result.stdout.strip())
 
-    print("[6/9] 安装单 worker 服务 drop-in（不改现有环境变量和密钥）")
-    dropin_state = ssh(
-        f"if test -f {DROPIN_TARGET}; then "
-        f"cp -a {DROPIN_TARGET} {backup}/previous-mobile-v1.conf && printf present; "
-        "else printf absent; fi"
-    ).stdout.strip()
-    if dropin_state not in {"present", "absent"}:
-        raise SystemExit(f"无法确认原 systemd drop-in 状态：{dropin_state!r}")
+    print("[6/9] 只读复核现有配置及灰度模板；相同则保持原文件")
+    require_existing_service_configuration(stage_deploy)
 
     code_replacement_started = False
 
     def restore_code_and_service() -> None:
-        if dropin_state == "present":
-            restore_dropin = (
-                f"cp -a {backup}/previous-mobile-v1.conf {DROPIN_TARGET}"
-            )
-        else:
-            restore_dropin = f"rm -f {DROPIN_TARGET}"
-        if domain_nginx_state == "present":
-            restore_domain_nginx = (
-                f"cp -a {backup}/previous-domain-nginx.conf {DOMAIN_NGINX_TARGET} && "
-                f"ln -sfn {DOMAIN_NGINX_TARGET} {DOMAIN_NGINX_LINK}"
-            )
-        else:
-            restore_domain_nginx = f"rm -f {DOMAIN_NGINX_TARGET} {DOMAIN_NGINX_LINK}"
-        if backup_cron_state == "present":
-            restore_backup_cron = f"cp -a {backup}/previous-backup.cron {BACKUP_CRON_TARGET}"
-        else:
-            restore_backup_cron = f"rm -f {BACKUP_CRON_TARGET}"
         code_rollback = ":"
         if code_replacement_started:
             server_rollback = managed_files_rollback_command(
@@ -538,9 +557,7 @@ def main() -> int:
             f"test \"$(readlink -f -- {backup}/server)\" = \"{backup}/server\" && "
             f"test \"$(readlink -f -- {REMOTE_SERVER_DIR})\" = \"{REMOTE_SERVER_DIR}\" && "
             f"{code_rollback} && "
-            f"{restore_dropin} && {restore_domain_nginx} && {restore_backup_cron} && "
-            f"systemctl daemon-reload && systemctl restart {SERVICE_NAME} && "
-            "nginx -t && systemctl reload nginx",
+            f"systemctl restart {SERVICE_NAME} && nginx -t",
             check=False,
         )
         if restored.returncode != 0:
@@ -548,28 +565,12 @@ def main() -> int:
                 "自动回滚执行失败，需要按备份人工恢复："
                 f"backup={backup} detail={restored.stderr.strip()[:300]}"
             )
-        rollback_ok, rollback_detail = production_health(
-            include_https=(domain_nginx_state == "present")
-        )
+        rollback_ok, rollback_detail = production_health(include_https=True)
         if not rollback_ok:
             raise SystemExit(
                 "自动回滚后的健康检查失败，需要按备份人工恢复："
                 f"backup={backup} {rollback_detail}"
             )
-
-    install_dropin = ssh(
-        f"install -d -m 0755 /etc/systemd/system/{SERVICE_NAME}.service.d && "
-        f"install -m 0644 {stage_dropin} {DROPIN_TARGET} && "
-        "systemctl daemon-reload && "
-        f"systemctl show {SERVICE_NAME} -p ExecStart --value | "
-        "grep -F -- '-w 1 --threads 4 --timeout 300' >/dev/null && "
-        f"systemctl show {SERVICE_NAME} -p EnvironmentFiles --value | "
-        "grep -F -- '/etc/album-auth/mobile.env' >/dev/null",
-        check=False,
-    )
-    if install_dropin.returncode != 0:
-        restore_code_and_service()
-        raise SystemExit(f"systemd drop-in 安装失败，已恢复原配置：{install_dropin.stderr}")
 
     print("[7/9] 替换代码、重启并检查旧接口和移动端接口")
     runtime_install = " && ".join(
@@ -585,7 +586,7 @@ def main() -> int:
     )
     if replacement.returncode != 0:
         restore_code_and_service()
-        raise SystemExit(f"服务重启失败，已回滚代码与 drop-in：{replacement.stderr}")
+        raise SystemExit(f"服务重启失败，已回滚代码：{replacement.stderr}")
     local_ok, local_detail = production_health()
     if not local_ok:
         restore_code_and_service()
@@ -593,17 +594,7 @@ def main() -> int:
             f"健康检查失败：{local_detail}；已完成并验证代码与服务回滚"
         )
 
-    print("[8/9] 安装已备案域名 nginx 配置和自动备份计划")
-    nginx_install = ssh(
-        f"install -m 0644 {stage_domain_nginx} {DOMAIN_NGINX_TARGET} && "
-        f"install -m 0644 {stage_backup_cron} {BACKUP_CRON_TARGET} && "
-        f"ln -sfn {DOMAIN_NGINX_TARGET} {DOMAIN_NGINX_LINK} && "
-        "nginx -t && systemctl reload nginx",
-        check=False,
-    )
-    if nginx_install.returncode != 0:
-        restore_code_and_service()
-        raise SystemExit(f"正式域名 nginx 安装失败，已回滚：{nginx_install.stderr}")
+    print("[8/9] 验证正式域名接口；保留 nginx 和自动备份计划")
     public_ok, public_detail = production_health(include_https=True)
     if not public_ok:
         restore_code_and_service()

@@ -78,7 +78,7 @@ class ServerDeployContractTest(unittest.TestCase):
         deployer = (ROOT / "deploy_auth.py").read_text(encoding="utf-8")
         env_path = "/etc/album-auth/mobile.env"
         preflight_start = deployer.index("def require_mobile_environment()")
-        preflight_end = deployer.index("def production_health", preflight_start)
+        preflight_end = deployer.index("\ndef ", preflight_start + len("def "))
         preflight = deployer[preflight_start:preflight_end]
 
         self.assertIn(f'test -s {{env_path}}', preflight)
@@ -171,8 +171,6 @@ class ServerDeployContractTest(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="20261118-010000", stderr="")
             if "&& printf present;" in command:
                 return SimpleNamespace(returncode=0, stdout="present", stderr="")
-            if failure == "dropin" and "EnvironmentFiles --value" in command:
-                return SimpleNamespace(returncode=1, stdout="", stderr="injected drop-in failure")
             if failure == "replacement" and command.startswith("cp -a /opt/album-auth/releases/"):
                 return SimpleNamespace(returncode=1, stdout="", stderr="injected replacement failure")
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -181,6 +179,9 @@ class ServerDeployContractTest(unittest.TestCase):
         with patch.object(deploy_auth, "SSH_KEY", Path(__file__)), patch.object(
             deploy_auth, "require_mobile_environment"
         ), patch.object(deploy_auth, "require_free_space", return_value=8 * 1024 * 1024), patch.object(
+            deploy_auth, "require_existing_service_configuration",
+            side_effect=[None, SystemExit("configuration mismatch")] if failure == "configuration" else None,
+        ), patch.object(
             deploy_auth, "ssh", side_effect=remote
         ), patch.object(deploy_auth, "ssh_python", return_value=success), patch.object(
             deploy_auth, "scp_file"
@@ -189,17 +190,13 @@ class ServerDeployContractTest(unittest.TestCase):
                 deploy_auth.main()
         return commands
 
-    def test_dropin_failure_cannot_remove_uncaptured_or_unchanged_runtime_files(self):
-        commands = self._failed_production_deploy_commands("dropin")
+    def test_staged_configuration_mismatch_stops_before_code_or_service_changes(self):
+        commands = self._failed_production_deploy_commands("configuration")
         self.assertTrue(any(command.startswith("test ! -e /opt/album-auth/backups/deploy-") for command in commands))
-        snapshot = next(index for index, command in enumerate(commands) if "touch " in command and ".snapshot-ready" in command)
-        dropin = next(index for index, command in enumerate(commands) if "EnvironmentFiles --value" in command)
-        rollback = next(command for command in commands if command.startswith('test "$(readlink -f'))
-        self.assertLess(snapshot, dropin)
-        # step 6 has changed only service configuration, so restoring code is unnecessary.
-        self.assertNotIn("runtime/", rollback)
-        self.assertNotIn("municipal_rules.py", rollback)
-        self.assertNotIn("rsync", rollback)
+        self.assertFalse(any(command.startswith("cp -a /opt/album-auth/releases/") for command in commands))
+        self.assertFalse(any("systemctl restart" in command for command in commands))
+        self.assertFalse(any("systemctl daemon-reload" in command for command in commands))
+        self.assertFalse(any("systemctl reload nginx" in command for command in commands))
 
     def test_replacement_failure_rolls_back_only_managed_files(self):
         commands = self._failed_production_deploy_commands("replacement")
@@ -210,6 +207,9 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertNotIn("rsync", rollback)
         self.assertNotIn("/data/", rollback)
         self.assertNotIn("server.db", rollback)
+        self.assertNotIn("/etc/", rollback)
+        self.assertNotIn("daemon-reload", rollback)
+        self.assertNotIn("reload nginx", rollback)
 
     @unittest.skipIf(sys.platform == "win32" or not shutil.which("bash"), "requires POSIX shell")
     def test_code_rollback_preserves_new_database_photos_and_unknown_files(self):
@@ -425,7 +425,11 @@ class ServerDeployContractTest(unittest.TestCase):
         cron = self.read("album-auth-backup.cron")
         self.assertIn("/opt/album-auth/server/deploy/backup.sh", cron)
         self.assertNotIn("/opt/album-auth/deploy/backup.sh", cron)
+        # Keep the installed cron byte-compatible; this legacy environment
+        # variable is ignored by the non-pruning backup script.
         self.assertIn("ALBUM_BACKUP_RETENTION_DAYS=7", cron)
+        self.assertNotIn("RETENTION_DAYS", self.read("backup.sh"))
+        self.assertNotIn("-delete", self.read("backup.sh"))
         self.assertIn("PRAGMA quick_check;", self.read("backup.sh"))
 
     def test_failed_deploy_verifies_code_rollback_without_restoring_business_data(self):
@@ -480,11 +484,15 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertIn("proxy_pass http://127.0.0.1:8000", rendered)
         self.assertEqual(module.inject_acme_location(rendered), rendered)
 
-    def test_manual_rollback_validates_backup_and_does_not_run_sqlite_restore(self):
+    def test_manual_rollback_does_not_swap_business_directories_or_install_dependencies(self):
         rollback = self.read("rollback.sh")
-        self.assertIn('"$root_real"/deploy-*', rollback)
-        self.assertIn("py_compile", rollback)
-        self.assertIn("数据库未回退", rollback)
+        self.assertIn('"$HELPER" prepare', rollback)
+        self.assertIn('"$HELPER" recover', rollback)
+        self.assertIn("check_dependencies.py", rollback)
+        self.assertNotIn('"$VENV/bin/pip"', rollback)
+        self.assertNotRegex(rollback, r"\bpip\b.*\binstall\b")
+        self.assertNotIn('mv "$CODE_DIR"', rollback)
+        self.assertNotIn('cp -a "$target_real/server"', rollback)
         self.assertNotRegex(rollback, r"sqlite3.+\.restore")
 
 

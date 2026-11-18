@@ -103,17 +103,29 @@ sudo bash /opt/album-auth/server/deploy/enable-https-ip.sh \
 ### 备份和回退
 
 ```bash
-# 一致性数据库备份（默认保留 7 天，避免 40GB 系统盘被本机副本占满）
+# 一致性数据库备份（保留全部历史副本；空间不足时停止）
 sudo bash /opt/album-auth/server/deploy/backup.sh
 
-# 回退到某次 deploy.sh 留下的代码版本
+# 回退到已经核实完整性的代码快照
 sudo bash /opt/album-auth/server/deploy/rollback.sh \
   /opt/album-auth/backups/deploy-<UTC时间>
 ```
 
-代码回退前还会再保留当前代码，并执行编译、依赖和健康检查。`rollback.sh` 不自动
-恢复数据库，因为那会抹掉部署之后的新注册和业务数据；数据库恢复必须在停服、确认
-数据影响并另做当前库备份后人工执行。
+每日备份在独占目录内生成并校验 SQLite 副本；同秒重试不会覆盖已有副本。历史
+`ALBUM_BACKUP_RETENTION_DAYS` 环境变量已不再生效，现有 cron 可以保持原样，
+脚本不再删除过期备份。它只备份数据库，不代替原片、预览图、分块和桌面资料的
+独立备份。运行前必须确认 `ALBUM_BACKUP_DB` 或默认路径确实指向当前数据库。
+
+手动代码回退只处理固定白名单文件；`server/data` 和外部数据目录、所有影像及
+部署控制文件保持原地不动。它先在新的 `pre-rollback-*` 目录独占保存当前和目标
+代码及哈希，再停止服务、切换代码并检查健康。切换或健康检查失败时恢复本次保存
+的当前代码，不把旧数据库或影像覆盖回来；恢复失败会明确停止并报告快照路径。
+
+目标备份必须是 `backups` 下直接的 `deploy-*` 目录，并包含完整的
+`runtime/.snapshot-ready` 标记。缺少该标记的旧 `deploy.sh` 快照无法确定根运行
+文件是否齐全，会在停服前拒绝。回退不会执行备份脚本或安装依赖；目标依赖清单
+须与当前一致，且已安装的直接和间接依赖须通过只读检查。数据库恢复仍须单独
+停服、核实业务影响并保留当前数据，不能用代码回退替代。
 
 首次签发证书时可使用 `nginx-bootstrap.conf`；证书就绪后安装
 `nginx-domain.conf`。正式 API 域名固定为 `https://api.shuiliyingxiang.cn`，nginx 请求体
@@ -162,7 +174,16 @@ sudo python validate_mobile_migration.py \
 迁移副本只用来证明旧库可安全增量升级，不安装进 staging；隔离联调使用新建的
 空测试数据库和一次性测试账号，避免真实账号资料进入测试服务。
 
-`main` 分支推送后，自托管 GitHub Actions 会从加密 Secrets 向 Runner 临时目录注入发布凭据，运行测试与发布契约检查，再把服务端上传到独立灰度目录；任务结束即清理临时凭据。`deploy_auth.py` 在替换线上代码前通过 SQLite backup API 生成一致性备份，并调用 `validate_mobile_migration.py` 只在第二份副本上验证迁移、旧表行数和完整性；验证副本用完即清，稳定备份按保留上限滚动清理（`backups/` 与 `releases/` 各只保留最近 2 个 `deploy-*` 快照，每日数据库备份目录 `backups/database/` 不受影响）。部署前还会确认系统盘可用空间不低于 3 GB，不足时先清理最旧快照，仍不足则直接拒绝部署——磁盘写满会让 SQLite 无法写 WAL，进而使所有读库接口返回 500。验证失败时不会替换线上代码。验证通过后安装 `album-auth-mobile-v1.conf` drop-in：加载受限的 `/etc/album-auth/mobile.env`，并把 gunicorn 收敛为单 worker、4 线程，原账号与邮件密钥不变。重启后同时检查旧接口、移动接口、nginx 和备案 HTTPS 域名；失败时精确恢复上一版代码与配置，并再次验证回滚结果。
+`main` 分支推送会启动正式发布。凭据仅注入 Runner 临时目录，任务结束即清理。
+`deploy_auth.py` 只接受现有 systemd、nginx、cron 与本次模板完全一致且 nginx
+链接正确、systemd 没有待重载变更的环境；检查在任何远端写入前及代码替换前各
+执行一次。差异即停止，本流程不安装、覆盖或重载这些配置。
+
+发布先确认磁盘空间，再保存代码和 SQLite 一致性备份；仅在独占副本验证数据库
+迁移、旧表行数和完整性。历史部署快照、安装包备份及每日数据库副本均不自动
+清理，空间不足时停止。依赖步骤只核验现有解释器的实际包版本和间接依赖，并
+保存校验凭据；不执行 `pip install`，缺包或版本不兼容需独立处理。重启后的接口
+及 HTTPS 健康检查失败时，仅恢复白名单代码并再次检查服务，不还原旧业务数据。
 
 ## 安全要点
 
