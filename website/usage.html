@@ -7,6 +7,7 @@
 <meta name="description" content="从安装、注册登录到上传打印的短路径说明，并提供 Word 完整教程。"/>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/restructure.css">
 </head>
 <body>
 <a class="skip-link" href="#main">跳到正文</a>
@@ -35,83 +36,7 @@
   </div>
 </header>
 <main id="main">
-
-<section class="section-tight">
-  <div class="container prose reveal">
-    <p class="eyebrow">使用指南</p>
-    <h1>先跑通主路径</h1>
-    <p class="lead">下面是最短闭环。完整逐步说明见 Word 教程（含易错点，依据源码整理）。</p>
-    <div class="callout">完整教程：<a href="/download/工程影像管理平台-使用教程.docx"><strong>工程影像管理平台-使用教程.docx</strong></a>。上线站点路径为 <code>/download/工程影像管理平台-使用教程.docx</code>。</div>
-  </div>
-</section>
-
-<section class="section" style="padding-top:0">
-  <div class="container">
-    <div class="steps">
-      <article class="step reveal"><h3>安装</h3><p>下载 Windows 安装包，选择安装位置与资料目录；用桌面快捷方式打开（本机默认 127.0.0.1:5088）。</p></article>
-      <article class="step reveal"><h3>注册并登录</h3><p>官网会员页注册，或软件内注册；回到桌面用同一账号登录。登录密码 ≠ 工程删除密码。</p></article>
-      <article class="step reveal"><h3>建工程并上传</h3><p>新建工程、导入项目划分，再上传或现场采集；匹配失败进待分类。</p></article>
-      <article class="step reveal"><h3>打印导出</h3><p>在对应分类下打印或导出统计 / 工程包，完成交付。</p></article>
-    </div>
-    <div class="grid-2" style="margin-top:28px">
-      <article class="card feature-card reveal">
-        <h3>注册入口</h3>
-        <p>主路径：<a href="https://shuiliyingxiang.cn/member#register">shuiliyingxiang.cn/member#register</a>。软件登录门也有注册按钮，会打开同一会员页。</p>
-      </article>
-      <article class="card feature-card reveal">
-        <h3>更新方式</h3>
-        <p>检查更新后需手动下载安装新版本；自动应用更新接口已关闭。覆盖安装不主动清除工程资料。</p>
-      </article>
-    </div>
-    <div style="margin-top:28px" class="reveal">
-      <a class="btn btn-primary btn-lg" href="download.html">去下载页</a>
-      <a class="btn btn-ghost btn-lg" href="/download/工程影像管理平台-使用教程.docx" style="margin-left:10px">下载 Word 教程</a>
-    </div>
-  </div>
-</section>
-
-<section class="section section-band" id="first-use">
-  <div class="container prose">
-    <p class="eyebrow">桌面端 + 微信小程序</p>
-    <h2>从注册登录，到照片归档交付</h2>
-    <p>先在电脑建立独立工程并导入项目划分，再让现场人员用同一云账号拍照。</p>
-    <div class="steps">
-      <article class="step"><h3>新建独立工程</h3><p>登录后点顶部工程选择器右侧的「＋」。填写工程名称、专业、类型和归档地区，并给这个工程单独设删除密码。删除密码为 6 到 32 位。新工程不会继承另一个工程的照片、项目划分、成员、编号规则、打印设置或水印设置。工程要绑定到当前登录的云账号，小程序才能看到。</p></article>
-      <article class="step"><h3>导入项目划分</h3><p>水利工程进入「设置 → 项目划分」，下载八列表。每一行是一个单元工程：合同工程、单位工程、分部工程、单元工程的名称和编码，外加关键词。市政工程另有分项模板：单位工程、可选子单位、分部工程、可选子分部、分项工程。合同或标段只作管理层。软件不会把水利单元表改名当成市政分项，也不会按照片清单自动生成工程。</p></article>
-      <article class="step"><h3>市政照片怎么整理</h3><p>道路、桥梁、给水管道和排水管道按部位和工序整理。桩号、井号、墩台和跨号按原文本填写，W01 不会收成 W1。给水排水构筑物使用单独的划分骨架，没有全国统一拍摄清单。照片组可以单独导出目录、原片、清单和预检报告。预检通过不等于城建档案机构验收通过，也不等于已经移交。竣工验收备案前移交工程档案；备案后形成的材料，在备案后三个月内移交。影像不代替验收文件。</p></article>
-      <article class="step"><h3>修改照片编号规则</h3><p>进入「设置 → 上传与匹配 → 编号规则」，分别设置施工单元、施工工序、监理单元、监理工序的格式、起始号和流水位数。保存后只对当前工程生效。</p></article>
-    </div>
-  </div>
-</section>
-<section class="section" id="members">
-  <div class="container">
-    <div class="section-head">
-      <p class="eyebrow">会员差异</p>
-      <h2>免费额度和会员不是同一套数字</h2>
-    </div>
-    <div class="grid-3">
-      <article class="card feature-card"><h3>免费版</h3><p>电脑上的照片合计最多 3000 张，用完就不能再上传。可以正常打印当前图库和导出。不能使用跨单元批量打印。小程序只能绑定 1 个工程，免费上传额度是 500 张。</p></article>
-      <article class="card feature-card"><h3>月度会员</h3><p>39 元 / 月。电脑上不限照片张数，可以使用批量打印。小程序上传不再受 500 张限制。月费会员最多 2 个小程序工程。</p></article>
-      <article class="card feature-card"><h3>终身会员</h3><p>399 元，一次买断。电脑上不限照片张数，可以使用批量打印。终身会员最多 3 个小程序工程。</p></article>
-    </div>
-    <p class="price-note">上面写的是「月费会员最多 2 个，终身会员最多 3 个」小程序工程。</p>
-  </div>
-</section>
-<section class="section section-band" id="mini">
-  <div class="container prose">
-    <p class="eyebrow">小程序完整流程</p>
-    <h2>现场按这个顺序拍</h2>
-    <p>用同一个云账号进入。先选已经绑定的工程，再选单位、分部、单元和工序，拍上水印。照片先留在手机队列里，网络恢复后再上传。电脑端保持登录，现场照片才会拉回对应工程。</p>
-  </div>
-</section>
-<section class="section" id="sync">
-  <div class="container prose">
-    <p class="eyebrow">工程之间</p>
-    <h2>同步与隔离</h2>
-    <p>切换顶部当前工程后，项目划分、照片、成员和设置一起换。工程属于哪个云账号，就只能由那个账号在小程序里看到。</p>
-  </div>
-</section>
-
+<section class="section-tight page-intro"><div class="container"><p class="eyebrow">使用指南</p><h1>先完成一次上传与归档</h1><p class="lead">按顺序操作；已有工程资料时，先备份，再调整划分或设置。</p></div></section><nav class="guide-nav container" aria-label="指南章节"><a href="#setup">安装与登录</a><a href="#project">建立工程</a><a href="#photos">上传整理</a><a href="#export">打印导出</a><a href="#mini">现场同步</a></nav><section class="section" id="setup"><div class="container narrow"><h2>1. 安装与登录</h2><ol class="workflow-list"><li><span class="flow-number">01</span><div><h3>安装 Windows 版</h3><p>下载安装程序，选择程序目录与资料目录。资料目录建议放在空间充足的磁盘。</p></div></li><li><span class="flow-number">02</span><div><h3>打开与登录</h3><p>用桌面快捷方式打开软件。未注册时前往会员中心注册，再回软件使用同一账号登录。登录密码与工程删除密码不是同一个密码。</p></div></li></ol></div></section><section class="section" id="project"><div class="container narrow"><h2>2. 建立独立工程</h2><ol class="workflow-list"><li><span class="flow-number">01</span><div><h3>新建工程</h3><p>点击顶部工程选择器旁的「＋」，填写工程名称、专业、类型及归档地区，为工程设置单独的删除密码。</p></div></li><li><span class="flow-number">02</span><div><h3>导入对应专业的划分</h3><p>进入设置的项目划分入口，下载对应模板。水利使用单元工程划分；市政使用单位、可选子单位、分部、可选子分部、分项的结构。先核对内容，再导入。</p></div></li></ol></div></section><section class="section" id="photos"><div class="container narrow"><h2>3. 上传与核对照片</h2><ol class="workflow-list"><li><span class="flow-number">01</span><div><h3>上传并检查匹配</h3><p>选择照片或文件夹，查看匹配预览后提交。不确定归属时先核对，不要直接批量确认。</p></div></li><li><span class="flow-number">02</span><div><h3>处理待分类照片</h3><p>进入待分类入口补充归属。市政照片按分项和部位整理，桩号、井号等按原文本填写。</p></div></li></ol></div></section><section class="section" id="export"><div class="container narrow"><h2>4. 打印与归档导出</h2><ol class="workflow-list"><li><span class="flow-number">01</span><div><h3>先检查照片</h3><p>确认工程、分类、部位与照片信息，再选择打印或导出。</p></div></li><li><span class="flow-number">02</span><div><h3>市政照片组归档</h3><p>按实际需要整理照片组，查看预检结果，再导出目录、原片、清单与预检报告。预检通过并不表示已移交或已通过档案机构验收。</p></div></li></ol></div></section><section class="section" id="mini"><div class="container narrow"><h2>5. 现场采集与同步</h2><ol class="workflow-list"><li><span class="flow-number">01</span><div><h3>先确认账号与工程</h3><p>小程序使用对应云账号，选择已绑定的工程。电脑端需保持运行和登录。</p></div></li><li><span class="flow-number">02</span><div><h3>检查上传结果</h3><p>拍摄后检查待上传队列及电脑接收情况。市政新版微信真机采集尚未验证，不作为已完成的操作示例。</p></div></li></ol></div></section><section class="section"><div class="container"><div class="section-head"><p class="eyebrow"></p><h2>教程与问题排查</h2></div><div class="next-panel"><div><h3>现有 Word 使用教程</h3><p>新版逐步截图教程正在补充。现有教程可用于参考，界面差异以当前软件为准。</p></div><a class="btn btn-ghost" href="/download/工程影像管理平台-使用教程.docx">下载现有教程（Word）</a><a class="btn btn-ghost" href="contact.html">联系支持</a></div></div></section>
 </main>
 <footer class="site-footer">
   <div class="container">
@@ -139,7 +64,7 @@
       </div>
       <div>
         <h4>资源</h4>
-        <a href="/download/工程影像管理平台-使用教程.docx">使用教程（Word）</a>
+        <a href="/download/工程影像管理平台-使用教程.docx">现有教程（Word）</a>
         <a href="https://shuiliyingxiang.cn/download/工程影像管理平台-安装程序.exe">Windows 安装包</a>
       </div>
     </div>
