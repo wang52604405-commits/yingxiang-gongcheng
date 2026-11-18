@@ -31,9 +31,10 @@ class DesktopProgramSnapshotTest(unittest.TestCase):
         self.program(self.install, b"previous")
         self.program(self.replacement, b"new release")
         self.database = self.data / "records.db"
-        with sqlite3.connect(self.database) as connection:
+        with contextlib.closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("CREATE TABLE records (id INTEGER PRIMARY KEY, value TEXT)")
             connection.execute("INSERT INTO records VALUES (1, 'original')")
+        self.assert_connection_closed(connection)
         for name in ("originals/photo.jpg", "previews/photo.jpg", "mobile_chunks/upload.part", "mobile_sync_state.json", "config/user.json"):
             self.write(self.data / name, b"business " + name.encode())
         for name in ("license.dat", "mobile_sync_state.json", "config/user.json", "logs/server.log", "operator-file", "data/legacy.jpg"):
@@ -46,6 +47,10 @@ class DesktopProgramSnapshotTest(unittest.TestCase):
     def write(path: Path, content: bytes):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
+
+    def assert_connection_closed(self, connection):
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
 
     def program(self, root: Path, version: bytes):
         for name in snapshot.TARGETS[:-1]:
@@ -66,14 +71,16 @@ class DesktopProgramSnapshotTest(unittest.TestCase):
         }
 
     def add_data(self, number):
-        with sqlite3.connect(self.database) as connection:
+        with contextlib.closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("INSERT INTO records VALUES (?, 'new')", (number,))
+        self.assert_connection_closed(connection)
         self.write(self.data / f"originals/new-{number}.jpg", f"new original {number}".encode())
         self.write(self.install / "mobile_sync_state.json", f"new state {number}".encode())
 
     def assert_rows(self, expected):
-        with sqlite3.connect(self.database) as connection:
+        with contextlib.closing(sqlite3.connect(self.database)) as connection, connection:
             self.assertEqual(connection.execute("SELECT id FROM records ORDER BY id").fetchall(), [(number,) for number in expected])
+        self.assert_connection_closed(connection)
 
     def test_complete_restore_retains_failed_program_and_all_new_business_bytes(self):
         old = snapshot._inventory(self.install, complete=True)

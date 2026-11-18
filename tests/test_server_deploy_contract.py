@@ -241,11 +241,13 @@ class ServerDeployContractTest(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 deploy_auth.managed_files_rollback_command("backup", "live", [name])
 
-    def test_github_deploy_checks_the_whole_push_for_server_changes(self):
+    def test_github_deploy_checks_changes_since_the_last_successful_release(self):
         workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("github.event.before", workflow)
+        self.assertIn("/actions/runs?branch=main&status=success&per_page=100", workflow)
+        self.assertIn("$before = $successful[0].head_sha", workflow)
+        self.assertNotIn("github.event.before", workflow)
         self.assertIn("$env:GITHUB_SHA", workflow)
         self.assertIn("deploy_auth\\.py", workflow)
         self.assertIn("\\.github/workflows/deploy\\.yml", workflow)
@@ -263,7 +265,7 @@ class ServerDeployContractTest(unittest.TestCase):
         self.assertNotIn("actions/checkout", self_hosted)
         archive_url = "https://github.com/${{ github.repository }}/archive/${{ github.sha }}.zip"
         self.assertEqual(self_hosted.count(archive_url), 3)
-        self.assertEqual(self_hosted.count("curl.exe -fsSL --ssl-no-revoke"), 4)
+        self.assertEqual(self_hosted.count("curl.exe -fsSL --ssl-no-revoke"), 5)
         download_steps = re.findall(
             r"- name: 下载本次提交的源码\n        shell: powershell\n        run: \|\n((?:          .*\n)+)",
             workflow,

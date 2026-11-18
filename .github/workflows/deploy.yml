@@ -59,7 +59,7 @@ jobs:
           git diff --check HEAD
           if ($LASTEXITCODE -ne 0) { throw "git diff check failed: exit code $LASTEXITCODE" }
 
-  # 授权中心自动部署：仅当 server/** 代码变更时触发。
+  # 授权中心自动部署：比较最近成功发布，保留失败发布尚未上线的代码变更。
   # 这里不再重复跑 189 项完整回归；validate 已在隔离的托管 Windows 完成。
   deploy-auth:
     needs: validate
@@ -164,7 +164,30 @@ jobs:
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $changed = $true
           } else {
-            $before = "${{ github.event.before }}"
+            # The previous push may have failed before deploying any server code.
+            # Compare with a completed successful production release instead.
+            $before = ''
+            $runsPath = Join-Path $env:RUNNER_TEMP "successful-releases-$env:GITHUB_RUN_ID.json"
+            $runsApi = "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=success&per_page=100"
+            foreach ($attempt in 1..3) {
+              & curl.exe -fsSL --ssl-no-revoke -H "Authorization: Bearer $env:GITHUB_TOKEN" -H "Accept: application/vnd.github+json" -H "User-Agent: yingxiang-gongcheng-deploy" -o $runsPath $runsApi
+              if ($LASTEXITCODE -eq 0) {
+                try {
+                  $runsRaw = [IO.File]::ReadAllText($runsPath, [Text.UTF8Encoding]::new($false))
+                  $runs = $runsRaw | ConvertFrom-Json
+                  $successful = @($runs.workflow_runs | Where-Object {
+                    $_.path -eq '.github/workflows/deploy.yml' -and
+                    $_.head_branch -eq 'main' -and $_.status -eq 'completed' -and
+                    $_.conclusion -eq 'success' -and $_.head_sha -match '^[0-9a-fA-F]{40}$'
+                  } | Sort-Object -Property created_at -Descending)
+                  if ($successful.Count -gt 0) { $before = $successful[0].head_sha }
+                } catch {
+                  Write-Warning "Unable to read the last successful release; deploying server fail-safe."
+                }
+                break
+              }
+              if ($attempt -lt 3) { Start-Sleep -Seconds (2 * $attempt) }
+            }
             $compareOk = $false
             if ($before -match '^[0-9a-fA-F]{40}$' -and $before -notmatch '^0+$') {
               # git fetch on this machine is reset by the proxy. List changed files with the compare API via curl.
@@ -180,6 +203,15 @@ jobs:
                 try {
                   $raw = [IO.File]::ReadAllText($jsonPath, [Text.UTF8Encoding]::new($false))
                   $compare = $raw | ConvertFrom-Json
+                  if ($compare.status -notin @('ahead', 'identical') -or
+                      -not $compare.PSObject.Properties['files'] -or $compare.files -isnot [array]) {
+                    throw 'Comparison did not provide a complete forward file list.'
+                  }
+                  foreach ($file in $compare.files) {
+                    if ($file.filename -isnot [string] -or [string]::IsNullOrWhiteSpace($file.filename)) {
+                      throw 'Comparison contained an invalid filename.'
+                    }
+                  }
                   $compareOk = $true
                 } catch {
                   Write-Warning "Unable to compare the pushed range; deploying server fail-safe."
@@ -209,7 +241,7 @@ jobs:
                 $changed = $true
               } else {
                 $changed = $changedFiles |
-                  Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|\.github/workflows/deploy\.yml$)'
+                  Select-String '^(server/|deploy_auth\.py$|validate_mobile_migration\.py$|municipal_rules\.py$|professional_templates\.py$|assets/professional_templates\.json$|\.github/workflows/deploy\.yml$)'
               }
             }
           }
