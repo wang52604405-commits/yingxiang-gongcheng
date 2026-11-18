@@ -237,7 +237,7 @@ class ServerDeployContractTest(unittest.TestCase):
             self.assertEqual((live / "operator-file").read_bytes(), b"preserve")
 
     def test_rollback_rejects_paths_outside_the_release_files(self):
-        for name in ("../server.db", "/etc/passwd", ""):
+        for name in ("../server.db", "/etc/passwd", "C:/Windows/system.ini", "C:server.db", r"..\server.db", ""):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 deploy_auth.managed_files_rollback_command("backup", "live", [name])
 

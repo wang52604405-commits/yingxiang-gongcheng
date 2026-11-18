@@ -22,7 +22,7 @@ import shlex
 import tarfile
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 REPO = Path(__file__).resolve().parent
 SSH_KEY = Path(os.environ.get(
@@ -284,8 +284,10 @@ def managed_files_rollback_command(backup: str, destination: str, names: list[st
     """恢复白名单文件，绝不把整个旧目录同步回正在接收新数据的生产目录。"""
     commands = []
     for name in names:
-        path = Path(name)
-        if path.is_absolute() or ".." in path.parts or not path.parts:
+        # These paths are sent to a Linux shell even when the publisher runs
+        # on Windows. Native Path.is_absolute('/etc/...') is false on Windows.
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts or not path.parts or "\\" in name or PureWindowsPath(name).drive:
             raise ValueError(f"不安全的发布文件路径：{name}")
         source = shlex.quote(f"{backup}/{name}")
         target = shlex.quote(f"{destination}/{name}")
