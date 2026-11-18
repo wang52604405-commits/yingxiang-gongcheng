@@ -61,7 +61,7 @@ onLoad(load)
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="projects.length" class="project-list card">
       <button v-for="project in projects" :key="project.id" class="project-card pressable" :class="{ active: current.id === project.id }" @tap="select(project)">
-        <view class="project-symbol">{{ project.industry?.includes('房') ? '建' : project.industry?.includes('市政') ? '市' : project.industry?.includes('电') ? '电' : project.industry?.includes('水') ? '水' : '工' }}</view>
+        <view class="project-symbol">{{ project.industry?.includes('房') ? '建' : project.industry?.includes('市政') ? '市' : project.industry?.includes('公路') ? '路' : project.industry?.includes('电') ? '电' : project.industry?.includes('水') ? '水' : '工' }}</view>
         <view class="project-copy"><text class="project-name">{{ project.name }}</text><text class="project-meta">{{ project.industry || '水利工程' }} · {{ projectMemberSummary(project) }}</text><text class="project-units">{{ project.unit_count || 0 }} 个工程部位</text></view>
         <text class="check">{{ current.id === project.id ? '✓' : '›' }}</text>
       </button>

@@ -291,7 +291,7 @@ class FrontendPhotoManagementContractTest(unittest.TestCase):
         # 工序格式留空时自动在单元格式里插入工序编码
         self.assertIn("function processTemplateFromUnit(", js)
         self.assertIn("保存后会立即重排本工程已有照片", html)
-        self.assertIn("默认使用导入表里的单元工程编码", html)
+        self.assertIn("默认保留导入的工程节点编码", html)
         self.assertIn("settingsData.renumbered?.photos", js)
 
 

@@ -18,12 +18,14 @@ import { queueRuntime } from '@/services/queue-runtime'
 import { chooseCaptureSource, type CaptureSource } from '@/services/capture-entry'
 import { choosePhotoPaths } from '@/services/media-picker'
 import { selectionStorage } from '@/stores/selection'
+import { specialtyLabels } from '@/services/specialty-labels'
 import type { ProjectNode, CaptureRequirementRef, PhotoCategory, Scope, UploadDraft, UploadMode } from '@/types/domain'
 import { formatBytes } from '@/utils/format'
 import { canCaptureProject, capturePermissionMessage } from '@/services/project-membership'
 import { archiveInfoIssues, isArchiveInfoComplete } from '@/services/archive-info'
 
 const project = ref(selectionStorage.getProject())
+const specialty = computed(() => specialtyLabels(project.value.industry))
 const scope = ref<Scope>('engineering')
 const category = ref<PhotoCategory>('construction')
 const mode = ref<UploadMode>('direct')
@@ -197,7 +199,7 @@ function openWatermark() {
   const values = captureOverrides(item, batchTitle.value, photographer.value)
   const assignment = values.assignment || archiveDraft.value.assignment
   try {
-    setWatermarkContext(scopeOwner.value, scopeProject.value, { sourcePath: item.path, sourceQuality: 'original', sourceKind: item.source, capturedAt: item.capturedAt || '', unitProjectName: assignment?.unit_project_name || '', partName: assignment?.part_name || '', unitName: assignment?.unit_name || '', scope: scope.value, category: category.value, sitePart: [assignment?.unit_project_name, assignment?.part_name, assignment?.unit_name, assignment?.process_name, assignment?.other_node_name].filter(Boolean).join(' / '), project: project.value.name, title: values.title || assignment?.process_name || assignment?.unit_name || assignment?.other_node_name || '', photographer: values.photographer || '', photoDate: values.photo_date || '' })
+    setWatermarkContext(scopeOwner.value, scopeProject.value, { sourcePath: item.path, sourceQuality: 'original', sourceKind: item.source, capturedAt: item.capturedAt || '', unitProjectName: assignment?.unit_project_name || '', partName: assignment?.part_name || '', unitName: assignment?.batch_name || assignment?.item_name || assignment?.unit_name || '', scope: scope.value, category: category.value, sitePart: [assignment?.unit_project_name, assignment?.part_name, assignment?.parent_item_name, assignment?.batch_name || assignment?.item_name || assignment?.unit_name, assignment?.process_name, assignment?.other_node_name].filter(Boolean).join(' / '), project: project.value.name, title: values.title || assignment?.process_name || assignment?.batch_name || assignment?.item_name || assignment?.unit_name || assignment?.other_node_name || '', photographer: values.photographer || '', photoDate: values.photo_date || '' })
     uni.navigateTo({ url: '/pages/photo/watermark' })
   } catch (reason) { uni.showToast({ title: reason instanceof Error ? reason.message : '打开水印失败', icon: 'none' }) }
 }
@@ -487,7 +489,7 @@ onUnload(persistDraft)
       </view>
       </view>
       <button class="destination-card pressable" @tap="chooseDestination">
-        <view class="destination-copy"><text class="destination-title">{{ destinationLabel }}</text><text class="destination-code">{{ destination?.scope === scope ? '更改归档位置' : scope === 'engineering' ? '选择单位、分部、单元和工序' : '选择目录' }}</text></view>
+        <view class="destination-copy"><text class="destination-title">{{ destinationLabel }}</text><text class="destination-code">{{ destination?.scope === scope ? '更改归档位置' : scope === 'engineering' ? specialty.path : '选择目录' }}</text></view>
         <view class="path-arrow"><UiIcon name="chevron" :size="18" /></view>
       </button>
       <view v-if="scope === 'engineering' && currentProcesses.length" class="inline-processes"><button v-for="process in currentProcesses" :key="process" class="small-chip pressable" :class="{ chosen: destination?.assignment.process_name === process }" @tap="chooseProcess(process)">{{ process }}</button></view>

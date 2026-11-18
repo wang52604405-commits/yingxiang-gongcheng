@@ -377,7 +377,7 @@ class DesktopForcedUpdateTest(unittest.TestCase):
     def test_frontend_and_release_contracts_are_wired(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "templates" / "index.html").read_text(encoding="utf-8")
-        asset_match = re.search(r'src="/assets/(app-A\d{8}-\d+\.\d+\.js)"', html)
+        asset_match = re.search(r'src="/assets/(app-A\d{8}-\d+\.\d+\.js)(?:\?v=[^"\s]+)?"', html)
         self.assertIsNotNone(asset_match, "index.html 必须引用带版本指纹的主脚本")
         javascript = (root / "assets" / asset_match.group(1)).read_text(encoding="utf-8")
         publish = (root / "publish_update.py").read_text(encoding="utf-8")

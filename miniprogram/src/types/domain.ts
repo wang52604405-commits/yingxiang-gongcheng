@@ -99,15 +99,31 @@ export interface CaptureRequirementRef {
 }
 
 export interface ProjectNode {
+  display_code?: string
+  item_display_code?: string
+  node_type?: string
+  batch_code?: string
+  batch_name?: string
+  parent_item_code?: string
+  parent_item_name?: string
+  parent_item_id?: string
   code: string
   name: string
-  type: 'contract' | 'unit_project' | 'sub_unit' | 'part' | 'sub_part' | 'unit' | 'item' | 'process' | 'other'
+  type: 'contract' | 'unit_project' | 'sub_unit' | 'part' | 'sub_part' | 'unit' | 'item' | 'batch' | 'process' | 'other'
   active?: boolean
   processes?: string[]
   children?: ProjectNode[]
 }
 
 export interface Assignment {
+  display_code?: string
+  item_display_code?: string
+  node_type?: string
+  batch_code?: string
+  batch_name?: string
+  parent_item_code?: string
+  parent_item_name?: string
+  parent_item_id?: string
   unit_project_code?: string
   unit_project_name?: string
   sub_unit_code?: string
@@ -256,6 +272,14 @@ export interface CloudPhoto {
   unit_name?: string
   item_code?: string
   item_name?: string
+  display_code?: string
+  item_display_code?: string
+  node_type?: string
+  batch_code?: string
+  batch_name?: string
+  parent_item_code?: string
+  parent_item_name?: string
+  parent_item_id?: string
   archive?: Record<string, unknown>
   spatial?: Record<string, string>
   process_name?: string

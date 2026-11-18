@@ -116,14 +116,14 @@ class ProcessPhotoTransferTest(unittest.TestCase):
     def test_desktop_move_dialog_exposes_current_unit_for_process_transfer(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "templates" / "index.html").read_text(encoding="utf-8")
-        asset = re.search(r'<script\s+defer\s+src="/assets/(app-A[^"]+\.js)"></script>', html)
+        asset = re.search(r'<script\s+defer\s+src="/assets/(app-A[^"]+\.js)(?:\?v=[^"\s]+)?"></script>', html)
         self.assertIsNotNone(asset)
         js = (root / "assets" / asset.group(1)).read_text(encoding="utf-8")
         self.assertIn('projectCode(project) === state.selectedCode', js)
         self.assertNotIn('projectCode(project) && projectCode(project) !== state.selectedCode', js)
         self.assertIn('targetCode === sourceCode && targetProcess === sourceProcess', js)
         self.assertIn('移动照片到工序或其它单元', html)
-        self.assertIn('id="movePhotoBtn">移动到工序/单元</button>', html)
+        self.assertRegex(html, r'id="movePhotoBtn"[^>]*data-leaf-label="移动到工序/单元"[^>]*>移动到工序/单元</button>')
 
 
 if __name__ == "__main__":

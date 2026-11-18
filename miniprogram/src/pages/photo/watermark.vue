@@ -119,7 +119,7 @@ function toggleWatermark(){if(busy.value)return;watermarkOn.value=!watermarkOn.v
     </template>
     <view v-if="error" class="error-card" role="alert"><text>{{ error }}</text><button v-if="showSettings" class="text-button pressable" @tap="openSettings">打开权限设置</button></view>
     <template v-if="context">
-      <text v-if="!liveCamera" class="classify-note">上传后自动归类到施工单元；识别不到的照片送电脑端待分类，供人工筛选。</text>
+      <text v-if="!liveCamera" class="classify-note">上传后按工程划分归类；识别不到的照片留待人工确认。</text>
       <text v-if="!liveCamera && !canCaptureProject(activeProject)" class="copy-note">当前可制作水印并保存到手机，本项目未开通上传权限。</text>
       <button v-if="!liveCamera && canCaptureProject(activeProject)" class="primary-button pressable save-button" :disabled="busy || Boolean(uploadedBatchId)" @tap="uploadAuto">{{ uploading ? '正在准备上传…' : uploadedBatchId ? '已加入上传归类队列' : previewOnly ? '上传水印预览并归类' : '上传并自动归类' }}</button>
       <button v-if="!liveCamera" class="secondary-button pressable album-button" :disabled="busy" @tap="savePhoto">{{ saveLabel }}</button>

@@ -78,13 +78,19 @@ def _engineering_project_identity(project: dict) -> dict:
 
 def _desktop_engineering_assignment(code: str, data: dict, hierarchy: dict, photo: dict) -> dict:
     """Keep municipal items distinct from legacy water-engineering units."""
-    is_item = hierarchy.get("node_kind") == "item"
+    is_item = hierarchy.get("node_kind") in {"item", "batch"}
     assignment = {
         "unit_code": "" if is_item else str(hierarchy.get("unit_code") or data.get("display_project_code") or code),
         "process_name": str(photo.get("process_name") or ""),
     }
     if is_item:
-        assignment["item_code"] = str(hierarchy.get("item_code") or data.get("display_project_code") or code)
+        assignment["item_code"] = str((data.get("source_fields") or {}).get("内部归档标识") or hierarchy.get("item_code") or data.get("display_project_code") or code)
+        assignment["item_display_code"] = str(data.get("display_project_code") or hierarchy.get("item_code") or "")
+        assignment["node_type"] = hierarchy.get("node_kind")
+        if hierarchy.get("node_kind") == "batch":
+            assignment.update({"batch_code": hierarchy.get("batch_code", ""), "batch_name": hierarchy.get("batch_name", ""),
+                "parent_item_code": hierarchy.get("item_code", ""), "parent_item_name": hierarchy.get("item_name", ""),
+                "parent_item_id": hierarchy.get("parent_item_id", "")})
     for key in ("archive", "spatial"):
         if isinstance(photo.get(key), dict):
             assignment[key] = dict(photo[key])
@@ -165,6 +171,13 @@ def _node_code(prefix: str, *parts) -> str:
     return f"{prefix}-{digest}"
 
 
+def _scoped_node_code(prefix: str, *parts) -> str:
+    # Exact JSON tuples avoid whitespace loss and delimiter collisions in approved codes.
+    identity = json.dumps([str(part) if part is not None else "" for part in parts], ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    return f"{prefix}-{digest}"
+
+
 def _normalize_other_tree(nodes) -> list:
     result = []
     for node in nodes if isinstance(nodes, list) else []:
@@ -218,7 +231,9 @@ def build_project_snapshot(
     }
 
     contract_groups: Dict[Tuple[str, str], dict] = {}
-    for item in manager.list_projects(include_other=True):
+    all_projects = manager.list_projects(include_other=True)
+    scoped = project_payload.get("industry") == "公路工程" or any(p.get("division_type") == "batch" or (p.get("source_fields") or {}).get("内部归档标识") for p in all_projects)
+    for item in all_projects:
         code = str(item.get("project_code") or "").strip()
         if not code:
             continue
@@ -227,7 +242,9 @@ def build_project_snapshot(
         if fields.get("_other_image"):
             continue
         hierarchy = manager.project_hierarchy(data)
-        contract_name = str(hierarchy.get("contract_name") or "").strip()
+        contract_name = str(hierarchy.get("contract_name") or "")
+        if not scoped:
+            contract_name = contract_name.strip()
         if contract_name in {"", "未填写", "未填写合同工程", "默认工程"}:
             contract_name = project_payload["project_name"]
         unit_project_name = hierarchy.get("unit_project_name") or "未分组单位工程"
@@ -238,70 +255,104 @@ def build_project_snapshot(
         part_code = hierarchy.get("part_code") or _node_code(
             "FB", project_id, contract_name, unit_project_code, part_name
         )
-        contract_code = str(fields.get("合同工程编码") or fields.get("标段编码") or "").strip() or _node_code(
+        contract_code = str(fields.get("合同工程编码") or fields.get("标段编码") or "")
+        if not scoped:
+            contract_code = contract_code.strip()
+        contract_code = contract_code or _node_code(
             "HT", project_id, contract_name
         )
         sub_unit_name = str(hierarchy.get("sub_unit_name") or "").strip()
-        sub_unit_code = str(hierarchy.get("sub_unit_code") or "").strip()
+        sub_unit_code = str(hierarchy.get("sub_unit_code") or "")
+        if not scoped:
+            sub_unit_code = sub_unit_code.strip()
         sub_part_name = str(hierarchy.get("sub_part_name") or "").strip()
-        sub_part_code = str(hierarchy.get("sub_part_code") or "").strip()
+        sub_part_code = str(hierarchy.get("sub_part_code") or "")
+        if not scoped:
+            sub_part_code = sub_part_code.strip()
         node_kind = str(hierarchy.get("node_kind") or "unit")
+        display_codes = {"contract": contract_code, "unit": unit_project_code, "part": part_code,
+                         "sub_unit": sub_unit_code, "sub_part": sub_part_code}
+        if scoped:
+            contract_code = _scoped_node_code("HT", project_id, contract_name, contract_code)
+            unit_project_code = _scoped_node_code("DW", project_id, contract_code, unit_project_code)
+            if sub_unit_code or sub_unit_name:
+                sub_unit_code = _scoped_node_code("ZDW", project_id, unit_project_code, sub_unit_code or sub_unit_name)
+            part_code = _scoped_node_code("FB", project_id, sub_unit_code or unit_project_code, part_code)
+            if sub_part_code or sub_part_name:
+                sub_part_code = _scoped_node_code("ZFB", project_id, part_code, sub_part_code or sub_part_name)
         processes = data.get("processes") or []
         if not isinstance(processes, list):
             processes = [part.strip() for part in str(processes).split("、") if part.strip()]
         process_names = [str(value).strip() for value in processes if str(value).strip()]
 
-        contract_key = (contract_code, contract_name)
+        contract_key = (contract_code,) if scoped else (contract_code, contract_name)
         contract = contract_groups.setdefault(contract_key, {
             "code": contract_code,
+            "display_code": display_codes["contract"],
             "name": contract_name,
             "unit_projects": {},
         })
-        unit_key = (unit_project_code, unit_project_name)
+        unit_key = (unit_project_code,) if scoped else (unit_project_code, unit_project_name)
         unit_project = contract["unit_projects"].setdefault(unit_key, {
             "code": unit_project_code,
+            "display_code": display_codes["unit"],
             "name": unit_project_name,
             "sub_units": {},
             "parts": {},
         })
         if sub_unit_code or sub_unit_name:
-            sub_key = (sub_unit_code or sub_unit_name, sub_unit_name)
+            sub_key = (sub_unit_code,) if scoped else (sub_unit_code or sub_unit_name, sub_unit_name)
             container = unit_project["sub_units"].setdefault(sub_key, {
                 "code": sub_unit_code or _node_code("ZDW", project_id, unit_project_code, sub_unit_name),
                 "name": sub_unit_name or sub_unit_code,
+                "display_code": display_codes["sub_unit"],
                 "parts": {},
             })
         else:
             container = unit_project
         # 子分部是分部的子节点，不能参与父分部的身份；否则同一分部
         # 会随每个子分部重复输出，直接挂在分部下的分项也会另起一份。
-        part_key = (part_code, part_name)
+        part_key = (part_code,) if scoped else (part_code, part_name)
         part = container["parts"].setdefault(part_key, {
             "code": part_code,
+            "display_code": display_codes["part"],
             "name": part_name,
             "sub_parts": {},
             "units": [],
             "items": [],
         })
         if sub_part_code or sub_part_name:
-            leaf_parent = part["sub_parts"].setdefault((sub_part_code or sub_part_name, sub_part_name), {
+            leaf_parent = part["sub_parts"].setdefault((sub_part_code,) if scoped else (sub_part_code or sub_part_name, sub_part_name), {
                 "code": sub_part_code or _node_code("ZFB", project_id, part_code, sub_part_name),
                 "name": sub_part_name or sub_part_code,
+                "display_code": display_codes["sub_part"],
                 "units": [],
                 "items": [],
             })
         else:
             leaf_parent = part
-        if node_kind == "item":
-            leaf_code = str(hierarchy.get("item_code") or data.get("display_project_code") or code).strip()
-            leaf_parent["items"].append({
-                "item_code": leaf_code,
-                "internal_project_code": code,
-                "name": str(hierarchy.get("item_name") or data.get("project_name") or leaf_code).strip(),
-                "division_type": "item",
-                "processes": process_names,
-                "project_order": data.get("project_order"),
-            })
+        if node_kind in {"item", "batch"}:
+            leaf_code = str(fields.get("内部归档标识") or hierarchy.get("item_code") or data.get("display_project_code") or code).strip()
+            parent_code = str(fields.get("父分项归档标识") or hierarchy.get("item_code") or "") if node_kind == "batch" else leaf_code
+            parent = next((n for n in leaf_parent["items"] if n["item_code"] == parent_code), None)
+            if parent is None:
+                parent = {"item_code": parent_code, "display_code": hierarchy.get("item_code", ""),
+                          "item_display_code": hierarchy.get("item_code", ""),
+                          "name": hierarchy.get("item_name") or data.get("project_name"),
+                          "division_type": "item", "processes": [], "batches": []}
+                leaf_parent["items"].append(parent)
+            leaf = {"item_code": leaf_code, "internal_project_code": code,
+                    "display_code": data.get("display_project_code") or hierarchy.get("item_code", ""),
+                    "item_display_code": data.get("display_project_code") or hierarchy.get("item_code", ""),
+                    "name": str(data.get("project_name") or leaf_code), "division_type": node_kind,
+                    "processes": process_names, "project_order": data.get("project_order")}
+            if node_kind == "batch":
+                leaf.update({"batch_code": hierarchy.get("batch_code", ""), "batch_name": hierarchy.get("batch_name", ""),
+                             "parent_item_code": hierarchy.get("item_code", ""), "parent_item_name": hierarchy.get("item_name", ""),
+                             "parent_item_id": parent_code})
+                parent["batches"].append(leaf)
+            else:
+                parent.update(leaf)
         else:
             unit_code = hierarchy.get("unit_code") or data.get("display_project_code") or code
             leaf_parent["units"].append({
@@ -324,6 +375,8 @@ def build_project_snapshot(
                 ))
                 for leaf in node[key]:
                     leaf.pop("project_order", None)
+                    for batch in leaf.get("batches", []):
+                        batch.pop("project_order", None)
             sub_parts = list(node.pop("sub_parts", {}).values()) if isinstance(node.get("sub_parts"), dict) else []
             for sub_part in sub_parts:
                 _sort_leaves(sub_part)
@@ -1354,7 +1407,10 @@ class DesktopMobileSync:
                     str(data.get("display_project_code") or "").strip(),
                     str(hierarchy.get("item_code") or "").strip(),
                 }
-                if item_code not in item_candidates or hierarchy.get("node_kind") != "item":
+                archive_id = str((data.get("source_fields") or {}).get("内部归档标识") or "")
+                if archive_id:
+                    item_candidates = {archive_id}
+                if item_code not in item_candidates or hierarchy.get("node_kind") not in {"item", "batch"}:
                     continue
             else:
                 candidates = {

@@ -349,7 +349,7 @@ class ServerDeployContractTest(unittest.TestCase):
             isolated = target / "isolated"
             isolated.mkdir()
             with tarfile.open(archive_path, "r:gz") as archive:
-                for name in ("municipal_rules.py", "professional_templates.py", "assets/professional_templates.json"):
+                for name in ("municipal_rules.py", "highway_rules.py", "professional_templates.py", "assets/professional_templates.json"):
                     destination = isolated / name
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with archive.extractfile(name) as content:

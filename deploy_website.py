@@ -57,6 +57,23 @@ class _AssetParser(HTMLParser):
 
 
 def validate_site(site: Path = SITE) -> None:
+    # Do not re-publish retired screenshots, legacy page copies or private backups.
+    # New screenshots require an explicit review and an updated allowlist.
+    approved_assets = {
+        "favicon.svg", "miniprogram_qr.png", "style.css", "restructure.css", "site.js",
+        "demo-h5-03-home.jpg", "demo-h5-06-library.jpg", "demo-h5-12-process.jpg",
+        "demo-desktop-municipal-division.jpg", "demo-desktop-municipal-location.jpg",
+    }
+    approved_roots = {*PAGES, "site-content.json", "README.md", "assets", "tutorial"}
+    for child in site.iterdir():
+        if child.name not in approved_roots or child.is_symlink():
+            raise SystemExit(f"官网发布目录含未审查文件：{child.name}")
+    for asset in (site / "assets").rglob("*"):
+        if not asset.is_file() or asset.is_symlink() or asset.relative_to(site / "assets").as_posix() not in approved_assets:
+            raise SystemExit(f"官网素材未通过隐私审查：{asset.name}")
+    for resource in (site / "tutorial").rglob("*"):
+        if not resource.is_file() or resource.is_symlink() or resource.relative_to(site / "tutorial").as_posix() != TUTORIAL_NAME:
+            raise SystemExit(f"教程目录含未审查文件：{resource.name}")
     missing = [name for name in PAGES if not (site / name).is_file()]
     if missing:
         raise SystemExit(f"宣传网站缺少页面：{', '.join(missing)}")

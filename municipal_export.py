@@ -68,14 +68,21 @@ def _catalog_row(photo: dict, leaf: dict) -> list[str]:
         str(archive.get("concealment") or ""),
         str(archive.get("process_event") or photo.get("process_name") or ""),
         str(archive.get("template_code") or ""),
-        str(leaf.get("item_code") or leaf.get("unit_code") or ""),
-        str(leaf.get("item_name") or leaf.get("unit_name") or ""),
+        str(leaf.get("batch_code") or leaf.get("item_code") or leaf.get("unit_code") or ""),
+        str(leaf.get("batch_name") or leaf.get("item_name") or leaf.get("unit_name") or ""),
         json.dumps(spatial, ensure_ascii=False),
         str(acceptance.get("record_no") or ""),
         str(original.get("status") or ""),
         str(original.get("sha256") or ""),
         str(original.get("size_bytes") or ""),
         str(original.get("warning") or ""),
+        str(leaf.get("contract_name") or ""),
+        str(leaf.get("unit_project_code") or ""),
+        str(leaf.get("part_code") or ""),
+        str(leaf.get("sub_part_code") or ""),
+        str(leaf.get("item_code") or ""),
+        str(leaf.get("batch_code") or ""),
+        str(photo.get("project_code") or ""),
     ]
 
 
@@ -100,12 +107,13 @@ CATALOG_HEADERS = [
     "摄入哈希",
     "摄入字节",
     "原件警告",
+    "合同或标段", "单位工程编码", "分部工程编码", "子分部工程编码", "分项工程编码", "检验批编码", "内部归档标识",
 ]
 
 
-def build_package(group_title: str, photos: list[dict], originals: dict[str, bytes], *, expect_concealment: bool = False, local_profile: str = "") -> bytes:
+def build_package(group_title: str, photos: list[dict], originals: dict[str, bytes], *, expect_concealment: bool = False, local_profile: str = "", rules=municipal_rules) -> bytes:
     """originals 的键是 photo_uuid，值必须是摄入原字节。压缩预览不得放进原片目录。"""
-    report = municipal_rules.precheck_photos(
+    report = rules.precheck_photos(
         photos, expect_concealment=expect_concealment, local_profile=local_profile
     )
     used = set()
@@ -169,16 +177,16 @@ def build_package(group_title: str, photos: list[dict], originals: dict[str, byt
             "打印相册、水印图和压缩预览是利用副本，不在原片目录，不能当作归档原片。\n".encode("utf-8"),
         )
         manifest = {
-            "package_kind": "municipal_photo_arrangement",
+            "package_kind": f"{rules.INDUSTRY_CODE}_photo_arrangement",
             "group_title": group_title,
-            "rule_version": municipal_rules.RULE_VERSION,
+            "rule_version": rules.RULE_VERSION,
             "not_a_transfer": True,
             "not_an_acceptance": True,
             "fonds_number": "",
             "archive_number": "",
-            "statement": municipal_rules.PRECHECK_STATEMENT,
-            "hash_limitation": municipal_rules.HASH_LIMITATION_TEXT,
-            "transfer_timing": municipal_rules.TRANSFER_TIMING_TEXT,
+            "statement": rules.PRECHECK_STATEMENT,
+            "hash_limitation": rules.HASH_LIMITATION_TEXT,
+            "transfer_timing": rules.TRANSFER_TIMING_TEXT,
             "catalog_count": len(photos),
             "original_count": len(original_rows),
             "files": manifest_files,

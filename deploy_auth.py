@@ -69,6 +69,7 @@ TEMPLATE_FILES = ["admin.html", "cloud.html", "member_center.html"]
 # 只把 server/ 拷进线上会在第一次校验归档目标时 ModuleNotFoundError。
 ROOT_RUNTIME_FILES = [
     ("municipal_rules.py", "municipal_rules.py"),
+    ("highway_rules.py", "highway_rules.py"),
     ("professional_templates.py", "professional_templates.py"),
     ("assets/professional_templates.json", "assets/professional_templates.json"),
 ]

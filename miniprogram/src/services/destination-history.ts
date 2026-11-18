@@ -10,13 +10,13 @@ export function flattenDestinations(nodes: ProjectNode[], ancestors: ProjectNode
     const subUnit = [...ancestors].reverse().find((item) => item.type === 'sub_unit')
     const part = [...ancestors].reverse().find((item) => item.type === 'part')
     const subPart = [...ancestors].reverse().find((item) => item.type === 'sub_part')
-    const assignment: Assignment = node.type === 'unit' || node.type === 'item' ? {
+    const assignment: Assignment = node.type === 'unit' || node.type === 'item' || node.type === 'batch' ? {
       unit_project_code: unitProject?.code, unit_project_name: unitProject?.name,
       sub_unit_code: subUnit?.code, sub_unit_name: subUnit?.name,
       part_code: part?.code, part_name: part?.name,
       sub_part_code: subPart?.code, sub_part_name: subPart?.name,
-      ...(node.type === 'item'
-        ? { item_code: node.code, item_name: node.name }
+      ...(['item', 'batch'].includes(node.type)
+        ? { item_code: node.code, item_name: node.name, node_type: node.type, display_code: node.display_code || node.item_display_code || node.code, item_display_code: node.display_code || node.item_display_code || node.code, ...(node.type === 'batch' ? { batch_code: node.batch_code || node.display_code || '', batch_name: node.batch_name || node.name, parent_item_code: node.parent_item_code || [...ancestors].reverse().find((a) => a.type === 'item')?.display_code || '', parent_item_name: node.parent_item_name || [...ancestors].reverse().find((a) => a.type === 'item')?.name || '', parent_item_id: node.parent_item_id || [...ancestors].reverse().find((a) => a.type === 'item')?.code || '' } : {}) }
         : { unit_code: node.code, unit_name: node.name }),
       process_required: node.type === 'unit' && Boolean(node.processes?.length),
     } : { other_node_code: node.code, other_node_name: node.name }
@@ -34,7 +34,7 @@ export function destinationKey(value: DestinationSelection): string {
 export function reconcileDestination(value: DestinationSelection, nodes: SelectableDestination[]): DestinationSelection | null {
   const a = value.assignment
   const node = nodes.find((item) => value.scope === 'engineering'
-    ? ((a.item_code && item.type === 'item' && item.code === a.item_code) || (!a.item_code && item.type === 'unit' && item.code === a.unit_code))
+    ? ((a.item_code && ['item', 'batch'].includes(item.type) && item.code === a.item_code) || (!a.item_code && item.type === 'unit' && item.code === a.unit_code))
       && (!a.part_code || item.assignment.part_code === a.part_code)
       && (!a.unit_project_code || item.assignment.unit_project_code === a.unit_project_code)
     : item.type === 'other' && item.code === a.other_node_code && !item.children?.length)
@@ -82,5 +82,5 @@ export function consumePhotoEditDestination(owner: string, projectId: string): D
 
 export function destinationLabel(value: DestinationSelection): string {
   const a = value.assignment
-  return (value.scope === 'engineering' ? [a.unit_project_name, a.sub_unit_name, a.part_name, a.sub_part_name, a.item_name || a.unit_name, a.process_name] : [a.other_node_name]).filter(Boolean).join(' / ')
+  return (value.scope === 'engineering' ? [a.unit_project_name, a.sub_unit_name, a.part_name, a.sub_part_name, a.parent_item_name, a.batch_name || a.item_name || a.unit_name, a.process_name] : [a.other_node_name]).filter(Boolean).join(' / ')
 }

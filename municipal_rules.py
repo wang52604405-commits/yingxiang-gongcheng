@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -100,6 +101,8 @@ MUNICIPAL_IMPORT_HEADERS = (
     "子分部工程编码",
     "分项工程名称",
     "分项工程编码",
+    "检验批名称",
+    "检验批编码",
     "关键词",
 )
 
@@ -362,11 +365,12 @@ def sanitize_spatial(payload, project_type: str = "") -> dict:
         found = subtype_by_name(project_type)
         if found:
             allowed = {field["key"] for field in SPATIAL_FIELDS[found["code"]]}
+    allowed.add("text")  # Free-form desktop description; retain typed imported fields separately.
     cleaned = {}
     for key, value in raw.items():
         if key not in allowed:
             continue
-        cleaned[key] = preserve_code_text(value)[:120]
+        cleaned[key] = preserve_code_text(value)[:200 if key == "text" else 120]
     return cleaned
 
 
@@ -574,3 +578,77 @@ def skeleton_rows(project_type: str, contract_name: str = "") -> list[dict]:
             item_index += 1
         order += 1
     return rows
+
+
+def division_identity(fields, include_batch=False):
+    values = [fields.get("合同或标段名称") or fields.get("合同工程名称") or ""]
+    for level in ("单位", "子单位", "分部", "子分部", "分项"):
+        values.append(str(fields.get(level + "工程编码") or fields.get(level + "工程编号") or "").strip())
+    if include_batch:
+        values.append(str(fields.get("检验批编码") or "").strip())
+    return tuple(values)
+
+
+def division_storage_code(fields, engineering_project_id, include_batch=False):
+    raw = json.dumps([engineering_project_id, *division_identity(fields, include_batch)], ensure_ascii=False, separators=(",", ":"))
+    return ("MB-" if include_batch else "MI-") + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def validate_batch_records(records):
+    result, seen, names = [], set(), {}
+    for index, raw in enumerate(records, start=2):
+        fields = {str(k or "").strip().lstrip("\ufeff").replace(" ", ""): preserve_code_text(v) for k, v in dict(raw).items()}
+        if not any(fields.values()):
+            continue
+        for level in ("单位", "子单位", "分部", "子分部", "分项"):
+            fields.setdefault(level + "工程编码", fields.get(level + "工程编号", ""))
+        fields.setdefault("检验批编码", fields.get("检验批编号", ""))
+        required = ("单位工程名称", "单位工程编码", "分部工程名称", "分部工程编码", "分项工程名称", "分项工程编码")
+        if any(not fields.get(k) for k in required):
+            raise ValueError(f"第{index}行检验批缺少完整的单位、分部或分项工程。")
+        has_batch = bool(fields.get("检验批名称") or fields.get("检验批编码"))
+        if has_batch and not (fields.get("检验批名称") and fields.get("检验批编码")):
+            raise ValueError(f"第{index}行检验批名称和编码须同时填写。")
+        parent = (fields.get("合同或标段名称") or fields.get("合同工程名称") or "",)
+        for level in ("单位", "子单位", "分部", "子分部", "分项"):
+            code, name = fields.get(level + "工程编码", ""), fields.get(level + "工程名称", "")
+            if code or name:
+                if not code or not name:
+                    raise ValueError(f"第{index}行{level}工程名称和编码须同时填写。")
+                node_key = parent + (level, code)
+                if node_key in names and names[node_key] != name:
+                    raise ValueError(f"第{index}行同一父级同一编码对应不同名称。")
+                names[node_key] = name
+                parent = node_key
+        key = division_identity(fields, has_batch)
+        if key in seen:
+            raise ValueError(f"第{index}行完整父路径和检验批编码重复，不会自动改号。")
+        seen.add(key)
+        fields["节点类型"] = "batch" if has_batch else "item"
+        result.append(fields)
+    return result
+
+
+def validate_existing_names(existing_records, incoming_records):
+    """Reject changed names for an established scoped code before any import writes."""
+    names = {}
+    for raw in [*existing_records, *incoming_records]:
+        fields = {str(k): preserve_code_text(v) for k, v in raw.items()}
+        parent = (fields.get("合同或标段名称") or fields.get("合同工程名称") or "",)
+        for level in ("单位", "子单位", "分部", "子分部", "分项"):
+            code = fields.get(level + "工程编码") or fields.get(level + "工程编号") or ""
+            name = fields.get(level + "工程名称") or ""
+            if code:
+                key = parent + (level, code)
+                if name and key in names and names[key] != name:
+                    raise ValueError(f"同一父路径的{level}工程编码已有不同名称，不能以导入覆盖；请先核对原划分。")
+                if name:
+                    names[key] = name
+                parent = key
+        code = fields.get("检验批编码") or fields.get("检验批编号") or ""
+        name = fields.get("检验批名称") or ""
+        if code and name:
+            key = parent + ("检验批", code)
+            if key in names and names[key] != name:
+                raise ValueError("同一父分项的检验批编码已有不同名称，不能以导入覆盖。")
+            names[key] = name

@@ -48,10 +48,10 @@ export function archiveInfoIssues(draft: UploadDraft): ArchiveInfoIssue[] {
   }
   if (present(assignment?.item_code) || present(assignment?.item_name)) {
     if (!present(assignment?.item_code) || !present(assignment?.item_name)) {
-      issues.push({ field: 'unit', label: '分项工程' })
+      issues.push({ field: 'unit', label: assignment?.node_type === 'batch' ? '检验批' : '分项工程' })
     }
   } else if (!present(assignment?.unit_code) || !present(assignment?.unit_name)) {
-    issues.push({ field: 'unit', label: '单元工程' })
+    issues.push({ field: 'unit', label: '归档位置' })
   }
   if (assignment?.process_required && !present(assignment.process_name)) {
     issues.push({ field: 'process', label: '工序' })

@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 {% set code = project.project_code or project.code %}
 {% set name = project.project_name or project.name %}
-{% set label = category_label or "影像资料" %}
+{% set leaf_label = leaf_label_override|default(print_leaf_label(project), true) %}
+{% set label = (category_label or "影像资料")|replace("单元", leaf_label) %}
 {% set print_style = print_style|default(request.args.get("style", ""), true)|string|trim|lower %}
 {% set layout = print_layout or request.args.get("layout", "landscape") %}
 {% if print_style == "sidelabel" %}{% set layout = "portrait" %}{% endif %}
@@ -416,12 +417,12 @@
 <body class="{{ layout }}">
   <div class="toolbar">
     {% if has_project_groups %}
-    <strong>{{ label }}：共 {{ project_groups|length }} {{ "册" if has_books else "个单元" }}</strong>
+    <strong>{{ label }}：共 {{ project_groups|length }} {{ "册" if has_books else "个" ~ leaf_label }}</strong>
     {% else %}
     <strong>{{ label }}：{{ code }} - {{ name }}</strong>
     {% endif %}
     <div class="toolbar-actions">
-      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 照片按 5 寸横版裁满，侧签在照片{{ "左边" if slip_side == "left" else "右边" }}（题名、照片号、单元工程名称、拍摄时间、摄影者、地点）。两张之间留 2 毫米，没有整页横线。侧签按表格分格，长文字换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
+      <span class="print-tip">{% if print_style == "sidelabel" %}版式：侧签两行 · 竖版 · 每页 2 张 · 照片按 5 寸横版裁满，侧签在照片{{ "左边" if slip_side == "left" else "右边" }}（题名、照片号、工程部位名称、拍摄时间、摄影者、地点）。两张之间留 2 毫米，没有整页横线。侧签按表格分格，长文字换行，不省略。{% else %}{% if style_labels.get(print_style) %}版式：{{ style_labels[print_style] }} · {% endif %}{{ "横版" if layout == "landscape" else "竖版" }} · 每页最多 {{ page_size }} 张{% if page_size == 1 %} · {{ "页面居中" if print_settings.get("print_single_alignment", "center") == "center" else "靠上排列" }}{% endif %} · {{ photo_width_cm }}×{{ photo_height_cm }}cm · 装订边25mm（{{ "上侧" if layout == "landscape" else "左侧" }}） · {% if caption_mode == "separate" %}标签另页{% else %}标签{{ {"bottom":"下方", "top":"上方", "left":"左侧", "right":"右侧", "hidden":"隐藏"}.get(caption_position, "下方") }}{% endif %}。{% endif %}系统打印中请取消页眉页脚并使用100%缩放。</span>
       <button onclick="window.print()">打印</button>
     </div>
   </div>
@@ -453,7 +454,7 @@
                 <aside class="side-slip">
                   <div class="slip-row"><span class="slip-k"><b>题名</b></span><span class="slip-v">{{ slip.title or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>照片号</b></span><span class="slip-v">{{ slip.photo_no or "" }}</span></div>
-                  <div class="slip-row"><span class="slip-k"><b>单元工程名称</b></span><span class="slip-v">{{ slip.unit_name or "" }}</span></div>
+                  <div class="slip-row"><span class="slip-k"><b>{{ slip.unit_name_label or print_leaf_name_label(project) }}</b></span><span class="slip-v">{{ slip.unit_name or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>拍摄时间</b></span><span class="slip-v">{{ slip.shot_at or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>摄影者</b></span><span class="slip-v">{{ slip.photographer or "" }}</span></div>
                   <div class="slip-row"><span class="slip-k"><b>地点</b></span><span class="slip-v">{{ slip.place or "" }}</span></div>
@@ -466,7 +467,7 @@
           {% else %}
           {% if show_page_title %}<div class="title">
             <h1>{{ page_unit }}{% if group.level %} · {{ group.level }}{% endif %}</h1>
-            <div class="meta">工程页 {{ "%03d"|format(page.print_page_number or loop.index) }}{% if page.unit_page_total|default(1)|int > 1 %} · 本单元第 {{ page.unit_page_number }} 页{% endif %}</div>
+            <div class="meta">工程页 {{ "%03d"|format(page.print_page_number or loop.index) }}{% if page.unit_page_total|default(1)|int > 1 %} · 本{{ leaf_label }}第 {{ page.unit_page_number }} 页{% endif %}</div>
           </div>{% endif %}
           <div class="layout-fixed">
             {% for item in page_items %}

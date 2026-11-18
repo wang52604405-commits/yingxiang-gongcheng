@@ -11,12 +11,15 @@ from functools import lru_cache
 from pathlib import Path
 
 import municipal_rules
+import highway_rules
 
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "assets" / "professional_templates.json"
 
 INDUSTRY_ALIASES = {
+    "公路": "公路工程",
+    "highway": "公路工程",
     "水利": "水利工程",
     "房建": "房屋建筑工程",
     "房屋建筑": "房屋建筑工程",
@@ -55,6 +58,7 @@ def catalog() -> dict:
             str(item.get("project_type") or "通用工程").strip()
         )
     grouped.setdefault("水利工程", set()).add("水利工程（沿用项目划分）")
+    grouped[highway_rules.INDUSTRY_NAME] = set(highway_rules.PROJECT_TYPES)
     for subtype in municipal_rules.SUBTYPES:
         grouped.setdefault(municipal_rules.INDUSTRY_NAME, set()).add(subtype["name"])
     return {
@@ -75,6 +79,10 @@ def catalog() -> dict:
 def requirements(industry: str, project_type: str = "") -> list[dict]:
     normalized_industry = _norm(industry)
     normalized_project_type = str(project_type or "").strip()
+    if normalized_industry == highway_rules.INDUSTRY_NAME:
+        if normalized_project_type:
+            highway_rules.canonical_project_type(normalized_project_type)
+        return []
     if normalized_industry == "水利工程":
         return []
     if normalized_industry == municipal_rules.INDUSTRY_NAME:
@@ -122,6 +130,9 @@ def plan_summary(industry: str, project_type: str = "") -> dict:
             checklist_status = "project_config"
             support_note = found.get("support_note", "")
             rows = []
+    if normalized_industry == highway_rules.INDUSTRY_NAME:
+        checklist_status = "project_config"
+        support_note = "拍摄内容按合同及批准的项目方案配置。"
     counts = {"required": 0, "conditional": 0, "recommended": 0}
     for row in rows:
         key = str(row.get("required_type") or "recommended")
@@ -132,10 +143,10 @@ def plan_summary(industry: str, project_type: str = "") -> dict:
         "conditional": counts.get("conditional", 0),
         "recommended": counts.get("recommended", 0),
         "template_version": str(load_template_db().get("version") or "V1.0"),
-        "rule_version": municipal_rules.RULE_VERSION if normalized_industry == municipal_rules.INDUSTRY_NAME else "",
+        "rule_version": highway_rules.RULE_VERSION if normalized_industry == highway_rules.INDUSTRY_NAME else municipal_rules.RULE_VERSION if normalized_industry == municipal_rules.INDUSTRY_NAME else "",
         "checklist_status": checklist_status,
         "support_note": support_note,
-        "rule_notice": "软件建议不能当成国家强制。隐蔽前现场影像的依据是 GB 55032-2022 第3.3.4条第4款，照片不代替验收文件。",
+        "rule_notice": "公路土建按 JTG F80/1-2017 及批准划分管理，照片不代替质量检验和验收文件。" if normalized_industry == highway_rules.INDUSTRY_NAME else "软件建议不能当成国家强制。隐蔽前现场影像的依据是 GB 55032-2022 第3.3.4条第4款，照片不代替验收文件。",
     }
 
 

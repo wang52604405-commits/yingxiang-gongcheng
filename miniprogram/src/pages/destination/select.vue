@@ -25,13 +25,13 @@ const owner = ref('')
 const history = ref<ReturnType<typeof getDestinationHistory>>({ recent: [], favorites: [] })
 const allNodes = computed(() => flattenDestinations(roots.value))
 const leafNodes = computed(() => allNodes.value.filter((node) => scope.value === 'engineering'
-  ? node.type === 'unit' || node.type === 'item' : node.type === 'other' && !node.children?.length))
+  ? node.type === 'unit' || node.type === 'item' || node.type === 'batch' : node.type === 'other' && !node.children?.length))
 const searchResults = computed(() => {
   const query = keyword.value.trim().toLowerCase()
   return leafNodes.value.filter((node) => matchesDivisionKeywords(node, query))
 })
 const browseNodes = computed(() => (trail.value.length ? trail.value[trail.value.length - 1].children || [] : roots.value)
-  .filter((node) => node.active !== false && (node.type === 'unit' || node.type === 'item' || node.type === 'other' || flattenDestinations([node]).some((item) => item.type === 'unit' || item.type === 'item'))))
+  .filter((node) => node.active !== false && (node.type === 'unit' || node.type === 'item' || node.type === 'batch' || node.type === 'other' || flattenDestinations([node]).some((item) => item.type === 'unit' || item.type === 'item' || item.type === 'batch'))))
 const recent = computed(() => validHistory(history.value.recent))
 const favorites = computed(() => validHistory(history.value.favorites))
 const hasProcessSheet = computed(() => scope.value === 'engineering' && selectedNode.value?.processes?.length && !['library', 'watermark'].includes(returnTarget.value))
@@ -64,13 +64,20 @@ async function loadTree() {
 }
 function browse(node: ProjectNode) {
   selectedNode.value = null
-  if (node.type === 'unit' || node.type === 'item' || (scope.value === 'other' && !node.children?.length)) {
+  if (node.type === 'item' && node.children?.some((child) => child.active !== false && child.type === 'batch')) { trail.value = [...trail.value, node]; return }
+  if (node.type === 'unit' || node.type === 'item' || node.type === 'batch' || (scope.value === 'other' && !node.children?.length)) {
     const part = [...trail.value].reverse().find((item) => item.type === 'part')
     const unitProject = [...trail.value].reverse().find((item) => item.type === 'unit_project')
     const selected = leafNodes.value.find((item) => item.code === node.code && item.pathLabel === trail.value.map((parent) => parent.name).join(' / ') && (!part || item.assignment.part_code === part.code) && (!unitProject || item.assignment.unit_project_code === unitProject.code))
     if (selected) chooseNode(selected)
   } else trail.value = [...trail.value, node]
 }
+function chooseCurrentItem() {
+  const current = trail.value[trail.value.length - 1]
+  const node = leafNodes.value.find((n) => n.type === 'item' && n.code === current?.code)
+  if (node) chooseNode(node)
+}
+function nodeLabel(node: ProjectNode) { return node.type === 'batch' ? `检验批 · ${node.name}` : node.name }
 function chooseNode(node: SelectableDestination) {
   selectedNode.value = node
   if (['library', 'watermark'].includes(returnTarget.value) || scope.value === 'other' || !node.processes?.length) saveSelection()
@@ -113,7 +120,7 @@ onLoad((query) => {
 <template>
   <page-meta :page-style="themeStyle" />
   <view class="page-shell no-tabs destination-page" :style="themeStyle" :class="{ 'has-process-sheet': hasProcessSheet }">
-    <PageHeader :title="returnTarget === 'library' && scope === 'engineering' ? '选择单元' : scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
+    <PageHeader :title="returnTarget === 'library' && scope === 'engineering' ? '选择工程部位' : scope === 'engineering' ? '选择工程部位' : '选择其它影像目录'" />
     <view class="search-box"><UiIcon class="search-icon" name="search" :size="19" /><input v-model="keyword" placeholder="搜索名称、编码或多个关键词" placeholder-class="input-placeholder" /><button v-if="keyword" class="clear-search pressable" @tap="keyword = ''">清除</button></view>
     <view v-if="loading" class="empty-state"><view class="loading-spinner" /><text class="empty-copy">加载中…</text></view>
     <view v-else-if="loadError" class="empty-state"><text class="empty-title">工程层级读取失败</text><text class="empty-copy">{{ loadError }}</text><button class="retry-button pressable" @tap="loadTree">重新加载</button></view>
@@ -134,17 +141,18 @@ onLoad((query) => {
         </view>
         <view class="section-head"><text class="section-title">按层级选择</text><button v-if="trail.length" class="reuse-button pressable" @tap="trail = trail.slice(0, -1); selectedNode = null">返回上级</button></view>
         <view class="breadcrumbs"><button class="crumb pressable" @tap="trail = []; selectedNode = null">全部</button><template v-for="(item, index) in trail" :key="item.code"><text> / </text><button class="crumb pressable" @tap="trail = trail.slice(0, index + 1); selectedNode = null">{{ item.name }}</button></template></view>
+        <button v-if="trail[trail.length - 1]?.type === 'item'" class="reuse-button pressable" @tap="chooseCurrentItem">归入此分项</button>
         <view v-if="browseNodes.length" class="node-list card"><button v-for="node in browseNodes" :key="node.code" class="node-card pressable" :class="{ active: selectedNode?.code === node.code }" @tap="browse(node)">
-          <view class="node-copy"><text class="node-name">{{ node.name }}</text><text class="node-code">{{ node.code }}</text></view><text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
+          <view class="node-copy"><text class="node-name">{{ nodeLabel(node) }}</text><text class="node-code">{{ node.display_code || node.code }}</text></view><text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
         </button></view>
         <view v-else class="empty-state"><text class="empty-title">此层级暂无可选部位</text></view>
       </template>
       <template v-else>
         <text class="result-count">找到 {{ searchResults.length }} 个部位</text>
         <view v-if="searchResults.length" class="node-list card"><button v-for="node in searchResults" :key="node.pathLabel + node.code" class="node-card pressable" :class="{ active: selectedNode?.code === node.code }" @tap="chooseNode(node)">
-          <view class="node-copy"><text class="node-name">{{ node.name }}</text><text class="node-path">{{ node.pathLabel || '工程根目录' }}</text><text class="node-code">{{ node.code }}</text></view><text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
+          <view class="node-copy"><text class="node-name">{{ nodeLabel(node) }}</text><text class="node-path">{{ node.pathLabel || '工程根目录' }}</text><text class="node-code">{{ node.display_code || node.code }}</text></view><text class="node-arrow">{{ selectedNode?.code === node.code ? '✓' : '›' }}</text>
         </button></view>
-        <view v-else class="empty-state"><text class="empty-title">未找到相关部位</text><text class="empty-copy">试试单元名称、分部名称或编码</text></view>
+        <view v-else class="empty-state"><text class="empty-title">未找到相关部位</text><text class="empty-copy">试试分项、检验批、单元名称或编码</text></view>
       </template>
     </template>
     <view v-if="hasProcessSheet && selectedNode" class="process-sheet">
