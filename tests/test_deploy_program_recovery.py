@@ -167,7 +167,10 @@ foreach ($name in @('Test-IsInstalledAppProcess','Get-InstalledServiceVersion','
   Invoke-Expression $fn.Extent.Text
 }
 $script:fixtureRoot=$args[1]
-$installDir=Join-Path $script:fixtureRoot 'owned-program'; $dataDir=Join-Path $script:fixtureRoot '业务资料 & keep'
+# Match production startup normalization. Windows PowerShell/.NET Framework
+# may expand the runner's short (RUNNER~1) temporary-directory prefix here.
+$installDir=[IO.Path]::GetFullPath((Join-Path $script:fixtureRoot 'owned-program')).TrimEnd([char[]]'\/')
+$dataDir=Join-Path $script:fixtureRoot '业务资料 & keep'
 $port=5088; $allowedAppNames=@('album_server.exe','工程影像管理平台.exe')
 function Reset-Health {
   $script:version='OLD'; $script:status=200; $script:ok=$true; $script:pidReads=0; $script:processReads=0
@@ -182,7 +185,7 @@ function Get-CimInstance {
   param($ClassName,$Filter,$ErrorAction)
   $script:processReads++
   $path=Join-Path $installDir 'album_server.exe'
-  if ($script:wrongPath) { $path=Join-Path $script:fixtureRoot 'other-program.exe' }
+  if ($script:wrongPath) { $path=Join-Path (Join-Path $script:fixtureRoot 'foreign-program') 'album_server.exe' }
   $stamp=1
   if ($script:reused -and $script:processReads -gt 1) { $stamp=2 }
   if ($script:noStamp) { $stamp=$null }
@@ -193,6 +196,13 @@ function Invoke-WebRequest {
   $version=$script:version
   if ($script:noVersion) { $version='' }
   return [pscustomobject]@{StatusCode=$script:status;Content=(ConvertTo-Json -Compress -InputObject @{ok=$script:ok;app_version=$version})}
+}
+Reset-Health
+$healthyOwner=Get-CimInstance Win32_Process -Filter 'ProcessId=901' -ErrorAction Stop
+if (-not (Test-IsInstalledAppProcess $healthyOwner)) {
+  $canonicalExecutable=[IO.Path]::GetFullPath([string]$healthyOwner.ExecutablePath)
+  $canonicalDirectory=[IO.Path]::GetDirectoryName($canonicalExecutable).TrimEnd([char[]]'\/')
+  throw ('Healthy fixture ownership mismatch: install='+$installDir+' executable='+$canonicalExecutable+' directory='+$canonicalDirectory+' stamp='+$healthyOwner.CreationDate)
 }
 Reset-Health
 if ((Get-InstalledServiceVersion 'OLD') -cne 'OLD') { throw 'Healthy installed service rejected' }

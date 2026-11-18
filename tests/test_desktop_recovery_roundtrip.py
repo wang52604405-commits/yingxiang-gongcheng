@@ -1,6 +1,7 @@
 """Bridge real PowerShell replacement orchestration and real program-only snapshots."""
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -18,6 +19,12 @@ PROGRAM_FILES = ("album_server.exe", "工程影像管理平台.exe", "guard_mani
 
 
 class DesktopRecoveryRoundtripTest(unittest.TestCase):
+    def assert_connection_closed(self, connection):
+        # A SQLite transaction context commits/rolls back but leaves its handle
+        # open. Check closure while the reference is still alive, also on POSIX.
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+
     def run_case(self, scenario):
         shell = os.environ.get("ALBUM_TEST_POWERSHELL") or shutil.which("powershell") or shutil.which("pwsh")
         if not shell:
@@ -41,14 +48,15 @@ class DesktopRecoveryRoundtripTest(unittest.TestCase):
             for path, content in protected.items():
                 path.write_bytes(content)
             database = data / "projects.db"
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute("CREATE TABLE photos(id INTEGER PRIMARY KEY, title TEXT)")
                 connection.execute("INSERT INTO photos VALUES(1, 'before snapshot')")
+            self.assert_connection_closed(connection)
             mutation = root / "after_snapshot.py"
             mutation.write_text(
-                "from pathlib import Path\nimport hashlib,sqlite3,sys\n"
+                "from pathlib import Path\nfrom contextlib import closing\nimport hashlib,sqlite3,sys\n"
                 "data, install = map(Path, sys.argv[1:3])\n"
-                "with sqlite3.connect(data/'projects.db') as c:\n"
+                "with closing(sqlite3.connect(data/'projects.db')) as c, c:\n"
                 "    c.execute(\"INSERT INTO photos VALUES(2, 'after snapshot')\")\n"
                 "(data/'after-snapshot.jpg').write_bytes(b'new original after snapshot')\n"
                 "(data/'sync-state.json').write_bytes(b'new sync state after snapshot')\n"
@@ -79,9 +87,10 @@ class DesktopRecoveryRoundtripTest(unittest.TestCase):
             self.assertEqual((data / "sync-state.json").read_bytes(), b"new sync state after snapshot")
             self.assertEqual((install / "sync-state.json").read_bytes(), b"new install sync state after snapshot")
             self.assertEqual(hashlib.sha256(database.read_bytes()).hexdigest(), (root / "database-after-snapshot.sha256").read_text())
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection:
                 self.assertEqual(connection.execute("SELECT * FROM photos ORDER BY id").fetchall(), [(1, "before snapshot"), (2, "after snapshot")])
                 self.assertEqual(connection.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assert_connection_closed(connection)
             self.assertFalse((snapshot / "program" / "license.dat").exists())
             self.assertFalse((snapshot / "program" / "operator.txt").exists())
             self.assertFalse((snapshot / "program" / "sync-state.json").exists())
